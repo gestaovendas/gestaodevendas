@@ -2820,14 +2820,11 @@ function carregarDash(){
 }
 
 function setBar(id,pct,real,meta,superMeta){
-  document.getElementById("p"+id).textContent=Math.min(pct,100).toFixed(1)+"%";
+  const pEl=document.getElementById("p"+id); if(pEl) pEl.textContent=Math.min(pct,100).toFixed(1)+"%";
   const b=document.getElementById("b"+id);
-  const pctVis=Math.min(100,pct);
-  b.style.width=pctVis+"%";
-  b.className="pfill"+(pct>=120?" roxo":pct>=100?" g":pct<50?" r":"");
+  if(b){const pctVis=Math.min(100,pct);b.style.width=pctVis+"%";b.className="pfill"+(pct>=120?" roxo":pct>=100?" g":pct<50?" r":"");}
   const vals={d:["pvd1","pvd2"],s:["pvs1","pvs2"],m:["pvm1","pvm2"]}[id];
-  document.getElementById(vals[0]).textContent=fmt(real)+" realizado";
-  document.getElementById(vals[1]).textContent="Meta "+fmt(meta)+" | Super "+fmt(superMeta);
+  if(vals){const e0=document.getElementById(vals[0]),e1=document.getElementById(vals[1]);if(e0)e0.textContent=fmt(real)+" realizado";if(e1)e1.textContent="Meta "+fmt(meta)+" | Super "+fmt(superMeta);}
   // Semaforo
   const sf=semaforoRitmo(pct);
   const sem=document.getElementById("semaforo"+id.toUpperCase());
@@ -3213,8 +3210,8 @@ function deletarLanc(lid, data){
   });
   save();
   showToast("🗑️ Lançamento de "+data+" excluído.");
-  carregarDash();
-  carregarVendsForm();
+  try{carregarDash();}catch(e){}
+  try{carregarVendsForm();}catch(e){}
   renderHistoricoLanc();
 }
 
