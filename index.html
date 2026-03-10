@@ -2614,52 +2614,26 @@ async function login(){
   const errEl=document.getElementById("lerr");
   errEl.style.display="none";
   if(!email||!senha){errEl.textContent="Preencha e-mail e senha.";errEl.style.display="block";return;}
-  // Firebase: se configurado, usa autenticação do Firebase
-  if(window._fbOk&&window._authFn&&window._auth){
-    errEl.textContent="Verificando...";errEl.style.display="block";errEl.style.color="var(--ouro)";
-    window._authFn.signInWithEmailAndPassword(window._auth,email,senha)
-      .then(()=>{errEl.style.display="none";})
-      .catch((err)=>{
-        console.error("[AVATIM] Login erro:",err.code,err.message);
-        const msgs={
-          'auth/invalid-credential':'E-mail ou senha incorretos.',
-          'auth/user-not-found':'Usuário não encontrado no Firebase.',
-          'auth/wrong-password':'Senha incorreta.',
-          'auth/invalid-email':'E-mail inválido.',
-          'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos.',
-          'auth/network-request-failed':'Sem conexão. Verifique internet.',
-          'auth/api-key-not-valid':'API Key inválida. Contate suporte.',
-        };
-        errEl.textContent=msgs[err.code]||('Erro: '+err.code);
-        errEl.style.color="var(--verm)";
-        errEl.style.display="block";
-      });
-    return;
-  }
   const u=(window.USUARIOS||{})[email];
   if(!u){errEl.textContent="E-mail não encontrado.";errEl.style.display="block";return;}
-  // Tenta SHA-256 via crypto.subtle (HTTPS/localhost)
+  // Verificar senha com SHA-256 (funciona em HTTPS e localhost)
   if(window.crypto&&window.crypto.subtle){
     try{
       const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(senha));
       const inputHash=Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
       if(u.hash!==inputHash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
-      window._currentUser={email};window._userLoja=u;showApp();
+      // Senha correta — logar localmente e também no Firebase (para sync de dados)
+      window._currentUser={email};window._userLoja=u;
+      if(window._fbOk&&window._authFn&&window._auth){
+        window._authFn.signInWithEmailAndPassword(window._auth,email,senha)
+          .catch(err=>console.warn("[AVATIM] Firebase auth opcional falhou:",err.code));
+      }
+      showApp();
       return;
-    }catch(e){}
+    }catch(e){console.warn("[AVATIM] crypto.subtle erro:",e);}
   }
-  // Fallback para file:// (sem crypto.subtle): compara hash pré-computado diretamente
-  // Gera hash simples para comparação offline
-  const senhaHash=_hashSimples(senha);
-  if(u.senhaPlana){
-    // Se tiver senha em texto (modo desenvolvimento)
-    if(u.senhaPlana!==senha){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
-  } else {
-    errEl.textContent="Abra o sistema via servidor ou GitHub Pages para usar as senhas. (file:// não suporta criptografia)";
-    errEl.style.display="block";
-    return;
-  }
-  window._currentUser={email};window._userLoja=u;showApp();
+  errEl.textContent="Abra via GitHub Pages ou servidor HTTPS para usar as senhas.";
+  errEl.style.display="block";
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
