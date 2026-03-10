@@ -528,9 +528,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <!-- Ranking Lojas (só admin vê) -->
       <div class="rcard admin-only" style="margin-top:12px;display:none">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-          <div style="font-size:12px;font-weight:600">Ranking Lojas &mdash; Hoje</div>
-          <button onclick="nav('lojas')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver tudo</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600">🏪 Ranking Lojas</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select id="rank-lojas-periodo" onchange="renderRankHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:10px;outline:none">
+              <option value="hoje">Hoje</option>
+              <option value="semana">Semana</option>
+              <option value="mes">Este Mês</option>
+              <option value="custom">Período</option>
+            </select>
+            <div id="rank-lojas-custom" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
+              <input type="date" id="rank-lojas-ini" onchange="renderRankHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
+              <span style="color:var(--muted);font-size:10px">até</span>
+              <input type="date" id="rank-lojas-fim" onchange="renderRankHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
+            </div>
+            <button onclick="nav('lojas')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver tudo</button>
+          </div>
         </div>
         <div id="rank-hoje">--</div>
       </div>
@@ -545,11 +558,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
               <option value="mes">Este Mês</option>
               <option value="custom">Período</option>
             </select>
-            <span id="rank-vend-custom" style="display:none;gap:4px;align-items:center">
+            <div id="rank-vend-custom" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
               <input type="date" id="rank-vend-ini" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
               <span style="color:var(--muted);font-size:10px">até</span>
               <input type="date" id="rank-vend-fim" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
-            </span>
+            </div>
           </div>
         </div>
         <div id="rank-vend-hoje">--</div>
@@ -2701,6 +2714,8 @@ function carregarDash(){
   const pctCli = metaCli>0 ? (cliHj/metaCli*100).toFixed(0)+"%" : "";
   document.getElementById("k-cli").textContent=cliHj||0;
   document.getElementById("k-cli-s").textContent=(metaCli>0?"meta: "+metaCli+" · ":"")+(clinovHj||0)+" novos"+(pctCli?" · "+pctCli:"");
+  // Atualizar rankings
+
 
   // Barras
   const pD=metaDiaRef>0?Math.min(200,fatHj/metaDiaRef*100):0;
@@ -2743,8 +2758,7 @@ function carregarDash(){
   }
 
   gerarDicas(v,m,pD);
-  renderRankHoje();
-  renderRankVendHoje();
+
 
   // Painel clientes
   const atend = v.cli||0, conv = v.trans||0, novos = v.clinov||0;
@@ -2890,15 +2904,75 @@ function salvarRealProd(){
   renderMetaProdDash();
 }
 
+function calcLojaPeriodo(lid, per, ini, fim){
+  // Calcula faturamento de uma loja num período customizável
+  const hj=hoje();
+  if(per==="hoje") return calcDia(lid);
+  if(per==="semana") return calcSem(lid);
+  if(per==="mes") return calcMes(lid);
+  // custom
+  if(!ini) return calcMes(lid);
+  const fimD=fim||hj;
+  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  let t=0;
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+      if(d>=ini&&d<=fimD) t+=Number(vd.val||0);
+    });
+  });
+  if(t===0&&vends.length===0){
+    Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{
+      if(d>=ini&&d<=fimD) t+=Number(vd.fat||0);
+    });
+  }
+  return t;
+}
+
 function renderRankHoje(){
   const hj=hoje();
+  const per=document.getElementById("rank-lojas-periodo")?.value||"hoje";
+  const customDiv=document.getElementById("rank-lojas-custom");
+  if(customDiv) customDiv.style.display=per==="custom"?"flex":"none";
+  if(per==="custom"){
+    const ini=document.getElementById("rank-lojas-ini");
+    const fim=document.getElementById("rank-lojas-fim");
+    if(ini&&!ini.value) ini.value=hj.slice(0,7)+"-01";
+    if(fim&&!fim.value) fim.value=hj;
+  }
+  const ini=document.getElementById("rank-lojas-ini")?.value||"";
+  const fim=document.getElementById("rank-lojas-fim")?.value||hj;
   const lojasRank = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
-  const r=lojasRank.map(l=>{const m=getMetas(l.id),v=calcDia(l.id);return{...l,v,m:m.dia,sm:m.superDia,pct:m.dia>0?v/m.dia*100:0};}).sort((a,b)=>b.v-a.v);
+  const r=lojasRank.map(l=>{
+    const m=getMetas(l.id);
+    const v=calcLojaPeriodo(l.id,per,ini,fim);
+    const meta=per==="hoje"?m.dia:per==="semana"?m.sem:per==="mes"?m.mes:(m.mes/30*(Math.max(1,(new Date(fim||hj)-new Date(ini||hj))/86400000+1)));
+    const sm=per==="hoje"?m.superDia:per==="semana"?m.superSem:m.superMes;
+    const pct=meta>0?v/meta*100:0;
+    const tm=calcTMLoja(l.id, per==="hoje"?"dia":per==="semana"?"semana":per==="mes"?"mes":"mes");
+    const metaTM=m.ticket||150;
+    const pctTM=metaTM>0?tm/metaTM*100:0;
+    return{...l,v,meta,sm,pct,tm,metaTM,pctTM};
+  }).sort((a,b)=>b.v-a.v);
   const max=r[0]?.v||1,cls=["r1","r2","r3","rx","rx","rx","rx"];
+  const perLabel=per==="hoje"?"Hoje":per==="semana"?"Semana":per==="mes"?"Mês":ini&&fim?ini.split("-").reverse().join("/")+"-"+fim.split("-").reverse().join("/"):"Período";
   document.getElementById("rank-hoje").innerHTML=r.map((l,i)=>{
-    const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
-    const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div class="ritem"><div class="rpos ${cls[i]}">${i+1}</div><div class="rinfo"><div class="rn">${l.nome} ${badge}</div><div class="rv">${fmt(l.v)} &mdash; ${l.pct.toFixed(0)}% da meta</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?l.v/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${l.pct.toFixed(0)}%</div></div></div>`;
+    const c=l.pct>=125?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
+    const cTM=l.pctTM>=100?"var(--verde)":l.pctTM>=80?"var(--ouro)":"var(--verm)";
+    const badge=l.pct>=125?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
+    return `<div class="ritem">
+      <div class="rpos ${cls[i]}">${i+1}</div>
+      <div class="rinfo" style="flex:1">
+        <div class="rn">${l.nome} ${badge}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:3px 0">
+          <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted)">
+          <span style="color:${c};font-weight:600">${fmt(l.v)} · ${l.pct.toFixed(0)}%</span>
+          <span style="color:${cTM}">TM ${fmt(l.tm)} · ${l.pctTM.toFixed(0)}%</span>
+        </div>
+      </div>
+      <div class="rpct" style="color:${c}">${l.pct.toFixed(0)}%</div>
+    </div>`;
   }).join("");
 }
 
@@ -2914,13 +2988,13 @@ function renderRankVendHoje(){
     if(ini&&!ini.value) ini.value=hj.slice(0,7)+"-01";
     if(fim&&!fim.value) fim.value=hj;
   }
+  const ini=document.getElementById("rank-vend-ini")?.value||"";
+  const fim=document.getElementById("rank-vend-fim")?.value||hj;
   function calcVendP(v){
     if(per==="hoje") return D.vendasVend[v.id]?.[hj]?.val||0;
     if(per==="semana") return calcVendPer(v.id,"semana");
     if(per==="mes") return calcVendPer(v.id,"mes");
-    const ini=document.getElementById("rank-vend-ini")?.value;
-    const fim=document.getElementById("rank-vend-fim")?.value||hj;
-    if(!ini) return 0;
+    if(!ini) return calcVendPer(v.id,"mes");
     let t=0;
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d>=ini&&d<=fim) t+=Number(vd.val||0);});
     return t;
@@ -2929,8 +3003,11 @@ function renderRankVendHoje(){
   vends=vends.map(v=>({...v,val:calcVendP(v)})).sort((a,b)=>b.val-a.val).slice(0,8);
   const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx","rx","rx","rx"];
   const ativos=vends.filter(v=>v.val>0);
+  // Mostrar período no título
+  const tituloEl=document.querySelector("#rank-vend-hoje")?.closest(".rcard")?.querySelector(".rn, div[style*='font-weight:600']");
   document.getElementById("rank-vend-hoje").innerHTML=ativos.length?ativos.map((v,i)=>{
-    const metaRef=per==="hoje"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hj):per==="semana"?(Number(v.metaMes)||0)/4.33:Number(v.metaMes)||0;
+    const dias=per==="custom"&&ini&&fim?Math.max(1,(new Date(fim)-new Date(ini))/86400000+1):30;
+    const metaRef=per==="hoje"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hj):per==="semana"?(Number(v.metaMes)||0)/4.33:per==="mes"?Number(v.metaMes)||0:(Number(v.metaMes)||0)/30*dias;
     const pct=metaRef>0?v.val/metaRef*100:0,c=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     const loja=LOJAS.find(l=>l.id===v.loja);
     const lojaTag=isAdmin()?`<span style="font-size:9px;color:var(--muted);margin-left:4px">${loja?.nome||""}</span>`:"";
