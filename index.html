@@ -3578,7 +3578,6 @@ function renderHistoricoLanc(){
   const selLoja=document.getElementById("lanc-loja-sel");
   const lid=(isAdmin()&&selLoja)?selLoja.value:lojaId();
   const mes=hoje().slice(0,7);
-  // Pegar todos os dias do mês com lançamentos (via vendasVend)
   const diasComLanc={};
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
@@ -3593,27 +3592,30 @@ function renderHistoricoLanc(){
     el.innerHTML="<div style='color:var(--muted);font-size:11px;padding:10px 0;text-align:center'>Nenhum lançamento neste mês.</div>";
     return;
   }
-  el.innerHTML=`<div style="overflow-x:auto"><table class="dtable" style="font-size:11px">
-    <thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style="width:60px"></th></tr></thead>
-    <tbody>${dias.map(([d,fat])=>{
-      // Soma atendimentos reais (trans) do dia — fallback: conta vendedoras com val>0
-      let natDia=0;
-      D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
-        const reg=D.vendasVend[v.id]?.[d];
-        if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); }
-      });
-      const tm=natDia>0?fat/natDia:0;
-      const dFmt=d.split("-").reverse().join("/");
-      const isHoje=d===hoje();
-      return \`<tr style="\${isHoje?"background:rgba(201,168,76,.05)":""}">
-        <td style="font-weight:\${isHoje?700:400};color:\${isHoje?"var(--ouro)":"var(--texto)"}">\${dFmt}\${isHoje?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':""}</td>
-        <td style="font-weight:700;color:var(--verde)">\${fmt(fat)}</td>
-        <td style="color:var(--azul)">\${fmt(tm)}</td>
-        <td style="color:var(--muted)">\${natDia}</td>
-        <td><button onclick="deletarLanc('\${lid}','\${d}')" style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🗑️</button></td>
-      </tr>\`;
-    }).join("")}</tbody>
-  </table></div>`;
+  let rows='';
+  dias.forEach(([d,fat])=>{
+    let natDia=0;
+    D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+      const reg=D.vendasVend[v.id]?.[d];
+      if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); }
+    });
+    const tm=natDia>0?fat/natDia:0;
+    const dFmt=d.split("-").reverse().join("/");
+    const isHoje=d===hoje();
+    const bgStyle=isHoje?"background:rgba(201,168,76,.05)":"";
+    const tdStyle="font-weight:"+(isHoje?700:400)+";color:"+(isHoje?"var(--ouro)":"var(--texto)");
+    const hojeLabel=isHoje?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':"";
+    rows+='<tr style="'+bgStyle+'">'
+      +'<td style="'+tdStyle+'">'+dFmt+hojeLabel+'</td>'
+      +'<td style="font-weight:700;color:var(--verde)">'+fmt(fat)+'</td>'
+      +'<td style="color:var(--azul)">'+fmt(tm)+'</td>'
+      +'<td style="color:var(--muted)">'+natDia+'</td>'
+      +'<td><button onclick="deletarLanc(''+lid+'',''+d+'')" style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🗑️</button></td>'
+      +'</tr>';
+  });
+  el.innerHTML='<div style="overflow-x:auto"><table class="dtable" style="font-size:11px">'
+    +'<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style="width:60px"></th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>';
 }
 function limparLanc(){
   const lid=lojaId();
