@@ -29,11 +29,18 @@ if(ok){try{
   window._fs={doc,setDoc,getDoc,collection,getDocs,deleteDoc};
   window._authFn={signInWithEmailAndPassword,signOut};
   console.log("[AVATIM] Firebase inicializado OK");
+  // onAuthStateChanged só controla o estado inicial (ex: sessão já aberta)
+  // Após login manual via SHA-256, window._localLogin=true impede que o Firebase derrube o acesso
   const runAuth=()=>onAuthStateChanged(auth,user=>{
     console.log("[AVATIM] Auth state:", user?user.email:"nenhum");
-    window._currentUser=user;
-    if(user){window._userLoja=(window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};showApp();}
-    else showLogin();
+    if(user){
+      window._currentUser=user;
+      window._userLoja=(window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+      if(!window._localLogin) showApp();
+    } else {
+      // Só volta para login se não foi um login local já confirmado
+      if(!window._localLogin){ window._currentUser=null; showLogin(); }
+    }
   });
   if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",runAuth);}else{runAuth();}
 }catch(e){
@@ -2931,6 +2938,7 @@ async function login(){
       if(u.hash!==inputHash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
       // Senha correta — logar localmente e também no Firebase (para sync de dados)
       window._currentUser={email};window._userLoja=u;
+      window._localLogin=true; // impede onAuthStateChanged de derrubar o acesso
       if(window._fbOk&&window._authFn&&window._auth){
         window._authFn.signInWithEmailAndPassword(window._auth,email,senha)
           .catch(err=>console.warn("[AVATIM] Firebase auth opcional falhou:",err.code));
@@ -2944,7 +2952,7 @@ async function login(){
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
-function logout(){if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);return;}window._currentUser=null;window._userLoja=null;showLogin();}
+function logout(){window._localLogin=false;if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);}window._currentUser=null;window._userLoja=null;showLogin();}
 
 // ============================================================
 // NAVEGACAO
