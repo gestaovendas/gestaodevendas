@@ -2320,36 +2320,55 @@ if(!D.fluxo)      D.fluxo=[];
     console.warn("[Avatim] "+corrompidas+" meta(s) corrompida(s) removida(s) automaticamente.");
   }
 })();
+// ── FIRESTORE SYNC ──────────────────────────────────────────
+// Documento único "avatim/principal" guarda todos os dados da rede
+const FS_COL = "avatim";
+const FS_DOC = "principal";
+let _savePending = false;
+
 function save(){
-  localStorage.setItem("avatim_v5",JSON.stringify(D));
-  // Sync com Firestore usando o Firebase já inicializado
+  localStorage.setItem("avatim_v5", JSON.stringify(D));
   if(window._fbOk && window._db && window._fs){
-    const lid = lojaId()||'admin';
-    try{
+    if(_savePending) return; // evita flood de writes
+    _savePending = true;
+    setTimeout(()=>{
+      _savePending = false;
+      const payload = {dados: JSON.stringify(D), ts: Date.now(), por: window._currentUser?.email||''};
       window._fs.setDoc(
-        window._fs.doc(window._db,"dados",lid),
-        {dados: JSON.stringify(D), ts: Date.now(), email: window._currentUser?.email||''},
-        {merge:true}
-      ).catch(e=>console.warn("[Avatim] Firestore save erro:",e.code));
-    }catch(e){}
+        window._fs.doc(window._db, FS_COL, FS_DOC),
+        payload,
+        {merge:false}
+      ).then(()=>{
+        console.log("[Avatim] ✅ Salvo no Firestore");
+      }).catch(e=>{
+        console.warn("[Avatim] ❌ Firestore save erro:", e.code, e.message);
+      });
+    }, 800); // debounce 800ms
   }
 }
 
 async function loadFromFirestore(){
-  if(!window._fbOk || !window._db || !window._fs) return false;
+  if(!window._fbOk || !window._db || !window._fs){
+    console.warn("[Avatim] Firebase não disponível para carregar dados");
+    return false;
+  }
   try{
-    const lid = lojaId()||'admin';
-    const snap = await window._fs.getDoc(window._fs.doc(window._db,"dados",lid));
+    console.log("[Avatim] Buscando dados no Firestore...");
+    const snap = await window._fs.getDoc(window._fs.doc(window._db, FS_COL, FS_DOC));
     if(snap.exists()){
       const remote = JSON.parse(snap.data().dados||"{}");
-      // Merge: remoto sobrescreve local
-      D = Object.assign({}, D, remote);
+      D = remote;
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] Dados carregados do Firestore ✅");
+      console.log("[Avatim] ✅ Dados carregados do Firestore! ts="+snap.data().ts);
       return true;
+    } else {
+      console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
+      return false;
     }
-  }catch(e){ console.warn("[Avatim] Firestore load erro:",e.message); }
-  return false;
+  }catch(e){
+    console.warn("[Avatim] ❌ Firestore load erro:", e.message);
+    return false;
+  }
 }
 
 // ============================================================
