@@ -15,7 +15,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } fro
 // console.firebase.google.com -> Configuracoes -> Seus apps -> Web
 // ============================================================
 const firebaseConfig = {
-  apiKey:"AIzaSyBysGz90olUSaUx2U0oEx5NXu6umBx_vEw",
+  apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
   authDomain:"gestao-f53b3.firebaseapp.com",
   projectId:"gestao-f53b3",
   storageBucket:"gestao-f53b3.firebasestorage.app",
@@ -28,7 +28,8 @@ if(ok){try{
   window._auth=auth; window._db=db; window._fbOk=true;
   window._fs={doc,setDoc,getDoc,collection,getDocs,deleteDoc};
   window._authFn={signInWithEmailAndPassword,signOut};
-  onAuthStateChanged(auth,user=>{window._currentUser=user;if(user){window._userLoja=USUARIOS[user.email]||{id:"desconhecido",nome:user.email};showApp();}else showLogin();});
+  const _runAuth=()=>onAuthStateChanged(auth,user=>{if(window._localLogin)return;window._currentUser=user;if(user){window._userLoja=(window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};showApp();}else showLogin();});
+  if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",_runAuth);}else{_runAuth();}
 }catch(e){window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}}
 else{window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}
 </script>
@@ -1592,7 +1593,7 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
-const USUARIOS={
+window.USUARIOS={
   "admin@avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
   "mooca@avatim.com":      {id:"mooca",       nome:"Mooca Plaza",        hash:"cb18a0eb4a247f4881eeba8ff86c02c4144b1d8cb9e6ccfe9220147941984fc1"},
   "lorena@avatim.com":     {id:"lorena",      nome:"Lorena",             hash:"0cf4d03a8e79dc148fc3e7badfb6db84f1d12d48fcc6ec25e0a278383d713504"},
@@ -2581,40 +2582,26 @@ async function login(){
   const errEl=document.getElementById("lerr");
   errEl.style.display="none";
   if(!email||!senha){errEl.textContent="Preencha e-mail e senha.";errEl.style.display="block";return;}
-  // Firebase: se configurado, usa autenticação do Firebase
-  if(window._fbOk&&window._authFn&&window._auth){
-    window._authFn.signInWithEmailAndPassword(window._auth,email,senha)
-      .catch(()=>{errEl.textContent="E-mail ou senha incorretos.";errEl.style.display="block";});
-    return;
-  }
-  const u=USUARIOS[email];
+  const u=(window.USUARIOS||{})[email];
   if(!u){errEl.textContent="E-mail não encontrado.";errEl.style.display="block";return;}
-  // Tenta SHA-256 via crypto.subtle (HTTPS/localhost)
   if(window.crypto&&window.crypto.subtle){
     try{
       const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(senha));
-      const inputHash=Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
-      if(u.hash!==inputHash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
-      window._currentUser={email};window._userLoja=u;showApp();
-      return;
+      const hash=Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
+      if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
+      window._localLogin=true;
+      window._currentUser={email};window._userLoja=u;
+      if(window._fbOk&&window._authFn&&window._auth){
+        window._authFn.signInWithEmailAndPassword(window._auth,email,senha).catch(()=>{});
+      }
+      showApp();return;
     }catch(e){}
   }
-  // Fallback para file:// (sem crypto.subtle): compara hash pré-computado diretamente
-  // Gera hash simples para comparação offline
-  const senhaHash=_hashSimples(senha);
-  if(u.senhaPlana){
-    // Se tiver senha em texto (modo desenvolvimento)
-    if(u.senhaPlana!==senha){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
-  } else {
-    errEl.textContent="Abra o sistema via servidor ou GitHub Pages para usar as senhas. (file:// não suporta criptografia)";
-    errEl.style.display="block";
-    return;
-  }
-  window._currentUser={email};window._userLoja=u;showApp();
+  errEl.textContent="Use o GitHub Pages (HTTPS) para acessar.";errEl.style.display="block";
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
-function logout(){if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);return;}window._currentUser=null;window._userLoja=null;showLogin();}
+function logout(){window._localLogin=false;if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);}window._currentUser=null;window._userLoja=null;showLogin();}
 
 // ============================================================
 // NAVEGACAO
@@ -3125,27 +3112,28 @@ function salvarLanc(){
 function renderConsolidadoLanc(lid){
   const el=document.getElementById("lanc-consolidado-grid");
   if(!el) return;
-  const periodos=[
-    {label:"Hoje",       per:"dia",    fat:calcDia(lid),  n:calcNVendas(lid,"dia")},
-    {label:"Semana",     per:"semana", fat:calcSem(lid),  n:calcNVendas(lid,"semana")},
-    {label:"Este Mês",   per:"mes",    fat:calcMes(lid),  n:calcNVendas(lid,"mes")},
-  ];
   const m=getMetas(lid);
-  const metas=[m.dia, m.sem, m.mes];
-  el.innerHTML=periodos.map((p,i)=>{
-    const tm=p.n>0?p.fat/p.n:0;
-    const pct=metas[i]>0?p.fat/metas[i]*100:0;
+  const periodos=[
+    {label:"Hoje",     fat:calcDia(lid), nat:calcNAtend(lid,"dia"),    meta:m.dia},
+    {label:"Semana",   fat:calcSem(lid), nat:calcNAtend(lid,"semana"), meta:m.sem},
+    {label:"Este Mês", fat:calcMes(lid), nat:calcNAtend(lid,"mes"),    meta:m.mes},
+  ];
+  el.innerHTML=periodos.map(p=>{
+    const tm=p.nat>0?p.fat/p.nat:0;
+    const pct=p.meta>0?p.fat/p.meta*100:0;
     const cor=pct>=125?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":p.fat>0?"var(--verm)":"var(--muted)";
-    return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px;text-align:center">
-      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">${p.label}</div>
-      <div style="font-size:16px;font-weight:700;color:${cor};margin-bottom:4px">${fmt(p.fat)}</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${pct.toFixed(0)}% da meta</div>
-      <div style="border-top:1px solid var(--borda);padding-top:8px;margin-top:4px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Ticket Médio</div>
-        <div style="font-size:14px;font-weight:700;color:var(--azul);margin-top:2px">${fmt(tm)}</div>
-        <div style="font-size:9px;color:var(--muted)">${p.n} venda${p.n!==1?"s":""}</div>
-      </div>
-    </div>`;
+    return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px;text-align:center'>"
+      +"<div style='font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px'>"+p.label+"</div>"
+      +"<div style='font-size:16px;font-weight:700;color:"+cor+";margin-bottom:4px'>"+fmt(p.fat)+"</div>"
+      +"<div style='font-size:9px;color:var(--muted);margin-bottom:6px'>"+pct.toFixed(0)+"% da meta</div>"
+      +"<div style='border-top:1px solid var(--borda);padding-top:8px;margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
+        +"<div><div style='font-size:9px;color:var(--muted);text-transform:uppercase'>Ticket Médio</div>"
+        +"<div style='font-size:13px;font-weight:700;color:var(--azul)'>"+fmt(tm)+"</div>"
+        +"<div style='font-size:9px;color:var(--muted)'>"+p.nat+" atend.</div></div>"
+        +"<div><div style='font-size:9px;color:var(--muted);text-transform:uppercase'>Clientes</div>"
+        +"<div style='font-size:13px;font-weight:700;color:var(--verde)'>"+p.nat+"</div>"
+        +"<div style='font-size:9px;color:var(--muted)'>atendidos</div></div>"
+      +"</div></div>";
   }).join("");
 }
 
@@ -3185,25 +3173,29 @@ function renderHistoricoLanc(){
     el.innerHTML="<div style='color:var(--muted);font-size:11px;padding:10px 0;text-align:center'>Nenhum lançamento neste mês.</div>";
     return;
   }
-  el.innerHTML=`<div style="overflow-x:auto"><table class="dtable" style="font-size:11px">
-    <thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Vendas</th><th style="width:60px"></th></tr></thead>
-    <tbody>${dias.map(([d,fat])=>{
-      const nv=calcNVendas(lid,"_custom_"+d);
-      // conta manualmente para este dia específico
-      let nVDia=0;
-      D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{ if((D.vendasVend[v.id]?.[d]?.val||0)>0) nVDia++; });
-      const tm=nVDia>0?fat/nVDia:0;
-      const dFmt=d.split("-").reverse().join("/");
-      const isHoje=d===hoje();
-      return `<tr style="${isHoje?"background:rgba(201,168,76,.05)":""}">
-        <td style="font-weight:${isHoje?700:400};color:${isHoje?"var(--ouro)":"var(--texto)"}">${dFmt}${isHoje?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':""}</td>
-        <td style="font-weight:700;color:var(--verde)">${fmt(fat)}</td>
-        <td style="color:var(--azul)">${fmt(tm)}</td>
-        <td style="color:var(--muted)">${nVDia}</td>
-        <td><button onclick="deletarLanc('${lid}','${d}')" style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🗑️</button></td>
-      </tr>`;
-    }).join("")}</tbody>
-  </table></div>`;
+
+  let rows='';
+  dias.forEach(function(item){
+    const d=item[0], fat=item[1];
+    let natDia=0;
+    D.vendedoras.filter(function(v){return v.loja===lid;}).forEach(function(v){
+      const reg=D.vendasVend[v.id]?D.vendasVend[v.id][d]:null;
+      if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); }
+    });
+    const tm=natDia>0?fat/natDia:0;
+    const dFmt=d.split("-").reverse().join("/");
+    const isHoje=d===hoje();
+    rows+="<tr style='"+(isHoje?"background:rgba(201,168,76,.05)":"")+"'>"
+      +"<td style='font-weight:"+(isHoje?700:400)+";color:"+(isHoje?"var(--ouro)":"var(--texto)")+"'>"+dFmt+(isHoje?" <span style='font-size:9px;color:var(--ouro)'>HOJE</span>":"")+"</td>"
+      +"<td style='font-weight:700;color:var(--verde)'>"+fmt(fat)+"</td>"
+      +"<td style='color:var(--azul)'>"+fmt(tm)+"</td>"
+      +"<td style='color:var(--muted)'>"+natDia+"</td>"
+      +"<td><button onclick='deletarLanc(&quot;"+d+"&quot;,&quot;"+lid+"&quot;)' style='background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer'>🗑️</button></td>"
+      +"</tr>";
+  });
+  el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
+    +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
+    +"<tbody>"+rows+"</tbody></table></div>";
 }
 function limparLanc(){
   const lid=lojaId();
