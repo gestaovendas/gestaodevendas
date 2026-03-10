@@ -28,10 +28,29 @@ if(ok){try{
   window._auth=auth; window._db=db; window._fbOk=true;
   window._fs={doc,setDoc,getDoc,collection,getDocs,deleteDoc};
   window._authFn={signInWithEmailAndPassword,signOut};
-  const runAuth=()=>onAuthStateChanged(auth,user=>{window._currentUser=user;if(user){window._userLoja=USUARIOS[user.email]||{id:"desconhecido",nome:user.email};showApp();}else showLogin();});
+  console.log("[AVATIM] Firebase inicializado OK");
+  const runAuth=()=>onAuthStateChanged(auth,user=>{
+    console.log("[AVATIM] Auth state:", user?user.email:"nenhum");
+    window._currentUser=user;
+    if(user){window._userLoja=(window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};showApp();}
+    else showLogin();
+  });
   if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",runAuth);}else{runAuth();}
-}catch(e){window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}}
-else{window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}
+}catch(e){
+  console.error("[AVATIM] ERRO Firebase init:",e.message,e.code);
+  window._fbOk=false;
+  window._fbInitError=e.message;
+  document.addEventListener("DOMContentLoaded",()=>{
+    showLogin();
+    const el=document.getElementById("lerr");
+    if(el){el.textContent="Erro Firebase: "+e.message;el.style.display="block";}
+  });
+}}
+else{
+  console.warn("[AVATIM] Firebase nao configurado");
+  window._fbOk=false;
+  document.addEventListener("DOMContentLoaded",showLogin);
+}
 </script>
 
 <script>
@@ -1606,7 +1625,7 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
-const USUARIOS={
+window.USUARIOS = {
   "admin@avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
   "mooca@avatim.com":      {id:"mooca",       nome:"Mooca Plaza",        hash:"cb18a0eb4a247f4881eeba8ff86c02c4144b1d8cb9e6ccfe9220147941984fc1"},
   "lorena@avatim.com":     {id:"lorena",      nome:"Lorena",             hash:"0cf4d03a8e79dc148fc3e7badfb6db84f1d12d48fcc6ec25e0a278383d713504"},
@@ -2597,11 +2616,27 @@ async function login(){
   if(!email||!senha){errEl.textContent="Preencha e-mail e senha.";errEl.style.display="block";return;}
   // Firebase: se configurado, usa autenticação do Firebase
   if(window._fbOk&&window._authFn&&window._auth){
+    errEl.textContent="Verificando...";errEl.style.display="block";errEl.style.color="var(--ouro)";
     window._authFn.signInWithEmailAndPassword(window._auth,email,senha)
-      .catch(()=>{errEl.textContent="E-mail ou senha incorretos.";errEl.style.display="block";});
+      .then(()=>{errEl.style.display="none";})
+      .catch((err)=>{
+        console.error("[AVATIM] Login erro:",err.code,err.message);
+        const msgs={
+          'auth/invalid-credential':'E-mail ou senha incorretos.',
+          'auth/user-not-found':'Usuário não encontrado no Firebase.',
+          'auth/wrong-password':'Senha incorreta.',
+          'auth/invalid-email':'E-mail inválido.',
+          'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos.',
+          'auth/network-request-failed':'Sem conexão. Verifique internet.',
+          'auth/api-key-not-valid':'API Key inválida. Contate suporte.',
+        };
+        errEl.textContent=msgs[err.code]||('Erro: '+err.code);
+        errEl.style.color="var(--verm)";
+        errEl.style.display="block";
+      });
     return;
   }
-  const u=USUARIOS[email];
+  const u=(window.USUARIOS||{})[email];
   if(!u){errEl.textContent="E-mail não encontrado.";errEl.style.display="block";return;}
   // Tenta SHA-256 via crypto.subtle (HTTPS/localhost)
   if(window.crypto&&window.crypto.subtle){
