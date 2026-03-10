@@ -479,6 +479,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
+    <button class="ni admin-only" onclick="nav('gestao')" id="nav-gestao" style="display:none"><span class="ic">&#128200;</span>Painel Gestao</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">&#9671;</span>Estoque</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -1609,6 +1610,73 @@ service cloud.firestore {
 </div>
 
 </main>
+
+<!-- PAINEL DE GESTAO -->
+<div class="page" id="page-gestao">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Painel de <span>Gestao</span></h1>
+      <div class="ps">Visao geral da rede — faturamento, ticket medio e status de metas</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="tabs" style="margin:0">
+        <button class="tab active" id="gtab-hoje" onclick="tabGestao('hoje',this)">Hoje</button>
+        <button class="tab" id="gtab-semana" onclick="tabGestao('semana',this)">Semana</button>
+        <button class="tab" id="gtab-mes" onclick="tabGestao('mes',this)">Mes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPIs TOPO -->
+  <div class="kgrid" id="gestao-kpis" style="margin-bottom:18px"></div>
+
+  <!-- GRID PRINCIPAL -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <!-- Ranking Faturamento Lojas -->
+    <div class="rcard">
+      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--ouro);display:flex;align-items:center;gap:6px">
+        &#127942; Ranking Faturamento — Lojas
+      </div>
+      <div id="gestao-rank-fat-lojas">--</div>
+    </div>
+    <!-- Ranking TM Lojas -->
+    <div class="rcard">
+      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--azul);display:flex;align-items:center;gap:6px">
+        &#127919; Ranking Ticket Medio — Lojas
+      </div>
+      <div id="gestao-rank-tm-lojas">--</div>
+    </div>
+  </div>
+
+  <!-- STATUS METAS TODAS AS LOJAS -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">Status de Metas — Todas as Lojas</div>
+    <div id="gestao-status-lojas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;padding:4px 0"></div>
+  </div>
+
+  <!-- RANKING TOP VENDEDORAS -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div class="rcard">
+      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--verde);display:flex;align-items:center;gap:6px">
+        &#128101; Top Vendedoras — Faturamento
+      </div>
+      <div id="gestao-rank-fat-vends">--</div>
+    </div>
+    <div class="rcard">
+      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--azul);display:flex;align-items:center;gap:6px">
+        &#127919; Top Vendedoras — Ticket Medio
+      </div>
+      <div id="gestao-rank-tm-vends">--</div>
+    </div>
+  </div>
+
+  <!-- PROJECAO MES -->
+  <div class="sc">
+    <div class="st">Projecao do Mes — por Loja</div>
+    <div id="gestao-projecao" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;padding:4px 0"></div>
+  </div>
+</div>
+
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
@@ -2565,6 +2633,245 @@ function calcProjecaoRede(){
 }
 
 // ============================================================
+// PAINEL DE GESTAO
+// ============================================================
+let _gestaoPer = 'hoje';
+
+function tabGestao(per, el) {
+  _gestaoPer = per;
+  document.querySelectorAll('#page-gestao .tab').forEach(e => e.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderGestao();
+}
+
+function renderGestao() {
+  const per = _gestaoPer;
+  const perV = per === 'hoje' ? 'dia' : per;
+  const cls = ['r1','r2','r3','rx','rx','rx','rx'];
+
+  // ── Dados das lojas
+  const ld = LOJAS.map(l => {
+    const m   = getMetas(l.id);
+    const fat = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
+    const meta= per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
+    const sm  = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const pct = meta>0 ? fat/meta*100 : 0;
+    const tm  = calcTMLoja(l.id, perV);
+    const nat = calcNAtend(l.id, perV);
+    return {...l, fat, meta, sm, pct, tm, nat};
+  }).sort((a,b) => b.fat - a.fat);
+
+  // ── KPIs topo
+  const totFat   = ld.reduce((s,l)=>s+l.fat,0);
+  const totMeta  = ld.reduce((s,l)=>s+l.meta,0);
+  const pctRede  = totMeta>0 ? totFat/totMeta*100 : 0;
+  const nasMeta  = ld.filter(l=>l.pct>=100).length;
+  const superMeta= ld.filter(l=>l.pct>=120).length;
+  const totAtend = ld.reduce((s,l)=>s+l.nat,0);
+  const tmRede   = totAtend>0 ? totFat/totAtend : 0;
+  const crRede   = pctRede>=120?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
+
+  document.getElementById('gestao-kpis').innerHTML = `
+    <div class="kcard ouro" style="padding:16px">
+      <div class="kl">Faturamento Rede</div>
+      <div class="kv" style="font-size:20px">${fmt(totFat)}</div>
+      <div class="ks">Meta: ${fmt(totMeta)}</div>
+    </div>
+    <div class="kcard" style="padding:16px;border-color:${crRede}">
+      <div class="kl">% da Meta da Rede</div>
+      <div class="kv" style="font-size:20px;color:${crRede}">${pctRede.toFixed(1)}%</div>
+      <div class="ks">${nasMeta} de ${LOJAS.length} lojas na meta</div>
+    </div>
+    <div class="kcard verde" style="padding:16px">
+      <div class="kl">Lojas na Meta</div>
+      <div class="kv" style="font-size:20px">${nasMeta}<span style="font-size:13px;color:var(--muted)">/${LOJAS.length}</span></div>
+      <div class="ks">${superMeta} na super meta</div>
+    </div>
+    <div class="kcard azul" style="padding:16px">
+      <div class="kl">Ticket Medio da Rede</div>
+      <div class="kv" style="font-size:20px">${fmt(tmRede)}</div>
+      <div class="ks">${totAtend} atendimentos</div>
+    </div>
+    <div class="kcard roxo" style="padding:16px">
+      <div class="kl">Melhor Loja</div>
+      <div class="kv" style="font-size:15px">${ld[0]?.nome||'--'}</div>
+      <div class="ks">${fmt(ld[0]?.fat)} (${ld[0]?.pct.toFixed(0)}%)</div>
+    </div>
+    <div class="kcard verm" style="padding:16px">
+      <div class="kl">Precisa de Atencao</div>
+      <div class="kv" style="font-size:15px">${ld[ld.length-1]?.nome||'--'}</div>
+      <div class="ks">${ld[ld.length-1]?.pct.toFixed(0)}% da meta</div>
+    </div>`;
+
+  // ── Ranking Faturamento Lojas
+  const maxFat = ld[0]?.fat||1;
+  document.getElementById('gestao-rank-fat-lojas').innerHTML = ld.map((l,i) => {
+    const c = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const badge = l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':'';
+    return `<div class="ritem">
+      <div class="rpos ${cls[i]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+      <div class="rinfo">
+        <div class="rn">${l.nome} ${badge}</div>
+        <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
+          <div style="width:${Math.min(100,l.fat/maxFat*100)}%;height:100%;background:${c};border-radius:4px"></div>
+        </div>
+        <div class="rv">${fmt(l.fat)} / meta ${fmt(l.meta)}</div>
+      </div>
+      <div style="text-align:right;min-width:48px">
+        <div style="font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Ranking TM Lojas
+  const ldTM = [...ld].filter(l=>l.nat>0).sort((a,b)=>b.tm-a.tm);
+  const maxTM = ldTM[0]?.tm||1;
+  document.getElementById('gestao-rank-tm-lojas').innerHTML = ldTM.length
+    ? ldTM.map((l,i) => `<div class="ritem">
+        <div class="rpos ${cls[i]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+        <div class="rinfo">
+          <div class="rn">${l.nome}</div>
+          <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
+            <div style="width:${l.tm/maxTM*100}%;height:100%;background:var(--azul);border-radius:4px"></div>
+          </div>
+          <div class="rv">${l.nat} atend. &middot; Fat: ${fmt(l.fat)}</div>
+        </div>
+        <div style="text-align:right;min-width:56px">
+          <div style="font-size:16px;font-weight:700;color:var(--azul)">${fmt(l.tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">TM</div>
+        </div>
+      </div>`).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
+
+  // ── Status de metas — cards por loja
+  const ldOrig = LOJAS.map(l => {
+    const m   = getMetas(l.id);
+    const fat = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
+    const meta= per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
+    const sm  = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const pct = meta>0 ? fat/meta*100 : 0;
+    const tm  = calcTMLoja(l.id, perV);
+    const nat = calcNAtend(l.id, perV);
+    const ticket = m.ticket||0;
+    return {...l, fat, meta, sm, pct, tm, nat, ticket};
+  });
+  document.getElementById('gestao-status-lojas').innerHTML = ldOrig.map(l => {
+    const c  = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const bg = l.pct>=120?'rgba(139,92,246,.08)':l.pct>=100?'rgba(52,211,153,.08)':l.pct>=70?'rgba(251,191,36,.06)':'rgba(239,68,68,.06)';
+    const icon= l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+    const faltaMeta = Math.max(0, l.meta - l.fat);
+    const faltaSM   = Math.max(0, l.sm - l.fat);
+    return `<div style="background:${bg};border:1px solid ${c};border-radius:12px;padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700">${icon} ${l.nome}</div>
+        <div style="font-size:18px;font-weight:900;color:${c}">${l.pct.toFixed(0)}%</div>
+      </div>
+      <div style="height:5px;background:var(--cinza);border-radius:5px;overflow:hidden;margin-bottom:10px;position:relative">
+        <div style="width:${Math.min(100,l.fat/Math.max(l.sm,1)*100)}%;height:100%;background:${c};border-radius:5px"></div>
+        ${l.meta>0?`<div style="position:absolute;top:0;left:${Math.min(100,l.meta/Math.max(l.sm,l.fat,1)*100)}%;width:2px;height:100%;background:rgba(255,255,255,.5)"></div>`:''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
+        <div><span style="color:var(--muted)">Realizado</span><br><strong>${fmt(l.fat)}</strong></div>
+        <div><span style="color:var(--muted)">Meta</span><br><strong>${fmt(l.meta)}</strong></div>
+        <div><span style="color:var(--muted)">Super Meta</span><br><strong>${fmt(l.sm)}</strong></div>
+        <div><span style="color:var(--muted)">TM</span><br><strong style="color:var(--azul)">${fmt(l.tm)}</strong>${l.ticket>0?` <span style="color:var(--muted)">(alvo:${fmt(l.ticket)})</span>`:''}</div>
+        ${faltaMeta>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Meta</span> <strong style="color:var(--verm)">${fmt(faltaMeta)}</strong></div>`:''}
+        ${l.pct>=100&&faltaSM>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Super</span> <strong style="color:var(--roxo)">${fmt(faltaSM)}</strong></div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Top vendedoras faturamento
+  const allV = D.vendedoras
+    .map(v => {
+      const loja = LOJAS.find(l=>l.id===v.loja);
+      const val  = calcVendPer(v.id, perV);
+      const pct  = v.metaMes>0 ? val/v.metaMes*100 : 0;
+      return {...v, val, pct, lojaNome:loja?.nome||v.loja};
+    })
+    .filter(v=>v.val>0)
+    .sort((a,b)=>b.val-a.val)
+    .slice(0,8);
+  const maxV = allV[0]?.val||1;
+  document.getElementById('gestao-rank-fat-vends').innerHTML = allV.length
+    ? allV.map((v,i) => {
+        const c = v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+        return `<div class="ritem">
+          <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+          <div class="rinfo">
+            <div class="rn">${v.nome}</div>
+            <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+              <div style="width:${v.val/maxV*100}%;height:100%;background:${c};border-radius:3px"></div>
+            </div>
+            <div class="rv">${v.lojaNome} &mdash; ${fmt(v.val)}</div>
+          </div>
+          <div style="text-align:right;min-width:44px">
+            <div style="font-size:13px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
+          </div>
+        </div>`;
+      }).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
+
+  // ── Top vendedoras TM
+  const allVTM = D.vendedoras.map(v => {
+    const loja = LOJAS.find(l=>l.id===v.loja);
+    let fat=0, nat=0;
+    if(perV==='dia'){
+      const reg = D.vendasVend[v.id]?.[hoje()];
+      fat = reg?.val||0; nat = reg?.trans||0; if(!nat&&fat>0)nat=1;
+    } else if(perV==='semana'){
+      const hj=new Date();hj.setHours(0,0,0,0);
+      const diff=hj.getDay()===0?6:hj.getDay()-1;
+      const seg=new Date(hj);seg.setDate(hj.getDate()-diff);
+      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hj){const dt=d.toISOString().slice(0,10);const r=D.vendasVend[v.id]?.[dt];if(r?.val){fat+=r.val;nat+=r.trans||(r.val>0?1:0);}}}
+    } else {
+      const mes=hoje().slice(0,7);
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([d,r])=>{if(d.startsWith(mes)&&r.val>0){fat+=r.val;nat+=r.trans||(r.val>0?1:0);}});
+    }
+    const tm = nat>0?fat/nat:0;
+    return {...v, fat, nat, tm, lojaNome:loja?.nome||v.loja};
+  }).filter(v=>v.nat>0).sort((a,b)=>b.tm-a.tm).slice(0,8);
+  const maxVTM = allVTM[0]?.tm||1;
+  document.getElementById('gestao-rank-tm-vends').innerHTML = allVTM.length
+    ? allVTM.map((v,i) => `<div class="ritem">
+        <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+        <div class="rinfo">
+          <div class="rn">${v.nome}</div>
+          <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+            <div style="width:${v.tm/maxVTM*100}%;height:100%;background:var(--azul);border-radius:3px"></div>
+          </div>
+          <div class="rv">${v.lojaNome} &middot; ${v.nat} atend.</div>
+        </div>
+        <div style="text-align:right;min-width:56px">
+          <div style="font-size:13px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">TM</div>
+        </div>
+      </div>`).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
+
+  // ── Projecao do mes por loja
+  document.getElementById('gestao-projecao').innerHTML = LOJAS.map(l => {
+    const m  = getMetas(l.id);
+    const pr = calcProjecao(l.id);
+    const pct= pr&&m.mes>0 ? pr.projecao/m.mes*100 : 0;
+    const c  = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
+    return `<div style="background:var(--cinza);border-radius:10px;padding:12px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px">${l.nome}</div>
+      ${pr ? `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <div style="font-size:16px;font-weight:900;color:${c}">${fmt(pr.projecao)}</div>
+          <div style="font-size:11px;color:var(--muted)">${pct.toFixed(0)}% da meta</div>
+        </div>
+        <div style="height:4px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden;margin-bottom:6px">
+          <div style="width:${Math.min(100,pct)}%;height:100%;background:${c};border-radius:4px"></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted)">Media/dia: ${fmt(pr.mediaD)} &middot; ${pr.dr} dias uteis restantes</div>
+      ` : `<div style="font-size:11px;color:var(--muted)">Sem lancamentos no mes.</div>`}
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
 // LOGIN
 // ============================================================
 function showLogin(){document.getElementById("loginScreen").style.display="flex";document.getElementById("appScreen").style.display="none";}
@@ -2645,7 +2952,7 @@ function logout(){if(window._fbOk&&window._authFn){window._authFn.signOut(window
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  const pgsAdmin=['metaslojas','metaprod','relatorio','config','arquivos','lojas','rankings'];
+  const pgsAdmin=['metaslojas','metaprod','relatorio','config','arquivos','lojas','rankings','gestao'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
@@ -2656,7 +2963,7 @@ function nav(pg){
     comissao:renderComissao,
     estoque:()=>{renderCampAtivas();renderEstqCritico();renderProdutos("","");},
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
-    arquivos:()=>renderArquivos("todos")})[pg]?.();
+    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();}})[pg]?.();
 }
 
 // ============================================================
