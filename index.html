@@ -15,7 +15,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } fro
 // console.firebase.google.com -> Configuracoes -> Seus apps -> Web
 // ============================================================
 const firebaseConfig = {
-  apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
+  apiKey:"AIzaSyBysGz90olUSaUx2U0oEx5NXu6umBx_vEw",
   authDomain:"gestao-f53b3.firebaseapp.com",
   projectId:"gestao-f53b3",
   storageBucket:"gestao-f53b3.firebasestorage.app",
@@ -536,7 +536,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <!-- Ranking Vendedoras da Loja (todas veem) -->
       <div class="rcard" style="margin-top:12px">
-        <div style="font-size:12px;font-weight:600;margin-bottom:14px">🏆 Ranking da Loja &mdash; Hoje</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600">🏆 Ranking Vendedoras</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select id="rank-vend-periodo" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:10px;outline:none">
+              <option value="hoje">Hoje</option>
+              <option value="semana">Semana</option>
+              <option value="mes">Este Mês</option>
+              <option value="custom">Período</option>
+            </select>
+            <span id="rank-vend-custom" style="display:none;gap:4px;align-items:center">
+              <input type="date" id="rank-vend-ini" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
+              <span style="color:var(--muted);font-size:10px">até</span>
+              <input type="date" id="rank-vend-fim" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:10px;outline:none">
+            </span>
+          </div>
+        </div>
         <div id="rank-vend-hoje">--</div>
       </div>
       <!-- Painel Clientes (loja vê) -->
@@ -2429,35 +2444,48 @@ function calcMes(lid){
   }
   return t;
 }
-// TM = Faturamento Total / Número de Vendas (registros de vendedoras com val > 0)
-function calcNVendas(lid, periodo){
-  // Conta quantos registros de vendedoras têm val > 0 no período
+// TM = Faturamento Total / Atendimentos totais (trans); se não tiver, usa contagem de vendedoras com lançamento
+function calcNAtend(lid, periodo){
+  // Soma os atendimentos (trans) das vendedoras no período. Fallback: conta registros com val>0
   const vends = D.vendedoras.filter(v=>v.loja===lid);
   let n=0;
   if(periodo==="dia"){
     const hj=hoje();
-    vends.forEach(v=>{ if((D.vendasVend[v.id]?.[hj]?.val||0)>0) n++; });
+    vends.forEach(v=>{
+      const trans=D.vendasVend[v.id]?.[hj]?.trans||0;
+      n += trans>0 ? trans : ((D.vendasVend[v.id]?.[hj]?.val||0)>0 ? 1 : 0);
+    });
   } else if(periodo==="semana"){
     const hoje_d=new Date(); hoje_d.setHours(0,0,0,0);
     const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
     const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diff);
     const dias=[];
     for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d)dias.push(d.toISOString().slice(0,10));}
-    vends.forEach(v=>{ dias.forEach(d=>{ if((D.vendasVend[v.id]?.[d]?.val||0)>0) n++; }); });
+    vends.forEach(v=>{ dias.forEach(d=>{
+      const trans=D.vendasVend[v.id]?.[d]?.trans||0;
+      n += trans>0 ? trans : ((D.vendasVend[v.id]?.[d]?.val||0)>0 ? 1 : 0);
+    }); });
   } else {
     const mes=hoje().slice(0,7);
-    vends.forEach(v=>{ Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{ if(d.startsWith(mes)&&(vd.val||0)>0) n++; }); });
+    vends.forEach(v=>{ Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+      if(d.startsWith(mes)){
+        const trans=vd.trans||0;
+        n += trans>0 ? trans : ((vd.val||0)>0 ? 1 : 0);
+      }
+    }); });
   }
   return n;
 }
+// Manter calcNVendas como alias para compatibilidade
+function calcNVendas(lid, periodo){ return calcNAtend(lid, periodo); }
 function calcTMLoja(lid, periodo){
   const fat = periodo==="dia"?calcDia(lid):periodo==="semana"?calcSem(lid):calcMes(lid);
-  const n = calcNVendas(lid, periodo);
+  const n = calcNAtend(lid, periodo);
   return n>0 ? fat/n : 0;
 }
 function calcTMRede(periodo){
   const fatTotal = LOJAS.reduce((s,l)=>s+(periodo==="dia"?calcDia(l.id):periodo==="semana"?calcSem(l.id):calcMes(l.id)),0);
-  const nTotal   = LOJAS.reduce((s,l)=>s+calcNVendas(l.id,periodo),0);
+  const nTotal   = LOJAS.reduce((s,l)=>s+calcNAtend(l.id,periodo),0);
   return nTotal>0 ? fatTotal/nTotal : 0;
 }
 
@@ -2657,11 +2685,22 @@ function carregarDash(){
   document.getElementById("k-ticket-s").textContent=nVendasHj+" vendas hoje";
   document.getElementById("k-tm").textContent=nVendasHj>0?nVendasHj+"":"--";
   document.getElementById("k-tm-s").textContent="vendas registradas hoje";
-  // Clientes — soma do dia
+  // Clientes — soma do dia (usa atendimentos reais se disponível)
+  const lojasBase2 = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid);
   let cliHj=0, clinovHj=0;
-  lojasBase.forEach(l=>{const vl=D.vendas[l.id]?.[hj]||{};cliHj+=(vl.cli||0);clinovHj+=(vl.clinov||0);});
-  document.getElementById("k-cli").textContent=cliHj||totalVendasHj;
-  document.getElementById("k-cli-s").textContent=(clinovHj||0)+" novos";
+  lojasBase2.forEach(l=>{
+    D.vendedoras.filter(v=>v.loja===l.id).forEach(v=>{
+      cliHj += D.vendasVend[v.id]?.[hj]?.trans || (D.vendasVend[v.id]?.[hj]?.val>0?1:0);
+    });
+    clinovHj+=(D.vendas[l.id]?.[hj]?.clinov||0);
+  });
+  // Meta de clientes do dia
+  const metaCli = isAdmin()
+    ? LOJAS.reduce((s,l)=>s+(getMetas(l.id).metaCli||0),0)
+    : (getMetas(lid).metaCli||0);
+  const pctCli = metaCli>0 ? (cliHj/metaCli*100).toFixed(0)+"%" : "";
+  document.getElementById("k-cli").textContent=cliHj||0;
+  document.getElementById("k-cli-s").textContent=(metaCli>0?"meta: "+metaCli+" · ":"")+(clinovHj||0)+" novos"+(pctCli?" · "+pctCli:"");
 
   // Barras
   const pD=metaDiaRef>0?Math.min(200,fatHj/metaDiaRef*100):0;
@@ -2865,14 +2904,38 @@ function renderRankHoje(){
 
 function renderRankVendHoje(){
   const lid=lojaId(), hj=hoje();
+  const per=document.getElementById("rank-vend-periodo")?.value||"hoje";
+  const customSpan=document.getElementById("rank-vend-custom");
+  if(customSpan) customSpan.style.display=per==="custom"?"inline-flex":"none";
+  // Pré-preencher datas custom
+  if(per==="custom"){
+    const ini=document.getElementById("rank-vend-ini");
+    const fim=document.getElementById("rank-vend-fim");
+    if(ini&&!ini.value) ini.value=hj.slice(0,7)+"-01";
+    if(fim&&!fim.value) fim.value=hj;
+  }
+  function calcVendP(v){
+    if(per==="hoje") return D.vendasVend[v.id]?.[hj]?.val||0;
+    if(per==="semana") return calcVendPer(v.id,"semana");
+    if(per==="mes") return calcVendPer(v.id,"mes");
+    const ini=document.getElementById("rank-vend-ini")?.value;
+    const fim=document.getElementById("rank-vend-fim")?.value||hj;
+    if(!ini) return 0;
+    let t=0;
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d>=ini&&d<=fim) t+=Number(vd.val||0);});
+    return t;
+  }
   let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  vends=vends.map(v=>({...v,val:D.vendasVend[v.id]?.[hj]?.val||0})).sort((a,b)=>b.val-a.val).slice(0,5);
-  const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx"];
-  document.getElementById("rank-vend-hoje").innerHTML=vends.length?vends.map((v,i)=>{
-    const metaDia=metaDiaProgressiva(Number(v.metaMes)||0,v.id,hj);
-    const pct=metaDia>0?v.val/metaDia*100:0,c=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
-    return `<div class="ritem"><div class="rpos ${cls[i]}">${["🥇","🥈","🥉","4","5"][i]}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${fmt(v.val)}${metaDia>0?" — "+pct.toFixed(0)+"% da meta":""}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?v.val/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${fmt(v.val)}</div></div></div>`;
-  }).join(""):"<div style='color:var(--muted);font-size:11px;padding:8px 0'>Sem lancamentos hoje.</div>";
+  vends=vends.map(v=>({...v,val:calcVendP(v)})).sort((a,b)=>b.val-a.val).slice(0,8);
+  const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx","rx","rx","rx"];
+  const ativos=vends.filter(v=>v.val>0);
+  document.getElementById("rank-vend-hoje").innerHTML=ativos.length?ativos.map((v,i)=>{
+    const metaRef=per==="hoje"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hj):per==="semana"?(Number(v.metaMes)||0)/4.33:Number(v.metaMes)||0;
+    const pct=metaRef>0?v.val/metaRef*100:0,c=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    const lojaTag=isAdmin()?`<span style="font-size:9px;color:var(--muted);margin-left:4px">${loja?.nome||""}</span>`:"";
+    return `<div class="ritem"><div class="rpos ${cls[i]}">${["🥇","🥈","🥉","4","5","6","7","8"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}${lojaTag}</div><div class="rv">${fmt(v.val)}${metaRef>0?" — "+pct.toFixed(0)+"% da meta":""}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?v.val/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${fmt(v.val)}</div></div></div>`;
+  }).join(""):"<div style='color:var(--muted);font-size:11px;padding:8px 0'>Sem lançamentos no período.</div>";
 }
 
 // ============================================================
@@ -2942,6 +3005,7 @@ function carregarVendsForm(lidOverride){
       const corM=pctMes>=100?"var(--verde)":pctMes>=70?"var(--ouro)":acumMes>0?"var(--verm)":"var(--cinza)";
       const valFmt=valAtual>0?valAtual.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}):"";
       const badge=`<span class="sbadge ${tblMap[v.cargo||"ESP"]||"ok"}" style="font-size:9px">${v.cargo||"ESP"}</span>`;
+      const atendAtual=Number(D.vendasVend[v.id]?.[hj]?.trans)||0;
       return `<div style="background:var(--card2);border:1px solid ${valAtual>0?"rgba(201,168,76,.3)":"var(--borda)"};border-radius:12px;padding:14px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div><div style="font-size:13px;font-weight:700">${v.nome}</div><div style="margin-top:3px">${badge}</div></div>
@@ -2961,11 +3025,22 @@ function carregarVendsForm(lidOverride){
           </div>
         </div>`:""}
         <div style="font-size:9px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;font-weight:600;letter-spacing:1px">💰 Vendas hoje (R$)</div>
-        <input type="text" inputmode="decimal" id="vlanc_${v.id}"
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:0">
+          <div>
+            <div style="font-size:9px;color:var(--muted);margin-bottom:4px">Valor (R$)</div>
+            <input type="text" inputmode="decimal" id="vlanc_${v.id}"
           value="${valFmt}" placeholder="0,00"
           style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:16px;font-weight:700;outline:none;transition:border .2s;box-sizing:border-box"
           oninput="atualizarSomaDia();atualizarCardVend('${v.id}',this.value,${metaDia})"
           onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.2)'">
+          </div>
+          <div>
+            <div style="font-size:9px;color:var(--muted);margin-bottom:4px;text-align:center">Atend.</div>
+            <input type="number" id="vatend_${v.id}" min="0" value="${atendAtual||""}"
+              placeholder="0" oninput="atualizarSomaDia()"
+              style="width:54px;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:10px 6px;color:var(--azul);font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
+          </div>
+        </div>
         <div id="vlpct_${v.id}" style="font-size:10px;margin-top:4px;text-align:right;color:${corD}">
           ${valAtual>0?pctDia.toFixed(0)+"% da meta":"—"}
         </div>
@@ -3016,22 +3091,27 @@ function salvarLanc(){
   const vends=D.vendedoras.filter(v=>v.loja===lid);
   let fat=0;
   const vendasParaSalvar=[];
+  let totalAtend=0;
   vends.forEach(v=>{
     const vval=parseBR(document.getElementById("vlanc_"+v.id)?.value)||0;
+    const vatend=parseInt(document.getElementById("vatend_"+v.id)?.value)||0;
     fat+=vval;
-    if(vval>0) vendasParaSalvar.push({v, vval});
+    if(vval>0) vendasParaSalvar.push({v, vval, vatend});
+    totalAtend+=vatend;
   });
   if(fat===0){showToast("Preencha pelo menos uma vendedora!","err");return;}
   // Salvar lançamento da loja (soma automática)
   if(!D.vendas[lid])D.vendas[lid]={};
   const obs=document.getElementById("l-obs")?.value||"";
-  const transCount=vendasParaSalvar.length; // 1 transação por vendedora que lançou
-  const dadosLanc={fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm:0, obs, ts:Date.now()};
+  const transCount=totalAtend||vendasParaSalvar.length;
+  const tm=transCount>0?parseFloat((fat/transCount).toFixed(2)):0;
+  const dadosLanc={fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, obs, ts:Date.now()};
   D.vendas[lid][data]=dadosLanc;
   // Salvar cada vendedora
-  vendasParaSalvar.forEach(({v, vval})=>{
+  vendasParaSalvar.forEach(({v, vval, vatend})=>{
     if(!D.vendasVend[v.id])D.vendasVend[v.id]={};
-    const vdados={val:vval, trans:0, cli:0, aniv:0, inativ:0};
+    const tmV=vatend>0?parseFloat((vval/vatend).toFixed(2)):0;
+    const vdados={val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
     D.vendasVend[v.id][data]=vdados;
     saveWithSync({vendaVend:{vendId:v.id,data,dados:vdados}});
   });
@@ -4043,6 +4123,10 @@ function renderMetasLojas(){
           <div style="font-size:9px;color:var(--azul);font-weight:700;margin-bottom:4px">🎫 TICKET MÉDIO ALVO (R$) <span style="font-weight:400;color:var(--muted)">— valor médio esperado por transação</span></div>
           <input type="text" inputmode="decimal" id="ml-ticket-${loja.id}" value="${m.ticket||150}" placeholder="Ex: 150.00" class="ml-inp" style="width:100%;border-color:rgba(91,141,239,.4)" oninput="calcPrevLoja(\'${loja.id}\')">
         </div>
+        <div style="margin-bottom:8px">
+          <div style="font-size:9px;color:var(--verde);font-weight:700;margin-bottom:4px">👥 META DE CLIENTES/DIA <span style="font-weight:400;color:var(--muted)">— atendimentos esperados por dia</span></div>
+          <input type="number" min="0" id="ml-cli-${loja.id}" value="${m.metaCli||''}" placeholder="Ex: 20" class="ml-inp" style="width:100%;border-color:rgba(46,204,135,.3)">
+        </div>
         <div id="ml-prev-${loja.id}" style="display:${m.mes?'block':'none'};margin-bottom:10px">
           <div style="font-size:9px;color:var(--azul);font-weight:600;margin-bottom:6px;padding:5px 8px;background:rgba(91,141,239,.06);border-radius:5px" id="ml-pdu-${loja.id}">📅 ${diasUteisNoMes()} dias no mês / 4,33 semanas</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
@@ -4078,6 +4162,12 @@ function renderMetasLojas(){
 
 function calcPrevLoja(lid){
   const mes    = parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
+  // Auto preencher super meta se estiver vazio
+  const smesEl = document.getElementById("ml-smes-"+lid);
+  if(smesEl && smesEl.value==="" && mes>0){
+    const autoSM = parseFloat((mes*1.25).toFixed(2));
+    smesEl.placeholder = "Auto: "+autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2});
+  }
   const smes   = parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   const prev   = document.getElementById("ml-prev-"+lid);
@@ -4186,13 +4276,16 @@ function calcAcumVend(vid){
   return t;
 }
 function salvarMetaLoja(lid){
+  const metaCli=parseInt(document.getElementById("ml-cli-"+lid)?.value)||0;
   const mes=parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
   if(mes<=0){showToast("Informe a meta mensal!","err");return;}
   const smes  = parseBR(document.getElementById("ml-smes-"+lid)?.value)||parseFloat((mes*1.255).toFixed(2));
   const ticket= parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   if(!D.metasLoja[lid]) D.metasLoja[lid]={};
   const _mr = _mesMeta||mesAtual();
-  D.metasLoja[lid][_mr]=calcMetasAuto(mes,ticket,smes);
+  const autoMetas = calcMetasAuto(mes,ticket,smes);
+  autoMetas.metaCli = metaCli;
+  D.metasLoja[lid][_mr]=autoMetas;
   // Distribuir APENAS entre vendedoras realmente cadastradas nesta loja
   const vends=D.vendedoras.filter(v=>v.loja===lid);
   if(vends.length>0){
