@@ -3519,25 +3519,31 @@ function salvarLanc(){
 function renderConsolidadoLanc(lid){
   const el=document.getElementById("lanc-consolidado-grid");
   if(!el) return;
+  // Usa atendimentos reais (trans) para calcular TM corretamente
   const periodos=[
-    {label:"Hoje",       per:"dia",    fat:calcDia(lid),  n:calcNVendas(lid,"dia")},
-    {label:"Semana",     per:"semana", fat:calcSem(lid),  n:calcNVendas(lid,"semana")},
-    {label:"Este Mês",   per:"mes",    fat:calcMes(lid),  n:calcNVendas(lid,"mes")},
+    {label:"Hoje",     fat:calcDia(lid), nat:calcNAtend(lid,"dia"),   meta:getMetas(lid).dia},
+    {label:"Semana",   fat:calcSem(lid), nat:calcNAtend(lid,"semana"),meta:getMetas(lid).sem},
+    {label:"Este Mês", fat:calcMes(lid), nat:calcNAtend(lid,"mes"),   meta:getMetas(lid).mes},
   ];
-  const m=getMetas(lid);
-  const metas=[m.dia, m.sem, m.mes];
-  el.innerHTML=periodos.map((p,i)=>{
-    const tm=p.n>0?p.fat/p.n:0;
-    const pct=metas[i]>0?p.fat/metas[i]*100:0;
+  el.innerHTML=periodos.map(p=>{
+    const tm=p.nat>0?p.fat/p.nat:0;
+    const pct=p.meta>0?p.fat/p.meta*100:0;
     const cor=pct>=125?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":p.fat>0?"var(--verm)":"var(--muted)";
     return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px;text-align:center">
       <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">${p.label}</div>
       <div style="font-size:16px;font-weight:700;color:${cor};margin-bottom:4px">${fmt(p.fat)}</div>
       <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${pct.toFixed(0)}% da meta</div>
-      <div style="border-top:1px solid var(--borda);padding-top:8px;margin-top:4px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Ticket Médio</div>
-        <div style="font-size:14px;font-weight:700;color:var(--azul);margin-top:2px">${fmt(tm)}</div>
-        <div style="font-size:9px;color:var(--muted)">${p.n} venda${p.n!==1?"s":""}</div>
+      <div style="border-top:1px solid var(--borda);padding-top:8px;margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Ticket Médio</div>
+          <div style="font-size:14px;font-weight:700;color:var(--azul);margin-top:2px">${fmt(tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">${p.nat} atend.</div>
+        </div>
+        <div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Clientes</div>
+          <div style="font-size:14px;font-weight:700;color:var(--verde);margin-top:2px">${p.nat}</div>
+          <div style="font-size:9px;color:var(--muted)">atendidos</div>
+        </div>
       </div>
     </div>`;
   }).join("");
@@ -3580,22 +3586,24 @@ function renderHistoricoLanc(){
     return;
   }
   el.innerHTML=`<div style="overflow-x:auto"><table class="dtable" style="font-size:11px">
-    <thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Vendas</th><th style="width:60px"></th></tr></thead>
+    <thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style="width:60px"></th></tr></thead>
     <tbody>${dias.map(([d,fat])=>{
-      const nv=calcNVendas(lid,"_custom_"+d);
-      // conta manualmente para este dia específico
-      let nVDia=0;
-      D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{ if((D.vendasVend[v.id]?.[d]?.val||0)>0) nVDia++; });
-      const tm=nVDia>0?fat/nVDia:0;
+      // Soma atendimentos reais (trans) do dia — fallback: conta vendedoras com val>0
+      let natDia=0;
+      D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+        const reg=D.vendasVend[v.id]?.[d];
+        if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); }
+      });
+      const tm=natDia>0?fat/natDia:0;
       const dFmt=d.split("-").reverse().join("/");
       const isHoje=d===hoje();
-      return `<tr style="${isHoje?"background:rgba(201,168,76,.05)":""}">
-        <td style="font-weight:${isHoje?700:400};color:${isHoje?"var(--ouro)":"var(--texto)"}">${dFmt}${isHoje?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':""}</td>
-        <td style="font-weight:700;color:var(--verde)">${fmt(fat)}</td>
-        <td style="color:var(--azul)">${fmt(tm)}</td>
-        <td style="color:var(--muted)">${nVDia}</td>
-        <td><button onclick="deletarLanc('${lid}','${d}')" style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🗑️</button></td>
-      </tr>`;
+      return \`<tr style="\${isHoje?"background:rgba(201,168,76,.05)":""}">
+        <td style="font-weight:\${isHoje?700:400};color:\${isHoje?"var(--ouro)":"var(--texto)"}">\${dFmt}\${isHoje?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':""}</td>
+        <td style="font-weight:700;color:var(--verde)">\${fmt(fat)}</td>
+        <td style="color:var(--azul)">\${fmt(tm)}</td>
+        <td style="color:var(--muted)">\${natDia}</td>
+        <td><button onclick="deletarLanc('\${lid}','\${d}')" style="background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🗑️</button></td>
+      </tr>\`;
     }).join("")}</tbody>
   </table></div>`;
 }
