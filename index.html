@@ -2320,7 +2320,37 @@ if(!D.fluxo)      D.fluxo=[];
     console.warn("[Avatim] "+corrompidas+" meta(s) corrompida(s) removida(s) automaticamente.");
   }
 })();
-function save(){localStorage.setItem("avatim_v5",JSON.stringify(D));}
+function save(){
+  localStorage.setItem("avatim_v5",JSON.stringify(D));
+  // Sync com Firestore usando o Firebase já inicializado
+  if(window._fbOk && window._db && window._fs){
+    const lid = lojaId()||'admin';
+    try{
+      window._fs.setDoc(
+        window._fs.doc(window._db,"dados",lid),
+        {dados: JSON.stringify(D), ts: Date.now(), email: window._currentUser?.email||''},
+        {merge:true}
+      ).catch(e=>console.warn("[Avatim] Firestore save erro:",e.code));
+    }catch(e){}
+  }
+}
+
+async function loadFromFirestore(){
+  if(!window._fbOk || !window._db || !window._fs) return false;
+  try{
+    const lid = lojaId()||'admin';
+    const snap = await window._fs.getDoc(window._fs.doc(window._db,"dados",lid));
+    if(snap.exists()){
+      const remote = JSON.parse(snap.data().dados||"{}");
+      // Merge: remoto sobrescreve local
+      D = Object.assign({}, D, remote);
+      localStorage.setItem("avatim_v5", JSON.stringify(D));
+      console.log("[Avatim] Dados carregados do Firestore ✅");
+      return true;
+    }
+  }catch(e){ console.warn("[Avatim] Firestore load erro:",e.message); }
+  return false;
+}
 
 // ============================================================
 // UTILITARIOS
@@ -2629,6 +2659,10 @@ function showApp(){
     if(btnAdm) btnAdm.style.display="inline-flex";
   }
 
+  // Carregar dados do Firestore (sync entre máquinas)
+  loadFromFirestore().then(loaded=>{
+    if(loaded){ carregarVendsForm(); preencherSelectVends(); carregarDash(); }
+  });
   carregarVendsForm();
   preencherSelectVends();
   carregarDash();
@@ -3253,13 +3287,39 @@ function renderHistoricoLanc(){
       +"<td style='font-weight:700;color:var(--verde)'>"+fmt(fat)+"</td>"
       +"<td style='color:var(--azul)'>"+fmt(tm)+"</td>"
       +"<td style='color:var(--muted)'>"+natDia+"</td>"
-      +"<td><button onclick='deletarLanc(&quot;"+lid+"&quot;,&quot;"+d+"&quot;)' style='background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer'>🗑️</button></td>"
+      +"<td style='display:flex;gap:4px'>"
+        +"<button onclick='editarLanc(&quot;"+lid+"&quot;,&quot;"+d+"&quot;)' style='background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:var(--ouro);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer'>✏️</button>"
+        +"<button onclick='deletarLanc(&quot;"+lid+"&quot;,&quot;"+d+"&quot;)' style='background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--verm);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer'>🗑️</button>"
+      +"</td>"
       +"</tr>";
   });
   el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
     +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
     +"<tbody>"+rows+"</tbody></table></div>";
 }
+function editarLanc(lid, data){
+  // Preenche o formulário com os dados do dia para correção
+  const dEl = document.getElementById("l-data");
+  if(dEl) dEl.value = data;
+  // Preencher valores de cada vendedora
+  D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+    const reg = D.vendasVend[v.id]?.[data];
+    const valEl = document.getElementById("vlanc_"+v.id);
+    const transEl = document.getElementById("vtrans_"+v.id);
+    if(valEl && reg) valEl.value = reg.val||0;
+    if(transEl && reg) transEl.value = reg.trans||0;
+    // Atualizar percentual visual
+    const pct = document.getElementById("vlpct_"+v.id);
+    if(pct && reg && v.metaMes>0) pct.textContent = ((reg.val||0)/v.metaMes*100).toFixed(0)+"%";
+  });
+  // Obs
+  const obsEl = document.getElementById("l-obs");
+  if(obsEl && D.vendas[lid]?.[data]) obsEl.value = D.vendas[lid][data].obs||"";
+  // Scroll para o topo do formulário
+  document.getElementById("page-lanc")?.scrollIntoView({behavior:"smooth"});
+  showToast("✏️ Dados do dia "+data.split("-").reverse().join("/")+" carregados. Corrija e salve!", "ok");
+}
+
 function limparLanc(){
   const lid=lojaId();
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
