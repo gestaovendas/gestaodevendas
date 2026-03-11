@@ -6,6 +6,13 @@
 <title>Avatim | Gestao Comercial</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
+<script>
+// Promise que resolve quando o módulo Firebase terminar de inicializar
+window._fbReady = new Promise(resolve => { window._fbReadyResolve = resolve; });
+// Timeout de segurança: se Firebase não inicializar em 5s, continua sem ele
+setTimeout(() => { window._fbReadyResolve && window._fbReadyResolve(); }, 5000);
+</script>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
@@ -25,12 +32,11 @@ try{
   const auth = getAuth(app);
   const db   = getFirestore(app);
 
-  window._fbOk  = true;
-  window._fbDb  = db;
-  window._auth  = auth;
+  window._fbOk   = true;
+  window._fbDb   = db;
+  window._auth   = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
-  // ── Expor save/load diretamente no módulo onde db está disponível ──
   window.fsGravar = async function(dadosJSON){
     try{
       await setDoc(doc(db,"avatim","principal"), {
@@ -39,6 +45,9 @@ try{
         por:   window._currentUser?.email||""
       });
       console.log("[Avatim] ✅ Salvo no Firestore");
+      // Atualizar badge visual
+      const badge = document.getElementById("sync-badge");
+      if(badge){ badge.textContent = "☁️ Salvo " + new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); badge.style.display="block"; }
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
     }
@@ -51,13 +60,17 @@ try{
         console.log("[Avatim] ✅ Dados carregados do Firestore");
         return snap.data().dados;
       }
-      console.log("[Avatim] Nenhum dado no Firestore ainda");
+      console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
       return null;
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao carregar:", e.code, e.message);
       return null;
     }
   };
+
+  // Sinaliza que o Firebase está pronto — resolve qualquer chamada pendente
+  window._fbReadyResolve && window._fbReadyResolve();
+  console.log("[Avatim] Firebase módulo pronto.");
 
   // ── Auth ──
   // IMPORTANTE: onAuthStateChanged apenas registra o usuário Firebase.
@@ -2377,19 +2390,15 @@ function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
   if(_savePending) return;
   _savePending = true;
-  setTimeout(()=>{
-    _savePending = false;
-    if(window.fsGravar && window._fbOk){
-      window.fsGravar(JSON.stringify(D));
-    } else {
-      setTimeout(()=>{
-        if(window.fsGravar && window._fbOk){
-          window.fsGravar(JSON.stringify(D));
-          console.log("[Avatim] Save atrasado executado.");
-        }
-      }, 3000);
-    }
-  }, 800);
+  // Aguarda Firebase estar pronto antes de salvar na nuvem
+  (window._fbReady || Promise.resolve()).then(()=>{
+    setTimeout(()=>{
+      _savePending = false;
+      if(window.fsGravar && window._fbOk){
+        window.fsGravar(JSON.stringify(D));
+      }
+    }, 500);
+  });
 }
 
 async function forceSyncToFirestore(){
@@ -2399,15 +2408,25 @@ async function forceSyncToFirestore(){
 }
 
 async function loadFromFirestore(){
-  if(!window.fsCarregar || !window._fbOk) return false;
   try{
+    // Espera o módulo Firebase inicializar (máx 5s)
+    console.log("[Avatim] Aguardando Firebase...");
+    await window._fbReady;
+
+    if(!window.fsCarregar || !window._fbOk){
+      console.warn("[Avatim] Firebase não disponível — usando localStorage");
+      return false;
+    }
+
     console.log("[Avatim] Buscando dados no Firestore...");
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       D = JSON.parse(dadosJSON);
       localStorage.setItem("avatim_v5", JSON.stringify(D));
+      console.log("[Avatim] ✅ Dados do Firestore carregados com sucesso!");
       return true;
     }
+    console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
     return false;
   }catch(e){
     console.warn("[Avatim] loadFromFirestore erro:", e.message);
