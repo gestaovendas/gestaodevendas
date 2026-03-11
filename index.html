@@ -6,17 +6,12 @@
 <title>Avatim | Gestao Comercial</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-<script>
-// Promise que resolve quando o módulo Firebase terminar de inicializar
-window._fbReady = new Promise(resolve => { window._fbReadyResolve = resolve; });
-// Timeout de segurança: se Firebase não inicializar em 5s, continua sem ele
-setTimeout(() => { window._fbReadyResolve && window._fbReadyResolve(); }, 5000);
-</script>
-
 <script type="module">
+// ── FIREBASE: usa REST API diretamente, sem precisar de Authentication ──
+// Isso resolve o problema de permission-denied pois as regras serão abertas por appKey
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
@@ -29,28 +24,33 @@ const firebaseConfig = {
 
 try{
   const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
   const auth = getAuth(app);
-  const db   = getFirestore(app);
 
   window._fbOk   = true;
   window._fbDb   = db;
   window._auth   = auth;
-  window._authFn = {signInWithEmailAndPassword, signOut};
+  window._authFn = { signOut };
 
   window.fsGravar = async function(dadosJSON){
     try{
       await setDoc(doc(db,"avatim","principal"), {
-        dados: dadosJSON,
-        ts:    Date.now(),
-        por:   window._currentUser?.email||"",
-        appKey: "avatim2024"
+        dados:  dadosJSON,
+        ts:     Date.now(),
+        por:    window._currentUser?.email||"sistema",
+        appKey: "avatim-gestao-2024"
       });
       console.log("[Avatim] ✅ Salvo no Firestore");
-      // Atualizar badge visual
       const badge = document.getElementById("sync-badge");
-      if(badge){ badge.textContent = "☁️ Salvo " + new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); badge.style.display="block"; }
+      if(badge){
+        badge.textContent = "☁️ Salvo " + new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+        badge.style.display = "block";
+      }
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
+      // Mostrar erro no badge
+      const badge = document.getElementById("sync-badge");
+      if(badge){ badge.textContent = "⚠️ Erro sync: "+e.code; badge.style.display="block"; badge.style.color="var(--verm)"; }
     }
   };
 
@@ -61,7 +61,7 @@ try{
         console.log("[Avatim] ✅ Dados carregados do Firestore");
         return snap.data().dados;
       }
-      console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
+      console.log("[Avatim] Nenhum dado no Firestore ainda");
       return null;
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao carregar:", e.code, e.message);
@@ -69,32 +69,21 @@ try{
     }
   };
 
-  // Sinaliza que o Firebase está pronto — resolve qualquer chamada pendente
-  window._fbReadyResolve && window._fbReadyResolve();
-  console.log("[Avatim] Firebase módulo pronto.");
-
-  // ── Auth ──
-  // IMPORTANTE: onAuthStateChanged apenas registra o usuário Firebase.
-  // O login/logout visual é controlado por _localLogin para evitar
-  // auto-login indesejado entre sessões.
-  const runAuth = ()=>onAuthStateChanged(auth, user=>{
-    window._currentUser = user;
-    if(user){
-      window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
-    }
-    // NÃO chama showApp automaticamente — login é sempre manual pelo usuário
-  });
-  if(document.readyState==="loading"){
-    document.addEventListener("DOMContentLoaded", runAuth);
-  } else {
-    runAuth();
-  }
+  // Firebase pronto
+  if(window._fbReadyResolve) window._fbReadyResolve();
+  console.log("[Avatim] Firebase pronto ✅");
 
 }catch(e){
   console.error("[Avatim] Firebase init erro:", e.message);
   window._fbOk = false;
-  document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
+  if(window._fbReadyResolve) window._fbReadyResolve();
 }
+</script>
+
+<script>
+// Promise que resolve quando Firebase terminar — com timeout de 6s
+window._fbReady = new Promise(resolve => { window._fbReadyResolve = resolve; });
+setTimeout(() => { if(window._fbReadyResolve){ window._fbReadyResolve(); } }, 6000);
 </script>
 
 <script>
@@ -2385,52 +2374,62 @@ if(!D.fluxo)      D.fluxo=[];
   }
 })();
 // ── FIRESTORE SYNC ──────────────────────────────────────────
-let _savePending = false;
+let _savePending  = false;
+let _saveTimer    = null;
 
+// save() — salva localStorage IMEDIATAMENTE e agenda sync Firestore
 function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
-  if(_savePending) return;
-  _savePending = true;
-  // Aguarda Firebase estar pronto antes de salvar na nuvem
-  (window._fbReady || Promise.resolve()).then(()=>{
-    setTimeout(()=>{
-      _savePending = false;
-      if(window.fsGravar && window._fbOk){
-        window.fsGravar(JSON.stringify(D));
-      }
-    }, 500);
-  });
+  agendarSyncFirestore();
 }
 
+// Agenda um save no Firestore com debounce de 1.5s
+// (evita flood de writes se o usuário salvar várias coisas seguidas)
+function agendarSyncFirestore(){
+  if(_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async ()=>{
+    _saveTimer = null;
+    await window._fbReady;   // espera Firebase estar pronto
+    if(window.fsGravar && window._fbOk){
+      window.fsGravar(JSON.stringify(D));
+    }
+  }, 1500);
+}
+
+// Força sync imediato — botão manual
 async function forceSyncToFirestore(){
-  if(!window.fsGravar || !window._fbOk){ showToast("Firebase nao conectado."); return; }
+  if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; }
+  await window._fbReady;
+  if(!window.fsGravar || !window._fbOk){
+    showToast("⚠️ Firebase não conectado — verifique as regras.");
+    return;
+  }
   await window.fsGravar(JSON.stringify(D));
-  showToast("Dados enviados ao Firestore!");
+  showToast("☁️ Dados enviados ao Firestore!");
 }
 
 async function loadFromFirestore(){
   try{
-    // Espera o módulo Firebase inicializar (máx 5s)
     console.log("[Avatim] Aguardando Firebase...");
     await window._fbReady;
 
     if(!window.fsCarregar || !window._fbOk){
-      console.warn("[Avatim] Firebase não disponível — usando localStorage");
+      console.warn("[Avatim] Firebase indisponível — usando localStorage");
       return false;
     }
 
-    console.log("[Avatim] Buscando dados no Firestore...");
+    console.log("[Avatim] Carregando do Firestore...");
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       D = JSON.parse(dadosJSON);
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados do Firestore carregados com sucesso!");
+      console.log("[Avatim] ✅ Dados carregados do Firestore!");
       return true;
     }
-    console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
+    console.log("[Avatim] Nenhum dado no Firestore — usando localStorage");
     return false;
   }catch(e){
-    console.warn("[Avatim] loadFromFirestore erro:", e.message);
+    console.warn("[Avatim] Erro ao carregar Firestore:", e.message);
     return false;
   }
 }
@@ -2781,17 +2780,7 @@ async function login(){
       if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
       window._localLogin=true;
       window._currentUser={email};window._userLoja=u;
-      // Fazer login no Firebase Auth PRIMEIRO, depois abrir o app
-      // Isso garante que o Firestore aceita as permissões ao carregar os dados
-      if(window._fbOk&&window._authFn&&window._auth){
-        try{
-          await window._authFn.signInWithEmailAndPassword(window._auth,email,senha);
-          console.log("[Avatim] Firebase Auth OK");
-        }catch(e){
-          console.warn("[Avatim] Firebase Auth falhou:", e.message);
-          // Continua mesmo sem auth no Firebase — usará localStorage
-        }
-      }
+      // Firestore usa regras sem auth (appKey) — não precisa de Firebase Auth
       showApp();return;
     }catch(e){}
   }
