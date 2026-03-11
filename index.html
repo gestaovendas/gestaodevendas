@@ -9,11 +9,8 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-// ============================================================
-// SUBSTITUA COM SUAS CREDENCIAIS DO FIREBASE
-// console.firebase.google.com -> Configuracoes -> Seus apps -> Web
-// ============================================================
+import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
   authDomain:"gestao-f53b3.firebaseapp.com",
@@ -22,16 +19,66 @@ const firebaseConfig = {
   messagingSenderId:"994718145517",
   appId:"1:994718145517:web:a98c6aab126150c976a5e4"
 };
-const ok = firebaseConfig.apiKey !== "SUA_API_KEY";
-if(ok){try{
-  const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
-  window._auth=auth; window._db=db; window._fbOk=true;
-  window._fs={doc,setDoc,getDoc,collection,getDocs,deleteDoc};
-  window._authFn={signInWithEmailAndPassword,signOut};
-  const _runAuth=()=>onAuthStateChanged(auth,user=>{if(window._localLogin)return;window._currentUser=user;if(user){window._userLoja=(window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};showApp();}else showLogin();});
-  if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",_runAuth);}else{_runAuth();}
-}catch(e){window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}}
-else{window._fbOk=false;document.addEventListener("DOMContentLoaded",showLogin);}
+
+try{
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  window._fbOk  = true;
+  window._authFn = {signInWithEmailAndPassword, signOut};
+
+  // ── Expor save/load diretamente no módulo onde db está disponível ──
+  window.fsGravar = async function(dadosJSON){
+    try{
+      await setDoc(doc(db,"avatim","principal"), {
+        dados: dadosJSON,
+        ts:    Date.now(),
+        por:   window._currentUser?.email||""
+      });
+      console.log("[Avatim] ✅ Salvo no Firestore");
+    }catch(e){
+      console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
+    }
+  };
+
+  window.fsCarregar = async function(){
+    try{
+      const snap = await getDoc(doc(db,"avatim","principal"));
+      if(snap.exists()){
+        console.log("[Avatim] ✅ Dados carregados do Firestore");
+        return snap.data().dados;
+      }
+      console.log("[Avatim] Nenhum dado no Firestore ainda");
+      return null;
+    }catch(e){
+      console.warn("[Avatim] ❌ Erro ao carregar:", e.code, e.message);
+      return null;
+    }
+  };
+
+  // ── Auth ──
+  const runAuth = ()=>onAuthStateChanged(auth, user=>{
+    if(window._localLogin) return;
+    window._currentUser = user;
+    if(user){
+      window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+      if(typeof showApp==="function") showApp();
+    } else {
+      if(typeof showLogin==="function") showLogin();
+    }
+  });
+  if(document.readyState==="loading"){
+    document.addEventListener("DOMContentLoaded", runAuth);
+  } else {
+    runAuth();
+  }
+
+}catch(e){
+  console.error("[Avatim] Firebase init erro:", e.message);
+  window._fbOk = false;
+  document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
+}
 </script>
 
 <script>
@@ -2321,56 +2368,34 @@ if(!D.fluxo)      D.fluxo=[];
   }
 })();
 // ── FIRESTORE SYNC ──────────────────────────────────────────
-// Documento único "avatim/principal" guarda todos os dados da rede
-const FS_COL = "avatim";
-const FS_DOC = "principal";
 let _savePending = false;
 
 function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
-  if(window._fbOk && window._db && window._fs){
-    if(_savePending) return; // evita flood de writes
+  // Usar fsGravar exposto pelo módulo Firebase
+  if(window.fsGravar && window._fbOk){
+    if(_savePending) return;
     _savePending = true;
     setTimeout(()=>{
       _savePending = false;
-      const payload = {dados: JSON.stringify(D), ts: Date.now(), por: window._currentUser?.email||''};
-      window._fs.setDoc(
-        window._fs.doc(window._db, FS_COL, FS_DOC),
-        payload,
-        {merge:false}
-      ).then(()=>{
-        console.log("[Avatim] ✅ Salvo no Firestore");
-      }).catch(e=>{
-        console.warn("[Avatim] ❌ Firestore save erro:", e.code, e.message);
-      });
-    }, 800); // debounce 800ms
+      window.fsGravar(JSON.stringify(D));
+    }, 800);
   }
 }
 
 async function loadFromFirestore(){
-  if(!window._fbOk || !window._db || !window._fs){
-    console.warn("[Avatim] Firebase não disponível para carregar dados");
-    return false;
-  }
+  if(!window.fsCarregar || !window._fbOk) return false;
   try{
     console.log("[Avatim] Buscando dados no Firestore...");
-    const snap = await window._fs.getDoc(window._fs.doc(window._db, FS_COL, FS_DOC));
-    if(snap.exists()){
-      const remote = JSON.parse(snap.data().dados||"{}");
-      D = remote;
+    const dadosJSON = await window.fsCarregar();
+    if(dadosJSON){
+      D = JSON.parse(dadosJSON);
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados do Firestore! ts="+snap.data().ts);
       return true;
-    } else {
-      console.log("[Avatim] Nenhum dado no Firestore ainda — usando localStorage");
-      return false;
     }
+    return false;
   }catch(e){
-    if(e.code==='permission-denied'){
-      console.warn("[Avatim] ⚠️ Firestore: permissão negada. Verifique as regras no Firebase Console.");
-    } else {
-      console.warn("[Avatim] ❌ Firestore load erro:", e.message);
-    }
+    console.warn("[Avatim] loadFromFirestore erro:", e.message);
     return false;
   }
 }
