@@ -26,6 +26,7 @@ try{
   const db   = getFirestore(app);
 
   window._fbOk  = true;
+  window._fbDb  = db;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
   // ── Expor save/load diretamente no módulo onde db está disponível ──
@@ -5445,7 +5446,7 @@ const FB_CONFIG = {
   messagingSenderId: '',
   appId:             ''
 };
-const FB_OK = ()=>FB_CONFIG.apiKey&&FB_CONFIG.projectId;
+const FB_OK = ()=>window._fbOk || (FB_CONFIG.apiKey&&FB_CONFIG.projectId);
 
 // Inicializar Firebase (carrega SDK dinamicamente)
 async function fbInit(){
@@ -5467,7 +5468,14 @@ async function fbInit(){
 }
 
 // Salvar documento no Firestore
+// Usa o módulo Firebase (window._fbDb) se disponível, senão o compat SDK
 async function fbSet(collection, docId, data){
+  // Preferir instância do módulo ESM (já inicializada com a config real)
+  if(window._fbOk && window._fbDb){
+    const {doc, setDoc} = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+    await setDoc(doc(window._fbDb, collection, docId), data, {merge:true});
+    return;
+  }
   const db = await fbInit();
   if(!db) return;
   await db.collection(collection).doc(docId).set(data, {merge:true});
@@ -5475,6 +5483,15 @@ async function fbSet(collection, docId, data){
 
 // Buscar documentos do Firestore
 async function fbGet(collection, field, value){
+  // Preferir instância do módulo ESM (já inicializada com a config real)
+  if(window._fbOk && window._fbDb){
+    const {collection: col, query, where, getDocs, getFirestore} = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+    const db = window._fbDb;
+    const colRef = col(db, collection);
+    const q = value ? query(colRef, where(field,'==',value)) : colRef;
+    const snap = await getDocs(q);
+    return snap.docs.map(d=>({id:d.id,...d.data()}));
+  }
   const db = await fbInit();
   if(!db) return [];
   const snap = value
