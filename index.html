@@ -4335,11 +4335,11 @@ function renderTabelaVend(){
 const TABELA_COM = {
   VRLL: { nome:"VR Líder Loja (VRLL)", tipo:"loja", faixas:[
     {max:null,
-     abaixo90: {pct:0.50,bonus_prod:0,folgas:0},
-     f90a99:   {pct:0.90,bonus_prod:0,folgas:0},
-     f100a109: {pct:1.50,bonus_prod:0,folgas:0},
-     f110a124: {pct:1.90,bonus_prod:0,folgas:0},
-     f125plus: {pct:2.50,bonus_prod:0,folgas:0}}
+     abaixo90: {pct:0.50,bonus_prod:0,  folgas:0},
+     f90a99:   {pct:0.90,bonus_prod:0,  folgas:0},
+     f100a109: {pct:1.50,bonus_prod:50, folgas:0},
+     f110a124: {pct:1.90,bonus_prod:100,folgas:1},
+     f125plus: {pct:2.50,bonus_prod:0,  folgas:0}}
   ]},
   VR:  { nome:"VR / Lider",        faixas:[
     {max:null, sem_meta:{pct:3.50,bonus_prod:0,folgas:0},
@@ -4387,7 +4387,7 @@ function calcComissaoVRLL(v, fatLoja, metaLoja){
   else if(pctLoja>=90) { nivel='f90a99';    faixaDados=faixa.f90a99;    }
   else                 { nivel='abaixo90';  faixaDados=faixa.abaixo90;  }
   const comissao = fatLoja * (faixaDados.pct/100);
-  return {pctLoja, nivel, taxa:faixaDados.pct, bonus_prod:0, folgas:0, comissao, fatLoja};
+  return {pctLoja, nivel, taxa:faixaDados.pct, bonus_prod:faixaDados.bonus_prod||0, folgas:faixaDados.folgas||0, comissao, fatLoja};
 }
 
 function calcComissaoVend(v, vendas, lojaAtingiu){
@@ -4487,6 +4487,8 @@ function calcularComissao(){
         +'<div class="kcard" style="padding:12px;border-color:'+cor2+'"><div class="kl">% Meta Loja</div><div class="kv" style="font-size:18px;color:'+cor2+'">'+r2.pctLoja.toFixed(1)+'%</div></div>'
         +'<div class="kcard verde" style="padding:12px"><div class="kl">Taxa aplicada</div><div class="kv" style="font-size:18px">'+r2.taxa+'%</div></div>'
         +'<div class="kcard azul" style="padding:12px"><div class="kl">Comissão total</div><div class="kv" style="font-size:18px">'+fmt(r2.comissao)+'</div></div>'
+        +(r2.bonus_prod>0?'<div class="kcard laranja" style="padding:12px"><div class="kl">Bônus Produto</div><div class="kv" style="font-size:18px">R$ '+r2.bonus_prod+'</div></div>':'')
+        +(r2.folgas>0?'<div class="kcard azul" style="padding:12px"><div class="kl">Folgas</div><div class="kv" style="font-size:18px">'+r2.folgas+' dia(s)</div></div>':'')
       +'</div>'
       +'<div style="margin-top:14px">'
         +'<div style="font-size:11px;font-weight:600;color:var(--ouro);margin-bottom:8px">Tabela VRLL — Comissão pelo Faturamento da Loja</div>'
@@ -4500,6 +4502,8 @@ function calcularComissao(){
           }).join('')+'</tbody>'
         +'</table></div>'
       +'</div>';
+    +(r2.folgas>0?"<div style='margin-top:8px;font-size:11px;color:var(--azul)'>🗓️ <strong>"+r2.folgas+" dia(s) de folga</strong> — a combinar com gerência no mês subsequente.</div>":"")
+    +(r2.bonus_prod>0?"<div style='background:rgba(255,140,66,.08);border:1px solid rgba(255,140,66,.2);border-radius:8px;padding:10px;margin-top:10px;font-size:11px'>🎁 <strong>Bônus Produto: R$ "+r2.bonus_prod+"</strong> em produtos a retirar até dia 5 do mês seguinte.</div>":"");
     return;
   }
   // ── Cargos normais ─────────────────────────────────
