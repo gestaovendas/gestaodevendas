@@ -2870,6 +2870,7 @@ function carregarDash(){
   }
 
   // Projecao card
+  const m = isAdmin() ? {mes:metaMesRef, superMes:superMesRef, ticket:0} : (getMetas(lid)||{});
   if(proj){
     const pctProj=m.mes>0?proj.projecao/m.mes*100:0, cpSM=m.superMes>0?proj.projecao/m.superMes*100:0;
     document.getElementById("projecao-dash").innerHTML=`
