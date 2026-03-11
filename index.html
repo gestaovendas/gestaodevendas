@@ -1467,15 +1467,19 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <!-- RELATORIO (ADMIN) -->
 <div class="page" id="page-relatorio">
   <div class="ph">
-    <div><h1 class="pt">Relatorio <span>Semanal</span></h1><div class="ps">Ranking completo lojas e vendedoras</div></div>
-    <div style="display:flex;gap:8px">
+    <div><h1 class="pt">Relatorio <span id="rel-titulo-per">Semanal</span></h1><div class="ps">Ranking completo lojas e vendedoras</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="rel-periodo" onchange="document.getElementById('rel-titulo-per').textContent=this.value==='semana'?'Semanal':'Mensal'" style="padding:6px 10px;border-radius:8px;background:var(--card2);color:var(--texto);border:1px solid var(--borda);font-size:12px">
+        <option value="semana">📅 Semanal</option>
+        <option value="mes">📆 Mensal</option>
+      </select>
       <button class="btn-p" onclick="gerarRel()">Gerar</button>
       <button class="btn-s" onclick="exportarCSV()">CSV</button>
       <button class="btn-s" onclick="copiarWhats()">WhatsApp</button>
       <button class="btn-s" onclick="window.print()">Imprimir</button>
     </div>
   </div>
-  <div id="rel-content"><div class="sc" style="text-align:center;padding:48px"><div style="font-size:36px;margin-bottom:14px">&#8803;</div><div style="font-size:14px;color:var(--muted)">Clique em "Gerar" para ver o ranking</div></div></div>
+  <div id="rel-content"><div class="sc" style="text-align:center;padding:48px"><div style="font-size:36px;margin-bottom:14px">&#8803;</div><div style="font-size:14px;color:var(--muted)">Selecione o período e clique em "Gerar"</div></div></div>
 </div>
 
 <!-- ARQUIVOS (ADMIN) -->
@@ -5211,36 +5215,47 @@ function renderTabelaMetaProd(){
 // ============================================================
 function gerarRel(){
   const hj=hoje();
+  const per = document.getElementById('rel-periodo')?.value || 'semana';
+  const isMes = per === 'mes';
+  const mesRef = hj.slice(0,7);
+
   const ld=LOJAS.map(l=>{
     const m=getMetas(l.id);
-    const sem=calcSem(l.id);
-    const pct=m.sem>0?sem/m.sem*100:0;
-    const tm=calcTMLoja(l.id,"semana");
-    const nV=calcNVendas(l.id,"semana");
+    const fat = isMes ? calcMes(l.id) : calcSem(l.id);
+    const metaRef = isMes ? (m.mes||0) : (m.sem||0);
+    const smRef   = isMes ? (m.superMes||0) : (m.superSem||0);
+    const pct=metaRef>0?fat/metaRef*100:0;
+    const tm=calcTMLoja(l.id, isMes?"mes":"semana");
+    const nV=calcNVendas(l.id, isMes?"mes":"semana");
     const metaTM=m.ticket||150;
     const pctTM=metaTM>0?tm/metaTM*100:0;
-    return{...l,sem,pct,tm,nV,metaTM,pctTM,meta:m.sem,sm:m.superSem};
-  }).sort((a,b)=>b.sem-a.sem);
+    return{...l,fat,pct,tm,nV,metaTM,pctTM,meta:metaRef,sm:smRef};
+  }).sort((a,b)=>b.fat-a.fat);
 
   const vends=D.vendedoras.map(v=>{
-    const val=calcVendPer(v.id,"semana");
+    const val = isMes ? calcVendPer(v.id,"mes") : calcVendPer(v.id,"semana");
     const metaMes=Number(v.metaMes)||0;
-    const metaSem=parseFloat((metaMes/4.33).toFixed(2));
-    const pct=metaSem>0?val/metaSem*100:0;
-    // TM individual: total de dias com lançamento na semana
-    const hoje_d=new Date();hoje_d.setHours(0,0,0,0);
-    const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
-    const seg=new Date(hoje_d);seg.setDate(hoje_d.getDate()-diff);
-    let fatV=0,nVV=0;
-    for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d){const dt=d.toISOString().slice(0,10);const vv=D.vendasVend[v.id]?.[dt]?.val||0;if(vv>0){fatV+=vv;nVV++;}}}
-    const tmV=nVV>0?fatV/nVV:0;
+    const metaVend = isMes ? metaMes : parseFloat((metaMes/4.33).toFixed(2));
+    const pct=metaVend>0?val/metaVend*100:0;
+    // TM individual
+    const vd=D.vendasVend[v.id]||{};
+    let fatV=0,nVV=0,transV=0;
+    if(isMes){
+      Object.entries(vd).forEach(([dt,r])=>{if(dt.startsWith(mesRef)){fatV+=Number(r.val||0);transV+=Number(r.trans||0);if(Number(r.val||0)>0)nVV++;}});
+    } else {
+      const hoje_d=new Date();hoje_d.setHours(0,0,0,0);
+      const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
+      const seg=new Date(hoje_d);seg.setDate(hoje_d.getDate()-diff);
+      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d){const dt=d.toISOString().slice(0,10);const r=vd[dt];if(r&&Number(r.val||0)>0){fatV+=Number(r.val||0);transV+=Number(r.trans||0);nVV++;}}}
+    }
+    const tmV=transV>0?fatV/transV:nVV>0?fatV/nVV:0;
     const metaTMV=Number(v.ticketAlvo||getMetas(v.loja).ticket||150);
     const pctTMV=metaTMV>0?tmV/metaTMV*100:0;
-    return{...v,val,metaSem,pct,tmV,nVV,metaTMV,pctTMV};
+    return{...v,val,metaVend,pct,tmV,nVV,metaTMV,pctTMV};
   }).sort((a,b)=>b.val-a.val);
 
-  const tot=ld.reduce((s,l)=>s+l.sem,0);
-  const fatTot=tot;
+  const tot=ld.reduce((s,l)=>s+l.fat,0);
+  const fatTot=tot; const perLabel=isMes?"Mensal":"Semanal";
   const nTot=LOJAS.reduce((s,l)=>s+calcNVendas(l.id,"semana"),0);
   const tmRede=nTot>0?fatTot/nTot:0;
   const metaTMRede=LOJAS.reduce((s,l)=>s+(getMetas(l.id).ticket||150),0)/LOJAS.length;
@@ -5248,7 +5263,7 @@ function gerarRel(){
   const corTMRede=pctTMRede>=100?"var(--verde)":pctTMRede>=80?"var(--ouro)":"var(--verm)";
 
   const med=["🥇","🥈","🥉"];
-  const maxSem=ld[0]?.sem||1;
+  const maxSem=ld[0]?.fat||1; // max para escala do gráfico
 
   // helper: barra de progresso dupla (faturamento + TM)
   const barDupla=(pctFat,pctTM,corFat,corTM)=>`
@@ -5271,8 +5286,8 @@ function gerarRel(){
 
     <!-- HEADER -->
     <div style="text-align:center;padding:14px 0 20px;border-bottom:1px solid var(--borda);margin-bottom:20px">
-      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING SEMANAL AVATIM</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:4px">Semana atual · ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
+      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING "+perLabel.toUpperCase()+" AVATIM</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:4px">isMes?"Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}):"Semana atual" · ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
     </div>
 
     <!-- KPIs REDE -->
@@ -5302,36 +5317,48 @@ function gerarRel(){
       </div>
     </div>
 
-    <!-- GRÁFICO BARRAS -->
+    <!-- GRÁFICO BARRAS LADO A LADO (Realizado vs Meta) -->
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px;margin-bottom:20px">
-      <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:16px">📊 Faturamento vs Meta por Loja</div>
-      <div style="position:relative;height:160px;display:flex;align-items:flex-end;gap:6px;padding-bottom:32px">
-        ${ld.map((l,i)=>{
-          const h=maxSem>0?Math.max(4,l.sem/maxSem*120):4;
-          const hMeta=maxSem>0&&l.meta>0?Math.min(120,l.meta/maxSem*120):0;
-          const c=l.pct>=125?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
-          const nome=l.nome.replace("Vila ","V.").replace("Jardim ","J.").replace("Alto de ","").replace(" Plaza","").replace("Shop. ","S.");
-          const corTML=l.pctTM>=100?"#2ECC87":l.pctTM>=80?"#C9A84C":"#ef4444";
-          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;position:relative;height:160px;justify-content:flex-end">
-            ${hMeta>0?`<div style="position:absolute;bottom:${hMeta+32}px;left:0;right:0;border-top:1px dashed rgba(255,255,255,.25);z-index:1"></div>`:""}
-            <div style="width:100%;background:${c};border-radius:4px 4px 0 0;height:${h}px;cursor:default;position:relative;z-index:2">
-              <div style="position:absolute;top:-17px;left:50%;transform:translateX(-50%);font-size:8px;color:${c};font-weight:700;white-space:nowrap">${l.pct.toFixed(0)}%</div>
-            </div>
-            <div style="width:100%;height:3px;background:${corTML};margin-top:2px;border-radius:2px" title="TM: ${fmt(l.tm)} / Meta: ${fmt(l.metaTM)}"></div>
-            <div style="font-size:7px;color:var(--muted);text-align:center;margin-top:3px;line-height:1.3">${nome}</div>
-            <div style="font-size:7px;color:${corTML};text-align:center;font-weight:600">${fmt(l.tm)}</div>
-          </div>`;
-        }).join("")}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--ouro)">📊 Realizado vs Meta — por Loja</div>
+        <div style="display:flex;gap:14px;font-size:10px;color:var(--muted)">
+          <span><span style="display:inline-block;width:12px;height:12px;background:#2B3F80;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Realizado</span>
+          <span><span style="display:inline-block;width:12px;height:12px;background:#C9601A;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Meta</span>
+        </div>
       </div>
-      <div style="display:flex;gap:12px;font-size:9px;color:var(--muted);flex-wrap:wrap;margin-top:6px;border-top:1px solid var(--borda);padding-top:8px">
-        <span><span style="display:inline-block;width:8px;height:8px;background:#8B5CF6;border-radius:2px;margin-right:3px"></span>Super Meta</span>
-        <span><span style="display:inline-block;width:8px;height:8px;background:#2ECC87;border-radius:2px;margin-right:3px"></span>Meta ✓</span>
-        <span><span style="display:inline-block;width:8px;height:8px;background:#C9A84C;border-radius:2px;margin-right:3px"></span>70%+</span>
-        <span><span style="display:inline-block;width:8px;height:8px;background:#ef4444;border-radius:2px;margin-right:3px"></span>Abaixo 70%</span>
-        <span style="margin-left:8px">━━ linha pontilhada = meta fat.</span>
-        <span>▬ barra fina = TM realizado</span>
-      </div>
-    </div>
+      ${(()=>{
+        const maxV=Math.max.apply(null,ld.map(function(l){return Math.max(l.fat,l.meta||0);}));
+        const BAR_H=160;
+        const nomeAbrev={"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
+        let html='<div style="display:flex;align-items:flex-end;gap:2px;height:'+(BAR_H+70)+'px;overflow-x:auto;padding-bottom:0">';
+        ld.forEach(function(l){
+          const hR=maxV>0?Math.max(6,Math.round(l.fat/maxV*BAR_H)):6;
+          const hM=maxV>0&&l.meta>0?Math.max(6,Math.round(l.meta/maxV*BAR_H)):6;
+          const nome=nomeAbrev[l.nome]||l.nome;
+          const corR=l.pct>=125?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
+          const corPct=l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
+          const fatFmt=fmt(l.fat); const metaFmt=fmt(l.meta||0);
+          html+='<div style="flex:1;min-width:72px;display:flex;flex-direction:column;align-items:center">';
+          html+='<div style="font-size:11px;font-weight:900;color:'+corPct+';margin-bottom:6px">'+l.pct.toFixed(0)+'%</div>';
+          html+='<div style="display:flex;align-items:flex-end;gap:3px;width:90%">';
+          // barra realizado
+          html+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">';
+          html+='<div style="font-size:7px;color:#a0b8d8;font-weight:700;margin-bottom:2px;white-space:nowrap">'+fatFmt+'</div>';
+          html+='<div style="width:100%;height:'+hR+'px;background:'+corR+';border-radius:4px 4px 0 0"></div>';
+          html+='</div>';
+          // barra meta
+          html+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">';
+          html+='<div style="font-size:7px;color:#e09060;font-weight:700;margin-bottom:2px;white-space:nowrap">'+metaFmt+'</div>';
+          html+='<div style="width:100%;height:'+hM+'px;background:#C9601A;border-radius:4px 4px 0 0;opacity:.82"></div>';
+          html+='</div>';
+          html+='</div>';
+          html+='<div style="font-size:7px;color:var(--muted);text-align:center;margin-top:5px;line-height:1.3">'+nome+'</div>';
+          html+='</div>';
+        });
+        html+='</div>';
+        return html;
+      })()}
+    </div></div>
 
     <!-- RANKING LOJAS com TM -->
     <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:12px">🏪 Ranking de Lojas</div>
@@ -5339,31 +5366,45 @@ function gerarRel(){
       const c=l.pct>=125?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
       const cTM=l.pctTM>=100?"var(--verde)":l.pctTM>=80?"var(--ouro)":"var(--verm)";
       const badge=l.pct>=125?'<span style="font-size:9px;background:rgba(139,92,246,.2);color:var(--roxo);padding:2px 6px;border-radius:8px;margin-left:6px">SUPER!</span>':l.pct>=100?'<span style="font-size:9px;background:rgba(46,204,135,.2);color:var(--verde);padding:2px 6px;border-radius:8px;margin-left:6px">META ✓</span>':"";
-      return `<div style="background:var(--card2);border:1px solid ${l.pct>=100?"rgba(46,204,135,.15)":l.pct>=125?"rgba(139,92,246,.15)":"var(--borda)"};border-radius:12px;padding:14px;margin-bottom:10px">
+      return `<div style="background:var(--card2);border:1px solid ${l.pct>=100?"rgba(46,204,135,.15)":l.pct>=125?"rgba(139,92,246,.15)":"var(--borda)"};border-radius:12px;padding:12px 14px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:12px">
           <div style="font-size:22px;width:32px;text-align:center">${med[i]||i+1}</div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:700">${l.nome}${badge}</div>
-            ${barDupla(l.pct,l.pctTM,c,cTM)}
-          </div>
-          <div style="text-align:right;min-width:80px">
-            <div style="font-family:Playfair Display,serif;font-size:17px;font-weight:700;color:${c}">${fmt(l.sem)}</div>
-            <div style="font-size:9px;color:var(--muted)">meta ${fmt(l.meta)}</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--borda)">
-          <div style="text-align:center">
-            <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Fat. %</div>
-            <div style="font-size:14px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
-          </div>
-          <div style="text-align:center;border-left:1px solid var(--borda);border-right:1px solid var(--borda)">
-            <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🎯 TM Real</div>
-            <div style="font-size:14px;font-weight:700;color:${cTM}">${fmt(l.tm)}</div>
-            <div style="font-size:8px;color:var(--muted)">meta ${fmt(l.metaTM)} · ${l.pctTM.toFixed(0)}%</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Vendas</div>
-            <div style="font-size:14px;font-weight:700;color:var(--texto)">${l.nV}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+              <div style="font-size:13px;font-weight:700">${l.nome}${badge}</div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <div style="text-align:center">
+                  <div style="font-size:9px;color:var(--muted)">Realizado</div>
+                  <div style="font-size:15px;font-weight:800;color:${c}">${l.pct.toFixed(0)}%</div>
+                </div>
+                <div style="text-align:center;padding-left:10px;border-left:1px solid var(--borda)">
+                  <div style="font-size:9px;color:var(--muted)">🎯 TM</div>
+                  <div style="font-size:15px;font-weight:800;color:${cTM}">${l.pctTM.toFixed(0)}%</div>
+                </div>
+                <div style="text-align:center;padding-left:10px;border-left:1px solid var(--borda)">
+                  <div style="font-size:9px;color:var(--muted)">Atend.</div>
+                  <div style="font-size:15px;font-weight:800;color:var(--texto)">${l.nV}</div>
+                </div>
+              </div>
+            </div>
+            <!-- barra fat -->
+            <div style="margin-bottom:4px">
+              <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:2px">
+                <span>Faturamento · ${fmt(l.fat)} / ${fmt(l.meta)}</span><span style="color:${c};font-weight:700">${l.pct.toFixed(0)}%</span>
+              </div>
+              <div style="height:6px;background:var(--cinza);border-radius:4px;overflow:hidden">
+                <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div>
+              </div>
+            </div>
+            <!-- barra TM -->
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:2px">
+                <span>Ticket Médio · ${fmt(l.tm)} / ${fmt(l.metaTM)}</span><span style="color:${cTM};font-weight:700">${l.pctTM.toFixed(0)}%</span>
+              </div>
+              <div style="height:6px;background:var(--cinza);border-radius:4px;overflow:hidden">
+                <div style="width:${Math.min(100,l.pctTM)}%;height:100%;background:${cTM};border-radius:4px"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>`;
@@ -5405,13 +5446,13 @@ function gerarRel(){
             </div>
             <div style="text-align:right">
               <div style="font-size:13px;font-weight:700;color:${c}">${fmt(v.val)}</div>
-              <div style="font-size:9px;color:var(--muted)">${v.pct.toFixed(0)}% meta sem.</div>
+              <div style="font-size:9px;color:var(--muted)">${v.pct.toFixed(0)}% meta "+( isMes?"mês":"sem.")</div>
             </div>
           </div>
           ${barDupla(v.pct,v.pctTMV,c,cTM)}
           <div style="display:flex;gap:12px;margin-top:6px;font-size:9px">
             <span style="color:${cTM}">🎯 TM: <strong>${fmt(v.tmV)}</strong> / meta ${fmt(v.metaTMV)} (${v.pctTMV.toFixed(0)}%)</span>
-            <span style="color:var(--muted)">${v.nVV} vendas</span>
+            <span style="color:var(--muted)">${v.nVV} atend.</span>
           </div>
         </div>
       </div>`;
@@ -5424,11 +5465,14 @@ function gerarRel(){
   </div>`;
 }
 function exportarCSV(){
-  const ld=LOJAS.map(l=>({nome:l.nome,sem:calcSem(l.id),mes:calcMes(l.id)}));
-  let csv="Loja,Vendas Semana,Vendas Mes\n"+ld.map(l=>`${l.nome},${l.sem.toFixed(2)},${l.mes.toFixed(2)}`).join("\n");
-  const vends=D.vendedoras.map(v=>({nome:v.nome,loja:LOJAS.find(l=>l.id===v.loja)?.nome||v.loja,sem:calcVendPer(v.id,"semana"),mes:calcVendPer(v.id,"mes")}));
-  if(vends.length)csv+="\n\nVendedora,Loja,Semana,Mes\n"+vends.map(v=>`${v.nome},${v.loja},${v.sem.toFixed(2)},${v.mes.toFixed(2)}`).join("\n");
-  const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="avatim_relatorio_"+hoje()+".csv";a.click();showToast("CSV exportado!");
+  const per=document.getElementById('rel-periodo')?.value||'semana';
+  const isMes=per==='mes';
+  const col=isMes?'Mes':'Semana';
+  const ld=LOJAS.map(l=>({nome:l.nome,val:isMes?calcMes(l.id):calcSem(l.id),meta:isMes?(getMetas(l.id).mes||0):(getMetas(l.id).sem||0)}));
+  let csv="Loja,Faturamento "+col+",Meta "+col+"\n"+ld.map(l=>`${l.nome},${l.val.toFixed(2)},${l.meta.toFixed(2)}`).join("\n");
+  const vends=D.vendedoras.map(v=>({nome:v.nome,loja:LOJAS.find(l=>l.id===v.loja)?.nome||v.loja,val:isMes?calcVendPer(v.id,"mes"):calcVendPer(v.id,"semana"),meta:isMes?(Number(v.metaMes)||0):parseFloat(((Number(v.metaMes)||0)/4.33).toFixed(2))}));
+  if(vends.length)csv+="\n\nVendedora,Loja,Faturamento "+col+",Meta "+col+"\n"+vends.map(v=>`${v.nome},${v.loja},${v.val.toFixed(2)},${v.meta.toFixed(2)}`).join("\n");
+  const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="avatim_relatorio_"+per+"_"+hoje()+".csv";a.click();showToast("CSV "+col+" exportado!");
 }
 function copiarWhats(){
   const ld=LOJAS.map(l=>({...l,sem:calcSem(l.id),pct:getMetas(l.id).sem>0?calcSem(l.id)/getMetas(l.id).sem*100:0})).sort((a,b)=>b.sem-a.sem);
@@ -6439,8 +6483,21 @@ function iniciarAutoRefresh(){
         D.vendasVend[v.vendedora_id][v.data_venda||hj]={val:v.valor_vendido||0,trans:v.num_transacoes||0};
       });
     } else {
-      const s=localStorage.getItem('avatim_v5');
-      if(s)try{const n=JSON.parse(s);D.vendas=n.vendas||D.vendas;D.vendasVend=n.vendasVend||D.vendasVend;}catch(e){}
+      // Firebase — busca dados frescos do Firestore (merge de todas as lojas)
+      try{
+        const ok = await waitForFirebase(3000);
+        if(ok && window.fsCarregar){
+          const dadosJSON = await window.fsCarregar();
+          if(dadosJSON){
+            const remoto = JSON.parse(dadosJSON);
+            // Merge cuidadoso: atualiza vendas e vendasVend sem perder outros dados
+            if(remoto.vendas)    D.vendas    = Object.assign({}, D.vendas,    remoto.vendas);
+            if(remoto.vendasVend)D.vendasVend = Object.assign({}, D.vendasVend, remoto.vendasVend);
+            localStorage.setItem('avatim_v5', JSON.stringify(D));
+            console.log('[Avatim] 🔄 syncAdmin: dados atualizados do Firestore');
+          }
+        }
+      }catch(e){ console.warn('[Avatim] syncAdmin erro Firebase:', e.message); }
     }
     const ts=new Date();
     const el=document.getElementById('sync-badge');
