@@ -2801,13 +2801,13 @@ function carregarDash(){
     superMesRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superMes||0),0);
     tkLabel="Rede";
   } else {
-    const m=getMetas(lid);
-    const prog=metaDiaLojaProgressiva(lid,hj);
+    const metas=getMetas(lid)||{};
+    const prog=metaDiaLojaProgressiva(lid,hj)||{};
     fatHj=calcDia(lid);
     realSem=calcSem(lid); realMes=calcMes(lid);
-    metaDiaRef=prog.dia>0?prog.dia:m.dia;
-    superDiaRef=m.superDia; metaSemRef=m.sem; superSemRef=m.superSem;
-    metaMesRef=m.mes; superMesRef=m.superMes;
+    metaDiaRef=(prog.dia||0)>0?prog.dia:(metas.dia||0);
+    superDiaRef=metas.superDia||0; metaSemRef=metas.sem||0; superSemRef=metas.superSem||0;
+    metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
     tkLabel=lojaNome();
   }
 
