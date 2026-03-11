@@ -5297,8 +5297,8 @@ function gerarRel(){
 
     <!-- HEADER -->
     <div style="text-align:center;padding:14px 0 20px;border-bottom:1px solid var(--borda);margin-bottom:20px">
-      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING "+perLabel.toUpperCase()+" AVATIM</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:4px">isMes?"Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}):"Semana atual" · ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
+      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING ${perLabel.toUpperCase()} AVATIM</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:4px">${isMes?"Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}):"Semana atual"} · ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
     </div>
 
     <!-- KPIs REDE -->
@@ -5310,11 +5310,8 @@ function gerarRel(){
       </div>
       <div style="background:rgba(91,141,239,.06);border:1px solid ${corTMRede.replace(')',',0.3)').replace('var(--','rgba(')};border-radius:10px;padding:12px;text-align:center">
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">🎯 TM Rede</div>
-        <div style="font-size:20px;font-weight:700;color:${corTMRede};font-family:Playfair Display,serif">${fmt(tmRede)}</div>
-        <div style="font-size:9px;margin-top:2px">
-          <span style="color:var(--muted)">Meta: </span><span style="color:${corTMRede};font-weight:600">${fmt(metaTMRede)}</span>
-          <span style="color:${corTMRede};margin-left:4px">${pctTMRede>=100?"✅":"⚠️"} ${pctTMRede.toFixed(0)}%</span>
-        </div>
+        <div style="font-size:20px;font-weight:700;color:${corTMRede};font-family:Playfair Display,serif">${pctTMRede.toFixed(0)}%</div>
+        <div style="font-size:9px;margin-top:2px;color:${corTMRede};font-weight:600">${pctTMRede>=100?"✅ Meta atingida":"⚠️ da meta"}</div>
       </div>
       <div style="background:rgba(46,204,135,.06);border:1px solid rgba(46,204,135,.2);border-radius:10px;padding:12px;text-align:center">
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Lojas na Meta</div>
