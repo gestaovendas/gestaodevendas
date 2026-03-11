@@ -535,6 +535,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
       <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde)"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
+      <button id="btn-force-sync" onclick="forceSyncToFirestore()" style="display:none;background:var(--ouro);color:#000;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer">☁️ Enviar dados</button>
     </div>
   </div>
   <!-- Alerta de Ritmo -->
@@ -2373,15 +2374,27 @@ let _savePending = false;
 
 function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
-  // Usar fsGravar exposto pelo módulo Firebase
-  if(window.fsGravar && window._fbOk){
-    if(_savePending) return;
-    _savePending = true;
-    setTimeout(()=>{
-      _savePending = false;
+  if(_savePending) return;
+  _savePending = true;
+  setTimeout(()=>{
+    _savePending = false;
+    if(window.fsGravar && window._fbOk){
       window.fsGravar(JSON.stringify(D));
-    }, 800);
-  }
+    } else {
+      setTimeout(()=>{
+        if(window.fsGravar && window._fbOk){
+          window.fsGravar(JSON.stringify(D));
+          console.log("[Avatim] Save atrasado executado.");
+        }
+      }, 3000);
+    }
+  }, 800);
+}
+
+async function forceSyncToFirestore(){
+  if(!window.fsGravar || !window._fbOk){ showToast("Firebase nao conectado."); return; }
+  await window.fsGravar(JSON.stringify(D));
+  showToast("Dados enviados ao Firestore!");
 }
 
 async function loadFromFirestore(){
@@ -2692,7 +2705,10 @@ function showApp(){
   document.getElementById("dash-badge").textContent=now.toLocaleDateString("pt-BR");
   document.getElementById("l-data").value=hoje();
   document.getElementById("vl-data").value=hoje();
-  if(window._fbOk){const db=document.getElementById("demo-box");if(db)db.style.display="none";}
+  if(window._fbOk){
+    const db=document.getElementById("demo-box");if(db)db.style.display="none";
+    const btnSync=document.getElementById("btn-force-sync");if(btnSync)btnSync.style.display="inline-block";
+  }
 
   // Mostrar/esconder itens admin-only
   const adminMode = isAdmin();
