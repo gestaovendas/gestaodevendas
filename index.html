@@ -42,7 +42,8 @@ try{
       await setDoc(doc(db,"avatim","principal"), {
         dados: dadosJSON,
         ts:    Date.now(),
-        por:   window._currentUser?.email||""
+        por:   window._currentUser?.email||"",
+        appKey: "avatim2024"
       });
       console.log("[Avatim] ✅ Salvo no Firestore");
       // Atualizar badge visual
@@ -2780,8 +2781,16 @@ async function login(){
       if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
       window._localLogin=true;
       window._currentUser={email};window._userLoja=u;
+      // Fazer login no Firebase Auth PRIMEIRO, depois abrir o app
+      // Isso garante que o Firestore aceita as permissões ao carregar os dados
       if(window._fbOk&&window._authFn&&window._auth){
-        window._authFn.signInWithEmailAndPassword(window._auth,email,senha).catch(()=>{});
+        try{
+          await window._authFn.signInWithEmailAndPassword(window._auth,email,senha);
+          console.log("[Avatim] Firebase Auth OK");
+        }catch(e){
+          console.warn("[Avatim] Firebase Auth falhou:", e.message);
+          // Continua mesmo sem auth no Firebase — usará localStorage
+        }
       }
       showApp();return;
     }catch(e){}
@@ -2953,6 +2962,7 @@ function carregarDash(){ try {
       </div>`;
   }
 
+  const v = D.vendas[lid]?.[hj] || {fat:0, trans:0, tm:0, cli:0, clinov:0, visit:0};
   gerarDicas(v,m,pD);
   renderRankHoje();
   renderRankVendHoje();
