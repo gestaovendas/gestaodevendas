@@ -2374,25 +2374,45 @@ let _savePending = false;
 
 function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
-  // Usar fsGravar exposto pelo módulo Firebase
-  if(window.fsGravar && window._fbOk){
-    if(_savePending) return;
-    _savePending = true;
-    setTimeout(()=>{
-      _savePending = false;
+  if(_savePending) return;
+  _savePending = true;
+  setTimeout(async ()=>{
+    _savePending = false;
+    const ok = await waitForFirebase(3000);
+    if(ok && window.fsGravar){
       window.fsGravar(JSON.stringify(D));
-    }, 800);
-  }
+    }
+  }, 800);
+}
+
+async function waitForFirebase(timeout=5000){
+  // Aguarda até o módulo Firebase estar pronto (max 5s)
+  return new Promise(resolve=>{
+    if(window.fsCarregar && window._fbOk){ resolve(true); return; }
+    const t0 = Date.now();
+    const check = setInterval(()=>{
+      if(window.fsCarregar && window._fbOk){
+        clearInterval(check); resolve(true);
+      } else if(Date.now()-t0 > timeout){
+        clearInterval(check); resolve(false);
+      }
+    }, 100);
+  });
 }
 
 async function loadFromFirestore(){
-  if(!window.fsCarregar || !window._fbOk) return false;
+  const ok = await waitForFirebase();
+  if(!ok){
+    console.warn("[Avatim] Firebase não disponível — usando localStorage");
+    return false;
+  }
   try{
     console.log("[Avatim] Buscando dados no Firestore...");
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       D = JSON.parse(dadosJSON);
       localStorage.setItem("avatim_v5", JSON.stringify(D));
+      console.log("[Avatim] ✅ Dados carregados!");
       return true;
     }
     return false;
@@ -2653,6 +2673,37 @@ function calcVendPer(id,per){
   }
   const mes=hoje().slice(0,7);
   return Object.entries(vd).filter(([d])=>d.startsWith(mes)).reduce((s,[,v])=>s+Number(v.val||0),0);
+}
+
+// TM individual da vendedora no período
+function calcTMVend(id, per){
+  const vd = D.vendasVend[id]||{};
+  let fat=0, trans=0;
+  if(per==='dia'){
+    const hj=hoje();
+    fat   = Number(vd[hj]?.val||0);
+    trans = Number(vd[hj]?.trans||0);
+  } else if(per==='semana'){
+    const hoje_d=new Date(); hoje_d.setHours(0,0,0,0);
+    const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
+    const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diff);
+    for(let i=0;i<7;i++){
+      const d=new Date(seg); d.setDate(seg.getDate()+i);
+      if(d<=hoje_d){
+        const ds=d.toISOString().slice(0,10);
+        fat   += Number(vd[ds]?.val||0);
+        trans += Number(vd[ds]?.trans||0);
+      }
+    }
+  } else {
+    const mes=hoje().slice(0,7);
+    Object.entries(vd).forEach(([d,v])=>{
+      if(d.startsWith(mes)){ fat+=Number(v.val||0); trans+=Number(v.trans||0); }
+    });
+  }
+  // fallback: se trans=0 mas tem fat, usa 1 atendimento
+  if(trans===0 && fat>0) trans=1;
+  return trans>0 ? fat/trans : 0;
 }
 
 // Semaforo de ritmo
@@ -3122,8 +3173,7 @@ function renderPainelDia(){
           const meta = per==='hoje' ? (getMetas(lid).dia/Math.max(1,vends.length)) : per==='semana' ? (getMetas(lid).sem/Math.max(1,vends.length)) : (v.metaMes||0);
           const pct = meta>0 ? val/meta*100 : 0;
           const cor = pct>=125?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
-          const nat = per==='hoje' ? calcNAtend(lid,'dia') : per==='semana' ? calcNAtend(lid,'semana') : calcNAtend(lid,'mes');
-          const tm = nat>0 ? val/nat : 0;
+          const tm = calcTMVend(v.id, per==='hoje'?'dia':per==='semana'?'semana':'mes');
           return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:14px'>"
             +"<div style='font-size:12px;font-weight:700;color:var(--texto);margin-bottom:2px'>"+v.nome+"</div>"
             +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+v.cargo+" · "+lojaNome()+"</div>"
