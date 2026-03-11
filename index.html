@@ -813,7 +813,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         </div>
         <div class="ig"><label>Cargo</label>
           <select id="vn-cargo">
-            <option value="VRL">VR Lider — comissão pela loja</option>
+            <option value="VRLL">VR Líder Loja (VRLL)</option>
             <option value="VR">VR / Lider (3.5% base)</option>
             <option value="ESP" selected>Especialista (3.0% base)</option>
             <option value="VP">Vend Pleno (1.5% base)</option>
@@ -4309,7 +4309,7 @@ function renderTabelaVend(){
     const proj=calcProjecao_vend(v.id);
     const projPct=proj&&v.metaMes>0?proj/v.metaMes*100:0;
     const projC=projPct>=100?"var(--verde)":projPct>=70?"var(--ouro)":"var(--verm)";
-    const cargoBadge={VRL:'<span class="sbadge gold">VRL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
+    const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
     return `<tr>
       <td><strong>${v.nome}</strong></td>
       <td>${cargoBadge}</td>
@@ -4333,7 +4333,7 @@ function renderTabelaVend(){
 
 // Tabela de cargos com todas as faixas
 const TABELA_COM = {
-  VRL: { nome:"VR Lider (comis. pela loja)", tipo:"loja", faixas:[
+  VRLL: { nome:"VR Líder Loja (VRLL)", tipo:"loja", faixas:[
     {max:null,
      abaixo90: {pct:0.50,bonus_prod:0,folgas:0},
      f90a99:   {pct:0.90,bonus_prod:0,folgas:0},
@@ -4375,9 +4375,9 @@ const TABELA_COM = {
 
 function getComConfig(cargo){return TABELA_COM[cargo]||TABELA_COM.ESP;}
 
-// Calcula comissão VRL — baseada no faturamento da loja
-function calcComissaoVRL(v, fatLoja, metaLoja){
-  const tbl  = TABELA_COM.VRL;
+// Calcula comissão VRLL — baseada no faturamento da loja
+function calcComissaoVRLL(v, fatLoja, metaLoja){
+  const tbl  = TABELA_COM.VRLL;
   const faixa= tbl.faixas[0];
   const pctLoja = metaLoja>0 ? fatLoja/metaLoja*100 : 0;
   let nivel, faixaDados;
@@ -4458,21 +4458,21 @@ function calcularComissao(){
   const lojaOk   = lojaM.mes>0 && lojaReal/lojaM.mes>=1;
   const lojaSM   = lojaM.superMes>0 && lojaReal/lojaM.superMes>=1;
   const lojaAting= lojaSM||lojaOk;
-  // ── VRL: comissão sobre faturamento da loja ─────────
-  if(v.cargo==='VRL'){
+  // ── VRLL: comissão sobre faturamento da loja ─────────
+  if(v.cargo==='VRLL'){
     const fatLoja  = calcMes(v.loja);
     const metaLoja = lojaM.mes||0;
-    const r2 = calcComissaoVRL(v, fatLoja, metaLoja);
+    const r2 = calcComissaoVRLL(v, fatLoja, metaLoja);
     const cor2 = r2.pctLoja>=125?'var(--roxo)':r2.pctLoja>=100?'var(--verde)':r2.pctLoja>=90?'var(--ouro)':'var(--verm)';
-    const tbl2 = TABELA_COM.VRL;
-    const nivelLabelsVRL={abaixo90:'Abaixo de 90% da meta loja',f90a99:'90% a 99% da meta loja',f100a109:'100% a 109% da meta loja',f110a124:'110% a 124% da meta loja',f125plus:'125%+ — Super Meta da loja'};
-    const tabelaVRL=[['abaixo90','Abaixo de 90%'],['f90a99','90% a 99%'],['f100a109','100% a 109%'],['f110a124','110% a 124%'],['f125plus','125%+ (Super Meta)']];
+    const tbl2 = TABELA_COM.VRLL;
+    const nivelLabelsVRLL={abaixo90:'Abaixo de 90% da meta loja',f90a99:'90% a 99% da meta loja',f100a109:'100% a 109% da meta loja',f110a124:'110% a 124% da meta loja',f125plus:'125%+ — Super Meta da loja'};
+    const tabelaVRLL=[['abaixo90','Abaixo de 90%'],['f90a99','90% a 99%'],['f100a109','100% a 109%'],['f110a124','110% a 124%'],['f125plus','125%+ (Super Meta)']];
     document.getElementById("com-resultado").innerHTML=
       '<div style="background:rgba(201,168,76,.07);border:1px solid '+cor2+';border-radius:12px;padding:16px;margin-bottom:14px">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">'
           +'<div>'
             +'<div style="font-size:13px;font-weight:700">'+v.nome+' <span style="font-size:10px;background:var(--cinza);padding:2px 8px;border-radius:20px">'+tbl2.nome+'</span></div>'
-            +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(nivelLabelsVRL[r2.nivel]||r2.nivel)+'</div>'
+            +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(nivelLabelsVRLL[r2.nivel]||r2.nivel)+'</div>'
             +'<div style="font-size:10px;color:var(--muted);margin-top:2px">Loja: '+(LOJAS.find(l=>l.id===v.loja)?.nome||v.loja)+' — '+r2.pctLoja.toFixed(1)+'% da meta</div>'
           +'</div>'
           +'<div style="text-align:right">'
@@ -4489,10 +4489,10 @@ function calcularComissao(){
         +'<div class="kcard azul" style="padding:12px"><div class="kl">Comissão total</div><div class="kv" style="font-size:18px">'+fmt(r2.comissao)+'</div></div>'
       +'</div>'
       +'<div style="margin-top:14px">'
-        +'<div style="font-size:11px;font-weight:600;color:var(--ouro);margin-bottom:8px">Tabela VRL — Comissão pelo Faturamento da Loja</div>'
+        +'<div style="font-size:11px;font-weight:600;color:var(--ouro);margin-bottom:8px">Tabela VRLL — Comissão pelo Faturamento da Loja</div>'
         +'<div style="overflow-x:auto"><table class="dtable">'
           +'<thead><tr><th>Atingimento Meta Loja</th><th>Taxa</th><th>Comissão c/ fat. atual</th><th></th></tr></thead>'
-          +'<tbody>'+tabelaVRL.map(function(item){
+          +'<tbody>'+tabelaVRLL.map(function(item){
             var k=item[0], lbl=item[1];
             var fd=tbl2.faixas[0][k], com=fatLoja*(fd.pct/100);
             var destaque=k===r2.nivel?'background:rgba(201,168,76,.08)':'';
@@ -4560,10 +4560,10 @@ function renderRankComissao(){
   const ranked=vends.map(v=>{
     const vm=calcVendPer(v.id,"mes");
     let r;
-    if(v.cargo==='VRL'){
+    if(v.cargo==='VRLL'){
       const fatLoja=calcMes(v.loja);
       const metaLoja=getMetas(v.loja).mes||0;
-      r=calcComissaoVRL(v,fatLoja,metaLoja);
+      r=calcComissaoVRLL(v,fatLoja,metaLoja);
       return{...v,vm:fatLoja,pct:r.pctLoja,comissao:r.comissao,taxa:r.taxa,nivel:r.nivel,bonus_prod:0};
     }
     r=calcComissaoVend(v,vm,lojaOks[v.loja]||false);
