@@ -5436,23 +5436,44 @@ function gerarRel(){
       const loja=LOJAS.find(l=>l.id===v.loja);
       const c=v.pct>=125?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--muted)";
       const cTM=v.pctTMV>=100?"var(--verde)":v.pctTMV>=80?"var(--ouro)":"var(--verm)";
-      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--card2);border-radius:10px;margin-bottom:6px;border:1px solid var(--borda)">
-        <div style="font-size:18px;width:26px;text-align:center">${med[i]||i+1}</div>
-        <div style="flex:1">
-          <div style="display:flex;justify-content:space-between;align-items:center">
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card2);border-radius:10px;margin-bottom:6px;border:1px solid var(--borda)">
+        <div style="font-size:18px;width:28px;text-align:center">${med[i]||i+1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
             <div>
-              <div style="font-size:12px;font-weight:600">${v.nome}</div>
+              <div style="font-size:12px;font-weight:700">${v.nome}</div>
               <div style="font-size:9px;color:var(--muted)">${loja?.nome||v.loja}</div>
             </div>
-            <div style="text-align:right">
-              <div style="font-size:13px;font-weight:700;color:${c}">${fmt(v.val)}</div>
-              <div style="font-size:9px;color:var(--muted)">${v.pct.toFixed(0)}% meta "+( isMes?"mês":"sem.")</div>
+            <div style="display:flex;gap:10px;align-items:center;flex-shrink:0">
+              <div style="text-align:center">
+                <div style="font-size:8px;color:var(--muted)">Realizado</div>
+                <div style="font-size:16px;font-weight:900;color:${c}">${v.pct.toFixed(0)}%</div>
+              </div>
+              <div style="text-align:center;padding-left:10px;border-left:1px solid var(--borda)">
+                <div style="font-size:8px;color:var(--muted)">🎯 TM</div>
+                <div style="font-size:16px;font-weight:900;color:${cTM}">${v.pctTMV.toFixed(0)}%</div>
+              </div>
+              <div style="text-align:center;padding-left:10px;border-left:1px solid var(--borda)">
+                <div style="font-size:8px;color:var(--muted)">Atend.</div>
+                <div style="font-size:16px;font-weight:900;color:var(--texto)">${v.nVV}</div>
+              </div>
             </div>
           </div>
-          ${barDupla(v.pct,v.pctTMV,c,cTM)}
-          <div style="display:flex;gap:12px;margin-top:6px;font-size:9px">
-            <span style="color:${cTM}">🎯 TM: <strong>${fmt(v.tmV)}</strong> / meta ${fmt(v.metaTMV)} (${v.pctTMV.toFixed(0)}%)</span>
-            <span style="color:var(--muted)">${v.nVV} atend.</span>
+          <div style="margin-bottom:3px">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:2px">
+              <span>Fat. · ${fmt(v.val)} / ${fmt(v.metaVend)}</span><span style="color:${c};font-weight:700">${v.pct.toFixed(0)}%</span>
+            </div>
+            <div style="height:5px;background:var(--cinza);border-radius:4px;overflow:hidden">
+              <div style="width:${Math.min(100,v.pct)}%;height:100%;background:${c};border-radius:4px"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:2px">
+              <span>TM · ${fmt(v.tmV)} / ${fmt(v.metaTMV)}</span><span style="color:${cTM};font-weight:700">${v.pctTMV.toFixed(0)}%</span>
+            </div>
+            <div style="height:5px;background:var(--cinza);border-radius:4px;overflow:hidden">
+              <div style="width:${Math.min(100,v.pctTMV)}%;height:100%;background:${cTM};border-radius:4px"></div>
+            </div>
           </div>
         </div>
       </div>`;
