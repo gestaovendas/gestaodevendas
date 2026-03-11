@@ -586,6 +586,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="kcard verde"><div class="kl">Meta Diaria</div><div class="kv" id="k-meta">R$ 0</div><div class="ks" id="k-meta-s">--</div></div>
     <div class="kcard roxo"><div class="kl">Super Meta Diaria</div><div class="kv" id="k-smeta">R$ 0</div><div class="ks" id="k-smeta-s">--</div></div>
     <div class="kcard azul"><div class="kl">Ticket Medio</div><div class="kv" id="k-ticket">R$ 0</div><div class="ks" id="k-ticket-s">0 transacoes</div></div>
+    <div class="kcard"><div class="kl">Ideal Hoje</div><div class="kv" id="k-ideal">R$ 0</div><div class="ks" id="k-gap" style="font-weight:600">--</div><div class="ks" id="k-gap-s" style="font-size:9px">gap do dia</div></div>
     <div class="kcard laranja"><div class="kl">TM (Itens/Venda)</div><div class="kv" id="k-tm">0</div><div class="ks" id="k-tm-s">meta: 3</div></div>
     <div class="kcard ciano" style="--ciano:#00CEC9"><div class="kl">Clientes</div><div class="kv" id="k-cli">0</div><div class="ks" id="k-cli-s">0 novos</div></div>
   </div>
@@ -1149,9 +1150,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <!-- ABA: POR LOJA -->
   <div id="rank-tab-lojas" style="display:none">
     <div class="tabs" style="margin-bottom:14px">
-      <button class="tab active" onclick="tabRankPer('hoje',this,'loja')">Hoje</button>
-      <button class="tab" onclick="tabRankPer('semana',this,'loja')">Semana</button>
-      <button class="tab" onclick="tabRankPer('mes',this,'loja')">Mes</button>
+      <button class="tab active" id="rtab-hoje" onclick="tabRankPerLoja('hoje',this)">Hoje</button>
+      <button class="tab" id="rtab-semana" onclick="tabRankPerLoja('semana',this)">Semana</button>
+      <button class="tab" id="rtab-mes" onclick="tabRankPerLoja('mes',this)">Mes</button>
+      <button class="tab" id="rtab-hist" onclick="tabRankPerLoja('hist',this)">📅 Histórico</button>
     </div>
     <!-- Seletor de loja (admin vê todas, vendedora vê só a sua) -->
     <div id="rank-loja-sel" style="margin-bottom:16px;display:none">
@@ -1178,13 +1180,44 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div id="rank-tm-vends-loja">--</div>
     </div>
     <!-- Tabela detalhada -->
-    <div class="sc">
-      <div class="st" id="rank-loja-titulo">Vendedoras</div>
-      <div style="overflow-x:auto">
-        <table class="dtable">
-          <thead><tr><th>#</th><th>Vendedora</th><th>Vendas</th><th>% Meta</th><th>% Super</th><th>Projecao Mes</th><th>Status</th></tr></thead>
-          <tbody id="tbody-rank-loja"></tbody>
-        </table>
+    <div id="rank-loja-ranking-bloco">
+      <div class="sc">
+        <div class="st" id="rank-loja-titulo">Vendedoras</div>
+        <div style="overflow-x:auto">
+          <table class="dtable">
+            <thead><tr><th>#</th><th>Vendedora</th><th>Vendas</th><th>% Meta</th><th>% Super</th><th>Projecao Mes</th><th>Status</th></tr></thead>
+            <tbody id="tbody-rank-loja"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ABA HISTÓRICO DA LOJA -->
+    <div id="rank-loja-hist-bloco" style="display:none">
+      <div class="sc">
+        <div class="st">🔍 Consultar Período</div>
+        <div class="igrid">
+          <div class="ig">
+            <label>Vendedora</label>
+            <select id="rh-sel-vend"><option value="">Todas da loja</option></select>
+          </div>
+          <div class="ig"><label>De</label><input type="date" id="rh-de"></div>
+          <div class="ig"><label>Até</label><input type="date" id="rh-ate"></div>
+          <div class="ig" style="display:flex;align-items:flex-end">
+            <button class="btn-p" style="width:100%" onclick="buscarHistLoja()">Buscar</button>
+          </div>
+        </div>
+      </div>
+      <div id="rh-resultado" style="display:none">
+        <div id="rh-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
+        <div class="sc" style="margin-top:0">
+          <div class="st" style="margin-bottom:10px">📅 Resultado por Dia</div>
+          <div id="rh-tabela"></div>
+        </div>
+        <div class="sc" style="margin-top:0">
+          <div class="st" style="margin-bottom:10px">👩 Performance por Vendedora</div>
+          <div id="rh-por-vend"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -2969,6 +3002,20 @@ function carregarDash(){
   const sfalta=Math.max(0,superDiaRef-fatHj);
   document.getElementById("k-smeta-s").textContent=sfalta>0?"Faltam "+fmt(sfalta):"✓ Super!";
 
+  // Valor ideal do dia e gap
+  const du_=diasUteisNoMes()||1;
+  const idealHj=(metaMesRef||0)/du_;
+  const gapHj=fatHj-idealHj;
+  const elIdeal=document.getElementById("k-ideal");
+  const elGap=document.getElementById("k-gap");
+  if(elIdeal) elIdeal.textContent=fmt(idealHj);
+  if(elGap){
+    elGap.textContent=(gapHj>=0?"+":"")+fmt(gapHj);
+    elGap.style.color=gapHj>=0?"var(--verde)":"var(--verm)";
+  }
+  const elGapS=document.getElementById("k-gap-s");
+  if(elGapS) elGapS.textContent=gapHj>=0?"✅ Acima do ideal":"⚠️ Abaixo do ideal";
+
   // Ticket Médio = Faturamento ÷ Número de vendas (registros com val>0 hoje)
   const tk = isAdmin() ? calcTMRede("dia") : calcTMLoja(lid,"dia");
   const nVendasHj = isAdmin()
@@ -3270,11 +3317,26 @@ function renderPainelDia(){
           const pct = meta>0 ? val/meta*100 : 0;
           const cor = pct>=125?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
           const tm = calcTMVend(v.id, per==='hoje'?'dia':per==='semana'?'semana':'mes');
+          const metaVPer = per==='hoje' ? (meta/Math.max(1,vends.length))
+            : per==='semana' ? (getMetas(lid).sem/Math.max(1,vends.length))
+            : (v.metaMes||0);
+          const du_=diasUteisNoMes()||1;
+          const idealVHj = per==='hoje'
+            ? (v.metaMes||0)/du_
+            : per==='semana'
+              ? (() => { const hd=new Date();hd.setHours(0,0,0,0);const dif=hd.getDay()===0?6:hd.getDay()-1;let c=0;for(let i=0;i<=dif;i++){const dd=new Date(hd);dd.setDate(hd.getDate()-i);if(dd.getDay()!==0&&dd.getDay()!==6)c++;}return(v.metaMes||0)/du_*c; })()
+              : (v.metaMes||0);
+          const gapV=val-idealVHj;
+          const corGapV=gapV>=0?"var(--verde)":"var(--verm)";
           return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:14px'>"
             +"<div style='font-size:12px;font-weight:700;color:var(--texto);margin-bottom:2px'>"+v.nome+"</div>"
             +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+v.cargo+" · "+lojaNome()+"</div>"
-            +"<div style='font-size:22px;font-weight:700;color:"+cor+";margin-bottom:4px'>"+fmt(val)+"</div>"
-            +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+pct.toFixed(0)+"% da meta · TM "+fmt(tm)+"</div>"
+            +"<div style='font-size:22px;font-weight:700;color:"+cor+";margin-bottom:2px'>"+fmt(val)+"</div>"
+            +"<div style='font-size:10px;color:var(--muted);margin-bottom:4px'>"+pct.toFixed(0)+"% da meta · TM "+fmt(tm)+"</div>"
+            +"<div style='display:flex;justify-content:space-between;font-size:9px;margin-bottom:6px'>"
+              +"<span style='color:var(--ouro)'>Ideal: "+fmt(idealVHj)+"</span>"
+              +"<span style='color:"+corGapV+";font-weight:700'>Gap: "+(gapV>=0?"+":"")+fmt(gapV)+"</span>"
+            +"</div>"
             +"<div style='height:4px;background:var(--borda);border-radius:2px'>"
               +"<div style='height:4px;background:"+cor+";border-radius:2px;width:"+Math.min(100,pct)+"%;transition:width .4s'></div>"
             +"</div>"
@@ -3472,28 +3534,57 @@ function salvarLanc(){
 function renderConsolidadoLanc(lid){
   const el=document.getElementById("lanc-consolidado-grid");
   if(!el) return;
-  const m=getMetas(lid);
+  const m=getMetas(lid)||{};
+  const hj=hoje();
+  // Calcular valor ideal para hoje e semana
+  const du=diasUteisNoMes()||1;
+  const idealDia=(m.mes||0)/du;
+  const diasSem=(() => {
+    const hd=new Date(hj+'T00:00:00'); let c=0;
+    const dow=hd.getDay(); const diffSeg=dow===0?6:dow-1;
+    const seg=new Date(hd); seg.setDate(hd.getDate()-diffSeg);
+    for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd&&d.getDay()!==0&&d.getDay()!==6)c++;}
+    return c;
+  })();
+  const idealSem=(m.mes||0)/du*diasSem;
   const periodos=[
-    {label:"Hoje",     fat:calcDia(lid), nat:calcNAtend(lid,"dia"),    meta:m.dia},
-    {label:"Semana",   fat:calcSem(lid), nat:calcNAtend(lid,"semana"), meta:m.sem},
-    {label:"Este Mês", fat:calcMes(lid), nat:calcNAtend(lid,"mes"),    meta:m.mes},
+    {label:"Hoje",     fat:calcDia(lid), nat:calcNAtend(lid,"dia"),    meta:m.dia,  ideal:idealDia, sup:m.superDia},
+    {label:"Semana",   fat:calcSem(lid), nat:calcNAtend(lid,"semana"), meta:m.sem,  ideal:idealSem, sup:m.superSem},
+    {label:"Este Mês", fat:calcMes(lid), nat:calcNAtend(lid,"mes"),    meta:m.mes,  ideal:m.mes,    sup:m.superMes},
   ];
   el.innerHTML=periodos.map(p=>{
     const tm=p.nat>0?p.fat/p.nat:0;
     const pct=p.meta>0?p.fat/p.meta*100:0;
+    const gap=p.fat-(p.ideal||0);
+    const corGap=gap>=0?"var(--verde)":"var(--verm)";
     const cor=pct>=125?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":p.fat>0?"var(--verm)":"var(--muted)";
-    return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px;text-align:center'>"
-      +"<div style='font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px'>"+p.label+"</div>"
-      +"<div style='font-size:16px;font-weight:700;color:"+cor+";margin-bottom:4px'>"+fmt(p.fat)+"</div>"
-      +"<div style='font-size:9px;color:var(--muted);margin-bottom:6px'>"+pct.toFixed(0)+"% da meta</div>"
-      +"<div style='border-top:1px solid var(--borda);padding-top:8px;margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:4px'>"
-        +"<div><div style='font-size:9px;color:var(--muted);text-transform:uppercase'>Ticket Médio</div>"
-        +"<div style='font-size:13px;font-weight:700;color:var(--azul)'>"+fmt(tm)+"</div>"
-        +"<div style='font-size:9px;color:var(--muted)'>"+p.nat+" atend.</div></div>"
-        +"<div><div style='font-size:9px;color:var(--muted);text-transform:uppercase'>Clientes</div>"
-        +"<div style='font-size:13px;font-weight:700;color:var(--verde)'>"+p.nat+"</div>"
-        +"<div style='font-size:9px;color:var(--muted)'>atendidos</div></div>"
-      +"</div></div>";
+    return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px'>"
+      +"<div style='font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;text-align:center'>"+p.label+"</div>"
+      +"<div style='font-size:18px;font-weight:700;color:"+cor+";text-align:center;margin-bottom:2px'>"+fmt(p.fat)+"</div>"
+      +"<div style='font-size:9px;color:var(--muted);text-align:center;margin-bottom:6px'>"+pct.toFixed(0)+"% da meta</div>"
+      // barra progresso
+      +"<div style='height:4px;background:var(--borda);border-radius:2px;overflow:hidden;margin-bottom:8px'>"
+        +"<div style='height:4px;background:"+cor+";width:"+Math.min(100,pct)+"%;border-radius:2px'></div>"
+      +"</div>"
+      // grid 3 cols: TM | Clientes | Ideal/Gap
+      +"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;border-top:1px solid var(--borda);padding-top:8px'>"
+        +"<div style='text-align:center'>"
+          +"<div style='font-size:8px;color:var(--muted);text-transform:uppercase'>TM</div>"
+          +"<div style='font-size:12px;font-weight:700;color:var(--azul)'>"+fmt(tm)+"</div>"
+          +"<div style='font-size:8px;color:var(--muted)'>"+p.nat+" atend.</div>"
+        +"</div>"
+        +"<div style='text-align:center'>"
+          +"<div style='font-size:8px;color:var(--muted);text-transform:uppercase'>Clientes</div>"
+          +"<div style='font-size:12px;font-weight:700;color:var(--verde)'>"+p.nat+"</div>"
+          +"<div style='font-size:8px;color:var(--muted)'>atendidos</div>"
+        +"</div>"
+        +"<div style='text-align:center'>"
+          +"<div style='font-size:8px;color:var(--muted);text-transform:uppercase'>Gap</div>"
+          +"<div style='font-size:12px;font-weight:700;color:"+corGap+"'>"+(gap>=0?"+":"")+fmt(gap)+"</div>"
+          +"<div style='font-size:8px;color:var(--ouro)'>ideal "+fmt(p.ideal||0)+"</div>"
+        +"</div>"
+      +"</div>"
+    +"</div>";
   }).join("");
 }
 
@@ -5318,6 +5409,198 @@ function renderRankings(tab) {
         </div>`;
       }).join('')
     : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lançamentos no período.</div>";
+}
+
+// ─── helpers: valor ideal e gap ───────────────────────
+function valorIdealPeriodo(metaMes, de, ate){
+  // Retorna o valor que deveria ter sido realizado no período dado
+  // baseado na proporção de dias úteis
+  if(!metaMes || metaMes<=0) return 0;
+  const du = diasUteisNoMes();
+  if(du<=0) return 0;
+  // contar dias úteis no período
+  let count=0;
+  const d0=new Date(de+'T00:00:00'), d1=new Date(ate+'T00:00:00');
+  for(let d=new Date(d0); d<=d1; d.setDate(d.getDate()+1)){
+    const dow=d.getDay();
+    if(dow!==0 && dow!==6) count++;
+  }
+  return (metaMes/du)*count;
+}
+
+function kpiCard(label, val, cor, sub){
+  return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
+    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${label}</div>
+    <div style="font-size:19px;font-weight:700;color:${cor||'var(--texto)'}">${val}</div>
+    ${sub?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${sub}</div>`:''}
+  </div>`;
+}
+
+// ─── Aba Por Loja — trocar período ou mostrar histórico ──
+function tabRankPerLoja(per, el){
+  document.querySelectorAll('#rank-tab-lojas .tab').forEach(e=>e.classList.remove('active'));
+  if(el) el.classList.add('active');
+  const rankBloco = document.getElementById('rank-loja-ranking-bloco');
+  const podioBloco= document.getElementById('rank-podio-vends');
+  const tmBloco   = document.querySelector('#rank-tab-lojas .rcard');
+  const histBloco = document.getElementById('rank-loja-hist-bloco');
+  const header    = document.getElementById('rank-loja-header');
+
+  if(per==='hist'){
+    if(rankBloco)  rankBloco.style.display='none';
+    if(podioBloco) podioBloco.style.display='none';
+    if(tmBloco)    tmBloco.style.display='none';
+    if(header)     header.style.display='none';
+    if(histBloco)  histBloco.style.display='';
+    // preencher select de vendedoras
+    const lid = isAdmin()
+      ? (document.getElementById('sel-loja-rank')?.value||'mooca')
+      : lojaId();
+    const sel = document.getElementById('rh-sel-vend');
+    if(sel){
+      sel.innerHTML = '<option value="">Todas da loja</option>'
+        + D.vendedoras.filter(v=>v.loja===lid)
+            .map(v=>`<option value="${v.id}">${v.nome}</option>`).join('');
+    }
+    // datas padrão = mês atual
+    const hj=hoje();
+    const de=document.getElementById('rh-de');
+    const ate=document.getElementById('rh-ate');
+    if(de && !de.value)  de.value=hj.slice(0,7)+'-01';
+    if(ate && !ate.value) ate.value=hj;
+  } else {
+    _rankPerLoja = per;
+    if(rankBloco)  rankBloco.style.display='';
+    if(podioBloco) podioBloco.style.display='';
+    if(tmBloco)    tmBloco.style.display='';
+    if(header)     header.style.display='';
+    if(histBloco)  histBloco.style.display='none';
+    renderRankingLoja();
+  }
+}
+
+// ─── Buscar histórico da loja ─────────────────────────
+function buscarHistLoja(){
+  const lid = isAdmin()
+    ? (document.getElementById('sel-loja-rank')?.value||'mooca')
+    : lojaId();
+  const vendId = document.getElementById('rh-sel-vend')?.value||'';
+  const de     = document.getElementById('rh-de')?.value;
+  const ate    = document.getElementById('rh-ate')?.value;
+  if(!de||!ate){ showToast('Selecione o período','err'); return; }
+
+  const vends  = D.vendedoras.filter(v=>v.loja===lid && (!vendId||v.id===vendId));
+  const mLoja  = getMetas(lid)||{};
+
+  // Coletar todos os dias no período com vendas
+  const diasMap={};
+  vends.forEach(v=>{
+    const vd=D.vendasVend[v.id]||{};
+    Object.entries(vd).forEach(([d,r])=>{
+      if(d<de||d>ate) return;
+      if(!diasMap[d]) diasMap[d]={fat:0,trans:0,aniv:0,inativ:0};
+      diasMap[d].fat   +=Number(r.val   ||0);
+      diasMap[d].trans +=Number(r.trans ||0);
+      diasMap[d].aniv  +=Number(r.aniv  ||0);
+      diasMap[d].inativ+=Number(r.inativ||0);
+    });
+  });
+
+  const dias=Object.keys(diasMap).sort();
+  let fatTotal=0,transTotal=0,anivTotal=0,inativTotal=0;
+  dias.forEach(d=>{
+    fatTotal   +=diasMap[d].fat;
+    transTotal +=diasMap[d].trans;
+    anivTotal  +=diasMap[d].aniv;
+    inativTotal+=diasMap[d].inativ;
+  });
+  const tmMedio      = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
+  const metaRef      = vendId
+    ? (D.vendedoras.find(v=>v.id===vendId)?.metaMes||0)
+    : (mLoja.mes||0);
+  const valorIdeal   = valorIdealPeriodo(metaRef, de, ate);
+  const gap          = fatTotal - valorIdeal;
+  const pctIdeal     = valorIdeal>0 ? fatTotal/valorIdeal*100 : 0;
+  const corGap       = gap>=0?'var(--verde)':'var(--verm)';
+  const corPct       = pctIdeal>=100?'var(--verde)':pctIdeal>=70?'var(--ouro)':'var(--verm)';
+
+  // KPIs
+  const kpis=document.getElementById('rh-kpis');
+  if(kpis) kpis.innerHTML=[
+    kpiCard('Realizado',        fmt(fatTotal),    corPct,            pctIdeal.toFixed(0)+'% do ideal'),
+    kpiCard('Valor Ideal',      fmt(valorIdeal),  'var(--ouro)',     'Para o período'),
+    kpiCard('Gap',              (gap>=0?'+':'')+fmt(gap), corGap,   gap>=0?'✅ Acima do ideal':'⚠️ Abaixo do ideal'),
+    kpiCard('TM Médio',         fmt(tmMedio),     'var(--azul)',     transTotal+' atend.'),
+    kpiCard('Aniversariantes',  anivTotal,        'var(--roxo)',     'no período'),
+    kpiCard('Inativos',         inativTotal,      'var(--laranja)',  'recuperados'),
+  ].join('');
+
+  // Tabela dia a dia
+  const tab=document.getElementById('rh-tabela');
+  if(tab) tab.innerHTML=dias.length
+    ?`<div style="overflow-x:auto"><table class="dtable">
+      <thead><tr>
+        <th>Data</th><th>Realizado</th><th>Ideal/dia</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th>
+      </tr></thead>
+      <tbody>${dias.map(d=>{
+        const r=diasMap[d];
+        const tm2=r.trans>0?r.fat/r.trans:r.fat>0?r.fat:0;
+        const du=diasUteisNoMes(); const idealDia=du>0?(metaRef/du):0;
+        const g2=r.fat-idealDia; const cg=g2>=0?'var(--verde)':'var(--verm)';
+        const cf=r.fat>=idealDia?'var(--verde)':'var(--verm)';
+        return `<tr>
+          <td>${d.split('-').reverse().join('/')}</td>
+          <td style="color:${cf};font-weight:600">${fmt(r.fat)}</td>
+          <td style="color:var(--ouro)">${fmt(idealDia)}</td>
+          <td style="color:${cg}">${g2>=0?'+':''}${fmt(g2)}</td>
+          <td style="color:var(--azul)">${fmt(tm2)}</td>
+          <td>${r.trans}</td>
+          <td>${r.aniv}</td>
+          <td>${r.inativ}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`
+    :`<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+
+  // Performance por vendedora
+  const pv=document.getElementById('rh-por-vend');
+  if(pv){
+    const vendsData=vends.map(v=>{
+      const vd=D.vendasVend[v.id]||{};
+      let fat2=0,trans2=0,aniv2=0,inativ2=0;
+      Object.entries(vd).forEach(([d,r])=>{
+        if(d<de||d>ate) return;
+        fat2+=Number(r.val||0); trans2+=Number(r.trans||0);
+        aniv2+=Number(r.aniv||0); inativ2+=Number(r.inativ||0);
+      });
+      const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
+      const metaV=v.metaMes||0;
+      const idealV=valorIdealPeriodo(metaV,de,ate);
+      const gapV=fat2-idealV;
+      return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,idealV,gapV};
+    }).sort((a,b)=>b.fat-a.fat);
+    pv.innerHTML=vendsData.length?`<div style="overflow-x:auto"><table class="dtable">
+      <thead><tr><th>#</th><th>Vendedora</th><th>Realizado</th><th>Ideal</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+      <tbody>${vendsData.map((v,i)=>{
+        const cg=v.gapV>=0?'var(--verde)':'var(--verm)';
+        const cf=v.fat>0?'var(--verde)':'var(--muted)';
+        return `<tr>
+          <td style="text-align:center">${['🥇','🥈','🥉'][i]||i+1}</td>
+          <td><strong>${v.nome}</strong></td>
+          <td style="color:${cf};font-weight:600">${fmt(v.fat)}</td>
+          <td style="color:var(--ouro)">${fmt(v.idealV)}</td>
+          <td style="color:${cg}">${v.gapV>=0?'+':''}${fmt(v.gapV)}</td>
+          <td style="color:var(--azul)">${fmt(v.tm)}</td>
+          <td>${v.trans}</td>
+          <td>${v.aniv}</td>
+          <td>${v.inativ}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`:
+    `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum dado.</div>`;
+  }
+
+  document.getElementById('rh-resultado').style.display='';
 }
 
 function renderRankingLoja() {
