@@ -3083,6 +3083,8 @@ function carregarDash(){
       </div>`;
   }
 
+  // v = dados do dia da loja (cli, trans, clinov)
+  const v = (D.vendas[lid]||{})[hj]||{};
   gerarDicas(v,m,pD);
   renderRankHoje();
   renderRankVendHoje();
