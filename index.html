@@ -2678,13 +2678,17 @@ function showApp(){
     if(btnAdm) btnAdm.style.display="inline-flex";
   }
 
-  // Carregar dados do Firestore (sync entre máquinas)
-  loadFromFirestore().then(loaded=>{
-    if(loaded){ carregarVendsForm(); preencherSelectVends(); carregarDash(); }
+  // Carregar dados do Firestore primeiro, depois renderizar
+  loadFromFirestore().then(()=>{
+    carregarVendsForm();
+    preencherSelectVends();
+    carregarDash();
+  }).catch(()=>{
+    // Fallback: usar localStorage se Firestore falhar
+    carregarVendsForm();
+    preencherSelectVends();
+    carregarDash();
   });
-  carregarVendsForm();
-  preencherSelectVends();
-  carregarDash();
   renderProdutos("","");
   iniciarAutoRefresh();
   restaurarConfigCosmos();
