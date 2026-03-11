@@ -27,6 +27,7 @@ try{
 
   window._fbOk  = true;
   window._fbDb  = db;
+  window._auth  = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
   // ── Expor save/load diretamente no módulo onde db está disponível ──
@@ -2795,7 +2796,7 @@ function nav(pg){
 // ============================================================
 // DASHBOARD
 // ============================================================
-function carregarDash(){
+function carregarDash(){ try {
   // Garantir que D está inicializado
   if(!D.metasLoja) D.metasLoja={};
   if(!D.vendedoras) D.vendedoras=[];
@@ -2926,6 +2927,7 @@ function carregarDash(){
   // Mostrar/esconder Ranking Lojas vs Loja
   const btnAdm=document.getElementById("btn-alllojas");
   if(btnAdm) btnAdm.style.display=isAdmin()?"inline-flex":"none";
+  } catch(e){ console.error("[Avatim] carregarDash erro:", e.message, e.stack); }
 }
 
 function setBar(id,pct,real,meta,superMeta){
