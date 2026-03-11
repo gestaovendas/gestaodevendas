@@ -9,7 +9,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
@@ -62,37 +62,133 @@ try{
   };
 
   // Gravar no Firestore — garante auth antes
+  // ── ARQUITETURA CORRETA: cada loja salva no SEU documento ──────────
+  // doc "principal" = admin (metas, vendedoras, campanhas)
+  // doc "loja_mooca", "loja_leopoldina" etc = vendas de cada loja
+  // Ao carregar: admin lê TODOS e faz merge. Loja lê só o dela + principal.
+
   window.fsGravar = async function(dadosJSON){
     try{
       if(!auth.currentUser){
         const email = window._currentUser?.email;
         if(email) await window.fbLogin(email);
       }
-      await setDoc(doc(db,"avatim","principal"), {
-        dados: dadosJSON,
-        ts:    Date.now(),
-        por:   window._currentUser?.email||""
-      });
-      console.log("[Avatim] ✅ Salvo no Firestore");
+      const D2 = JSON.parse(dadosJSON);
+      const email = window._currentUser?.email||"";
+      const isAdm = email === "admin@avatim.com";
+
+      if(isAdm){
+        // Admin salva tudo num único documento (ele tem visão completa)
+        await setDoc(doc(db,"avatim","principal"), { dados: dadosJSON, ts: Date.now(), por: email });
+        console.log("[Avatim] ✅ Admin: tudo salvo");
+      } else {
+        // Loja salva SÓ seus dados no doc da loja (não toca nos outros)
+        // Descobre o lojaId da loja logada
+        const lojaMap = {
+          "mooca@avatim.com":      "mooca",
+          "leopoldina@avatim.com": "leopoldina",
+          "perdizes@avatim.com":   "perdizes",
+          "santana@avatim.com":    "santana",
+          "jarpaul@avatim.com":    "jarpaul",
+          "pinheiros@avatim.com":  "pinheiros",
+          "ibirapuera@avatim.com": "ibirapuera",
+          "lorena@avatim.com":     "jarpaul"
+        };
+        const lid = lojaMap[email];
+        if(!lid){ console.warn("[Avatim] lojaId desconhecido para:", email); return; }
+
+        // Extrai só os dados desta loja
+        const pedaco = {
+          vendas:     { [lid]: D2.vendas?.[lid]||{} },
+          vendasVend: {}
+        };
+        // Inclui vendas das vendedoras desta loja
+        Object.entries(D2.vendasVend||{}).forEach(([vid, vdata])=>{
+          const vend = (D2.vendedoras||[]).find(v=>v.id===vid);
+          if(vend && vend.loja===lid) pedaco.vendasVend[vid] = vdata;
+        });
+
+        const docId = "loja_"+lid;
+        await setDoc(doc(db,"avatim",docId), {
+          dados:    JSON.stringify(pedaco),
+          lojaId:   lid,
+          ts:       Date.now(),
+          por:      email
+        });
+        console.log("[Avatim] ✅ Loja "+lid+" salva no doc "+docId);
+      }
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
     }
   };
 
-  // Carregar do Firestore — garante auth antes
+  // Carregar do Firestore — merge de todos os docs de loja
   window.fsCarregar = async function(){
     try{
       if(!auth.currentUser){
         const email = window._currentUser?.email;
         if(email) await window.fbLogin(email);
       }
-      const snap = await getDoc(doc(db,"avatim","principal"));
-      if(snap.exists()){
-        console.log("[Avatim] ✅ Dados carregados do Firestore");
-        return snap.data().dados;
+      const email = window._currentUser?.email||"";
+      const isAdm = email === "admin@avatim.com";
+
+      // Sempre lê o doc principal (tem metas, vendedoras, campanhas)
+      const snapPrincipal = await getDoc(doc(db,"avatim","principal"));
+      let base = snapPrincipal.exists() ? JSON.parse(snapPrincipal.data().dados) : null;
+
+      if(!base){
+        console.log("[Avatim] Nenhum dado no Firestore ainda");
+        return null;
       }
-      console.log("[Avatim] Nenhum dado no Firestore ainda");
-      return null;
+
+      if(isAdm){
+        // Admin faz merge com todos os docs de loja
+        const LOJAS_IDS = ["mooca","leopoldina","perdizes","santana","jarpaul","pinheiros","ibirapuera"];
+        for(const lid of LOJAS_IDS){
+          try{
+            const snap = await getDoc(doc(db,"avatim","loja_"+lid));
+            if(snap.exists()){
+              const pedaco = JSON.parse(snap.data().dados);
+              // Merge vendas da loja
+              if(!base.vendas) base.vendas={};
+              Object.assign(base.vendas, pedaco.vendas||{});
+              // Merge vendasVend das vendedoras desta loja
+              if(!base.vendasVend) base.vendasVend={};
+              Object.assign(base.vendasVend, pedaco.vendasVend||{});
+              console.log("[Avatim] ✅ Merge loja:", lid);
+            }
+          }catch(e2){ console.warn("[Avatim] Erro merge loja "+lid+":", e2.message); }
+        }
+        console.log("[Avatim] ✅ Admin: todos os dados carregados e merged");
+      } else {
+        // Loja carrega só seus dados e faz merge sobre o base
+        const lojaMap = {
+          "mooca@avatim.com":      "mooca",
+          "leopoldina@avatim.com": "leopoldina",
+          "perdizes@avatim.com":   "perdizes",
+          "santana@avatim.com":    "santana",
+          "jarpaul@avatim.com":    "jarpaul",
+          "pinheiros@avatim.com":  "pinheiros",
+          "ibirapuera@avatim.com": "ibirapuera",
+          "lorena@avatim.com":     "jarpaul"
+        };
+        const lid = lojaMap[email];
+        if(lid){
+          try{
+            const snap = await getDoc(doc(db,"avatim","loja_"+lid));
+            if(snap.exists()){
+              const pedaco = JSON.parse(snap.data().dados);
+              if(!base.vendas) base.vendas={};
+              Object.assign(base.vendas, pedaco.vendas||{});
+              if(!base.vendasVend) base.vendasVend={};
+              Object.assign(base.vendasVend, pedaco.vendasVend||{});
+              console.log("[Avatim] ✅ Loja "+lid+" carregada");
+            }
+          }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
+        }
+      }
+
+      return JSON.stringify(base);
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao carregar:", e.code, e.message);
       return null;
@@ -2500,9 +2596,17 @@ function save(){
   _savePending = true;
   setTimeout(async ()=>{
     _savePending = false;
-    const ok = await waitForFirebase(3000);
+    const ok = await waitForFirebase(5000);
     if(ok && window.fsGravar){
-      window.fsGravar(JSON.stringify(D));
+      try{
+        await window.fsGravar(JSON.stringify(D));
+      }catch(e){
+        console.warn("[Avatim] save() erro:", e.message);
+        // Tenta novamente em 5s
+        setTimeout(()=>{ if(window.fsGravar) window.fsGravar(JSON.stringify(D)); }, 5000);
+      }
+    } else {
+      console.warn("[Avatim] Firebase indisponível — dado só no localStorage");
     }
   }, 800);
 }
@@ -2523,7 +2627,7 @@ async function waitForFirebase(timeout=5000){
 }
 
 async function loadFromFirestore(){
-  const ok = await waitForFirebase();
+  const ok = await waitForFirebase(8000); // mais tempo para Firebase iniciar
   if(!ok){
     console.warn("[Avatim] Firebase não disponível — usando localStorage");
     return false;
@@ -2532,11 +2636,14 @@ async function loadFromFirestore(){
     console.log("[Avatim] Buscando dados no Firestore...");
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
-      D = JSON.parse(dadosJSON);
+      const remoto = JSON.parse(dadosJSON);
+      // Merge inteligente: dados remotos têm prioridade (são mais recentes e completos)
+      D = remoto;
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados!");
+      console.log("[Avatim] ✅ Dados carregados e merged do Firestore!");
       return true;
     }
+    console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
     return false;
   }catch(e){
     console.warn("[Avatim] loadFromFirestore erro:", e.message);
