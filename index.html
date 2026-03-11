@@ -20,17 +20,54 @@ const firebaseConfig = {
   appId:"1:994718145517:web:a98c6aab126150c976a5e4"
 };
 
+// Senhas reais para autenticação Firebase (mesmo usuário do SHA-256)
+const FB_SENHAS = {
+  "admin@avatim.com":      "M@vida1801",
+  "mooca@avatim.com":      "M@2018g",
+  "lorena@avatim.com":     "L@2018g",
+  "leopoldina@avatim.com": "W@2018g",
+  "perdizes@avatim.com":   "P@2018g",
+  "santana@avatim.com":    "S@nt2018g",
+  "pinheiros@avatim.com":  "@LT2018g",
+  "ibirapuera@avatim.com": "Sh@p2018g",
+  "jarpaul@avatim.com":    "L@2018g"
+};
+
 try{
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
 
-  window._fbOk  = true;
+  window._fbOk   = true;
+  window._auth   = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
-  // ── Expor save/load diretamente no módulo onde db está disponível ──
+  // Garantir auth Firebase: chama signIn com email+senha reais
+  window.fbLogin = async function(email){
+    try{
+      if(auth.currentUser) return true; // já autenticado
+      const senha = FB_SENHAS[email];
+      if(!senha){ console.warn("[Avatim] Sem senha FB para:", email); return false; }
+      await signInWithEmailAndPassword(auth, email, senha);
+      console.log("[Avatim] ✅ Firebase auth OK para:", email);
+      return true;
+    }catch(e){
+      console.warn("[Avatim] ❌ Firebase auth falhou:", e.code);
+      return false;
+    }
+  };
+
+  window.fbLogout = async function(){
+    try{ await signOut(auth); }catch(e){}
+  };
+
+  // Gravar no Firestore — garante auth antes
   window.fsGravar = async function(dadosJSON){
     try{
+      if(!auth.currentUser){
+        const email = window._currentUser?.email;
+        if(email) await window.fbLogin(email);
+      }
       await setDoc(doc(db,"avatim","principal"), {
         dados: dadosJSON,
         ts:    Date.now(),
@@ -42,8 +79,13 @@ try{
     }
   };
 
+  // Carregar do Firestore — garante auth antes
   window.fsCarregar = async function(){
     try{
+      if(!auth.currentUser){
+        const email = window._currentUser?.email;
+        if(email) await window.fbLogin(email);
+      }
       const snap = await getDoc(doc(db,"avatim","principal"));
       if(snap.exists()){
         console.log("[Avatim] ✅ Dados carregados do Firestore");
@@ -57,7 +99,7 @@ try{
     }
   };
 
-  // ── Auth ──
+  // onAuthStateChanged — só age se NÃO for login local
   const runAuth = ()=>onAuthStateChanged(auth, user=>{
     if(window._localLogin) return;
     window._currentUser = user;
@@ -2796,9 +2838,8 @@ async function login(){
       if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
       window._localLogin=true;
       window._currentUser={email};window._userLoja=u;
-      if(window._fbOk&&window._authFn&&window._auth){
-        window._authFn.signInWithEmailAndPassword(window._auth,email,senha).catch(()=>{});
-      }
+      // Autenticar no Firebase em background (necessário para Firestore)
+      if(window.fbLogin) window.fbLogin(email);
       showApp();return;
     }catch(e){}
   }
@@ -2806,7 +2847,14 @@ async function login(){
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
-function logout(){window._localLogin=false;if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);}window._currentUser=null;window._userLoja=null;showLogin();}
+function logout(){
+  window._localLogin = false;
+  window._currentUser = null;
+  window._userLoja = null;
+  // SignOut Firebase
+  if(window.fbLogout) window.fbLogout();
+  showLogin();
+}
 
 // ============================================================
 // NAVEGACAO
@@ -2863,6 +2911,8 @@ function carregarDash(){
     metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
     tkLabel=lojaNome();
   }
+  // m = metas da loja (para uso em projeção e dicas)
+  const m = isAdmin() ? {mes:metaMesRef,superMes:superMesRef,dia:metaDiaRef,superDia:superDiaRef,sem:metaSemRef,superSem:superSemRef,ticket:150} : (getMetas(lid)||{});
 
   // KPIs
   document.getElementById("k-hoje").textContent=fmt(fatHj);
