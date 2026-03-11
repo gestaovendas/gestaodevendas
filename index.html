@@ -789,7 +789,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-vendedoras">
   <div class="ph">
     <div><h1 class="pt">Ranking <span>Vendedoras</span></h1><div class="ps">Performance individual da equipe</div></div>
-    <button class="btn-p" onclick="toggleFormVend()">+ Cadastrar</button>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="tabs" style="margin:0">
+        <button class="tab active" id="vtab-ranking" onclick="tabPgVend('ranking',this)">Ranking</button>
+        <button class="tab" id="vtab-historico" onclick="tabPgVend('historico',this)">Meu Histórico</button>
+      </div>
+      <button class="btn-p admin-item" style="display:none" onclick="toggleFormVend()">+ Cadastrar</button>
+    </div>
   </div>
   <div id="form-vend" style="display:none">
     <div class="sc">
@@ -850,13 +856,53 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="btn-r"><button class="btn-p" onclick="lancarVendaVend()">Lancar</button></div>
   </div>
   <!-- Tabela completa -->
-  <div class="sc" style="margin-top:12px">
+  <div class="sc" style="margin-top:12px" id="vend-tabela-bloco">
     <div class="st">Equipe Cadastrada</div>
     <div style="overflow-x:auto">
       <table class="dtable">
         <thead><tr><th>Nome</th><th>Cargo</th><th>Loja</th><th>Meta Mes</th><th>Super Meta</th><th>Realizado</th><th>% Meta</th><th>Projecao</th><th></th></tr></thead>
         <tbody id="tbody-vend"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- MEU HISTÓRICO (aba vendedora / admin) -->
+  <div id="vend-hist-bloco" style="display:none">
+    <div class="sc">
+      <div class="st">🔍 Consultar Período</div>
+      <div class="igrid">
+        <div class="ig">
+          <label>Vendedora</label>
+          <select id="hist-sel-vend"><option value="">Selecione...</option></select>
+        </div>
+        <div class="ig">
+          <label>De</label>
+          <input type="date" id="hist-de">
+        </div>
+        <div class="ig">
+          <label>Até</label>
+          <input type="date" id="hist-ate">
+        </div>
+        <div class="ig" style="display:flex;align-items:flex-end">
+          <button class="btn-p" style="width:100%" onclick="buscarHistVend()">Buscar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resultado -->
+    <div id="hist-vend-resultado" style="display:none">
+      <!-- KPIs resumo -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px" id="hist-vend-kpis"></div>
+      <!-- Histórico dia a dia -->
+      <div class="sc" style="margin-top:0">
+        <div class="st" style="margin-bottom:10px">📅 Vendas por Dia</div>
+        <div id="hist-vend-tabela"></div>
+      </div>
+      <!-- Campanhas -->
+      <div class="sc" style="margin-top:0">
+        <div class="st" style="margin-bottom:10px">🎯 Campanhas no Período</div>
+        <div id="hist-vend-campanhas"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -4011,6 +4057,123 @@ function lancarVendaVend(){
   if(document.getElementById('page-lanc')?.classList.contains('active')) renderPainelDia();
 }
 
+// ── Aba da página vendedoras ──────────────────────────
+function tabPgVend(aba, el){
+  document.querySelectorAll('#page-vendedoras .tab').forEach(e=>e.classList.remove('active'));
+  if(el) el.classList.add('active');
+  const ranking  = document.getElementById('vend-ranking');
+  const lancBloco= document.querySelector('#page-vendedoras .sc:has(#vl-vend)');
+  const tabelaB  = document.getElementById('vend-tabela-bloco');
+  const histBloco= document.getElementById('vend-hist-bloco');
+  const formBloco= document.getElementById('form-vend');
+  if(aba==='ranking'){
+    if(ranking)    ranking.style.display='';
+    if(tabelaB)    tabelaB.style.display='';
+    if(histBloco)  histBloco.style.display='none';
+  } else {
+    if(ranking)    ranking.style.display='none';
+    if(tabelaB)    tabelaB.style.display='none';
+    if(histBloco)  histBloco.style.display='';
+    if(formBloco)  formBloco.style.display='none';
+    preencherSelHistVend();
+  }
+}
+
+function preencherSelHistVend(){
+  const sel = document.getElementById('hist-sel-vend');
+  if(!sel) return;
+  const vends = isAdmin()
+    ? D.vendedoras
+    : D.vendedoras.filter(v=>v.loja===lojaId());
+  sel.innerHTML = '<option value="">Selecione...</option>'
+    + vends.map(v=>`<option value="${v.id}">${v.nome} (${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja})</option>`).join('');
+  // pré-selecionar a própria vendedora se for loja
+  if(!isAdmin() && vends.length===1) sel.value=vends[0].id;
+  // datas padrão: mês atual
+  const hoje_=hoje();
+  const de=document.getElementById('hist-de');
+  const ate=document.getElementById('hist-ate');
+  if(de && !de.value)  de.value = hoje_.slice(0,7)+'-01';
+  if(ate && !ate.value) ate.value = hoje_;
+}
+
+function buscarHistVend(){
+  const vendId = document.getElementById('hist-sel-vend')?.value;
+  const de     = document.getElementById('hist-de')?.value;
+  const ate    = document.getElementById('hist-ate')?.value;
+  if(!vendId || !de || !ate){ showToast('Selecione vendedora e período','err'); return; }
+  const v = D.vendedoras.find(v2=>v2.id===vendId);
+  if(!v){ showToast('Vendedora não encontrada','err'); return; }
+  const vd = D.vendasVend[vendId]||{};
+
+  // Filtrar dias no período
+  const dias = Object.keys(vd)
+    .filter(d=>d>=de && d<=ate)
+    .sort();
+
+  let fatTotal=0, transTotal=0, anivTotal=0, inativTotal=0;
+  dias.forEach(d=>{
+    fatTotal   += Number(vd[d].val   ||0);
+    transTotal += Number(vd[d].trans ||0);
+    anivTotal  += Number(vd[d].aniv  ||0);
+    inativTotal+= Number(vd[d].inativ||0);
+  });
+  const tmMedio = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
+  const metaP   = v.metaMes||0;
+
+  // KPIs
+  const kpis = document.getElementById('hist-vend-kpis');
+  if(kpis) kpis.innerHTML = [
+    {l:'Faturamento',v:fmt(fatTotal),c:'var(--ouro)'},
+    {l:'TM Médio',v:fmt(tmMedio),c:'var(--azul)'},
+    {l:'Atend.',v:transTotal,c:'var(--verde)'},
+    {l:'Aniversariantes',v:anivTotal,c:'var(--roxo)'},
+    {l:'Inativos',v:inativTotal,c:'var(--laranja)'},
+    {l:'Dias trabalhados',v:dias.length,c:'var(--muted)'},
+  ].map(k=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
+    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${k.l}</div>
+    <div style="font-size:20px;font-weight:700;color:${k.c}">${k.v}</div>
+  </div>`).join('');
+
+  // Tabela dia a dia
+  const tabela = document.getElementById('hist-vend-tabela');
+  if(tabela) tabela.innerHTML = dias.length
+    ? `<div style="overflow-x:auto"><table class="dtable">
+        <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+        <tbody>${dias.map(d=>{
+          const r=vd[d];
+          const fat2=Number(r.val||0);
+          const trans2=Number(r.trans||0);
+          const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
+          return `<tr>
+            <td>${d.split('-').reverse().join('/')}</td>
+            <td style="color:var(--verde);font-weight:600">${fmt(fat2)}</td>
+            <td style="color:var(--azul)">${fmt(tm2)}</td>
+            <td>${trans2}</td>
+            <td>${r.aniv||0}</td>
+            <td>${r.inativ||0}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`
+    : `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+
+  // Campanhas ativas no período
+  const camps = document.getElementById('hist-vend-campanhas');
+  if(camps){
+    const campAtivas = (D.campanhas||[]).filter(c=>{
+      return c.vendId===vendId || c.vendedoras?.includes(vendId);
+    });
+    camps.innerHTML = campAtivas.length
+      ? campAtivas.map(c=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:10px;margin-bottom:8px">
+          <div style="font-weight:600">${c.nome||'Campanha'}</div>
+          <div style="font-size:11px;color:var(--muted)">${c.inicio||''} a ${c.fim||''}</div>
+        </div>`).join('')
+      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma campanha registrada para esta vendedora.</div>`;
+  }
+
+  document.getElementById('hist-vend-resultado').style.display='';
+}
+
 function renderVendRanking(per){
   const lid=lojaId();let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
   vends=vends.map(v=>({...v,val:calcVendPer(v.id,per)})).sort((a,b)=>b.val-a.val);
@@ -5116,22 +5279,26 @@ function renderRankings(tab) {
   // ── Ranking TM das Vendedoras da rede
   const allVTM = D.vendedoras.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
-    let fat=0, nV=0;
-    if(perTM==='dia'){
-      fat=D.vendasVend[v.id]?.[hoje()]?.val||0;
-      nV=fat>0?1:0;
-    } else if(perTM==='semana'){
-      const hoje_d=new Date();hoje_d.setHours(0,0,0,0);
-      const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
-      const seg=new Date(hoje_d);seg.setDate(hoje_d.getDate()-diff);
-      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d){const dt=d.toISOString().slice(0,10);const v2=D.vendasVend[v.id]?.[dt]?.val||0;if(v2>0){fat+=v2;nV++;}}}
-    } else {
-      const mes=hoje().slice(0,7);
-      Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d.startsWith(mes)&&(vd.val||0)>0){fat+=vd.val;nV++;}});
-    }
-    const tm=nV>0?fat/nV:0;
-    return {...v, fat, nV, tm, lojaNome:loja?.nome||v.loja};
-  }).filter(v=>v.nV>0).sort((a,b)=>b.tm-a.tm).slice(0,10);
+    const tm = calcTMVend(v.id, perTM);
+    const fat = calcVendPer(v.id, perTM);
+    const trans = (() => {
+      const vd=D.vendasVend[v.id]||{};
+      let t=0;
+      if(perTM==='dia'){ t=Number(vd[hoje()]?.trans||0); }
+      else if(perTM==='semana'){
+        const hd=new Date();hd.setHours(0,0,0,0);
+        const diff=hd.getDay()===0?6:hd.getDay()-1;
+        const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
+        for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){t+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);}}
+      } else {
+        const mes=hoje().slice(0,7);
+        Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes))t+=Number(vd2.trans||0);});
+      }
+      return t;
+    })();
+    const nV = fat>0 ? 1 : 0; // manter compatibilidade display
+    return {...v, fat, nV, trans, tm, lojaNome:loja?.nome||v.loja};
+  }).filter(v=>v.fat>0).sort((a,b)=>b.tm-a.tm).slice(0,10);
   const maxVTM=allVTM[0]?.tm||1;
   document.getElementById('rank-tm-vends').innerHTML = allVTM.length
     ? allVTM.map((v,i)=>{
@@ -5142,7 +5309,7 @@ function renderRankings(tab) {
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
               <div style="width:${maxVTM>0?v.tm/maxVTM*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
             </div>
-            <div class="rv">${v.lojaNome} · ${v.nV} vendas · ${fmt(v.fat)}</div>
+            <div class="rv">${v.lojaNome} · ${v.trans||v.nV} atend. · ${fmt(v.fat)}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:15px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
@@ -5211,21 +5378,23 @@ function renderRankingLoja() {
 
   // ── Ranking TM por vendedora da loja
   const vendsTM = D.vendedoras.filter(v=>v.loja===lid).map(v=>{
-    let fat=0, nV=0;
-    if(perV==='dia'){
-      fat=D.vendasVend[v.id]?.[hj]?.val||0; nV=fat>0?1:0;
-    } else if(perV==='semana'){
+    const fat   = calcVendPer(v.id, perV);
+    const tm    = calcTMVend(v.id, perV);
+    const vd    = D.vendasVend[v.id]||{};
+    let trans   = 0;
+    if(perV==='dia'){ trans=Number(vd[hj]?.trans||0); }
+    else if(perV==='semana'){
       const hd=new Date();hd.setHours(0,0,0,0);
       const diff=hd.getDay()===0?6:hd.getDay()-1;
       const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
-      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){const dt=d.toISOString().slice(0,10);const vv=D.vendasVend[v.id]?.[dt]?.val||0;if(vv>0){fat+=vv;nV++;}}}
+      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){trans+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);}}
     } else {
       const mes=hj.slice(0,7);
-      Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d.startsWith(mes)&&(vd.val||0)>0){fat+=vd.val;nV++;}});
+      Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes))trans+=Number(vd2.trans||0);});
     }
-    const tm=nV>0?fat/nV:0;
-    return {...v,fat,nV,tm};
-  }).filter(v=>v.nV>0).sort((a,b)=>b.tm-a.tm);
+    const nV=fat>0?1:0;
+    return {...v,fat,trans,nV,tm};
+  }).filter(v=>v.fat>0).sort((a,b)=>b.tm-a.tm);
   const maxVTML=vendsTM[0]?.tm||1;
   const clsL=['r1','r2','r3','rx','rx'];
   document.getElementById('rank-tm-vends-loja').innerHTML = vendsTM.length
@@ -5236,7 +5405,7 @@ function renderRankingLoja() {
           <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
             <div style="width:${maxVTML>0?v.tm/maxVTML*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
           </div>
-          <div class="rv">${v.nV} vendas · Fat: ${fmt(v.fat)}</div>
+          <div class="rv">${v.trans||v.nV} atend. · Fat: ${fmt(v.fat)}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:15px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
