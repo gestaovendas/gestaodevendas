@@ -7,11 +7,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <script type="module">
-// ── FIREBASE: usa REST API diretamente, sem precisar de Authentication ──
-// Isso resolve o problema de permission-denied pois as regras serão abertas por appKey
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
@@ -24,33 +22,23 @@ const firebaseConfig = {
 
 try{
   const app = initializeApp(firebaseConfig);
-  const db  = getFirestore(app);
   const auth = getAuth(app);
+  const db   = getFirestore(app);
 
-  window._fbOk   = true;
-  window._fbDb   = db;
-  window._auth   = auth;
-  window._authFn = { signOut };
+  window._fbOk  = true;
+  window._authFn = {signInWithEmailAndPassword, signOut};
 
+  // ── Expor save/load diretamente no módulo onde db está disponível ──
   window.fsGravar = async function(dadosJSON){
     try{
       await setDoc(doc(db,"avatim","principal"), {
-        dados:  dadosJSON,
-        ts:     Date.now(),
-        por:    window._currentUser?.email||"sistema",
-        appKey: "avatim-gestao-2024"
+        dados: dadosJSON,
+        ts:    Date.now(),
+        por:   window._currentUser?.email||""
       });
       console.log("[Avatim] ✅ Salvo no Firestore");
-      const badge = document.getElementById("sync-badge");
-      if(badge){
-        badge.textContent = "☁️ Salvo " + new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-        badge.style.display = "block";
-      }
     }catch(e){
       console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
-      // Mostrar erro no badge
-      const badge = document.getElementById("sync-badge");
-      if(badge){ badge.textContent = "⚠️ Erro sync: "+e.code; badge.style.display="block"; badge.style.color="var(--verm)"; }
     }
   };
 
@@ -69,21 +57,28 @@ try{
     }
   };
 
-  // Firebase pronto
-  if(window._fbReadyResolve) window._fbReadyResolve();
-  console.log("[Avatim] Firebase pronto ✅");
+  // ── Auth ──
+  const runAuth = ()=>onAuthStateChanged(auth, user=>{
+    if(window._localLogin) return;
+    window._currentUser = user;
+    if(user){
+      window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+      if(typeof showApp==="function") showApp();
+    } else {
+      if(typeof showLogin==="function") showLogin();
+    }
+  });
+  if(document.readyState==="loading"){
+    document.addEventListener("DOMContentLoaded", runAuth);
+  } else {
+    runAuth();
+  }
 
 }catch(e){
   console.error("[Avatim] Firebase init erro:", e.message);
   window._fbOk = false;
-  if(window._fbReadyResolve) window._fbReadyResolve();
+  document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
 }
-</script>
-
-<script>
-// Promise que resolve quando Firebase terminar — com timeout de 6s
-window._fbReady = new Promise(resolve => { window._fbReadyResolve = resolve; });
-setTimeout(() => { if(window._fbReadyResolve){ window._fbReadyResolve(); } }, 6000);
 </script>
 
 <script>
@@ -498,7 +493,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
     <button class="ni active" onclick="nav('dash')" id="nav-dash"><span class="ic">&#9672;</span>Dashboard</button>
-    <button class="ni" onclick="nav('lanc')" id="nav-lanc"><span class="ic">&#10022;</span>Lancamentos</button>
+    <button class="ni" onclick="nav('lanc')" id="nav-lanc"><span class="ic">📊</span>Painel do Dia</button>
     <button class="ni" onclick="nav('metas')" id="nav-metas"><span class="ic">&#9676;</span>Metas &amp; KPIs</button>
   </div>
   <div class="sb-sec">
@@ -525,7 +520,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
   <div class="sb-foot">
     <div class="sb-user" id="sb-user"></div>
-    <button class="btn-out" onclick="confirmarSair()"><span>&#8619;</span> Sair</button>
+    <button class="btn-out" onclick="logout()"><span>&#8619;</span> Sair</button>
   </div>
 </nav>
 
@@ -539,7 +534,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
       <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde)"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
-      <button id="btn-force-sync" onclick="forceSyncToFirestore()" style="display:none;background:var(--ouro);color:#000;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer">☁️ Enviar dados</button>
     </div>
   </div>
   <!-- Alerta de Ritmo -->
@@ -649,10 +643,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 <!-- LANCAMENTO -->
 <div class="page" id="page-lanc">
-  <div class="ph"><div><h1 class="pt">Lancamento <span>do Dia</span></h1><div class="ps" id="lanc-sub">Preencha o valor de cada vendedora — o total é calculado automaticamente</div></div></div>
+  <div class="ph">
+    <div>
+      <h1 class="pt">Painel <span>do Dia</span></h1>
+      <div class="ps" id="lanc-sub">Acompanhamento em tempo real — vendas alimentadas pelas vendedoras</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="tabs" style="margin:0">
+        <button class="tab active" id="ptab-hoje" onclick="tabPainel('hoje',this)">Hoje</button>
+        <button class="tab" id="ptab-semana" onclick="tabPainel('semana',this)">Semana</button>
+        <button class="tab" id="ptab-mes" onclick="tabPainel('mes',this)">Mês</button>
+      </div>
+    </div>
+  </div>
 
-  <!-- Meta do dia e semana (visível para a loja) -->
-  <div id="lanc-metas-box" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+  <!-- METAS DO PERÍODO -->
+  <div id="lanc-metas-box" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
     <div style="background:var(--card2);border:1px solid rgba(201,168,76,.25);border-radius:10px;padding:12px;text-align:center">
       <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta do Dia</div>
       <div style="font-size:20px;font-weight:700;color:var(--ouro)" id="lanc-meta-dia">—</div>
@@ -661,37 +667,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta da Semana</div>
       <div style="font-size:20px;font-weight:700;color:var(--verde)" id="lanc-meta-sem">—</div>
     </div>
+    <div style="background:var(--card2);border:1px solid rgba(100,100,255,.2);border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta do Mês</div>
+      <div style="font-size:20px;font-weight:700;color:var(--azul)" id="lanc-meta-mes">—</div>
+    </div>
   </div>
 
+  <!-- CARDS VENDEDORAS DO DIA -->
   <div class="sc">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-      <div class="ig" style="flex:1;margin:0"><label>Data</label><input type="date" id="l-data"></div>
-      <div style="font-size:10px;color:var(--muted);padding-top:18px">Altere só se lançar dia anterior</div>
-    </div>
+    <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Realizado</div>
     <div id="vend-lanc-grid"></div>
-
-    <!-- Total da loja (soma automática) -->
-    <div id="soma-vend-box" style="display:none;margin-top:16px">
-      <div style="background:linear-gradient(135deg,rgba(201,168,76,.12),rgba(201,168,76,.04));border:1px solid rgba(201,168,76,.4);border-radius:12px;padding:16px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Total da Loja</div>
-        <div style="font-family:Playfair Display,serif;font-size:28px;font-weight:700;color:var(--ouro)" id="soma-vend">R$ 0</div>
-        <div id="soma-pct-meta" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
-      </div>
-    </div>
-
-    <!-- Obs -->
-    <div class="ig" style="margin-top:14px"><label>Observação (opcional)</label><input type="text" id="l-obs" placeholder="Ex: promoção, evento, faltou produto..."></div>
   </div>
 
   <!-- CONSOLIDADO DIA / SEMANA / MÊS + TM -->
   <div class="sc" id="lanc-consolidado" style="margin-top:0">
     <div class="st" style="margin-bottom:12px">📊 Consolidado — TM por Período</div>
     <div id="lanc-consolidado-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
-  </div>
-
-  <div class="btn-r">
-    <button class="btn-p" onclick="salvarLanc()">💾 Salvar Lançamento</button>
-    <button class="btn-s" onclick="limparLanc()">Limpar</button>
   </div>
 
   <!-- HISTÓRICO DE LANÇAMENTOS -->
@@ -702,6 +693,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
     <div id="hist-lanc-box"></div>
   </div>
+
+  <!-- campos ocultos para compatibilidade -->
+  <input type="hidden" id="l-data">
+  <input type="hidden" id="l-obs">
+  <div id="soma-vend-box" style="display:none"><div id="soma-vend"></div><div id="soma-pct-meta"></div></div>
 </div>
 
 <!-- METAS & KPIs -->
@@ -2374,62 +2370,34 @@ if(!D.fluxo)      D.fluxo=[];
   }
 })();
 // ── FIRESTORE SYNC ──────────────────────────────────────────
-let _savePending  = false;
-let _saveTimer    = null;
+let _savePending = false;
 
-// save() — salva localStorage IMEDIATAMENTE e agenda sync Firestore
 function save(){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
-  agendarSyncFirestore();
-}
-
-// Agenda um save no Firestore com debounce de 1.5s
-// (evita flood de writes se o usuário salvar várias coisas seguidas)
-function agendarSyncFirestore(){
-  if(_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async ()=>{
-    _saveTimer = null;
-    await window._fbReady;   // espera Firebase estar pronto
-    if(window.fsGravar && window._fbOk){
+  // Usar fsGravar exposto pelo módulo Firebase
+  if(window.fsGravar && window._fbOk){
+    if(_savePending) return;
+    _savePending = true;
+    setTimeout(()=>{
+      _savePending = false;
       window.fsGravar(JSON.stringify(D));
-    }
-  }, 1500);
-}
-
-// Força sync imediato — botão manual
-async function forceSyncToFirestore(){
-  if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; }
-  await window._fbReady;
-  if(!window.fsGravar || !window._fbOk){
-    showToast("⚠️ Firebase não conectado — verifique as regras.");
-    return;
+    }, 800);
   }
-  await window.fsGravar(JSON.stringify(D));
-  showToast("☁️ Dados enviados ao Firestore!");
 }
 
 async function loadFromFirestore(){
+  if(!window.fsCarregar || !window._fbOk) return false;
   try{
-    console.log("[Avatim] Aguardando Firebase...");
-    await window._fbReady;
-
-    if(!window.fsCarregar || !window._fbOk){
-      console.warn("[Avatim] Firebase indisponível — usando localStorage");
-      return false;
-    }
-
-    console.log("[Avatim] Carregando do Firestore...");
+    console.log("[Avatim] Buscando dados no Firestore...");
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       D = JSON.parse(dadosJSON);
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados do Firestore!");
       return true;
     }
-    console.log("[Avatim] Nenhum dado no Firestore — usando localStorage");
     return false;
   }catch(e){
-    console.warn("[Avatim] Erro ao carregar Firestore:", e.message);
+    console.warn("[Avatim] loadFromFirestore erro:", e.message);
     return false;
   }
 }
@@ -2725,10 +2693,7 @@ function showApp(){
   document.getElementById("dash-badge").textContent=now.toLocaleDateString("pt-BR");
   document.getElementById("l-data").value=hoje();
   document.getElementById("vl-data").value=hoje();
-  if(window._fbOk){
-    const db=document.getElementById("demo-box");if(db)db.style.display="none";
-    const btnSync=document.getElementById("btn-force-sync");if(btnSync)btnSync.style.display="inline-block";
-  }
+  if(window._fbOk){const db=document.getElementById("demo-box");if(db)db.style.display="none";}
 
   // Mostrar/esconder itens admin-only
   const adminMode = isAdmin();
@@ -2780,7 +2745,9 @@ async function login(){
       if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
       window._localLogin=true;
       window._currentUser={email};window._userLoja=u;
-      // Firestore usa regras sem auth (appKey) — não precisa de Firebase Auth
+      if(window._fbOk&&window._authFn&&window._auth){
+        window._authFn.signInWithEmailAndPassword(window._auth,email,senha).catch(()=>{});
+      }
       showApp();return;
     }catch(e){}
   }
@@ -2788,36 +2755,7 @@ async function login(){
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
-function logout(){
-  window._localLogin = false;
-  window._currentUser = null;
-  window._userLoja = null;
-  if(window._fbOk && window._auth && window._authFn){
-    window._authFn.signOut(window._auth).catch(()=>{});
-  }
-  if(typeof _autoRefreshTimer !== "undefined" && _autoRefreshTimer){
-    clearInterval(_autoRefreshTimer);
-    _autoRefreshTimer = null;
-  }
-  showLogin();
-}
-
-function confirmarSair(){
-  const modal = document.createElement('div');
-  modal.id = 'modal-sair';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999';
-  modal.innerHTML = `
-    <div style="background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:32px;max-width:320px;width:90%;text-align:center">
-      <div style="font-size:36px;margin-bottom:12px">👋</div>
-      <div style="font-size:16px;font-weight:600;color:var(--texto);margin-bottom:8px">Deseja sair?</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:24px">Você precisará fazer login novamente para acessar o sistema.</div>
-      <div style="display:flex;gap:10px;justify-content:center">
-        <button onclick="document.getElementById('modal-sair').remove()" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--borda);background:var(--card2);color:var(--texto);font-size:13px;cursor:pointer">Cancelar</button>
-        <button onclick="document.getElementById('modal-sair').remove();logout();" style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--verm);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Sair</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-}
+function logout(){window._localLogin=false;if(window._fbOk&&window._authFn){window._authFn.signOut(window._auth);}window._currentUser=null;window._userLoja=null;showLogin();}
 
 // ============================================================
 // NAVEGACAO
@@ -2836,13 +2774,13 @@ function nav(pg){
     comissao:renderComissao,
     estoque:()=>{renderCampAtivas();renderEstqCritico();renderProdutos("","");},
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
-    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();}})[pg]?.();
+    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>renderPainelDia()})[pg]?.();
 }
 
 // ============================================================
 // DASHBOARD
 // ============================================================
-function carregarDash(){ try {
+function carregarDash(){
   // Garantir que D está inicializado
   if(!D.metasLoja) D.metasLoja={};
   if(!D.vendedoras) D.vendedoras=[];
@@ -2933,7 +2871,6 @@ function carregarDash(){ try {
   }
 
   // Projecao card
-  const m = isAdmin() ? {mes:metaMesRef, superMes:superMesRef, ticket:0} : (getMetas(lid)||{});
   if(proj){
     const pctProj=m.mes>0?proj.projecao/m.mes*100:0, cpSM=m.superMes>0?proj.projecao/m.superMes*100:0;
     document.getElementById("projecao-dash").innerHTML=`
@@ -2951,7 +2888,6 @@ function carregarDash(){ try {
       </div>`;
   }
 
-  const v = D.vendas[lid]?.[hj] || {fat:0, trans:0, tm:0, cli:0, clinov:0, visit:0};
   gerarDicas(v,m,pD);
   renderRankHoje();
   renderRankVendHoje();
@@ -2974,7 +2910,6 @@ function carregarDash(){ try {
   // Mostrar/esconder Ranking Lojas vs Loja
   const btnAdm=document.getElementById("btn-alllojas");
   if(btnAdm) btnAdm.style.display=isAdmin()?"inline-flex":"none";
-  } catch(e){ console.error("[Avatim] carregarDash erro:", e.message, e.stack); }
 }
 
 function setBar(id,pct,real,meta,superMeta){
@@ -3149,6 +3084,64 @@ function renderRankVendHoje(){
 // ============================================================
 // LANCAMENTO
 // ============================================================
+// ============================================================
+// PAINEL DO DIA
+// ============================================================
+let _painelPer = 'hoje';
+
+function tabPainel(per, el){
+  _painelPer = per;
+  document.querySelectorAll('#page-lanc .tab').forEach(e=>e.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderPainelDia();
+}
+
+function renderPainelDia(){
+  const lid = lojaId();
+  const per = _painelPer;
+
+  // Atualizar metas
+  const m = getMetas(lid)||{};
+  const metaDia = document.getElementById('lanc-meta-dia');
+  const metaSem = document.getElementById('lanc-meta-sem');
+  const metaMes = document.getElementById('lanc-meta-mes');
+  if(metaDia) metaDia.textContent = fmt(m.dia||0);
+  if(metaSem) metaSem.textContent = fmt(m.sem||0);
+  if(metaMes) metaMes.textContent = fmt(m.mes||0);
+
+  // Renderizar cards das vendedoras no período
+  const grid = document.getElementById('vend-lanc-grid');
+  if(grid){
+    const vends = D.vendedoras.filter(v=>v.loja===lid);
+    if(!vends.length){
+      grid.innerHTML = "<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Nenhuma vendedora cadastrada nesta loja.</div>";
+    } else {
+      grid.innerHTML = "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px'>" +
+        vends.map(v=>{
+          const val = per==='hoje' ? calcVendPer(v.id,'dia') : per==='semana' ? calcVendPer(v.id,'semana') : calcVendPer(v.id,'mes');
+          const meta = per==='hoje' ? (getMetas(lid).dia/Math.max(1,vends.length)) : per==='semana' ? (getMetas(lid).sem/Math.max(1,vends.length)) : (v.metaMes||0);
+          const pct = meta>0 ? val/meta*100 : 0;
+          const cor = pct>=125?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
+          const nat = per==='hoje' ? calcNAtend(lid,'dia') : per==='semana' ? calcNAtend(lid,'semana') : calcNAtend(lid,'mes');
+          const tm = nat>0 ? val/nat : 0;
+          return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:14px'>"
+            +"<div style='font-size:12px;font-weight:700;color:var(--texto);margin-bottom:2px'>"+v.nome+"</div>"
+            +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+v.cargo+" · "+lojaNome()+"</div>"
+            +"<div style='font-size:22px;font-weight:700;color:"+cor+";margin-bottom:4px'>"+fmt(val)+"</div>"
+            +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+pct.toFixed(0)+"% da meta · TM "+fmt(tm)+"</div>"
+            +"<div style='height:4px;background:var(--borda);border-radius:2px'>"
+              +"<div style='height:4px;background:"+cor+";border-radius:2px;width:"+Math.min(100,pct)+"%;transition:width .4s'></div>"
+            +"</div>"
+          +"</div>";
+        }).join('') + "</div>";
+    }
+  }
+
+  // Atualizar consolidado
+  renderConsolidadoLanc(lid);
+  renderHistoricoLanc();
+}
+
 function carregarVendsForm(lidOverride){
   const lid = lidOverride || lojaId();
   const hj=hoje();
@@ -3913,7 +3906,9 @@ function lancarVendaVend(){
   if(!id||!data||val===0){showToast("Preencha todos os campos!","err");return;}
   if(!D.vendasVend[id])D.vendasVend[id]={};
   D.vendasVend[id][data]={val,trans:parseInt(document.getElementById("vl-trans").value)||0};
-  save();showToast("Venda lancada!");renderVendRanking(_tabVend);renderTabelaVend();
+  save();showToast("✅ Venda lançada!");renderVendRanking(_tabVend);renderTabelaVend();
+  // Atualizar painel do dia se estiver aberto
+  if(document.getElementById('page-lanc')?.classList.contains('active')) renderPainelDia();
 }
 
 function renderVendRanking(per){
@@ -5512,7 +5507,7 @@ const FB_CONFIG = {
   messagingSenderId: '',
   appId:             ''
 };
-const FB_OK = ()=>window._fbOk || (FB_CONFIG.apiKey&&FB_CONFIG.projectId);
+const FB_OK = ()=>FB_CONFIG.apiKey&&FB_CONFIG.projectId;
 
 // Inicializar Firebase (carrega SDK dinamicamente)
 async function fbInit(){
@@ -5534,14 +5529,7 @@ async function fbInit(){
 }
 
 // Salvar documento no Firestore
-// Usa o módulo Firebase (window._fbDb) se disponível, senão o compat SDK
 async function fbSet(collection, docId, data){
-  // Preferir instância do módulo ESM (já inicializada com a config real)
-  if(window._fbOk && window._fbDb){
-    const {doc, setDoc} = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
-    await setDoc(doc(window._fbDb, collection, docId), data, {merge:true});
-    return;
-  }
   const db = await fbInit();
   if(!db) return;
   await db.collection(collection).doc(docId).set(data, {merge:true});
@@ -5549,15 +5537,6 @@ async function fbSet(collection, docId, data){
 
 // Buscar documentos do Firestore
 async function fbGet(collection, field, value){
-  // Preferir instância do módulo ESM (já inicializada com a config real)
-  if(window._fbOk && window._fbDb){
-    const {collection: col, query, where, getDocs, getFirestore} = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
-    const db = window._fbDb;
-    const colRef = col(db, collection);
-    const q = value ? query(colRef, where(field,'==',value)) : colRef;
-    const snap = await getDocs(q);
-    return snap.docs.map(d=>({id:d.id,...d.data()}));
-  }
   const db = await fbInit();
   if(!db) return [];
   const snap = value
