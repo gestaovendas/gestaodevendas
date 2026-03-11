@@ -4191,6 +4191,65 @@ function preencherSelHistVend(){
   if(ate && !ate.value) ate.value = hoje_;
 }
 
+// ── Editar lançamento de vendedora individual ──────────
+function editarLancVend(vendId, data){
+  // Navega para vendedoras, seleciona a vendedora e preenche os campos
+  nav('vendedoras');
+  setTimeout(()=>{
+    const selVend = document.getElementById('vl-vend');
+    const selData = document.getElementById('vl-data');
+    const inpVal  = document.getElementById('vl-val');
+    const inpTrans= document.getElementById('vl-trans');
+    if(selVend) selVend.value = vendId;
+    if(selData) selData.value = data;
+    const r = D.vendasVend[vendId]?.[data];
+    if(r){
+      if(inpVal)   inpVal.value   = (r.val||0).toFixed(2).replace('.',',');
+      if(inpTrans) inpTrans.value = r.trans||0;
+    }
+    showToast('✏️ Dados de '+data.split('-').reverse().join('/')+' carregados. Corrija e clique Lançar.', 'ok');
+    // Scroll para o formulário
+    document.getElementById('vl-vend')?.scrollIntoView({behavior:'smooth', block:'center'});
+  }, 300);
+}
+
+// ── Excluir lançamento de vendedora individual ─────────
+function excluirLancVend(vendId, data, btn){
+  const dFmt = data.split('-').reverse().join('/');
+  if(!confirm('Excluir lançamento de '+dFmt+' desta vendedora?')) return;
+  if(D.vendasVend[vendId]) delete D.vendasVend[vendId][data];
+  save();
+  showToast('🗑️ Lançamento de '+dFmt+' excluído.', 'ok');
+  // Remove a linha da tabela
+  btn?.closest('tr')?.remove();
+  // Atualiza KPIs do histórico
+  buscarHistVend();
+}
+
+// ── Editar lançamento do dia inteiro (loja) ────────────
+function editarLancDia(lid, data){
+  // Usa editarLanc existente que já carrega no formulário de lançamentos
+  editarLanc(lid, data);
+  nav('lanc');
+  showToast('✏️ Dados de '+data.split('-').reverse().join('/')+' carregados no Painel do Dia.', 'ok');
+}
+
+// ── Excluir lançamento do dia inteiro (loja) ───────────
+function excluirLancDia(lid, data, btn){
+  const dFmt = data.split('-').reverse().join('/');
+  if(!confirm('Excluir TODOS os lançamentos de '+dFmt+' desta loja? Esta ação não pode ser desfeita.')) return;
+  // Remove D.vendas do dia
+  if(D.vendas[lid]) delete D.vendas[lid][data];
+  // Remove vendasVend de todas as vendedoras da loja naquele dia
+  D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+    if(D.vendasVend[v.id]) delete D.vendasVend[v.id][data];
+  });
+  save();
+  showToast('🗑️ Lançamentos de '+dFmt+' excluídos.', 'ok');
+  btn?.closest('tr')?.remove();
+  buscarHistLoja();
+}
+
 function buscarHistVend(){
   const vendId = document.getElementById('hist-sel-vend')?.value;
   const de     = document.getElementById('hist-de')?.value;
@@ -4233,19 +4292,24 @@ function buscarHistVend(){
   const tabela = document.getElementById('hist-vend-tabela');
   if(tabela) tabela.innerHTML = dias.length
     ? `<div style="overflow-x:auto"><table class="dtable">
-        <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+        <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
         <tbody>${dias.map(d=>{
           const r=vd[d];
           const fat2=Number(r.val||0);
           const trans2=Number(r.trans||0);
           const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
+          const dFmt=d.split('-').reverse().join('/');
           return `<tr>
-            <td>${d.split('-').reverse().join('/')}</td>
+            <td>${dFmt}</td>
             <td style="color:var(--verde);font-weight:600">${fmt(fat2)}</td>
             <td style="color:var(--azul)">${fmt(tm2)}</td>
             <td>${trans2}</td>
             <td>${r.aniv||0}</td>
             <td>${r.inativ||0}</td>
+            <td style="white-space:nowrap">
+              <button onclick="editarLancVend('${vendId}','${d}')" title="Editar" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px">✏️</button>
+              <button onclick="excluirLancVend('${vendId}','${d}',this)" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>
+            </td>
           </tr>`;
         }).join('')}</tbody>
       </table></div>`
@@ -5622,7 +5686,7 @@ function buscarHistLoja(){
   if(tab) tab.innerHTML=dias.length
     ?`<div style="overflow-x:auto"><table class="dtable">
       <thead><tr>
-        <th>Data</th><th>Realizado</th><th>Ideal/dia</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th>
+        <th>Data</th><th>Realizado</th><th>Ideal/dia</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th>
       </tr></thead>
       <tbody>${dias.map(d=>{
         const r=diasMap[d];
@@ -5639,6 +5703,10 @@ function buscarHistLoja(){
           <td>${r.trans}</td>
           <td>${r.aniv}</td>
           <td>${r.inativ}</td>
+          <td style="white-space:nowrap">
+            <button onclick="editarLancDia('${lid}','${d}')" title="Editar" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px">✏️</button>
+            <button onclick="excluirLancDia('${lid}','${d}',this)" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>
+          </td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`
