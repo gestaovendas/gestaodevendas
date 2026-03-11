@@ -2366,7 +2366,11 @@ async function loadFromFirestore(){
       return false;
     }
   }catch(e){
-    console.warn("[Avatim] ❌ Firestore load erro:", e.message);
+    if(e.code==='permission-denied'){
+      console.warn("[Avatim] ⚠️ Firestore: permissão negada. Verifique as regras no Firebase Console.");
+    } else {
+      console.warn("[Avatim] ❌ Firestore load erro:", e.message);
+    }
     return false;
   }
 }
@@ -2750,6 +2754,11 @@ function nav(pg){
 // DASHBOARD
 // ============================================================
 function carregarDash(){
+  // Garantir que D está inicializado
+  if(!D.metasLoja) D.metasLoja={};
+  if(!D.vendedoras) D.vendedoras=[];
+  if(!D.vendasVend) D.vendasVend={};
+  if(!D.vendas) D.vendas={};
   const lid=lojaId(), hj=hoje();
 
   // ── Admin vê TOTAL DA REDE; loja vê SÓ a sua
