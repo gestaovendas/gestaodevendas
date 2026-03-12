@@ -2799,6 +2799,53 @@ function diasDoMes(mesRef){
   const [y,m]=mesRef.split("-").map(Number);
   return new Date(y,m,0).getDate();
 }
+// ── CALENDÁRIO POR LOJA ──────────────────────────────────────
+// Shopping (Mooca + Ibirapuera): abrem todos os dias (0=dom a 6=sab)
+// Demais lojas: seg a sab (fecha domingo = dia 0)
+const LOJAS_7DIAS = ["mooca","ibirapuera"]; // abrem domingo também
+
+function diasAbertosNoMes(lid){
+  // Conta dias em que a loja abre no mês atual
+  const h = new Date();
+  const ano = h.getFullYear(), mes = h.getMonth();
+  const totalDias = new Date(ano, mes+1, 0).getDate();
+  const abre7 = LOJAS_7DIAS.includes(lid);
+  let count = 0;
+  for(let d=1; d<=totalDias; d++){
+    const dow = new Date(ano, mes, d).getDay();
+    if(abre7 || dow !== 0) count++; // fecha domingo se não é shopping
+  }
+  return count;
+}
+
+function diasAbertosPassados(lid){
+  // Conta dias abertos até hoje (inclusive)
+  const h = new Date();
+  const ano = h.getFullYear(), mes = h.getMonth(), hoje = h.getDate();
+  const abre7 = LOJAS_7DIAS.includes(lid);
+  let count = 0;
+  for(let d=1; d<=hoje; d++){
+    const dow = new Date(ano, mes, d).getDay();
+    if(abre7 || dow !== 0) count++;
+  }
+  return Math.max(1, count);
+}
+
+function diasAbertosRestantes(lid){
+  // Conta dias abertos a partir de amanhã até fim do mês
+  const h = new Date();
+  const ano = h.getFullYear(), mes = h.getMonth(), hoje = h.getDate();
+  const totalDias = new Date(ano, mes+1, 0).getDate();
+  const abre7 = LOJAS_7DIAS.includes(lid);
+  let count = 0;
+  for(let d=hoje+1; d<=totalDias; d++){
+    const dow = new Date(ano, mes, d).getDay();
+    if(abre7 || dow !== 0) count++;
+  }
+  return Math.max(1, count);
+}
+
+// Manter funções genéricas (sem lid) para compatibilidade com admin/rede
 function diasUteisNoMes(){
   return diasDoMes(mesAtual());
 }
@@ -2982,10 +3029,13 @@ function semaforoRitmo(pct){
 
 // Projecao do mes
 function calcProjecao(lid){
-  const realMes=calcMes(lid), dp=diasPassadosNoMes(), dr=diasUteisRestantes(), du=diasUteisNoMes();
-  if(dp<=0||realMes===0)return null;
-  const mediaD=realMes/dp;
-  const projecao=realMes+(mediaD*dr);
+  const realMes = calcMes(lid);
+  const dp = diasAbertosPassados(lid);
+  const dr = diasAbertosRestantes(lid);
+  const du = diasAbertosNoMes(lid);
+  if(dp<=0||realMes===0) return null;
+  const mediaD = realMes/dp;
+  const projecao = realMes+(mediaD*dr);
   return{projecao,mediaD,dr,dp,du};
 }
 function calcProjecaoRede(){
@@ -4507,8 +4557,12 @@ function renderVendRanking(per){
 }
 
 function calcProjecao_vend(id){
-  const realMes=calcVendPer(id,"mes"),dp=diasPassadosNoMes(),dr=diasUteisRestantes();
-  if(dp<=0||realMes===0)return null;
+  const v = D.vendedoras.find(x=>x.id===id);
+  const lid = v?.loja || lojaId();
+  const realMes = calcVendPer(id,"mes");
+  const dp = diasAbertosPassados(lid);
+  const dr = diasAbertosRestantes(lid);
+  if(dp<=0||realMes===0) return null;
   return realMes+(realMes/dp*dr);
 }
 
