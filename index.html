@@ -5298,10 +5298,10 @@ function gerarRel(){
     <!-- HEADER -->
     <div style="text-align:center;padding:12px 0 18px;border-bottom:1px solid var(--borda);margin-bottom:20px">
       <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING ${perLabel.toUpperCase()} AVATIM</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:4px">${isMes ? "Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}) : "Semana · "+new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:4px">${isMes?"Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}):"Semana · "+new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
     </div>
 
-    <!-- KPIs resumo topo -->
+    <!-- KPIs topo -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">
       <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:10px;padding:12px;text-align:center">
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Atendimentos</div>
@@ -5325,11 +5325,11 @@ function gerarRel(){
       </div>
     </div>
 
-    <!-- ═══ GRÁFICO 1: ATINGIMENTO ════════════════════════ -->
+    <!-- ═══ GRÁFICO 1: ATINGIMENTO (ordenado maior→menor) ═══ -->
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:14px;padding:20px;margin-bottom:20px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px">
-        <div style="font-size:13px;font-weight:700;color:var(--ouro)">📊 Atingimento da Meta — por Loja</div>
-        <div style="display:flex;gap:12px;font-size:10px;color:var(--muted)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;font-weight:700;color:var(--ouro)">🏆 Atingimento da Meta — Ranking por Loja</div>
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--muted)">
           <span><span style="display:inline-block;width:10px;height:10px;background:#8B5CF6;border-radius:2px;margin-right:3px;vertical-align:middle"></span>125%+</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#2ECC87;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Meta ✓</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#C9A84C;border-radius:2px;margin-right:3px;vertical-align:middle"></span>70%+</span>
@@ -5337,18 +5337,27 @@ function gerarRel(){
         </div>
       </div>
       ${(()=>{
-        const BAR_H=180;
-        const maxV=Math.max.apply(null,ld.map(function(l){return l.fat||0;}))||1;
-        const nomes={"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
-        var h='<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H+60)+'px">';
-        ld.forEach(function(l){
-          var hR=maxV>0?Math.max(8,Math.round(l.fat/maxV*BAR_H)):8;
-          var corR=l.pct>=125?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
-          var corP=l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
-          var nome=nomes[l.nome]||l.nome;
+        // Ordenar por % atingimento decrescente para ranking correto
+        var ranked = ld.slice().sort(function(a,b){return b.pct-a.pct;});
+        var BAR_H = 180;
+        var nomes = {"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
+        var medals = ["🥇","🥈","🥉"];
+        var h = '<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H+90)+'px">';
+        ranked.forEach(function(l, i){
+          var corR  = l.pct>=125?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
+          var corP  = l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
+          var hR    = l.pct>0 ? Math.max(8, Math.round(l.pct/ranked[0].pct*BAR_H)) : 6;
+          var nome  = nomes[l.nome]||l.nome;
+          var medal = medals[i]||(i+1)+"º";
           h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">';
-          h+='<div style="font-size:14px;font-weight:900;color:'+corP+';margin-bottom:6px">'+l.pct.toFixed(0)+'%</div>';
-          h+='<div style="width:75%;height:'+hR+'px;background:'+corR+';border-radius:6px 6px 0 0"></div>';
+          h+='<div style="font-size:11px;margin-bottom:2px">'+medal+'</div>';
+          h+='<div style="font-size:15px;font-weight:900;color:'+corP+';margin-bottom:4px">'+l.pct.toFixed(0)+'%</div>';
+          h+='<div style="width:78%;height:'+hR+'px;background:'+corR+';border-radius:6px 6px 0 0;position:relative">';
+          // linha de 100% como referência visual
+          if(l.pct>0){
+            h+='<div style="position:absolute;bottom:'+Math.round(100/l.pct*hR)+'px;left:0;right:0;border-top:1px dashed rgba(255,255,255,.25)"></div>';
+          }
+          h+='</div>';
           h+='<div style="font-size:8px;color:var(--muted);text-align:center;margin-top:6px;line-height:1.4">'+nome+'</div>';
           h+='</div>';
         });
@@ -5357,29 +5366,32 @@ function gerarRel(){
       })()}
     </div>
 
-    <!-- ═══ GRÁFICO 2: TICKET MÉDIO ════════════════════════ -->
+    <!-- ═══ GRÁFICO 2: TICKET MÉDIO (ordenado maior→menor) ═══ -->
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:14px;padding:20px;margin-bottom:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px">
-        <div style="font-size:13px;font-weight:700;color:var(--azul)">🎯 Ticket Médio — por Loja</div>
-        <div style="display:flex;gap:12px;font-size:10px;color:var(--muted)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;font-weight:700;color:var(--azul)">🎯 Ticket Médio — Ranking por Loja</div>
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--muted)">
           <span><span style="display:inline-block;width:10px;height:10px;background:#2ECC87;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Meta ✓</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#C9A84C;border-radius:2px;margin-right:3px;vertical-align:middle"></span>80%+</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Abaixo</span>
         </div>
       </div>
       ${(()=>{
-        var BAR_H2=180;
-        var maxTM=Math.max.apply(null,ld.map(function(l){return l.tm||0;}))||1;
-        var nomes2={"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
-        var h2='<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H2+80)+'px">';
-        ld.forEach(function(l){
-          var hTM=maxTM>0?Math.max(8,Math.round(l.tm/maxTM*BAR_H2)):8;
-          var corTM2=l.pctTM>=100?"#2ECC87":l.pctTM>=80?"#C9A84C":"#ef4444";
-          var nome2=nomes2[l.nome]||l.nome;
+        var rankedTM = ld.slice().sort(function(a,b){return b.pctTM-a.pctTM;});
+        var BAR_H2 = 180;
+        var nomes2 = {"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
+        var medals2 = ["🥇","🥈","🥉"];
+        var h2 = '<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H2+100)+'px">';
+        rankedTM.forEach(function(l, i){
+          var corTM2 = l.pctTM>=100?"#2ECC87":l.pctTM>=80?"#C9A84C":"#ef4444";
+          var hTM   = l.pctTM>0 ? Math.max(8, Math.round(l.pctTM/rankedTM[0].pctTM*BAR_H2)) : 6;
+          var nome2 = nomes2[l.nome]||l.nome;
+          var medal2 = medals2[i]||(i+1)+"º";
           h2+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">';
-          h2+='<div style="font-size:14px;font-weight:900;color:'+corTM2+';margin-bottom:4px">'+l.pctTM.toFixed(0)+'%</div>';
-          h2+='<div style="font-size:9px;color:'+corTM2+';margin-bottom:6px;font-weight:600">'+fmt(l.tm)+'</div>';
-          h2+='<div style="width:75%;height:'+hTM+'px;background:'+corTM2+';border-radius:6px 6px 0 0"></div>';
+          h2+='<div style="font-size:11px;margin-bottom:2px">'+medal2+'</div>';
+          h2+='<div style="font-size:15px;font-weight:900;color:'+corTM2+';margin-bottom:2px">'+l.pctTM.toFixed(0)+'%</div>';
+          h2+='<div style="font-size:10px;color:'+corTM2+';margin-bottom:4px;font-weight:600">'+fmt(l.tm)+'</div>';
+          h2+='<div style="width:78%;height:'+hTM+'px;background:'+corTM2+';border-radius:6px 6px 0 0"></div>';
           h2+='<div style="font-size:8px;color:var(--muted);text-align:center;margin-top:6px;line-height:1.4">'+nome2+'</div>';
           h2+='</div>';
         });
