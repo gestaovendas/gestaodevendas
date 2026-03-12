@@ -3411,7 +3411,7 @@ function renderRankVendHoje(){
     return t;
   }
   let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  vends=vends.map(v=>({...v,val:calcVendP(v)})).sort((a,b)=>b.val-a.val).slice(0,8);
+  vends=vends.map(v=>({...v,val:calcVendP(v),pct:Number(v.metaMes)>0?calcVendP(v)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
   const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx","rx","rx","rx"];
   const ativos=vends.filter(v=>v.val>0);
   document.getElementById("rank-vend-hoje").innerHTML=ativos.length?ativos.map((v,i)=>{
@@ -4479,7 +4479,7 @@ function buscarHistVend(){
 
 function renderVendRanking(per){
   const lid=lojaId();let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  vends=vends.map(v=>({...v,val:calcVendPer(v.id,per)})).sort((a,b)=>b.val-a.val);
+  vends=vends.map(v=>({...v,val:calcVendPer(v.id,per),pct:Number(v.metaMes)>0?calcVendPer(v.id,per)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val);
   const max=vends[0]?.val||1;
   document.getElementById("vend-ranking").innerHTML=vends.length?vends.map((v,i)=>{
     const loja=LOJAS.find(l=>l.id===v.loja),pct=v.metaMes>0?v.val/v.metaMes*100:0;
@@ -4892,7 +4892,7 @@ function renderLojas(per="hoje"){
     </div>`;
   }).join("");
   // Ranking vendedoras da rede
-  let allVends=D.vendedoras.map(v=>({...v,val:calcVendPer(v.id,per==="hoje"?"dia":per)})).sort((a,b)=>b.val-a.val).slice(0,10);
+  let allVends=D.vendedoras.map(v=>({...v,val:calcVendPer(v.id,per==="hoje"?"dia":per),pct:Number(v.metaMes)>0?calcVendPer(v.id,per==="hoje"?"dia":per)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
   document.getElementById("rank-vend-rede").innerHTML=allVends.length?allVends.map((v,i)=>{
     const loja=LOJAS.find(l=>l.id===v.loja),pct=v.metaMes>0?v.val/v.metaMes*100:0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja} &mdash; ${fmt(v.val)}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
@@ -5563,8 +5563,8 @@ function renderRankings(tab) {
   // --- Top vendedoras da rede ---
   const perV = per==='hoje'?'dia':per;
   const allV = D.vendedoras
-    .map(v => ({...v, val: calcVendPer(v.id, perV)}))
-    .sort((a,b) => b.val - a.val)
+    .map(v => ({...v, val: calcVendPer(v.id, perV), pct: Number(v.metaMes)>0?calcVendPer(v.id,perV)/Number(v.metaMes)*100:0}))
+    .sort((a,b) => b.pct-a.pct || b.val-a.val)
     .slice(0, 10);
   const maxV = allV[0]?.val || 1;
   document.getElementById('rank-full-vends-rede').innerHTML = allV.length
@@ -5913,8 +5913,8 @@ function renderRankingLoja() {
   // Vendedoras desta loja
   let vends = D.vendedoras
     .filter(v=>v.loja===lid)
-    .map(v => ({...v, val: calcVendPer(v.id, perV)}))
-    .sort((a,b) => b.val - a.val);
+    .map(v => ({...v, val: calcVendPer(v.id, perV), pct: Number(v.metaMes)>0?calcVendPer(v.id,perV)/Number(v.metaMes)*100:0}))
+    .sort((a,b) => b.pct-a.pct || b.val-a.val);
 
   // Podio
   document.getElementById('rank-podio-vends').innerHTML = vends.length >= 1
@@ -6867,7 +6867,7 @@ function renderGestao() {
       return {...v, val, pct, lojaNome:loja?.nome||v.loja};
     })
     .filter(v=>v.val>0)
-    .sort((a,b)=>b.val-a.val)
+    .sort((a,b)=>b.pct-a.pct||b.val-a.val)
     .slice(0,8);
   const maxV = allV[0]?.val||1;
   document.getElementById('gestao-rank-fat-vends').innerHTML = allV.length
