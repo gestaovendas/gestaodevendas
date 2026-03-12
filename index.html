@@ -3905,10 +3905,13 @@ function renderMetas(){
 
   // Alerta de ritmo
   const alertaEl=document.getElementById("alerta-metas");
-  if(pct>=120) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">🏆</div><div class="alerta-txt"><strong>Super Meta da Franquia! ${pct.toFixed(0)}%</strong> — Incrível!</div></div>`;
-  else if(pct>=100) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">✅</div><div class="alerta-txt"><strong>Meta ${isAdmin()?"da Franquia":""} atingida! ${pct.toFixed(0)}%</strong> — Agora vai pela Super Meta de ${fmt(superMeta)}!</div></div>`;
-  else if(pct>=70) alertaEl.innerHTML=`<div class="alerta-box amarelo"><div class="alerta-icon">⚠️</div><div class="alerta-txt"><strong>${pct.toFixed(0)}% da meta.</strong> Faltam ${fmt(Math.abs(gap))} para bater.</div></div>`;
-  else if(real>0) alertaEl.innerHTML=`<div class="alerta-box vermelho"><div class="alerta-icon">🔴</div><div class="alerta-txt"><strong>Ritmo crítico: ${pct.toFixed(0)}%.</strong> Faltam ${fmt(Math.abs(gap))}. Esforço extra!</div></div>`;
+  // Usar projeção para o alerta (igual ao dashboard) — mais preciso que % realizado
+  const pProj = proj && meta>0 ? proj.projecao/meta*100 : pct;
+  const drLabel = proj?.dr>0 ? ` · ${proj.dr} dias úteis restantes` : "";
+  if(pProj>=125) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">🏆</div><div class="alerta-txt"><strong>Ritmo de Super Meta! Projeção: ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
+  else if(pProj>=100) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">✅</div><div class="alerta-txt"><strong>No ritmo certo! Projeção: ${fmt(proj?.projecao||0)} de ${fmt(meta)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
+  else if(pProj>=70) alertaEl.innerHTML=`<div class="alerta-box amarelo"><div class="alerta-icon">⚠️</div><div class="alerta-txt"><strong>Atenção: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário R$ ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
+  else if(real>0) alertaEl.innerHTML=`<div class="alerta-box vermelho"><div class="alerta-icon">🔴</div><div class="alerta-txt"><strong>Ritmo crítico: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário R$ ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
   else alertaEl.innerHTML="";
 
   // ── PAINEL DE ACOMPANHAMENTO: Hoje / Semana / Mês
