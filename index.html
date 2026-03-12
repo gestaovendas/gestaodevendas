@@ -109,6 +109,21 @@ try{
         });
 
         const docId = "loja_"+lid;
+        // Merge com o que já existe no Firestore — NUNCA sobrescreve com dados vazios
+        try{
+          const snapExist = await getDoc(doc(db,"avatim",docId));
+          if(snapExist.exists()){
+            const existing = JSON.parse(snapExist.data().dados||"{}");
+            // Deep merge: preserva dias já gravados
+            if(existing.vendas?.[lid]){
+              Object.assign(pedaco.vendas[lid], existing.vendas[lid], pedaco.vendas[lid]);
+            }
+            Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
+              if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
+              pedaco.vendasVend[vid] = Object.assign({}, dias, pedaco.vendasVend[vid]);
+            });
+          }
+        }catch(e2){ console.warn("[Avatim] Merge preventivo falhou:", e2.message); }
         await setDoc(doc(db,"avatim",docId), {
           dados:    JSON.stringify(pedaco),
           lojaId:   lid,
@@ -2611,6 +2626,14 @@ function save(){
   _savePending = true;
   setTimeout(async ()=>{
     _savePending = false;
+    // Proteção: não gravar no Firebase se não há dados de vendas (evita sobrescrever com vazio)
+    const temDados = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0)
+                  || Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0)
+                  || (D.metasLoja && Object.keys(D.metasLoja).length>0);
+    if(!temDados && !isAdmin()){
+      console.warn("[Avatim] save() bloqueado — dados vazios, evitando sobrescrever Firebase");
+      return;
+    }
     const ok = await waitForFirebase(5000);
     if(ok && window.fsGravar){
       try{
