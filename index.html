@@ -1473,6 +1473,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
             <span style="margin-left:8px;font-size:9px">(preenche a Meta Rede automaticamente se vazio)</span>
           </div>
         </div>
+        <div class="ig" style="grid-column:span 2">
+          <label style="display:flex;align-items:center;gap:8px">
+            Produtos em Destaque
+            <span style="font-size:9px;color:var(--muted);font-weight:400">— produtos foco da campanha</span>
+          </label>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="text" id="camp-prod-busca"
+              placeholder="Buscar produto pelo nome ou código..."
+              style="flex:1"
+              oninput="buscarProdCampObj(this.value)"
+              autocomplete="off">
+          </div>
+          <div id="camp-prod-sugest" style="margin-top:4px;max-height:160px;overflow-y:auto"></div>
+          <div id="camp-prods-sel" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+        </div>
         <div class="ig" style="grid-column:span 2"><label>Orientação para equipe</label>
           <textarea id="camp-obs-obj" placeholder="Estratégia, produtos foco, como abordar..."></textarea>
         </div>
@@ -5583,6 +5598,67 @@ function exportarRelCamp(){
   showToast('CSV exportado!');
 }
 
+// ── PRODUTOS EM DESTAQUE NO OBJETIVO ────────────────────────
+let _campProdsObj = []; // produtos selecionados no form atual
+
+function buscarProdCampObj(q){
+  const sugestEl = document.getElementById('camp-prod-sugest');
+  if(!sugestEl) return;
+  if(!q || q.length < 2){ sugestEl.innerHTML=''; return; }
+  const prods = PRODUTOS.filter(p=>
+    p.n.toLowerCase().includes(q.toLowerCase()) || p.c.includes(q)
+  ).slice(0, 8);
+  if(!prods.length){
+    sugestEl.innerHTML='<div style="font-size:11px;color:var(--muted);padding:4px">Nenhum produto encontrado</div>';
+    return;
+  }
+  sugestEl.innerHTML = prods.map(p=>`
+    <div onclick="adicionarProdCampObj('${p.c}','${p.n.replace(/'/g,"\\'")}','${p.g}')"
+      style="padding:7px 10px;font-size:11px;cursor:pointer;border-radius:6px;
+             background:var(--card);margin-bottom:4px;
+             border:1px solid var(--borda);transition:background .15s"
+      onmouseover="this.style.background='var(--card2)'"
+      onmouseout="this.style.background='var(--card)'">
+      <span style="font-weight:500">${p.n}</span>
+      <span style="color:var(--muted);margin-left:6px">${p.c} · ${p.g}</span>
+      ${p.s<=5?`<span style="margin-left:6px;color:var(--verm);font-size:9px">⚠️ Saldo: ${p.s}</span>`:''}
+    </div>`).join('');
+}
+
+function adicionarProdCampObj(cod, nome, grupo){
+  if(_campProdsObj.find(p=>p.c===cod)){
+    showToast('Produto já adicionado','err'); return;
+  }
+  _campProdsObj.push({c:cod, n:nome, g:grupo});
+  renderProdsSelecionados();
+  // Limpar busca
+  const b = document.getElementById('camp-prod-busca'); if(b) b.value='';
+  const s = document.getElementById('camp-prod-sugest'); if(s) s.innerHTML='';
+}
+
+function removerProdCampObj(cod){
+  _campProdsObj = _campProdsObj.filter(p=>p.c!==cod);
+  renderProdsSelecionados();
+}
+
+function renderProdsSelecionados(){
+  const el = document.getElementById('camp-prods-sel');
+  if(!el) return;
+  if(!_campProdsObj.length){
+    el.innerHTML='<div style="font-size:10px;color:var(--muted)">Nenhum produto selecionado</div>';
+    return;
+  }
+  el.innerHTML = _campProdsObj.map(p=>`
+    <div style="display:flex;align-items:center;gap:6px;background:rgba(201,168,76,.08);
+                border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:5px 10px">
+      <span style="font-size:11px;font-weight:500">⭐ ${p.n}</span>
+      <span style="font-size:9px;color:var(--muted)">${p.c}</span>
+      <button onclick="removerProdCampObj('${p.c}')"
+        style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:11px;padding:0 2px;line-height:1">✕</button>
+    </div>`).join('');
+}
+
+
 // Calcular soma das metas por loja e preencher Meta Rede automaticamente
 function calcMetaRedeCamp(){
   const ids = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
@@ -5640,6 +5716,10 @@ function abrirFormCampObj(){
 }
 function fecharFormCampObj(){
   document.getElementById('form-camp-obj').style.display='none';
+  _campProdsObj = [];
+  const b=document.getElementById('camp-prod-busca'); if(b) b.value='';
+  const s=document.getElementById('camp-prod-sugest'); if(s) s.innerHTML='';
+  const p=document.getElementById('camp-prods-sel'); if(p) p.innerHTML='';
 }
 function salvarCampObj(){
   initCampData();
@@ -5664,6 +5744,7 @@ function salvarCampObj(){
   const obj = {
     id: 'obj_'+Date.now(), tipo, nome, ini, fim,
     metaRede, metasPorLoja, obs,
+    produtos: [..._campProdsObj],
     criadoEm: hoje(), criadoPor: 'admin'
   };
   D.campObjetivos.push(obj);
@@ -5678,6 +5759,8 @@ function salvarCampObj(){
     const el=document.getElementById('camp-meta-'+lid); if(el) el.value='';
   });
   const somaEl=document.getElementById('camp-meta-soma'); if(somaEl) somaEl.textContent='R$ 0,00';
+  _campProdsObj=[];
+  const selEl=document.getElementById('camp-prods-sel'); if(selEl) selEl.innerHTML='';
   renderCampLista();
 }
 
@@ -5832,6 +5915,7 @@ function renderCampLista(){
           <div style="font-size:11px;color:var(--muted)">📅 ${fmtData(obj.ini)} a ${fmtData(obj.fim)}</div>
           ${obj.metaRede>0?`<div style="font-size:11px;color:var(--muted)">🎯 Meta rede: ${fmt(obj.metaRede)}${metaLoja>0?' · Meta loja: '+fmt(metaLoja):''}</div>`:''}
           ${obj.obs?`<div style="font-size:11px;color:var(--ouro2);margin-top:4px">📋 ${obj.obs}</div>`:''}
+          ${obj.produtos&&obj.produtos.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px"><span style="font-size:9px;color:var(--muted);font-weight:600">\u2b50 PRODUTOS FOCO:</span>${obj.produtos.map(p=>`<span style="font-size:9px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);color:var(--ouro2);border-radius:6px;padding:2px 8px">${p.n}</span>`).join('')}</div>`:''}
         </div>
         ${isAdmin()?`<div style="display:flex;gap:6px">
           <button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:none;border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:4px 10px;cursor:pointer">Excluir</button>
