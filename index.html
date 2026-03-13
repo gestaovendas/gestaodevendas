@@ -1536,6 +1536,130 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
   <!-- LISTA DE CAMPANHAS -->
   <div id="camp-lista">--</div>
+
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- ABAS: CAMPANHAS | ESTOQUE                          -->
+  <!-- ══════════════════════════════════════════════════ -->
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--borda);margin-bottom:18px;margin-top:8px">
+    <button id="aba-camp-btn" onclick="trocarAbaEstoque('camp')"
+      style="padding:10px 20px;font-size:12px;font-weight:600;background:none;border:none;cursor:pointer;color:var(--texto);border-bottom:2px solid var(--ouro);margin-bottom:-2px">
+      🏷️ Campanhas
+    </button>
+    <button id="aba-estq-btn" onclick="trocarAbaEstoque('estq')"
+      style="padding:10px 20px;font-size:12px;font-weight:600;background:none;border:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px">
+      📦 Estoque & Produtos
+    </button>
+  </div>
+
+  <!-- ABA CAMPANHAS (já existe acima — só o camp-lista é renderizado aqui) -->
+  <div id="aba-camp-content">
+    <!-- Filtros -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn-s" onclick="filtrarCampTipo('')" id="camp-fil-todos" style="opacity:1">Todas</button>
+      <button class="btn-s" onclick="filtrarCampTipo('NATAL')" id="camp-fil-NATAL">🎄 Natal</button>
+      <button class="btn-s" onclick="filtrarCampTipo('BLACK')" id="camp-fil-BLACK">🖤 Black</button>
+      <button class="btn-s" onclick="filtrarCampTipo('OFERTAS')" id="camp-fil-OFERTAS">🏷️ Ofertas</button>
+      <button class="btn-s" onclick="filtrarCampTipo('DIA_CONSUMIDOR')" id="camp-fil-DIA_CONSUMIDOR">🛍️ Consumidor</button>
+      <button class="btn-s" onclick="filtrarCampTipo('DIA_MAES')" id="camp-fil-DIA_MAES">💐 Mães</button>
+      <button class="btn-s" onclick="filtrarCampTipo('DIA_NAMORADOS')" id="camp-fil-DIA_NAMORADOS">❤️ Namorados</button>
+      <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO">📌 Outro</button>
+    </div>
+    <div id="camp-lista">--</div>
+  </div>
+
+  <!-- ABA ESTOQUE & PRODUTOS -->
+  <div id="aba-estq-content" style="display:none">
+
+    <!-- Botão novo produto (só admin) -->
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn-p admin-only" onclick="abrirFormNovoProd()" style="display:none">+ Novo Produto</button>
+    </div>
+
+    <!-- Form novo produto (admin) -->
+    <div id="form-novo-prod" style="display:none;margin-bottom:16px">
+      <div class="sc">
+        <div class="st">Novo Produto</div>
+        <div class="igrid">
+          <div class="ig"><label>Código</label>
+            <input type="text" id="nprod-cod" placeholder="Ex: 1020111100">
+          </div>
+          <div class="ig" style="grid-column:span 2"><label>Nome do Produto</label>
+            <input type="text" id="nprod-nome" placeholder="Ex: PERFUME PARA INTERIORES CURUMIM 1100 ML">
+          </div>
+          <div class="ig"><label>Grupo / Linha</label>
+            <input type="text" id="nprod-grupo" placeholder="Ex: CURUMIM">
+          </div>
+          <div class="ig"><label>Linha</label>
+            <select id="nprod-linha">
+              <option>LINHA CLASSICOS</option>
+              <option>LINHA ESPLENDOR</option>
+              <option>LINHA RITOS</option>
+              <option>EQUIPAMENTOS E ACESSORIOS</option>
+              <option>LINHA RESERVA</option>
+              <option>LINHA DIA DIA</option>
+              <option>LINHA DESFRUTAR</option>
+              <option>SENSORE</option>
+              <option>LINHA GIGI</option>
+              <option>LINHA SELETO</option>
+              <option>ATELIE</option>
+              <option>MATERIAL CONSUMO</option>
+              <option>LANÇAMENTO</option>
+            </select>
+          </div>
+          <div class="ig"><label>Saldo Inicial</label>
+            <input type="number" id="nprod-saldo" placeholder="0" min="0" value="0">
+          </div>
+        </div>
+        <div class="btn-r">
+          <button class="btn-p" onclick="salvarNovoProd()">Adicionar Produto</button>
+          <button class="btn-s" onclick="fecharFormNovoProd()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estoque crítico + catálogo lado a lado no topo -->
+    <div class="g2" style="margin-bottom:12px">
+      <div class="sc"><div class="st">🔴 Estoque Crítico (saldo ≤5)</div><div id="estq-critico">--</div></div>
+      <div class="sc">
+        <div class="st">📦 Atualizar Saldo</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Busque um produto e atualize o saldo de estoque</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="search-bar" type="text" id="upd-saldo-busca" placeholder="Buscar produto..." style="flex:1;min-width:160px" oninput="buscarProdSaldo(this.value)">
+        </div>
+        <div id="upd-saldo-lista" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- Catálogo completo -->
+    <div class="sc">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <div class="st" style="margin-bottom:0">Catálogo — <span id="cat-total">531</span> Produtos</div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <input class="search-bar" type="text" placeholder="Buscar produto..." style="flex:1;min-width:180px" oninput="filtrarProd(this.value)">
+        <select onchange="filtrarLinha(this.value)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none;min-width:180px">
+          <option value="">Todas as Linhas</option>
+          <option>LINHA CLASSICOS</option><option>LINHA ESPLENDOR</option><option>LINHA RITOS</option>
+          <option>EQUIPAMENTOS E ACESSORIOS</option><option>LINHA RESERVA</option><option>LINHA DIA DIA</option>
+          <option>LINHA DESFRUTAR</option><option>SENSORE</option><option>LINHA GIGI</option>
+          <option>LINHA SELETO</option><option>ATELIE</option><option>MATERIAL CONSUMO</option>
+          <option>LANÇAMENTO</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dtable">
+          <thead><tr>
+            <th>Código</th><th>Produto</th><th>Grupo</th><th>Linha</th>
+            <th>Saldo</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="tbody-prod"></tbody>
+        </table>
+        <div id="prod-pag" style="display:flex;gap:8px;justify-content:center;align-items:center;margin-top:12px;flex-wrap:wrap"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- METAS POR LOJA (ADMIN) -->
@@ -2089,6 +2213,19 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
+// Restaurar saldos customizados salvos pelo admin
+(function(){
+  const d = (() => { try { return JSON.parse(localStorage.getItem('avatim_v5')||'{}'); } catch(e){ return {}; } })();
+  if(d.saldosOverride){
+    Object.entries(d.saldosOverride).forEach(([cod,saldo])=>{
+      const p = PRODUTOS.find(x=>x.c===cod); if(p) p.s=saldo;
+    });
+  }
+  if(d.produtosExtras && Array.isArray(d.produtosExtras)){
+    d.produtosExtras.forEach(p=>{ if(!PRODUTOS.find(x=>x.c===p.c)) PRODUTOS.push(p); });
+  }
+})();
+
 window.USUARIOS={
   "admin@avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
   "mooca@avatim.com":      {id:"mooca",       nome:"Mooca Plaza",        hash:"cb18a0eb4a247f4881eeba8ff86c02c4144b1d8cb9e6ccfe9220147941984fc1"},
@@ -3281,7 +3418,7 @@ function nav(pg){
   ({rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
-    estoque:()=>{initCampData();renderCampLista();},
+    estoque:()=>{initCampData();renderCampLista();renderEstqCritico();trocarAbaEstoque('camp');},
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
     arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>renderPainelDia()})[pg]?.();
 }
@@ -5127,6 +5264,120 @@ function renderProdutos(q,linha){
 }
 function pagProd(p){_pp=p;renderProdutos(_pfiltro,_plinha);}
 let _campSel="";
+
+// ════════════════════════════════════════════════════════════
+// ABAS ESTOQUE: trocar entre Campanhas e Estoque/Produtos
+// ════════════════════════════════════════════════════════════
+function trocarAbaEstoque(aba){
+  const isCamp = aba === 'camp';
+  const campContent = document.getElementById('aba-camp-content');
+  const estqContent = document.getElementById('aba-estq-content');
+  const campBtn = document.getElementById('aba-camp-btn');
+  const estqBtn = document.getElementById('aba-estq-btn');
+  if(campContent) campContent.style.display = isCamp ? '' : 'none';
+  if(estqContent) estqContent.style.display = isCamp ? 'none' : '';
+  if(campBtn){
+    campBtn.style.color = isCamp ? 'var(--texto)' : 'var(--muted)';
+    campBtn.style.borderBottomColor = isCamp ? 'var(--ouro)' : 'transparent';
+  }
+  if(estqBtn){
+    estqBtn.style.color = isCamp ? 'var(--muted)' : 'var(--texto)';
+    estqBtn.style.borderBottomColor = isCamp ? 'transparent' : 'var(--ouro)';
+  }
+  if(!isCamp){
+    renderEstqCritico();
+    renderProdutos(_pfiltro, _plinha);
+    atualizarTotalCatalogo();
+  }
+}
+
+function atualizarTotalCatalogo(){
+  const el = document.getElementById('cat-total');
+  if(el) el.textContent = PRODUTOS.length;
+}
+
+// ── NOVO PRODUTO (Admin) ─────────────────────────────────────
+function abrirFormNovoProd(){
+  document.getElementById('form-novo-prod').style.display = 'block';
+}
+function fecharFormNovoProd(){
+  document.getElementById('form-novo-prod').style.display = 'none';
+  ['nprod-cod','nprod-nome','nprod-grupo'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  const s=document.getElementById('nprod-saldo'); if(s) s.value='0';
+}
+function salvarNovoProd(){
+  const cod   = document.getElementById('nprod-cod').value.trim();
+  const nome  = document.getElementById('nprod-nome').value.trim().toUpperCase();
+  const grupo = document.getElementById('nprod-grupo').value.trim().toUpperCase();
+  const linha = document.getElementById('nprod-linha').value;
+  const saldo = parseInt(document.getElementById('nprod-saldo').value)||0;
+  if(!cod){ showToast('Informe o código do produto','err'); return; }
+  if(!nome){ showToast('Informe o nome do produto','err'); return; }
+  // Verificar se código já existe
+  if(PRODUTOS.find(p=>p.c===cod)){
+    showToast('Código já cadastrado!','err'); return;
+  }
+  // Adicionar ao array PRODUTOS (em memória + salvar em D.produtosExtras)
+  const novo = {c:cod, n:nome, g:grupo, l:linha, s:saldo, extra:true};
+  PRODUTOS.push(novo);
+  if(!D.produtosExtras) D.produtosExtras=[];
+  D.produtosExtras.push(novo);
+  save();
+  showToast('Produto adicionado!');
+  fecharFormNovoProd();
+  atualizarTotalCatalogo();
+  renderProdutos(_pfiltro, _plinha);
+  renderEstqCritico();
+}
+
+// ── ATUALIZAR SALDO (busca rápida) ───────────────────────────
+function buscarProdSaldo(q){
+  const lista = document.getElementById('upd-saldo-lista');
+  if(!lista) return;
+  if(!q || q.length < 2){ lista.innerHTML=''; return; }
+  const prods = PRODUTOS.filter(p=>
+    p.n.toLowerCase().includes(q.toLowerCase())||
+    p.c.includes(q)
+  ).slice(0,6);
+  if(!prods.length){ lista.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum produto encontrado</div>'; return; }
+  lista.innerHTML = prods.map(p=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--borda)">
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:500">${p.n}</div>
+        <div style="font-size:9px;color:var(--muted)">${p.c} · ${p.g}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" value="${p.s}" min="0"
+          style="width:60px;background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:4px 6px;color:var(--texto);font-size:12px;text-align:center"
+          id="saldo-input-${p.c}">
+        <button onclick="atualizarSaldoProd('${p.c}')"
+          style="font-size:10px;background:var(--azul);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">
+          Salvar
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function atualizarSaldoProd(cod){
+  const input = document.getElementById('saldo-input-'+cod);
+  if(!input) return;
+  const novoSaldo = parseInt(input.value);
+  if(isNaN(novoSaldo)||novoSaldo<0){ showToast('Saldo inválido','err'); return; }
+  const idx = PRODUTOS.findIndex(p=>p.c===cod);
+  if(idx<0){ showToast('Produto não encontrado','err'); return; }
+  PRODUTOS[idx].s = novoSaldo;
+  // Salvar em D.saldosOverride para persistir no Firebase
+  if(!D.saldosOverride) D.saldosOverride={};
+  D.saldosOverride[cod] = novoSaldo;
+  save();
+  showToast('Saldo atualizado!');
+  renderEstqCritico();
+  renderProdutos(_pfiltro, _plinha);
+  buscarProdSaldo(document.getElementById('upd-saldo-busca')?.value||'');
+}
+
 // ════════════════════════════════════════════════════════════
 // CAMPANHAS — NOVO SISTEMA (Objetivo Admin + Realizado Loja)
 // ════════════════════════════════════════════════════════════
