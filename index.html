@@ -2228,18 +2228,6 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
-// Restaurar saldos customizados salvos pelo admin
-(function(){
-  const d = (() => { try { return JSON.parse(localStorage.getItem('avatim_v5')||'{}'); } catch(e){ return {}; } })();
-  if(d.saldosOverride){
-    Object.entries(d.saldosOverride).forEach(([cod,saldo])=>{
-      const p = PRODUTOS.find(x=>x.c===cod); if(p) p.s=saldo;
-    });
-  }
-  if(d.produtosExtras && Array.isArray(d.produtosExtras)){
-    d.produtosExtras.forEach(p=>{ if(!PRODUTOS.find(x=>x.c===p.c)) PRODUTOS.push(p); });
-  }
-})();
 
 window.USUARIOS={
   "admin@avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
@@ -2825,6 +2813,21 @@ const PRODUTOS=[
   {c:"2041330210",n:"ESSENCIA PARA DIFUSOR ZIMBRO 210 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:4},
   {c:"2040740211",n:"ESSENCIA PARA DIFUSOR YLANG YLANG 210 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:8}
 ];
+
+// Restaurar saldos e produtos extras salvos pelo admin (executado após PRODUTOS ser definido)
+(function(){
+  try {
+    const d = JSON.parse(localStorage.getItem('avatim_v5')||'{}');
+    if(d.saldosOverride){
+      Object.entries(d.saldosOverride).forEach(([cod,saldo])=>{
+        const p = PRODUTOS.find(x=>x.c===cod); if(p) p.s=saldo;
+      });
+    }
+    if(d.produtosExtras && Array.isArray(d.produtosExtras)){
+      d.produtosExtras.forEach(p=>{ if(!PRODUTOS.find(x=>x.c===p.c)) PRODUTOS.push(p); });
+    }
+  } catch(e){}
+})();
 
 // ============================================================
 // UTILITARIO: permite digitar virgula em inputs numericos
