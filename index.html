@@ -1394,8 +1394,45 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div class="ig"><label>Meta Rede (R$)</label>
           <input type="text" id="camp-meta-rede" placeholder="R$ 0,00" oninput="maskBR(this)">
         </div>
-        <div class="ig"><label>Meta por Loja (R$) — opcional</label>
-          <input type="text" id="camp-meta-loja" placeholder="R$ 0,00 (se igual para todas)" oninput="maskBR(this)">
+        <div class="ig" style="grid-column:span 2">
+          <label style="display:flex;align-items:center;gap:8px">
+            Meta por Loja (R$)
+            <span style="font-size:9px;color:var(--muted);font-weight:400">— defina individualmente para cada loja</span>
+          </label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:8px">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🛍️ Mooca Plaza</span>
+              <input type="text" id="camp-meta-mooca" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🛍️ Shop. Ibirapuera</span>
+              <input type="text" id="camp-meta-ibirapuera" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🏪 Vila Leopoldina</span>
+              <input type="text" id="camp-meta-leopoldina" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🏪 Jardim Paulista</span>
+              <input type="text" id="camp-meta-jarpaul" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🏪 Santana</span>
+              <input type="text" id="camp-meta-santana" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🏪 Perdizes</span>
+              <input type="text" id="camp-meta-perdizes" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--muted)">🏪 Alto de Pinheiros</span>
+              <input type="text" id="camp-meta-pinheiros" placeholder="R$ 0,00" oninput="maskBR(this);calcMetaRedeCamp()">
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+            Soma das metas → <span id="camp-meta-soma" style="color:var(--ouro);font-weight:700">R$ 0,00</span>
+            <span style="margin-left:8px;font-size:9px">(preenche a Meta Rede automaticamente se vazio)</span>
+          </div>
         </div>
         <div class="ig" style="grid-column:span 2"><label>Orientação para equipe</label>
           <textarea id="camp-obs-obj" placeholder="Estratégia, produtos foco, como abordar..."></textarea>
@@ -5052,6 +5089,21 @@ let _campSel="";
 // Novos campos em D.campObjetivos[] e D.campRealizados[]
 
 // Garantir estruturas
+
+// Calcular soma das metas por loja e preencher Meta Rede automaticamente
+function calcMetaRedeCamp(){
+  const ids = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
+  let soma = 0;
+  ids.forEach(lid=>{
+    const el = document.getElementById('camp-meta-'+lid);
+    if(el) soma += parseBR(el.value)||0;
+  });
+  const somaEl = document.getElementById('camp-meta-soma');
+  if(somaEl) somaEl.textContent = fmt(soma);
+  // Se Meta Rede estiver vazio, preenche com a soma
+  const redeEl = document.getElementById('camp-meta-rede');
+  if(redeEl && (!parseBR(redeEl.value))) redeEl.value = soma > 0 ? soma.toFixed(2).replace('.',',') : '';
+}
 function initCampData(){
   if(!D.campObjetivos)  D.campObjetivos=[];
   if(!D.campRealizados) D.campRealizados=[];
@@ -5102,14 +5154,23 @@ function salvarCampObj(){
   const nome  = document.getElementById('camp-nome-obj').value.trim();
   const ini   = document.getElementById('camp-ini-obj').value;
   const fim   = document.getElementById('camp-fim-obj').value;
-  const metaRede = parseBR(document.getElementById('camp-meta-rede').value)||0;
-  const metaLoja = parseBR(document.getElementById('camp-meta-loja').value)||0;
   const obs   = document.getElementById('camp-obs-obj').value.trim();
   if(!nome){ showToast('Informe um nome para a campanha','err'); return; }
   if(!ini || !fim){ showToast('Informe as datas','err'); return; }
+  // Ler metas individuais por loja
+  const metasPorLoja = {};
+  const lojaIds = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
+  let somaLojas = 0;
+  lojaIds.forEach(lid=>{
+    const el = document.getElementById('camp-meta-'+lid);
+    const val = el ? (parseBR(el.value)||0) : 0;
+    if(val > 0){ metasPorLoja[lid] = val; somaLojas += val; }
+  });
+  const metaRedeInput = parseBR(document.getElementById('camp-meta-rede').value)||0;
+  const metaRede = metaRedeInput > 0 ? metaRedeInput : somaLojas;
   const obj = {
     id: 'obj_'+Date.now(), tipo, nome, ini, fim,
-    metaRede, metaLoja, obs,
+    metaRede, metasPorLoja, obs,
     criadoEm: hoje(), criadoPor: 'admin'
   };
   D.campObjetivos.push(obj);
@@ -5117,9 +5178,13 @@ function salvarCampObj(){
   showToast('Objetivo criado!');
   fecharFormCampObj();
   // Limpar campos
-  ['camp-nome-obj','camp-obs-obj','camp-meta-rede','camp-meta-loja'].forEach(id=>{
+  ['camp-nome-obj','camp-obs-obj','camp-meta-rede'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
+  lojaIds.forEach(lid=>{
+    const el=document.getElementById('camp-meta-'+lid); if(el) el.value='';
+  });
+  const somaEl=document.getElementById('camp-meta-soma'); if(somaEl) somaEl.textContent='R$ 0,00';
   renderCampLista();
 }
 
@@ -5145,10 +5210,12 @@ function atualizarObjetivoCamp(){
   if(!id){ infoEl.style.display='none'; return; }
   const obj = D.campObjetivos.find(o=>o.id===id);
   if(!obj){ infoEl.style.display='none'; return; }
-  const metaLoja = obj.metaLoja||obj.metaRede||0;
-  textoEl.innerHTML = `🎯 Meta: ${metaLoja>0?fmt(metaLoja):'não definida'} &nbsp;·&nbsp; 📅 ${fmtData(obj.ini)} a ${fmtData(obj.fim)}${obj.obs?'<br>📋 '+obj.obs:''}`;
+  const lid = lojaId();
+  // Usar meta específica desta loja, ou genérica, ou da rede
+  const metaEstaLoja = (obj.metasPorLoja && obj.metasPorLoja[lid]) || obj.metaLoja || 0;
+  const metaTexto = metaEstaLoja > 0 ? fmt(metaEstaLoja) : (obj.metaRede>0 ? 'Rede: '+fmt(obj.metaRede) : 'não definida');
+  textoEl.innerHTML = `🎯 Sua meta: <strong>${metaTexto}</strong> &nbsp;·&nbsp; 📅 ${fmtData(obj.ini)} a ${fmtData(obj.fim)}${obj.obs?'<br>📋 '+obj.obs:''}`;
   infoEl.style.display='block';
-  // Auto-calcular TM
   calcTMCampReal();
 }
 function calcTMCampReal(){
@@ -5216,7 +5283,8 @@ function renderCampLista(){
 
     // Linha do realizado desta loja (para view de loja)
     const meuReal = reais.find(r=>r.lojaId===lid);
-    const metaLoja = obj.metaLoja||0;
+    // Meta desta loja: individual > genérica > rede
+    const metaLoja = (obj.metasPorLoja&&obj.metasPorLoja[lid]) || obj.metaLoja || 0;
     const pctLoja = metaLoja>0&&meuReal ? meuReal.fat/metaLoja*100 : 0;
     const corLoja = pctLoja>=100?'var(--verde)':pctLoja>=70?'var(--ouro)':'var(--verm)';
 
@@ -5226,12 +5294,13 @@ function renderCampLista(){
         <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:600">REALIZADOS POR LOJA</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px">
           ${reais.map(r=>{
-            const pct2 = metaLoja>0?r.fat/metaLoja*100:0;
+            const metaR = (obj.metasPorLoja&&obj.metasPorLoja[r.lojaId]) || obj.metaLoja || 0;
+            const pct2 = metaR>0?r.fat/metaR*100:0;
             const c2 = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
             return `<div style="background:var(--card);border-radius:8px;padding:8px">
               <div style="font-size:9px;color:var(--muted)">${r.lojaNome}</div>
               <div style="font-size:13px;font-weight:700;color:${c2}">${fmt(r.fat)}</div>
-              ${metaLoja>0?`<div style="font-size:9px;color:${c2}">${pct2.toFixed(0)}% da meta</div>`:''}
+              ${metaR>0?`<div style="font-size:9px;color:${c2}">${pct2.toFixed(0)}% · meta ${fmt(metaR)}</div>`:''}
               ${r.atend>0?`<div style="font-size:9px;color:var(--muted)">${r.atend} atend · TM ${fmt(r.tm)}</div>`:''}
               ${r.obs?`<div style="font-size:9px;color:var(--muted);margin-top:3px">${r.obs}</div>`:''}
               <button onclick="excluirCampReal('${r.id}')" style="font-size:8px;color:var(--verm);background:none;border:none;cursor:pointer;margin-top:4px;padding:0">✕ remover</button>
