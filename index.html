@@ -1411,7 +1411,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <!-- FORM ADMIN: criar objetivo de campanha -->
   <div id="form-camp-obj" style="display:none;margin-bottom:16px">
     <div class="sc">
-      <div class="st">Novo Objetivo de Campanha</div>
+      <div class="st" id="camp-form-titulo">Novo Objetivo de Campanha</div>
       <div class="igrid">
         <div class="ig"><label>Campanha</label>
           <select id="camp-tipo-obj">
@@ -1493,7 +1493,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         </div>
       </div>
       <div class="btn-r">
-        <button class="btn-p" onclick="salvarCampObj()">Criar Objetivo</button>
+        <button class="btn-p" id="camp-salvar-btn" onclick="salvarCampObj()">Criar Objetivo</button>
         <button class="btn-s" onclick="fecharFormCampObj()">Cancelar</button>
       </div>
     </div>
@@ -5610,33 +5610,61 @@ function buscarProdCampObj(q){
   if(!q || q.length < 2){ sugestEl.innerHTML=''; return; }
   const prods = PRODUTOS.filter(p=>
     p.n.toLowerCase().includes(q.toLowerCase()) || p.c.includes(q)
-  ).slice(0, 8);
+  ).slice(0, 12);
   if(!prods.length){
-    sugestEl.innerHTML='<div style="font-size:11px;color:var(--muted);padding:4px">Nenhum produto encontrado</div>';
+    sugestEl.innerHTML='<div style="font-size:11px;color:var(--muted);padding:6px">Nenhum produto encontrado</div>';
     return;
   }
-  sugestEl.innerHTML = prods.map(p=>`
-    <div onclick="adicionarProdCampObj('${p.c}','${p.n.replace(/'/g,"\\'")}','${p.g}')"
-      style="padding:7px 10px;font-size:11px;cursor:pointer;border-radius:6px;
-             background:var(--card);margin-bottom:4px;
-             border:1px solid var(--borda);transition:background .15s"
-      onmouseover="this.style.background='var(--card2)'"
-      onmouseout="this.style.background='var(--card)'">
-      <span style="font-weight:500">${p.n}</span>
-      <span style="color:var(--muted);margin-left:6px">${p.c} · ${p.g}</span>
-      ${p.s<=5?`<span style="margin-left:6px;color:var(--verm);font-size:9px">⚠️ Saldo: ${p.s}</span>`:''}
-    </div>`).join('');
+  const rows = prods.map(p=>{
+    const jaTem = _campProdsObj.find(x=>x.c===p.c);
+    const nEsc  = p.n.replace(/\\/g,'\\\\').replace(/"/g,'&quot;').replace(/'/g,"\\'");
+    const gEsc  = (p.g||'').replace(/'/g,"\\'");
+    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)"'
+      + ' onmouseover="this.style.background=\'rgba(255,255,255,.04)\'" onmouseout="this.style.background=\'\'"><input type="checkbox"'
+      + ' class="camp-prod-check" data-cod="'+p.c+'" data-nome="'+nEsc+'" data-grupo="'+gEsc+'"'
+      + (jaTem?' checked disabled':'')
+      + ' style="width:15px;height:15px;accent-color:var(--ouro);cursor:pointer;flex-shrink:0">'
+      + '<div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:500">'+(jaTem?'<span style="opacity:.5">':'')+p.n+(jaTem?'</span>':'')+'</div>'
+      + '<div style="font-size:9px;color:var(--muted)">'+p.c+(p.g?' · '+p.g:'')+(p.s<=5?' <span style="color:var(--verm)">⚠️ Saldo '+p.s+'</span>':'')+'</div></div>'
+      + (jaTem?'<span style="font-size:9px;color:var(--ouro)">já adicionado</span>':'')
+      + '</label>';
+  }).join('');
+  sugestEl.innerHTML = '<div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;overflow:hidden;margin-top:4px">'
+    + '<div style="padding:7px 12px;font-size:10px;color:var(--muted);border-bottom:1px solid var(--borda);display:flex;align-items:center;justify-content:space-between">'
+    + '<span>'+prods.length+' resultado(s) — marque os desejados</span>'
+    + '<button onclick="adicionarProdsSelecionadosCamp()" style="font-size:10px;background:var(--ouro);color:#000;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-weight:700">+ Adicionar</button>'
+    + '</div>' + rows + '</div>';
 }
 
 function adicionarProdCampObj(cod, nome, grupo){
-  if(_campProdsObj.find(p=>p.c===cod)){
-    showToast('Produto já adicionado','err'); return;
-  }
+  if(_campProdsObj.find(p=>p.c===cod)) return;
   _campProdsObj.push({c:cod, n:nome, g:grupo});
   renderProdsSelecionados();
-  // Limpar busca
   const b = document.getElementById('camp-prod-busca'); if(b) b.value='';
   const s = document.getElementById('camp-prod-sugest'); if(s) s.innerHTML='';
+}
+
+function adicionarProdsSelecionadosCamp(){
+  const checks = document.querySelectorAll('.camp-prod-check:checked:not(:disabled)');
+  let adicionados = 0;
+  checks.forEach(cb=>{
+    const cod   = cb.getAttribute('data-cod');
+    const nome  = cb.getAttribute('data-nome');
+    const grupo = cb.getAttribute('data-grupo')||'';
+    if(!_campProdsObj.find(p=>p.c===cod)){
+      _campProdsObj.push({c:cod, n:nome, g:grupo});
+      adicionados++;
+    }
+  });
+  if(adicionados>0){
+    renderProdsSelecionados();
+    showToast(adicionados+' produto(s) adicionado(s)!');
+  } else {
+    showToast('Selecione ao menos um produto','err');
+  }
+  // Manter sugestões abertas para continuar selecionando
+  const busca = document.getElementById('camp-prod-busca');
+  if(busca && busca.value.length>=2) buscarProdCampObj(busca.value);
 }
 
 function removerProdCampObj(cod){
@@ -5720,10 +5748,15 @@ function abrirFormCampObj(){
 function fecharFormCampObj(){
   document.getElementById('form-camp-obj').style.display='none';
   _campProdsObj = [];
+  _editandoCampObjId = null;
   const b=document.getElementById('camp-prod-busca'); if(b) b.value='';
   const s=document.getElementById('camp-prod-sugest'); if(s) s.innerHTML='';
   const p=document.getElementById('camp-prods-sel'); if(p) p.innerHTML='';
+  const titulo=document.getElementById('camp-form-titulo'); if(titulo) titulo.textContent='Novo Objetivo de Campanha';
+  const btn=document.getElementById('camp-salvar-btn'); if(btn) btn.textContent='Criar Objetivo';
 }
+let _editandoCampObjId = null; // id da campanha sendo editada
+
 function salvarCampObj(){
   initCampData();
   const tipo  = document.getElementById('camp-tipo-obj').value;
@@ -5733,7 +5766,6 @@ function salvarCampObj(){
   const obs   = document.getElementById('camp-obs-obj').value.trim();
   if(!nome){ showToast('Informe um nome para a campanha','err'); return; }
   if(!ini || !fim){ showToast('Informe as datas','err'); return; }
-  // Ler metas individuais por loja
   const metasPorLoja = {};
   const lojaIds = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
   let somaLojas = 0;
@@ -5743,16 +5775,30 @@ function salvarCampObj(){
     if(val > 0){ metasPorLoja[lid] = val; somaLojas += val; }
   });
   const metaRedeInput = parseBR(document.getElementById('camp-meta-rede').value)||0;
+  // Se metaRede estiver vazio, calcular como soma das lojas
   const metaRede = metaRedeInput > 0 ? metaRedeInput : somaLojas;
-  const obj = {
-    id: 'obj_'+Date.now(), tipo, nome, ini, fim,
-    metaRede, metasPorLoja, obs,
-    produtos: [..._campProdsObj],
-    criadoEm: hoje(), criadoPor: 'admin'
-  };
-  D.campObjetivos.push(obj);
+  if(_editandoCampObjId){
+    // EDITAR campanha existente
+    const idx = D.campObjetivos.findIndex(o=>o.id===_editandoCampObjId);
+    if(idx>=0){
+      D.campObjetivos[idx] = {...D.campObjetivos[idx], tipo, nome, ini, fim,
+        metaRede, metasPorLoja, obs, produtos:[..._campProdsObj],
+        editadoEm: hoje()};
+    }
+    _editandoCampObjId = null;
+    document.getElementById('camp-form-titulo').textContent = 'Novo Objetivo de Campanha';
+    document.getElementById('camp-salvar-btn').textContent = 'Criar Objetivo';
+  } else {
+    // CRIAR nova campanha
+    const obj = {
+      id: 'obj_'+Date.now(), tipo, nome, ini, fim,
+      metaRede, metasPorLoja, obs,
+      produtos: [..._campProdsObj],
+      criadoEm: hoje(), criadoPor: 'admin'
+    };
+    D.campObjetivos.push(obj);}
   save();
-  showToast('Objetivo criado!');
+  showToast('Campanha salva! ✅');
   fecharFormCampObj();
   // Limpar campos
   ['camp-nome-obj','camp-obs-obj','camp-meta-rede'].forEach(id=>{
@@ -5790,10 +5836,22 @@ function atualizarObjetivoCamp(){
   const obj = D.campObjetivos.find(o=>o.id===id);
   if(!obj){ infoEl.style.display='none'; return; }
   const lid = lojaId();
-  // Usar meta específica desta loja, ou genérica, ou da rede
   const metaEstaLoja = (obj.metasPorLoja && obj.metasPorLoja[lid]) || obj.metaLoja || 0;
   const metaTexto = metaEstaLoja > 0 ? fmt(metaEstaLoja) : (obj.metaRede>0 ? 'Rede: '+fmt(obj.metaRede) : 'não definida');
-  textoEl.innerHTML = `🎯 Sua meta: <strong>${metaTexto}</strong> &nbsp;·&nbsp; 📅 ${fmtData(obj.ini)} a ${fmtData(obj.fim)}${obj.obs?'<br>📋 '+obj.obs:''}`;
+  // Calcular total já realizado pela rede e pelas outras lojas
+  const reais = (D.campRealizados||[]).filter(r=>r.campId===id);
+  const totalRede = reais.reduce((s,r)=>s+r.fat, 0);
+  const meuReal   = reais.find(r=>r.lojaId===lid);
+  const pctMeta   = metaEstaLoja>0 && meuReal ? (meuReal.fat/metaEstaLoja*100).toFixed(0)+'%' : '--';
+  const pctRede   = obj.metaRede>0 ? (totalRede/obj.metaRede*100).toFixed(0)+'%' : '--';
+  textoEl.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:14px">'
+    + '<div><div style="font-size:9px;color:var(--muted)">🎯 SUA META</div><div style="font-weight:700;color:var(--ouro)">' + metaTexto + '</div></div>'
+    + (meuReal?'<div><div style="font-size:9px;color:var(--muted)">✅ SEU REALIZADO</div><div style="font-weight:700;color:var(--verde)">'+fmt(meuReal.fat)+' ('+pctMeta+')</div></div>':'')
+    + (obj.metaRede>0?'<div><div style="font-size:9px;color:var(--muted)">🌐 TOTAL REDE</div><div style="font-weight:700;color:var(--azul)">'+fmt(totalRede)+' / '+fmt(obj.metaRede)+' ('+pctRede+')</div></div>':'')
+    + '<div><div style="font-size:9px;color:var(--muted)">📅 PERÍODO</div><div style="font-weight:600">'+fmtData(obj.ini)+' → '+fmtData(obj.fim)+'</div></div>'
+    + '</div>'
+    + (obj.obs?'<div style="margin-top:8px;font-size:11px;color:var(--muted)">📋 '+obj.obs+'</div>':'');
   infoEl.style.display='block';
   calcTMCampReal();
 }
@@ -5878,7 +5936,10 @@ function renderCampLista(){
             </div>
           </div>
         </div>
-        ${isAdmin()?`<button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:5px 12px;cursor:pointer">🗑 Excluir</button>`:''}
+        ${isAdmin()?`<div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="editarCampObj('${obj.id}')" style="font-size:10px;color:var(--azul);background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:5px 12px;cursor:pointer">✏️ Editar</button>
+          <button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:5px 12px;cursor:pointer">🗑 Excluir</button>
+        </div>`:''}
       </div>`;
 
     // ── ORIENTAÇÃO (se houver) ────────────────────────────────
@@ -5977,6 +6038,39 @@ function fmtData(d){
   if(!d) return '';
   const p=d.split('-');
   return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;
+}
+
+function editarCampObj(id){
+  initCampData();
+  const obj = D.campObjetivos.find(o=>o.id===id);
+  if(!obj){ showToast('Campanha não encontrada','err'); return; }
+  abrirFormCampObj();
+  _editandoCampObjId = id;
+  setTimeout(()=>{
+    // Título e botão
+    const titulo = document.getElementById('camp-form-titulo');
+    const btn    = document.getElementById('camp-salvar-btn');
+    if(titulo) titulo.textContent = 'Editar Campanha';
+    if(btn)    btn.textContent    = 'Salvar Alterações';
+    // Preencher campos
+    const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.value=val||''; };
+    set('camp-tipo-obj', obj.tipo);
+    set('camp-nome-obj', obj.nome);
+    set('camp-ini-obj',  obj.ini);
+    set('camp-fim-obj',  obj.fim);
+    set('camp-obs-obj',  obj.obs||'');
+    set('camp-meta-rede', obj.metaRede>0 ? obj.metaRede.toFixed(2).replace('.',',') : '');
+    // Metas por loja
+    const lojaIds = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
+    lojaIds.forEach(lid=>{
+      const val = obj.metasPorLoja&&obj.metasPorLoja[lid] ? obj.metasPorLoja[lid].toFixed(2).replace('.',',') : '';
+      set('camp-meta-'+lid, val);
+    });
+    calcMetaRedeCamp();
+    // Produtos
+    _campProdsObj = obj.produtos ? [...obj.produtos] : [];
+    renderProdsSelecionados();
+  }, 120);
 }
 
 function excluirCampObj(id){
