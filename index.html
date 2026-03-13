@@ -5838,95 +5838,136 @@ function renderCampLista(){
   const el = document.getElementById('camp-lista');
   if(!el) return;
   const lid = lojaId();
-  // Mostrar botões corretos
+
   document.querySelectorAll('.admin-only[onclick*="abrirFormCampObj"]').forEach(b=>b.style.display=isAdmin()?'':'none');
   document.querySelectorAll('.loja-only[onclick*="abrirFormCampReal"]').forEach(b=>b.style.display=!isAdmin()?'':'none');
 
   let objs = [...D.campObjetivos];
   if(_campFiltroAtivo) objs = objs.filter(o=>o.tipo===_campFiltroAtivo);
-  // Ordenar mais recentes primeiro
   objs.sort((a,b)=>b.ini.localeCompare(a.ini));
 
   if(!objs.length){
-    el.innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">${isAdmin()?'Nenhuma campanha criada ainda. Clique em "+ Objetivo" para começar.':'Nenhuma campanha disponível no momento.'}</div>`;
+    el.innerHTML=`<div style="text-align:center;padding:48px;color:var(--muted);font-size:13px">${isAdmin()?'Nenhuma campanha criada. Clique em "+ Objetivo" para começar.':'Nenhuma campanha disponível no momento.'}</div>`;
     return;
   }
 
   el.innerHTML = objs.map(obj=>{
-    const info = CAMP_TIPOS[obj.tipo]||{label:obj.tipo,emoji:'📌'};
-    const reais = D.campRealizados.filter(r=>r.campId===obj.id);
+    const info      = CAMP_TIPOS[obj.tipo]||{label:obj.tipo,emoji:'📌'};
+    const reais     = D.campRealizados.filter(r=>r.campId===obj.id);
     const totalReal = reais.reduce((s,r)=>s+r.fat,0);
-    const pctRede = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
-    const cor = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
-    const corBorda = pctRede>=100?'rgba(46,204,135,.2)':pctRede>=70?'rgba(201,168,76,.2)':'var(--borda)';
+    const pctRede   = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
+    const corRede   = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
+    const corBorda  = pctRede>=100?'rgba(46,204,135,.25)':pctRede>=70?'rgba(201,168,76,.25)':'var(--borda)';
+    const meuReal   = reais.find(r=>r.lojaId===lid);
+    const metaLoja  = (obj.metasPorLoja&&obj.metasPorLoja[lid]) || obj.metaLoja || 0;
+    const pctLoja   = metaLoja>0&&meuReal ? meuReal.fat/metaLoja*100 : 0;
+    const corLoja   = pctLoja>=100?'var(--verde)':pctLoja>=70?'var(--ouro)':'var(--verm)';
 
-    // Linha do realizado desta loja (para view de loja)
-    const meuReal = reais.find(r=>r.lojaId===lid);
-    // Meta desta loja: individual > genérica > rede
-    const metaLoja = (obj.metasPorLoja&&obj.metasPorLoja[lid]) || obj.metaLoja || 0;
-    const pctLoja = metaLoja>0&&meuReal ? meuReal.fat/metaLoja*100 : 0;
-    const corLoja = pctLoja>=100?'var(--verde)':pctLoja>=70?'var(--ouro)':'var(--verm)';
+    // ── CABEÇALHO DO CARD ─────────────────────────────────────
+    const header = `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:42px;height:42px;border-radius:12px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${info.emoji}</div>
+          <div>
+            <div style="font-size:15px;font-weight:700;letter-spacing:-.2px">${obj.nome}</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">
+              <span style="font-size:10px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 10px;border-radius:20px;font-weight:600">${info.label}</span>
+              <span style="font-size:10px;color:var(--muted)">📅 ${fmtData(obj.ini)} → ${fmtData(obj.fim)}</span>
+              ${obj.metaRede>0?`<span style="font-size:10px;color:var(--muted)">🎯 Meta rede: <strong style="color:var(--texto)">${fmt(obj.metaRede)}</strong></span>`:''}
+              ${metaLoja>0?`<span style="font-size:10px;color:var(--muted)">🏪 Meta loja: <strong style="color:var(--texto)">${fmt(metaLoja)}</strong></span>`:''}
+            </div>
+          </div>
+        </div>
+        ${isAdmin()?`<button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:5px 12px;cursor:pointer">🗑 Excluir</button>`:''}
+      </div>`;
 
-    // Tabela de realizados (admin vê todas as lojas)
+    // ── ORIENTAÇÃO (se houver) ────────────────────────────────
+    const orientacao = obj.obs ? `
+      <div style="background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-size:9px;font-weight:700;color:var(--ouro);letter-spacing:.8px;margin-bottom:6px">📋 ORIENTAÇÃO DA CAMPANHA</div>
+        <div style="font-size:12px;color:var(--texto);line-height:1.6;white-space:pre-line">${obj.obs}</div>
+      </div>` : '';
+
+    // ── PRODUTOS FOCO ─────────────────────────────────────────
+    const produtosFoco = obj.produtos&&obj.produtos.length ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-bottom:6px">⭐ PRODUTOS FOCO</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${obj.produtos.map(p=>`
+            <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:5px 10px">
+              <div style="font-size:11px;font-weight:600;color:var(--texto)">${p.n}</div>
+              <div style="font-size:9px;color:var(--muted)">${p.c}${p.g?' · '+p.g:''}</div>
+            </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    // ── REALIZADOS ADMIN: grid de cards por loja ─────────────
     const tabelaReais = isAdmin() && reais.length ? `
-      <div style="margin-top:12px;border-top:1px solid var(--borda);padding-top:10px">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:600">REALIZADOS POR LOJA</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px">
+      <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+          <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px">📊 REALIZADOS POR LOJA</div>
+          <div style="font-size:11px;font-weight:700;color:${corRede}">
+            Total: ${fmt(totalReal)}${obj.metaRede>0?' / '+fmt(obj.metaRede)+' · '+pctRede.toFixed(0)+'%':''}
+          </div>
+        </div>
+        ${obj.metaRede>0?`
+        <div style="height:6px;background:rgba(255,255,255,.07);border-radius:99px;margin-bottom:14px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(100,pctRede).toFixed(1)}%;background:${corRede};border-radius:99px;transition:width .5s"></div>
+        </div>`:''}
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:8px">
           ${reais.map(r=>{
             const metaR = (obj.metasPorLoja&&obj.metasPorLoja[r.lojaId]) || obj.metaLoja || 0;
-            const pct2 = metaR>0?r.fat/metaR*100:0;
-            const c2 = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
-            return `<div style="background:var(--card);border-radius:8px;padding:8px">
-              <div style="font-size:9px;color:var(--muted)">${r.lojaNome}</div>
-              <div style="font-size:13px;font-weight:700;color:${c2}">${fmt(r.fat)}</div>
-              ${metaR>0?`<div style="font-size:9px;color:${c2}">${pct2.toFixed(0)}% · meta ${fmt(metaR)}</div>`:''}
-              ${r.atend>0?`<div style="font-size:9px;color:var(--muted)">${r.atend} atend · TM ${fmt(r.tm)}</div>`:''}
-              ${r.obs?`<div style="font-size:9px;color:var(--muted);margin-top:3px">${r.obs}</div>`:''}
-              <button onclick="excluirCampReal('${r.id}')" style="font-size:8px;color:var(--verm);background:none;border:none;cursor:pointer;margin-top:4px;padding:0">✕ remover</button>
+            const pct2  = metaR>0?r.fat/metaR*100:0;
+            const c2    = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
+            return `<div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:10px">
+              <div style="font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">${r.lojaNome}</div>
+              <div style="font-size:16px;font-weight:800;color:${c2}">${fmt(r.fat)}</div>
+              ${metaR>0?`<div style="font-size:10px;color:${c2};margin-top:2px">${pct2.toFixed(0)}% da meta (${fmt(metaR)})</div>`:''}
+              ${r.atend>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px">👥 ${r.atend} atend · TM ${fmt(r.tm)}</div>`:''}
+              ${r.per?`<div style="font-size:9px;color:var(--muted)">📅 ${r.per}</div>`:''}
+              ${r.obs?`<div style="font-size:10px;color:var(--muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--borda)">${r.obs}</div>`:''}
+              <button onclick="excluirCampReal('${r.id}')" style="margin-top:6px;font-size:9px;color:var(--verm);background:none;border:none;cursor:pointer;padding:0">✕ remover</button>
             </div>`;
           }).join('')}
         </div>
-        <div style="margin-top:8px;font-size:11px;font-weight:700;color:${cor}">
-          Total realizado: ${fmt(totalReal)} ${obj.metaRede>0?'/ '+fmt(obj.metaRede)+' ('+pctRede.toFixed(0)+'%)':''}
-        </div>
-      </div>` : '';
+      </div>` : (isAdmin()&&!reais.length?`
+      <div style="border-top:1px solid var(--borda);padding-top:12px;margin-top:4px">
+        <div style="font-size:11px;color:var(--muted);text-align:center;padding:12px">Nenhuma loja lançou realizado ainda</div>
+      </div>`:'');
 
-    // View loja: mostrar meu realizado
+    // ── VIEW LOJA: meu realizado ──────────────────────────────
     const meuRealView = !isAdmin() && meuReal ? `
-      <div style="margin-top:10px;padding:8px;background:rgba(46,204,135,.06);border-radius:8px;border:1px solid rgba(46,204,135,.15)">
-        <div style="font-size:10px;color:var(--muted)">Seu realizado</div>
-        <div style="font-size:15px;font-weight:700;color:${corLoja}">${fmt(meuReal.fat)}</div>
-        ${metaLoja>0?`<div style="font-size:10px;color:${corLoja}">${pctLoja.toFixed(0)}% da meta</div>`:''}
-        ${meuReal.atend>0?`<div style="font-size:10px;color:var(--muted)">${meuReal.atend} atendimentos · TM ${fmt(meuReal.tm)}</div>`:''}
-        ${meuReal.obs?`<div style="font-size:10px;color:var(--muted);margin-top:3px">${meuReal.obs}</div>`:''}
-        <button onclick="abrirFormCampReal()" style="font-size:9px;color:var(--azul);background:none;border:none;cursor:pointer;margin-top:4px;padding:0">✏️ editar</button>
+      <div style="margin-top:12px;background:rgba(46,204,135,.05);border:1px solid rgba(46,204,135,.18);border-radius:10px;padding:12px 14px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:9px;font-weight:700;color:var(--verde);letter-spacing:.8px;margin-bottom:6px">✅ SEU REALIZADO</div>
+            <div style="font-size:20px;font-weight:800;color:${corLoja}">${fmt(meuReal.fat)}</div>
+            ${metaLoja>0?`<div style="font-size:11px;color:${corLoja};margin-top:2px">${pctLoja.toFixed(0)}% da meta (${fmt(metaLoja)})</div>`:''}
+            ${meuReal.atend>0?`<div style="font-size:11px;color:var(--muted);margin-top:4px">👥 ${meuReal.atend} atendimentos · TM ${fmt(meuReal.tm)}</div>`:''}
+            ${meuReal.per?`<div style="font-size:10px;color:var(--muted)">📅 ${meuReal.per}</div>`:''}
+            ${meuReal.obs?`<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid rgba(46,204,135,.15)">${meuReal.obs}</div>`:''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button onclick="editarCampReal('${meuReal.id}')"
+              style="font-size:11px;background:rgba(59,130,246,.1);color:var(--azul);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:6px 14px;cursor:pointer">✏️ Editar</button>
+            <button onclick="excluirCampRealLoja('${meuReal.id}')"
+              style="font-size:11px;background:rgba(239,68,68,.06);color:var(--verm);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:6px 14px;cursor:pointer">🗑 Apagar</button>
+          </div>
+        </div>
+        ${metaLoja>0?`
+        <div style="margin-top:10px;height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(100,pctLoja).toFixed(1)}%;background:${corLoja};border-radius:99px;transition:width .5s"></div>
+        </div>`:''}
       </div>` : '';
 
     const semRealView = !isAdmin() && !meuReal ? `
-      <div style="margin-top:10px">
-        <button class="btn-s" onclick="abrirFormCampReal()" style="font-size:11px;padding:6px 12px">+ Lançar Realizado</button>
+      <div style="margin-top:12px;padding:12px;background:rgba(201,168,76,.04);border:1px dashed rgba(201,168,76,.2);border-radius:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Você ainda não lançou o realizado desta campanha</div>
+        <button class="btn-p" onclick="abrirFormCampRealPara('${obj.id}')" style="font-size:11px;padding:7px 18px">+ Lançar Realizado</button>
       </div>` : '';
 
-    return `<div style="background:var(--card2);border:1px solid ${corBorda};border-radius:14px;padding:16px;margin-bottom:12px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <span style="font-size:20px">${info.emoji}</span>
-            <span style="font-size:14px;font-weight:700">${obj.nome}</span>
-            <span style="font-size:9px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 8px;border-radius:8px">${info.label}</span>
-          </div>
-          <div style="font-size:11px;color:var(--muted)">📅 ${fmtData(obj.ini)} a ${fmtData(obj.fim)}</div>
-          ${obj.metaRede>0?`<div style="font-size:11px;color:var(--muted)">🎯 Meta rede: ${fmt(obj.metaRede)}${metaLoja>0?' · Meta loja: '+fmt(metaLoja):''}</div>`:''}
-          ${obj.obs?`<div style="font-size:11px;color:var(--ouro2);margin-top:4px">📋 ${obj.obs}</div>`:''}
-          ${obj.produtos&&obj.produtos.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px"><span style="font-size:9px;color:var(--muted);font-weight:600">\u2b50 PRODUTOS FOCO:</span>${obj.produtos.map(p=>`<span style="font-size:9px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);color:var(--ouro2);border-radius:6px;padding:2px 8px">${p.n}</span>`).join('')}</div>`:''}
-        </div>
-        ${isAdmin()?`<div style="display:flex;gap:6px">
-          <button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:none;border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:4px 10px;cursor:pointer">Excluir</button>
-        </div>`:''}
-      </div>
-      ${tabelaReais}
-      ${meuRealView}
-      ${semRealView}
+    return `<div style="background:var(--card2);border:1px solid ${corBorda};border-radius:16px;padding:18px;margin-bottom:14px">
+      ${header}${orientacao}${produtosFoco}${tabelaReais}${meuRealView}${semRealView}
     </div>`;
   }).join('');
 }
@@ -5944,6 +5985,46 @@ function excluirCampObj(id){
   D.campRealizados = D.campRealizados.filter(r=>r.campId!==id);
   save(); renderCampLista();
 }
+// ── EDITAR / APAGAR realizado (pela loja) ───────────────────
+function editarCampReal(id){
+  initCampData();
+  const r = D.campRealizados.find(x=>x.id===id);
+  if(!r){ showToast('Realizado não encontrado','err'); return; }
+  // Abrir form preenchido
+  abrirFormCampReal();
+  // Pré-selecionar a campanha
+  setTimeout(()=>{
+    const sel = document.getElementById('camp-sel-real');
+    if(sel){ sel.value = r.campId; atualizarObjetivoCamp(); }
+    const fat = document.getElementById('camp-real-fat');
+    if(fat){ fat.value = r.fat.toFixed(2).replace('.',','); }
+    const atend = document.getElementById('camp-real-atend');
+    if(atend){ atend.value = r.atend||''; }
+    const per = document.getElementById('camp-real-per');
+    if(per){ per.value = r.per||''; }
+    const obs = document.getElementById('camp-real-obs');
+    if(obs){ obs.value = r.obs||''; }
+    calcTMCampReal();
+    // Marcar que é edição
+    window._editandoCampRealId = id;
+    // Remover o antigo ao salvar (salvarCampReal já faz findIndex por campId+lojaId)
+  },120);
+}
+
+function excluirCampRealLoja(id){
+  if(!confirm('Remover seu realizado desta campanha?')) return;
+  D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
+  save(); showToast('Realizado removido'); renderCampLista();
+}
+
+function abrirFormCampRealPara(campId){
+  abrirFormCampReal();
+  setTimeout(()=>{
+    const sel = document.getElementById('camp-sel-real');
+    if(sel){ sel.value = campId; atualizarObjetivoCamp(); }
+  },120);
+}
+
 function excluirCampReal(id){
   if(!confirm('Remover este realizado?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
