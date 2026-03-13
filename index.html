@@ -1364,8 +1364,47 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ps" id="camp-subtitulo">Objetivos e resultados por campanha</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="toggleRelCamp()">📊 Relatório</button>
       <button class="btn-p admin-only" onclick="abrirFormCampObj()" style="display:none">+ Objetivo</button>
       <button class="btn-s loja-only" onclick="abrirFormCampReal()" style="display:none">+ Realizado</button>
+    </div>
+  </div>
+
+  <!-- RELATÓRIO E RANKING DE CAMPANHAS -->
+  <div id="painel-rel-camp" style="display:none;margin-bottom:16px">
+    <div class="sc">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+        <div class="st" style="margin-bottom:0">📊 Relatório de Campanhas</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="rel-camp-sel" onchange="renderRelCamp()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+            <option value="">Todas as campanhas</option>
+          </select>
+          <button class="btn-s admin-only" onclick="exportarRelCamp()" style="display:none;font-size:11px">⬇️ Exportar CSV</button>
+        </div>
+      </div>
+
+      <!-- KPIs resumo -->
+      <div id="rel-camp-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:18px"></div>
+
+      <!-- Ranking lojas -->
+      <div style="margin-bottom:18px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">🏆 RANKING DE LOJAS</div>
+        <div id="rel-camp-ranking"></div>
+      </div>
+
+      <!-- Tabela detalhada -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">📋 DETALHAMENTO POR LOJA</div>
+        <div style="overflow-x:auto">
+          <table class="dtable" id="rel-camp-tabela">
+            <thead><tr>
+              <th>Loja</th><th>Faturamento</th><th>Meta</th><th>%</th>
+              <th>Atend.</th><th>TM</th><th>Período</th><th>Observações</th>
+            </tr></thead>
+            <tbody id="rel-camp-tbody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -4433,7 +4472,13 @@ function salvarVend(){
   toggleFormVend();renderTabelaVend();renderVendRanking(_tabVend);carregarVendsForm();preencherSelectVends();
   if(isAdmin()) renderMetasLojas();
 }
-function excluirVend(id){D.vendedoras=D.vendedoras.filter(v=>v.id!==id);delete D.vendasVend[id];save();renderTabelaVend();renderVendRanking(_tabVend);}
+function excluirVend(id){
+  if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedoras.','err');return;}
+  if(!confirm('Excluir esta vendedora? Os dados de vendas serão removidos.')) return;
+  D.vendedoras=D.vendedoras.filter(v=>v.id!==id);
+  delete D.vendasVend[id];
+  save();renderTabelaVend();renderVendRanking(_tabVend);
+}
 
 function lancarVendaVend(){
   const id=document.getElementById("vl-vend").value,data=document.getElementById("vl-data").value,val=parseBR(document.getElementById("vl-val").value)||0;
@@ -4681,7 +4726,7 @@ function renderTabelaVend(){
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
-      <td><button onclick="excluirVend('${v.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">x</button></td>
+      <td>${isAdmin()?`<button onclick="excluirVend('${v.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">✕</button>`:''}</td>
     </tr>`;
   }).join(""):"<tr><td colspan='9' style='color:var(--muted);text-align:center;padding:20px'>Sem vendedoras.</td></tr>";
 }
@@ -5089,6 +5134,203 @@ let _campSel="";
 // Novos campos em D.campObjetivos[] e D.campRealizados[]
 
 // Garantir estruturas
+
+// ════════════════════════════════════════════════════════════
+// RELATÓRIO E RANKING DE CAMPANHAS
+// ════════════════════════════════════════════════════════════
+function toggleRelCamp(){
+  const el = document.getElementById('painel-rel-camp');
+  if(!el) return;
+  const abrindo = el.style.display==='none';
+  el.style.display = abrindo ? 'block' : 'none';
+  if(abrindo) popularSelectRelCamp(), renderRelCamp();
+}
+
+function popularSelectRelCamp(){
+  initCampData();
+  const sel = document.getElementById('rel-camp-sel');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Todas as campanhas</option>' +
+    [...D.campObjetivos]
+      .sort((a,b)=>b.ini.localeCompare(a.ini))
+      .map(o=>`<option value="${o.id}">${CAMP_TIPOS[o.tipo]?.emoji||'📌'} ${o.nome}</option>`)
+      .join('');
+}
+
+function renderRelCamp(){
+  initCampData();
+  const filtroId = document.getElementById('rel-camp-sel')?.value||'';
+  const lid = lojaId();
+
+  // Filtrar objetivos
+  let objs = filtroId
+    ? D.campObjetivos.filter(o=>o.id===filtroId)
+    : [...D.campObjetivos];
+
+  if(!objs.length){
+    document.getElementById('rel-camp-kpis').innerHTML='<div style="color:var(--muted);font-size:12px">Nenhuma campanha encontrada.</div>';
+    document.getElementById('rel-camp-ranking').innerHTML='';
+    document.getElementById('rel-camp-tbody').innerHTML='';
+    return;
+  }
+
+  // Coletar todos os realizados dos objetivos filtrados
+  const campIds = objs.map(o=>o.id);
+  let reaisAll = D.campRealizados.filter(r=>campIds.includes(r.campId));
+  // Loja só vê seus próprios dados
+  if(!isAdmin()) reaisAll = reaisAll.filter(r=>r.lojaId===lid);
+
+  // ── KPIs ───────────────────────────────────────────────────
+  const totalFat  = reaisAll.reduce((s,r)=>s+r.fat,0);
+  const totalAtend= reaisAll.reduce((s,r)=>s+r.atend,0);
+  const tmMedio   = totalAtend>0 ? totalFat/totalAtend : 0;
+  const metaTotal = objs.reduce((s,o)=>{
+    if(isAdmin()) return s+(o.metaRede||0);
+    const m = (o.metasPorLoja&&o.metasPorLoja[lid])||o.metaLoja||0;
+    return s+m;
+  },0);
+  const pctGeral  = metaTotal>0 ? totalFat/metaTotal*100 : 0;
+  const corPct    = pctGeral>=100?'var(--verde)':pctGeral>=70?'var(--ouro)':'var(--verm)';
+  const lojasComReal = new Set(reaisAll.map(r=>r.lojaId)).size;
+
+  document.getElementById('rel-camp-kpis').innerHTML = `
+    <div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">FATURAMENTO TOTAL</div>
+      <div style="font-size:18px;font-weight:800;color:var(--verde)">${fmt(totalFat)}</div>
+    </div>
+    <div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">% DA META</div>
+      <div style="font-size:18px;font-weight:800;color:${corPct}">${metaTotal>0?pctGeral.toFixed(1)+'%':'--'}</div>
+    </div>
+    <div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">TICKET MÉDIO</div>
+      <div style="font-size:18px;font-weight:800;color:var(--azul)">${tmMedio>0?fmt(tmMedio):'--'}</div>
+    </div>
+    <div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">ATENDIMENTOS</div>
+      <div style="font-size:18px;font-weight:800">${totalAtend||'--'}</div>
+    </div>
+    ${isAdmin()?`<div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">LOJAS COM LANÇAMENTO</div>
+      <div style="font-size:18px;font-weight:800">${lojasComReal} <span style="font-size:11px;color:var(--muted)">de ${LOJAS.length}</span></div>
+    </div>`:''}
+    ${objs.length>1?`<div style="background:var(--card);border-radius:10px;padding:12px">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">CAMPANHAS</div>
+      <div style="font-size:18px;font-weight:800">${objs.length}</div>
+    </div>`:''}
+  `;
+
+  // ── RANKING DE LOJAS (só admin vê) ──────────────────────────
+  const rankEl = document.getElementById('rel-camp-ranking');
+  if(isAdmin()){
+    // Agregar realizados por loja somando todas as campanhas filtradas
+    const porLoja = {};
+    LOJAS.forEach(l=>{ porLoja[l.id]={lojaId:l.id,nome:l.nome,fat:0,atend:0,meta:0}; });
+    reaisAll.forEach(r=>{
+      if(!porLoja[r.lojaId]) porLoja[r.lojaId]={lojaId:r.lojaId,nome:r.lojaNome,fat:0,atend:0,meta:0};
+      porLoja[r.lojaId].fat   += r.fat;
+      porLoja[r.lojaId].atend += r.atend;
+    });
+    objs.forEach(o=>{
+      LOJAS.forEach(l=>{
+        const m = (o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0;
+        porLoja[l.id].meta += m;
+      });
+    });
+    const ranking = Object.values(porLoja)
+      .filter(l=>l.fat>0||l.meta>0)
+      .sort((a,b)=>{
+        const pa = a.meta>0?a.fat/a.meta:0;
+        const pb = b.meta>0?b.fat/b.meta:0;
+        return pb-pa||b.fat-a.fat;
+      });
+
+    const medalhas=['🥇','🥈','🥉'];
+    rankEl.innerHTML = ranking.length ? ranking.map((l,i)=>{
+      const pct2 = l.meta>0?l.fat/l.meta*100:0;
+      const cor2 = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
+      const barW = ranking[0].fat>0?Math.round(l.fat/ranking[0].fat*100):0;
+      const tm2  = l.atend>0?l.fat/l.atend:0;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+        <div style="width:24px;text-align:center;font-size:15px;flex-shrink:0">${medalhas[i]||((i+1)+'º')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:12px;font-weight:600">${l.nome}</span>
+            <span style="font-size:12px;font-weight:700;color:${cor2}">${fmt(l.fat)}${l.meta>0?' · '+pct2.toFixed(0)+'%':''}</span>
+          </div>
+          <div style="height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${barW}%;background:${cor2};border-radius:3px;transition:width .5s"></div>
+          </div>
+          ${l.atend>0?`<div style="font-size:9px;color:var(--muted);margin-top:3px">${l.atend} atend · TM ${fmt(tm2)}</div>`:''}
+        </div>
+      </div>`;
+    }).join('') : '<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum realizado lançado ainda.</div>';
+  } else {
+    rankEl.innerHTML = '';
+  }
+
+  // ── TABELA DETALHADA ────────────────────────────────────────
+  const tbody = document.getElementById('rel-camp-tbody');
+  // Montar linhas: uma por loja por campanha
+  const linhas = [];
+  objs.forEach(obj=>{
+    const reaisObj = reaisAll.filter(r=>r.campId===obj.id);
+    const info2 = CAMP_TIPOS[obj.tipo]||{emoji:'📌',label:obj.tipo};
+    if(isAdmin()){
+      LOJAS.forEach(l=>{
+        const r = reaisObj.find(x=>x.lojaId===l.id);
+        const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
+        linhas.push({campNome:`${info2.emoji} ${obj.nome}`,loja:l.nome,fat:r?.fat||0,meta:metaL,atend:r?.atend||0,tm:r?.tm||0,per:r?.per||'',obs:r?.obs||'',lancado:!!r});
+      });
+    } else {
+      const r = reaisObj.find(x=>x.lojaId===lid);
+      const metaL = (obj.metasPorLoja&&obj.metasPorLoja[lid])||obj.metaLoja||0;
+      linhas.push({campNome:`${info2.emoji} ${obj.nome}`,loja:'',fat:r?.fat||0,meta:metaL,atend:r?.atend||0,tm:r?.tm||0,per:r?.per||'',obs:r?.obs||'',lancado:!!r});
+    }
+  });
+
+  tbody.innerHTML = linhas.map(ln=>{
+    const pct3 = ln.meta>0?ln.fat/ln.meta*100:null;
+    const cor3 = pct3===null?'var(--muted)':pct3>=100?'var(--verde)':pct3>=70?'var(--ouro)':'var(--verm)';
+    return `<tr style="${!ln.lancado?'opacity:.45':''}">
+      <td style="font-size:11px">${ln.campNome}</td>
+      ${isAdmin()?`<td style="font-size:11px">${ln.loja}</td>`:''}
+      <td style="font-size:12px;font-weight:700;color:${ln.fat>0?'var(--verde)':'var(--muted)'}">${ln.fat>0?fmt(ln.fat):'--'}</td>
+      <td style="font-size:11px;color:var(--muted)">${ln.meta>0?fmt(ln.meta):'--'}</td>
+      <td style="font-size:12px;font-weight:700;color:${cor3}">${pct3!==null?pct3.toFixed(0)+'%':'--'}</td>
+      <td style="font-size:11px">${ln.atend||'--'}</td>
+      <td style="font-size:11px">${ln.tm>0?fmt(ln.tm):'--'}</td>
+      <td style="font-size:11px;color:var(--muted)">${ln.per||'--'}</td>
+      <td style="font-size:10px;color:var(--muted);max-width:150px">${ln.obs||'--'}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="9" style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Nenhum dado</td></tr>`;
+}
+
+function exportarRelCamp(){
+  initCampData();
+  const filtroId = document.getElementById('rel-camp-sel')?.value||'';
+  let objs = filtroId ? D.campObjetivos.filter(o=>o.id===filtroId) : [...D.campObjetivos];
+  const campIds = objs.map(o=>o.id);
+  const reaisAll = D.campRealizados.filter(r=>campIds.includes(r.campId));
+
+  let csv = 'Campanha;Tipo;Loja;Faturamento;Meta;%;Atendimentos;TM;Período;Observações\n';
+  objs.forEach(obj=>{
+    const info2 = CAMP_TIPOS[obj.tipo]||{label:obj.tipo};
+    LOJAS.forEach(l=>{
+      const r = reaisAll.find(x=>x.campId===obj.id&&x.lojaId===l.id);
+      const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
+      const pct3 = metaL>0&&r ? (r.fat/metaL*100).toFixed(1)+'%' : '--';
+      csv += [obj.nome,info2.label,l.nome,r?r.fat.toFixed(2):'0',metaL.toFixed(2),pct3,r?.atend||0,r?.tm?r.tm.toFixed(2):'0',r?.per||'',r?.obs||''].join(';')+'\n';
+    });
+  });
+
+  const blob = new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'relatorio_campanhas_avatim.csv';
+  a.click();
+  showToast('CSV exportado!');
+}
 
 // Calcular soma das metas por loja e preencher Meta Rede automaticamente
 function calcMetaRedeCamp(){
