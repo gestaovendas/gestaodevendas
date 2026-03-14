@@ -1499,40 +1499,78 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
-  <!-- FORM LOJA: lançar realizado -->
+  <!-- FORM LOJA: lançar realizado diário -->
   <div id="form-camp-real" style="display:none;margin-bottom:16px">
     <div class="sc">
-      <div class="st">Lançar Realizado</div>
+      <div class="st" id="camp-real-titulo">Lançar Realizado do Dia</div>
+
+      <!-- Seleção de campanha -->
       <div class="igrid">
         <div class="ig" style="grid-column:span 2"><label>Campanha</label>
           <select id="camp-sel-real" onchange="atualizarObjetivoCamp()">
             <option value="">Selecione uma campanha...</option>
           </select>
         </div>
+
+        <!-- Painel de info + progresso da campanha -->
         <div class="ig" id="camp-obj-info" style="grid-column:span 2;display:none">
-          <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)">
-            <span id="camp-obj-texto"></span>
+          <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:10px;padding:12px">
+            <div id="camp-obj-texto"></div>
+            <!-- Barra de progresso da loja -->
+            <div id="camp-prog-wrap" style="display:none;margin-top:10px">
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px">
+                <span style="color:var(--muted)">Progresso da loja</span>
+                <span id="camp-prog-pct" style="font-weight:700">0%</span>
+              </div>
+              <div style="height:7px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden">
+                <div id="camp-prog-bar" style="height:100%;width:0%;border-radius:99px;background:var(--ouro);transition:width .4s"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-top:4px">
+                <span style="color:var(--verde)" id="camp-prog-acum">Acumulado: R$ 0,00</span>
+                <span style="color:var(--verm)" id="camp-prog-falta">Falta: --</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="ig"><label>Faturamento Realizado (R$)</label>
-          <input type="text" id="camp-real-fat" placeholder="R$ 0,00" oninput="maskBR(this);calcTMCampReal()">
+
+        <!-- Data do lançamento -->
+        <div class="ig"><label>Data</label>
+          <input type="date" id="camp-real-data">
+        </div>
+        <div class="ig"><label>Faturamento do Dia (R$)</label>
+          <input type="text" id="camp-real-fat" placeholder="R$ 0,00" oninput="maskBR(this);calcTMCampReal();atualizarProgrCamp()">
         </div>
         <div class="ig"><label>Nº de Atendimentos</label>
           <input type="number" id="camp-real-atend" placeholder="0" min="0" oninput="calcTMCampReal()">
         </div>
-        <div class="ig"><label>Ticket Médio Realizado (R$)</label>
+        <div class="ig"><label>Ticket Médio (R$)</label>
           <input type="text" id="camp-real-tm" placeholder="Calculado automaticamente" readonly style="opacity:.6">
         </div>
-        <div class="ig"><label>Período</label>
-          <input type="text" id="camp-real-per" placeholder="Ex: 25/11 a 01/12">
+        <div class="ig" style="grid-column:span 2"><label>Observações do dia</label>
+          <textarea id="camp-real-obs" placeholder="Destaques, produtos mais vendidos..."></textarea>
         </div>
-        <div class="ig" style="grid-column:span 2"><label>Observações</label>
-          <textarea id="camp-real-obs" placeholder="Destaques, dificuldades, produtos mais vendidos..."></textarea>
+
+        <!-- Vendedoras do dia -->
+        <div class="ig" style="grid-column:span 2">
+          <label style="display:flex;align-items:center;gap:8px">
+            Resultado por Vendedora
+            <span style="font-size:9px;color:var(--muted);font-weight:400">— opcional, mas recomendado</span>
+          </label>
+          <div id="camp-vend-campos" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+            <div style="font-size:11px;color:var(--muted);padding:8px">Selecione uma campanha para ver as vendedoras</div>
+          </div>
         </div>
       </div>
-      <div class="btn-r">
-        <button class="btn-p" onclick="salvarCampReal()">Salvar Realizado</button>
-        <button class="btn-s" onclick="fecharFormCampReal()">Cancelar</button>
+
+      <!-- Histórico de lançamentos desta campanha -->
+      <div id="camp-historico-wrap" style="display:none;margin-top:14px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.6px;margin-bottom:8px">📅 LANÇAMENTOS ANTERIORES</div>
+        <div id="camp-historico-lista" style="max-height:180px;overflow-y:auto"></div>
+      </div>
+
+      <div class="btn-r" style="margin-top:14px">
+        <button class="btn-p" onclick="salvarCampReal()">Salvar Dia</button>
+        <button class="btn-s" onclick="fecharFormCampReal()">Fechar</button>
       </div>
     </div>
   </div>
@@ -5816,13 +5854,18 @@ function salvarCampObj(){
 // ── LOJA: formulário de realizado ────────────────────────────
 function abrirFormCampReal(){
   initCampData();
-  // Preencher select de campanhas abertas
+  // Preencher select — mostrar todas as campanhas (ativas e recentes)
   const sel = document.getElementById('camp-sel-real');
-  const objs = D.campObjetivos.filter(o=>o.fim >= hoje() || !o.fim);
+  const objs = D.campObjetivos.sort((a,b)=>b.ini.localeCompare(a.ini));
   sel.innerHTML = '<option value="">Selecione uma campanha...</option>' +
-    objs.map(o=>`<option value="${o.id}">${CAMP_TIPOS[o.tipo]?.emoji||'📌'} ${o.nome} (${fmtData(o.ini)} a ${fmtData(o.fim)})</option>`).join('');
+    objs.map(o=>`<option value="${o.id}">${CAMP_TIPOS[o.tipo]?.emoji||'📌'} ${o.nome} (${fmtData(o.ini)} → ${fmtData(o.fim)})</option>`).join('');
+  // Data padrão: hoje
+  const dataEl = document.getElementById('camp-real-data');
+  if(dataEl) dataEl.value = hoje();
   document.getElementById('form-camp-real').style.display='block';
   document.getElementById('camp-obj-info').style.display='none';
+  document.getElementById('camp-historico-wrap').style.display='none';
+  document.getElementById('camp-prog-wrap').style.display='none';
 }
 function fecharFormCampReal(){
   document.getElementById('form-camp-real').style.display='none';
@@ -5854,7 +5897,145 @@ function atualizarObjetivoCamp(){
     + (obj.obs?'<div style="margin-top:8px;font-size:11px;color:var(--muted)">📋 '+obj.obs+'</div>':'');
   infoEl.style.display='block';
   calcTMCampReal();
+  atualizarProgrCamp();
+  const lid2 = lojaId();
+  if(!isAdmin()){
+    renderHistoricoCamp(id, lid2);
+    renderVendCampForm(id);
+  }
 }
+// ── PROGRESSO DA CAMPANHA (barra + falta) ────────────────────
+// ── VENDEDORAS NO FORM DE CAMPANHA ───────────────────────────
+function renderVendCampForm(campId){
+  const el = document.getElementById('camp-vend-campos');
+  if(!el) return;
+  const lid   = lojaId();
+  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
+  if(!vends.length){
+    el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhuma vendedora cadastrada</div>';
+    return;
+  }
+  // Buscar lançamentos anteriores desta campanha nesta data para pré-preencher
+  const data   = document.getElementById('camp-real-data')?.value || hoje();
+  const lanc   = (D.campRealizados||[]).find(r=>r.campId===campId && r.lojaId===lid && r.data===data);
+  const vendVals = lanc?.vendedoras || {};
+  el.innerHTML = vends.map(v=>`
+    <div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:10px">
+      <div style="font-size:11px;font-weight:600;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.nome}</div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${v.cargo||''}</div>
+      <input type="text" id="camp-vend-${v.id}"
+        placeholder="R$ 0,00"
+        value="${vendVals[v.id]?vendVals[v.id].toFixed(2).replace('.',','):''}"
+        oninput="maskBR(this);calcTotalVendsCamp()"
+        style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700">
+      <div id="camp-vend-pct-${v.id}" style="font-size:9px;color:var(--muted);margin-top:4px;text-align:right"></div>
+    </div>`).join('');
+  calcTotalVendsCamp();
+}
+
+function calcTotalVendsCamp(){
+  // Somar campos de vendedoras e atualizar fat total automaticamente
+  const lid   = lojaId();
+  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
+  let soma = 0;
+  vends.forEach(v=>{
+    const el = document.getElementById('camp-vend-'+v.id);
+    if(el) soma += parseBR(el.value)||0;
+  });
+  if(soma>0){
+    const fatEl = document.getElementById('camp-real-fat');
+    if(fatEl && (!parseBR(fatEl.value))) {
+      fatEl.value = soma.toFixed(2).replace('.',',');
+      calcTMCampReal();
+      atualizarProgrCamp();
+    }
+  }
+}
+
+function getVendCampVals(){
+  // Retorna objeto {vendId: valor} com os valores preenchidos
+  const lid   = lojaId();
+  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
+  const result = {};
+  vends.forEach(v=>{
+    const el  = document.getElementById('camp-vend-'+v.id);
+    const val = el ? (parseBR(el.value)||0) : 0;
+    if(val>0) result[v.id] = val;
+  });
+  return result;
+}
+
+function atualizarProgrCamp(){
+  const campId = document.getElementById('camp-sel-real')?.value;
+  if(!campId) return;
+  const obj    = D.campObjetivos.find(o=>o.id===campId);
+  const lid    = lojaId();
+  const meta   = (obj?.metasPorLoja&&obj.metasPorLoja[lid]) || obj?.metaLoja || 0;
+  if(!meta){ document.getElementById('camp-prog-wrap').style.display='none'; return; }
+  // Acumulado dos lançamentos + o que está sendo digitado agora
+  const lancados  = (D.campRealizados||[]).filter(r=>r.campId===campId && r.lojaId===lid);
+  const acumulado = lancados.reduce((s,r)=>s+r.fat,0);
+  const hoje_fat  = parseBR(document.getElementById('camp-real-fat')?.value)||0;
+  const total     = acumulado + hoje_fat;
+  const pct       = Math.min(100, total/meta*100);
+  const falta     = Math.max(0, meta-total);
+  const cor       = pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
+  document.getElementById('camp-prog-wrap').style.display  = '';
+  document.getElementById('camp-prog-bar').style.width     = pct.toFixed(1)+'%';
+  document.getElementById('camp-prog-bar').style.background= cor;
+  document.getElementById('camp-prog-pct').textContent     = pct.toFixed(0)+'%';
+  document.getElementById('camp-prog-pct').style.color     = cor;
+  document.getElementById('camp-prog-acum').textContent    = 'Acumulado: '+fmt(total);
+  document.getElementById('camp-prog-falta').textContent   = falta>0 ? 'Falta: '+fmt(falta) : '🏆 Meta atingida!';
+  document.getElementById('camp-prog-falta').style.color   = falta>0 ? 'var(--verm)' : 'var(--verde)';
+}
+
+// ── HISTÓRICO DE LANÇAMENTOS DA CAMPANHA ─────────────────────
+function renderHistoricoCamp(campId, lid){
+  const wrap  = document.getElementById('camp-historico-wrap');
+  const lista = document.getElementById('camp-historico-lista');
+  if(!wrap||!lista) return;
+  const lids = lid || lojaId();
+  const lancs = (D.campRealizados||[])
+    .filter(r=>r.campId===campId && r.lojaId===lids)
+    .sort((a,b)=>b.data.localeCompare(a.data));
+  if(!lancs.length){ wrap.style.display='none'; return; }
+  const total = lancs.reduce((s,r)=>s+r.fat,0);
+  wrap.style.display = '';
+  lista.innerHTML = lancs.map(l=>{
+    // Vendedoras deste lançamento
+    const vendRows = l.vendedoras && Object.keys(l.vendedoras).length
+      ? D.vendedoras.filter(v=>l.vendedoras[v.id]>0).map(v=>
+          `<span style="font-size:9px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.15);border-radius:6px;padding:2px 8px;color:var(--ouro2)">${v.nome}: ${fmt(l.vendedoras[v.id])}</span>`
+        ).join('')
+      : '';
+    return `
+    <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="min-width:70px;font-size:11px;font-weight:600;color:var(--muted)">${fmtData(l.data)}</div>
+        <div style="flex:1">
+          <span style="font-size:14px;font-weight:700;color:var(--verde)">${fmt(l.fat)}</span>
+          ${l.atend>0?`<span style="font-size:10px;color:var(--muted);margin-left:8px">${l.atend} atend · TM ${fmt(l.tm)}</span>`:''}
+          ${l.obs?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${l.obs}</div>`:''}
+        </div>
+        <button onclick="excluirLancCamp('${l.id}')"
+          style="font-size:9px;color:var(--verm);background:none;border:none;cursor:pointer;padding:0 4px;flex-shrink:0">✕</button>
+      </div>
+      ${vendRows?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;padding-left:80px">${vendRows}</div>`:''}
+    </div>`;
+  }).join('')
+    + `<div style="padding:8px 0;font-size:11px;font-weight:700;color:var(--ouro)">Total acumulado: ${fmt(total)}</div>`;
+}
+
+function excluirLancCamp(id){
+  if(!confirm('Remover este lançamento?')) return;
+  D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
+  save();
+  const campId = document.getElementById('camp-sel-real')?.value;
+  if(campId){ renderHistoricoCamp(campId, lojaId()); atualizarObjetivoCamp(); }
+  renderCampLista();
+}
+
 function calcTMCampReal(){
   const fat   = parseBR(document.getElementById('camp-real-fat')?.value)||0;
   const atend = parseInt(document.getElementById('camp-real-atend')?.value)||0;
@@ -5865,28 +6046,44 @@ function salvarCampReal(){
   initCampData();
   const campId = document.getElementById('camp-sel-real').value;
   if(!campId){ showToast('Selecione uma campanha','err'); return; }
+  const data  = document.getElementById('camp-real-data').value || hoje();
   const fat   = parseBR(document.getElementById('camp-real-fat').value)||0;
   const atend = parseInt(document.getElementById('camp-real-atend').value)||0;
-  const per   = document.getElementById('camp-real-per').value.trim();
   const obs   = document.getElementById('camp-real-obs').value.trim();
-  if(!fat){ showToast('Informe o faturamento realizado','err'); return; }
-  const lid = lojaId();
+  if(!fat){ showToast('Informe o faturamento do dia','err'); return; }
+  const lid      = lojaId();
   const lojaNome = LOJAS.find(l=>l.id===lid)?.nome||lid;
-  // Verificar se já tem realizado desta loja nesta campanha — atualizar
-  const existing = D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid);
-  const real = {
-    id: 'real_'+Date.now(), campId, lojaId: lid, lojaNome,
+
+  // Verificar se já tem lançamento desta loja nesta data desta campanha
+  const existIdx = D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid && r.data===data);
+  const vendsVals = getVendCampVals();
+  const lancamento = {
+    id: existIdx>=0 ? D.campRealizados[existIdx].id : 'real_'+Date.now(),
+    campId, lojaId: lid, lojaNome, data,
     fat, atend, tm: atend>0?fat/atend:0,
-    per, obs, lancadoEm: hoje()
+    obs, vendedoras: vendsVals, lancadoEm: hoje()
   };
-  if(existing>=0) D.campRealizados[existing] = real;
-  else D.campRealizados.push(real);
+  if(existIdx>=0){
+    D.campRealizados[existIdx] = lancamento;
+    showToast('Lançamento atualizado!');
+  } else {
+    D.campRealizados.push(lancamento);
+    showToast('Dia lançado! ✅');
+  }
   save();
-  showToast('Realizado salvo!');
-  fecharFormCampReal();
-  ['camp-real-fat','camp-real-atend','camp-real-tm','camp-real-per','camp-real-obs'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.value='';
+  // Limpar campos mas manter campanha selecionada
+  document.getElementById('camp-real-fat').value='';
+  document.getElementById('camp-real-atend').value='';
+  document.getElementById('camp-real-tm').value='';
+  document.getElementById('camp-real-obs').value='';
+  document.getElementById('camp-real-data').value = hoje();
+  // Limpar campos de vendedoras
+  const lidL = lojaId();
+  D.vendedoras.filter(v=>v.loja===lidL).forEach(v=>{
+    const el=document.getElementById('camp-vend-'+v.id); if(el) el.value='';
   });
+  atualizarObjetivoCamp();
+  renderHistoricoCamp(campId, lid);
   renderCampLista();
 }
 
@@ -5916,7 +6113,17 @@ function renderCampLista(){
     const pctRede   = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
     const corRede   = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
     const corBorda  = pctRede>=100?'rgba(46,204,135,.25)':pctRede>=70?'rgba(201,168,76,.25)':'var(--borda)';
-    const meuReal   = reais.find(r=>r.lojaId===lid);
+    // Agrupar lançamentos diários da loja em um objeto consolidado
+    const meusLancs = reais.filter(r=>r.lojaId===lid);
+    const meuReal   = meusLancs.length ? {
+      fat:   meusLancs.reduce((s,r)=>s+r.fat,0),
+      atend: meusLancs.reduce((s,r)=>s+(r.atend||0),0),
+      tm:    meusLancs.reduce((s,r)=>s+(r.atend||0),0)>0
+               ? meusLancs.reduce((s,r)=>s+r.fat,0)/meusLancs.reduce((s,r)=>s+(r.atend||0),0)
+               : 0,
+      dias:  meusLancs.length,
+      id:    meusLancs[0].id
+    } : null;
     const metaLoja  = (obj.metasPorLoja&&obj.metasPorLoja[lid]) || obj.metaLoja || 0;
     const pctLoja   = metaLoja>0&&meuReal ? meuReal.fat/metaLoja*100 : 0;
     const corLoja   = pctLoja>=100?'var(--verde)':pctLoja>=70?'var(--ouro)':'var(--verm)';
@@ -5963,6 +6170,43 @@ function renderCampLista(){
       </div>` : '';
 
     // ── REALIZADOS ADMIN: grid de cards por loja ─────────────
+    // Ranking de vendedoras consolidado
+    const rankVend = {};
+    reais.forEach(r=>{
+      if(!r.vendedoras) return;
+      Object.entries(r.vendedoras).forEach(([vId,val])=>{
+        if(!rankVend[vId]) rankVend[vId] = {val:0, nome:''};
+        rankVend[vId].val += val;
+        const vObj = D.vendedoras.find(v=>v.id===vId);
+        if(vObj){ rankVend[vId].nome = vObj.nome; rankVend[vId].loja = vObj.loja; }
+      });
+    });
+    const rankVendArr = Object.values(rankVend).sort((a,b)=>b.val-a.val);
+    const rankVendHTML = rankVendArr.length ? `
+      <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
+        <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-bottom:10px">🏆 RANKING DE VENDEDORAS</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${rankVendArr.map((v,i)=>{
+            const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}º`;
+            const maxVal = rankVendArr[0].val;
+            const pct = maxVal>0?(v.val/maxVal*100).toFixed(0):0;
+            const lojaN = LOJAS.find(l=>l.id===v.loja)?.nome||v.loja||'';
+            return `<div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:14px;min-width:24px;text-align:center">${medal}</span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+                  <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.nome}<span style="font-weight:400;color:var(--muted);margin-left:6px">${lojaN}</span></span>
+                  <span style="font-weight:700;color:var(--ouro);flex-shrink:0;margin-left:8px">${fmt(v.val)}</span>
+                </div>
+                <div style="height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${i===0?'var(--ouro)':i===1?'rgba(180,180,180,.7)':'rgba(160,120,60,.7)'};border-radius:99px"></div>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : '';
+
     const tabelaReais = isAdmin() && reais.length ? `
       <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
@@ -5997,27 +6241,29 @@ function renderCampLista(){
       </div>`:'');
 
     // ── VIEW LOJA: meu realizado ──────────────────────────────
+    const faltaLoja  = metaLoja>0 ? Math.max(0, metaLoja-meuReal?.fat||0) : 0;
     const meuRealView = !isAdmin() && meuReal ? `
       <div style="margin-top:12px;background:rgba(46,204,135,.05);border:1px solid rgba(46,204,135,.18);border-radius:10px;padding:12px 14px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-size:9px;font-weight:700;color:var(--verde);letter-spacing:.8px;margin-bottom:6px">✅ SEU REALIZADO</div>
-            <div style="font-size:20px;font-weight:800;color:${corLoja}">${fmt(meuReal.fat)}</div>
-            ${metaLoja>0?`<div style="font-size:11px;color:${corLoja};margin-top:2px">${pctLoja.toFixed(0)}% da meta (${fmt(metaLoja)})</div>`:''}
-            ${meuReal.atend>0?`<div style="font-size:11px;color:var(--muted);margin-top:4px">👥 ${meuReal.atend} atendimentos · TM ${fmt(meuReal.tm)}</div>`:''}
-            ${meuReal.per?`<div style="font-size:10px;color:var(--muted)">📅 ${meuReal.per}</div>`:''}
-            ${meuReal.obs?`<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid rgba(46,204,135,.15)">${meuReal.obs}</div>`:''}
+            <div style="font-size:9px;font-weight:700;color:var(--verde);letter-spacing:.8px;margin-bottom:6px">✅ SEU REALIZADO · ${meuReal.dias} dia(s) lançado(s)</div>
+            <div style="font-size:22px;font-weight:800;color:${corLoja}">${fmt(meuReal.fat)}</div>
+            ${metaLoja>0?`
+            <div style="font-size:11px;color:${corLoja};margin-top:2px">${pctLoja.toFixed(0)}% da meta de ${fmt(metaLoja)}</div>
+            <div style="font-size:11px;color:var(--verm);margin-top:2px">${faltaLoja>0?'Falta: '+fmt(faltaLoja):'🏆 Meta atingida!'}</div>`:''}
+            ${meuReal.atend>0?`<div style="font-size:11px;color:var(--muted);margin-top:4px">👥 ${meuReal.atend} atend · TM ${fmt(meuReal.tm)}</div>`:''}
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <button onclick="editarCampReal('${meuReal.id}')"
-              style="font-size:11px;background:rgba(59,130,246,.1);color:var(--azul);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:6px 14px;cursor:pointer">✏️ Editar</button>
-            <button onclick="excluirCampRealLoja('${meuReal.id}')"
-              style="font-size:11px;background:rgba(239,68,68,.06);color:var(--verm);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:6px 14px;cursor:pointer">🗑 Apagar</button>
-          </div>
+          <button onclick="abrirFormCampRealPara('${obj.id}')"
+            style="font-size:11px;background:rgba(201,168,76,.1);color:var(--ouro);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:600">+ Lançar Dia</button>
         </div>
         ${metaLoja>0?`
-        <div style="margin-top:10px;height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
-          <div style="height:100%;width:${Math.min(100,pctLoja).toFixed(1)}%;background:${corLoja};border-radius:99px;transition:width .5s"></div>
+        <div style="margin-top:10px">
+          <div style="height:7px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
+            <div style="height:100%;width:${Math.min(100,pctLoja).toFixed(1)}%;background:${corLoja};border-radius:99px;transition:width .5s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:9px;margin-top:4px;color:var(--muted)">
+            <span>${fmt(meuReal.fat)} realizado</span><span>${fmt(metaLoja)} meta</span>
+          </div>
         </div>`:''}
       </div>` : '';
 
@@ -6028,7 +6274,7 @@ function renderCampLista(){
       </div>` : '';
 
     return `<div style="background:var(--card2);border:1px solid ${corBorda};border-radius:16px;padding:18px;margin-bottom:14px">
-      ${header}${orientacao}${produtosFoco}${tabelaReais}${meuRealView}${semRealView}
+      ${header}${orientacao}${produtosFoco}${rankVendHTML}${tabelaReais}${meuRealView}${semRealView}
     </div>`;
   }).join('');
 }
