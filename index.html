@@ -1607,16 +1607,36 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
   <!-- ABA CAMPANHAS (já existe acima — só o camp-lista é renderizado aqui) -->
   <div id="aba-camp-content">
-    <!-- Filtros -->
-    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      <button class="btn-s" onclick="filtrarCampTipo('')" id="camp-fil-todos" style="opacity:1">Todas</button>
-      <button class="btn-s" onclick="filtrarCampTipo('NATAL')" id="camp-fil-NATAL">🎄 Natal</button>
-      <button class="btn-s" onclick="filtrarCampTipo('BLACK')" id="camp-fil-BLACK">🖤 Black</button>
-      <button class="btn-s" onclick="filtrarCampTipo('OFERTAS')" id="camp-fil-OFERTAS">🏷️ Ofertas</button>
-      <button class="btn-s" onclick="filtrarCampTipo('DIA_CONSUMIDOR')" id="camp-fil-DIA_CONSUMIDOR">🛍️ Consumidor</button>
-      <button class="btn-s" onclick="filtrarCampTipo('DIA_MAES')" id="camp-fil-DIA_MAES">💐 Mães</button>
-      <button class="btn-s" onclick="filtrarCampTipo('DIA_NAMORADOS')" id="camp-fil-DIA_NAMORADOS">❤️ Namorados</button>
-      <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO">📌 Outro</button>
+
+    <!-- Filtros por TIPO (todos) + por LOJA (só admin) -->
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+
+      <!-- Linha 1: tipos de campanha -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px;min-width:36px">TIPO</span>
+        <button class="btn-s" onclick="filtrarCampTipo('')" id="camp-fil-todos" style="opacity:1">Todas</button>
+        <button class="btn-s" onclick="filtrarCampTipo('NATAL')" id="camp-fil-NATAL">🎄 Natal</button>
+        <button class="btn-s" onclick="filtrarCampTipo('BLACK')" id="camp-fil-BLACK">🖤 Black</button>
+        <button class="btn-s" onclick="filtrarCampTipo('OFERTAS')" id="camp-fil-OFERTAS">🏷️ Ofertas</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_CONSUMIDOR')" id="camp-fil-DIA_CONSUMIDOR">🛍️ Consumidor</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_MAES')" id="camp-fil-DIA_MAES">💐 Mães</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_NAMORADOS')" id="camp-fil-DIA_NAMORADOS">❤️ Namorados</button>
+        <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO">📌 Outro</button>
+      </div>
+
+      <!-- Linha 2: filtro por loja (só admin vê) -->
+      <div id="camp-fil-lojas-wrap" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px;min-width:36px">LOJA</span>
+        <button class="btn-s" onclick="filtrarCampLoja('')" id="camp-fil-loja-todas" style="opacity:1">Todas</button>
+        <button class="btn-s" onclick="filtrarCampLoja('mooca')" id="camp-fil-loja-mooca">🛍️ Mooca</button>
+        <button class="btn-s" onclick="filtrarCampLoja('ibirapuera')" id="camp-fil-loja-ibirapuera">🛍️ Ibirapuera</button>
+        <button class="btn-s" onclick="filtrarCampLoja('leopoldina')" id="camp-fil-loja-leopoldina">🏪 Leopoldina</button>
+        <button class="btn-s" onclick="filtrarCampLoja('jarpaul')" id="camp-fil-loja-jarpaul">🏪 Jd. Paulista</button>
+        <button class="btn-s" onclick="filtrarCampLoja('santana')" id="camp-fil-loja-santana">🏪 Santana</button>
+        <button class="btn-s" onclick="filtrarCampLoja('perdizes')" id="camp-fil-loja-perdizes">🏪 Perdizes</button>
+        <button class="btn-s" onclick="filtrarCampLoja('pinheiros')" id="camp-fil-loja-pinheiros">🏪 Pinheiros</button>
+      </div>
+
     </div>
     <div id="camp-lista">--</div>
   </div>
@@ -5764,12 +5784,21 @@ const CAMP_TIPOS = {
 };
 
 let _campFiltroAtivo = '';
+let _campFiltroLoja  = ''; // filtro por loja (só admin)
 
 function filtrarCampTipo(tipo){
   _campFiltroAtivo = tipo;
-  // Destacar botão ativo
   document.querySelectorAll('[id^="camp-fil-"]').forEach(b=>{
-    b.style.opacity = (b.id === 'camp-fil-'+(tipo||'todos')) ? '1' : '0.45';
+    if(!b.id.startsWith('camp-fil-loja'))
+      b.style.opacity = (b.id === 'camp-fil-'+(tipo||'todos')) ? '1' : '0.45';
+  });
+  renderCampLista();
+}
+
+function filtrarCampLoja(lid){
+  _campFiltroLoja = lid;
+  document.querySelectorAll('[id^="camp-fil-loja-"]').forEach(b=>{
+    b.style.opacity = (b.id === 'camp-fil-loja-'+(lid||'todas')) ? '1' : '0.45';
   });
   renderCampLista();
 }
@@ -6096,9 +6125,21 @@ function renderCampLista(){
 
   document.querySelectorAll('.admin-only[onclick*="abrirFormCampObj"]').forEach(b=>b.style.display=isAdmin()?'':'none');
   document.querySelectorAll('.loja-only[onclick*="abrirFormCampReal"]').forEach(b=>b.style.display=!isAdmin()?'':'none');
+  // Mostrar filtro de lojas só para admin
+  const filLojasWrap = document.getElementById('camp-fil-lojas-wrap');
+  if(filLojasWrap) filLojasWrap.style.display = isAdmin() ? 'flex' : 'none';
 
   let objs = [...D.campObjetivos];
   if(_campFiltroAtivo) objs = objs.filter(o=>o.tipo===_campFiltroAtivo);
+  // Filtro por loja: campanha aparece se a loja tem realizado OU se admin quer ver tudo
+  if(_campFiltroLoja && isAdmin()){
+    objs = objs.filter(o=>{
+      const reaisLoja = (D.campRealizados||[]).filter(r=>r.campId===o.id && r.lojaId===_campFiltroLoja);
+      // Mostrar campanha se a loja lançou OU se tem meta definida para ela
+      const temMeta = o.metasPorLoja && o.metasPorLoja[_campFiltroLoja]>0;
+      return reaisLoja.length>0 || temMeta;
+    });
+  }
   objs.sort((a,b)=>b.ini.localeCompare(a.ini));
 
   if(!objs.length){
@@ -6112,7 +6153,15 @@ function renderCampLista(){
     const totalReal = reais.reduce((s,r)=>s+r.fat,0);
     const pctRede   = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
     const corRede   = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
-    const corBorda  = pctRede>=100?'rgba(46,204,135,.25)':pctRede>=70?'rgba(201,168,76,.25)':'var(--borda)';
+    // Se filtro de loja ativo, usar cor baseada no % desta loja específica
+    const _reaisLojFil = _campFiltroLoja ? reais.filter(r=>r.lojaId===_campFiltroLoja) : [];
+    const _fatLojFil   = _reaisLojFil.reduce((s,r)=>s+r.fat,0);
+    const _metaLojFil  = _campFiltroLoja&&obj.metasPorLoja ? (obj.metasPorLoja[_campFiltroLoja]||0) : 0;
+    const _pctLojFil   = _metaLojFil>0 ? _fatLojFil/_metaLojFil*100 : pctRede;
+    const _corFil      = _pctLojFil>=100?'var(--verde)':_pctLojFil>=70?'var(--ouro)':'var(--verm)';
+    const corBorda     = (_campFiltroLoja
+      ? (_pctLojFil>=100?'rgba(46,204,135,.35)':_pctLojFil>=70?'rgba(201,168,76,.35)':'rgba(239,68,68,.2)')
+      : (pctRede>=100?'rgba(46,204,135,.25)':pctRede>=70?'rgba(201,168,76,.25)':'var(--borda)'));
     // Agrupar lançamentos diários da loja em um objeto consolidado
     const meusLancs = reais.filter(r=>r.lojaId===lid);
     const meuReal   = meusLancs.length ? {
@@ -6141,6 +6190,20 @@ function renderCampLista(){
               ${obj.metaRede>0?`<span style="font-size:10px;color:var(--muted)">🎯 Meta rede: <strong style="color:var(--texto)">${fmt(obj.metaRede)}</strong></span>`:''}
               ${metaLoja>0?`<span style="font-size:10px;color:var(--muted)">🏪 Meta loja: <strong style="color:var(--texto)">${fmt(metaLoja)}</strong></span>`:''}
             </div>
+            ${_campFiltroLoja&&_metaLojFil>0?`
+            <div style="margin-top:8px;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.04);border-radius:8px;padding:7px 10px">
+              <div>
+                <div style="font-size:9px;color:var(--muted)">${LOJAS.find(l=>l.id===_campFiltroLoja)?.nome||_campFiltroLoja}</div>
+                <div style="font-size:14px;font-weight:800;color:${_corFil}">${fmt(_fatLojFil)}</div>
+                <div style="font-size:10px;color:${_corFil}">${_pctLojFil.toFixed(0)}% de ${fmt(_metaLojFil)}</div>
+              </div>
+              <div style="flex:1;margin-left:6px">
+                <div style="height:5px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:${Math.min(100,_pctLojFil).toFixed(1)}%;background:${_corFil};border-radius:99px"></div>
+                </div>
+                <div style="font-size:9px;color:var(--verm);margin-top:3px">${_fatLojFil<_metaLojFil?'Falta: '+fmt(_metaLojFil-_fatLojFil):_fatLojFil>=_metaLojFil?'🏆 Meta atingida!':''}</div>
+              </div>
+            </div>`:''}
           </div>
         </div>
         ${isAdmin()?`<div style="display:flex;gap:6px;flex-wrap:wrap">
