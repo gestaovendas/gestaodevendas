@@ -100,13 +100,16 @@ try{
         // Extrai só os dados desta loja
         const pedaco = {
           vendas:     { [lid]: D2.vendas?.[lid]||{} },
-          vendasVend: {}
+          vendasVend: {},
+          campRealizados: [] // lançamentos desta loja nas campanhas
         };
         // Inclui vendas das vendedoras desta loja
         Object.entries(D2.vendasVend||{}).forEach(([vid, vdata])=>{
           const vend = (D2.vendedoras||[]).find(v=>v.id===vid);
           if(vend && vend.loja===lid) pedaco.vendasVend[vid] = vdata;
         });
+        // Inclui realizados de campanha desta loja
+        pedaco.campRealizados = (D2.campRealizados||[]).filter(r=>r.lojaId===lid);
 
         const docId = "loja_"+lid;
         // Merge com o que já existe no Firestore — NUNCA sobrescreve com dados vazios
@@ -122,6 +125,15 @@ try{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
               pedaco.vendasVend[vid] = Object.assign({}, dias, pedaco.vendasVend[vid]);
             });
+            // Preservar campRealizados existentes no Firestore + adicionar novos
+            if(existing.campRealizados && existing.campRealizados.length){
+              const novos = pedaco.campRealizados || [];
+              existing.campRealizados.forEach(r=>{
+                const jaExiste = novos.findIndex(x=>x.id===r.id);
+                if(jaExiste<0) novos.push(r); // preserva os que não foram sobrescritos
+              });
+              pedaco.campRealizados = novos;
+            }
           }
         }catch(e2){ console.warn("[Avatim] Merge preventivo falhou:", e2.message); }
         await setDoc(doc(db,"avatim",docId), {
@@ -175,6 +187,15 @@ try{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
                 Object.assign(base.vendasVend[vid], dias);
               });
+              // Merge campRealizados desta loja
+              if(pedaco.campRealizados && pedaco.campRealizados.length){
+                if(!base.campRealizados) base.campRealizados=[];
+                pedaco.campRealizados.forEach(r=>{
+                  const idx = base.campRealizados.findIndex(x=>x.id===r.id);
+                  if(idx>=0) base.campRealizados[idx]=r;
+                  else base.campRealizados.push(r);
+                });
+              }
               console.log("[Avatim] ✅ Merge loja:", lid);
             }
           }catch(e2){ console.warn("[Avatim] Erro merge loja "+lid+":", e2.message); }
@@ -208,7 +229,16 @@ try{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
                 Object.assign(base.vendasVend[vid], dias);
               });
-              console.log("[Avatim] ✅ Loja "+lid+" carregada");
+              // Merge campRealizados desta loja ao base
+              if(pedaco.campRealizados && pedaco.campRealizados.length){
+                if(!base.campRealizados) base.campRealizados=[];
+                pedaco.campRealizados.forEach(r=>{
+                  const rIdx = base.campRealizados.findIndex(x=>x.id===r.id);
+                  if(rIdx>=0) base.campRealizados[rIdx]=r;
+                  else base.campRealizados.push(r);
+                });
+              }
+              console.log("[Avatim] ✅ Loja "+lid+" carregada (incl. campRealizados)");
             }
           }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
         }
@@ -2977,7 +3007,8 @@ function save(){
     // Proteção: não gravar no Firebase se não há dados de vendas (evita sobrescrever com vazio)
     const temDados = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0)
                   || Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0)
-                  || (D.metasLoja && Object.keys(D.metasLoja).length>0);
+                  || (D.metasLoja && Object.keys(D.metasLoja).length>0)
+                  || (D.campRealizados && D.campRealizados.length>0); // campanha conta como dado válido
     if(!temDados && !isAdmin()){
       console.warn("[Avatim] save() bloqueado — dados vazios, evitando sobrescrever Firebase");
       return;
@@ -7960,6 +7991,15 @@ function iniciarAutoRefresh(){
               Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
                 if(!D.vendasVend[vid]) D.vendasVend[vid]={};
                 Object.assign(D.vendasVend[vid], dias);
+              });
+            }
+            // Merge campRealizados das lojas
+            if(remoto.campRealizados && remoto.campRealizados.length){
+              if(!D.campRealizados) D.campRealizados=[];
+              remoto.campRealizados.forEach(r=>{
+                const idx = D.campRealizados.findIndex(x=>x.id===r.id);
+                if(idx>=0) D.campRealizados[idx]=r;
+                else D.campRealizados.push(r);
               });
             }
             localStorage.setItem('avatim_v5', JSON.stringify(D));
