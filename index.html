@@ -1164,6 +1164,23 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
             <option value="outro">📌 Outro</option>
           </select>
         </div>
+        <div class="ig"><label>Canal de Compra</label>
+          <select id="fx-canal">
+            <option value="loja">🏪 Loja física</option>
+            <option value="whatsapp">💬 WhatsApp</option>
+            <option value="instagram">📸 Instagram</option>
+            <option value="telefone">📞 Telefone</option>
+            <option value="site">🌐 Site / E-commerce</option>
+            <option value="outro">📌 Outro</option>
+          </select>
+        </div>
+        <div class="ig"><label>Cliente</label>
+          <select id="fx-novo">
+            <option value="novo">✨ Cliente Novo</option>
+            <option value="retorno">🔄 Retorno</option>
+            <option value="inativo">♻️ Reativação</option>
+          </select>
+        </div>
         <div class="ig"><label>Vendedora</label>
           <select id="fx-vend"><option value="">Selecione...</option></select>
         </div>
@@ -3184,25 +3201,39 @@ function metaDiaLojaProgressiva(lid, dataRef){
   const m = getMetas(lid);
   if(!m || m.mes<=0) return {dia:0, super:0};
   dataRef = dataRef || hoje();
-  const [y,mo,d] = dataRef.split("-").map(Number);
-  const diasNoMes = new Date(y, mo, 0).getDate();
-  const diasRestantes = diasNoMes - d + 1;
+  // Usar dias úteis restantes respeitando calendário da loja (seg-sab vs 7 dias)
+  const diasRestantes = diasAbertosRestantes(lid);
   const acumulado = calcMesAte(lid, dataRef);
-  const restante = Math.max(0, m.mes - acumulado);
-  const dia = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : 0;
-  const resSuper = Math.max(0, (m.superMes||m.mes*1.255) - acumulado);
-  const superDia = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : 0;
+  const restante  = Math.max(0, m.mes - acumulado);
+  const dia       = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : 0;
+  const resSuper  = Math.max(0, (m.superMes||m.mes*1.255) - acumulado);
+  const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : 0;
   return {dia, superDia, diasRestantes, acumulado, restante};
 }
 // Vendas acumuladas da loja até (exclusive) uma data
 function calcMesAte(lid, dataRef){
   dataRef = dataRef || hoje();
+  const mes = dataRef.slice(0,7);
+  const vends = D.vendedoras.filter(v=>v.loja===lid);
   let total = 0;
-  if(D.vendas[lid]){
-    Object.entries(D.vendas[lid]).forEach(([dt, v])=>{
-      if(dt < dataRef) total += Number(v.fat)||0;
+  // Somar por vendedora (mesma lógica do calcMes)
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
+      if(dt.startsWith(mes) && dt <= dataRef) total += Number(vd.val||0);
+    });
+  });
+  // Fallback: D.vendas direto
+  if(total===0 && vends.length===0){
+    Object.entries(D.vendas[lid]||{}).forEach(([dt,vd])=>{
+      if(dt.startsWith(mes) && dt <= dataRef) total += Number(vd.fat||0);
     });
   }
+  // Incluir campRealizados do mês até dataRef (marcados como deCampanha evitam dupla contagem)
+  const campTotal = (D.campRealizados||[])
+    .filter(r=>r.lojaId===lid && r.data && r.data.startsWith(mes) && r.data<=dataRef)
+    .reduce((s,r)=>s+r.fat, 0);
+  // Só adiciona se não há lançamento normal do dia (evita dupla contagem)
+  if(total===0 && campTotal>0) total = campTotal;
   return total;
 }
 function diasDoMes(mesRef){
@@ -3626,7 +3657,11 @@ function carregarDash(){
     fatHj=LOJAS.reduce((s,l)=>s+calcDia(l.id),0);
     realSem=LOJAS.reduce((s,l)=>s+calcSem(l.id),0);
     realMes=LOJAS.reduce((s,l)=>s+calcMes(l.id),0);
-    metaDiaRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).dia||0),0);
+    // Admin: meta diária progressiva = soma das metas restantes ÷ dias úteis médios
+    metaDiaRef=LOJAS.reduce((s,l)=>{
+      const prog=metaDiaLojaProgressiva(l.id,hj)||{};
+      return s+(prog.dia||getMetas(l.id).dia||0);
+    },0);
     superDiaRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superDia||0),0);
     metaSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).sem||0),0);
     superSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superSem||0),0);
@@ -3638,7 +3673,12 @@ function carregarDash(){
     const prog=metaDiaLojaProgressiva(lid,hj)||{};
     fatHj=calcDia(lid);
     realSem=calcSem(lid); realMes=calcMes(lid);
-    metaDiaRef=(prog.dia||0)>0?prog.dia:(metas.dia||0);
+    // Meta diária progressiva: (meta restante) ÷ dias úteis restantes
+    const _diasRest = diasAbertosRestantes(lid);
+    const _acum     = calcMesAte(lid, hj);
+    const _rest     = Math.max(0, (metas.mes||0) - _acum);
+    metaDiaRef = _diasRest > 0 ? parseFloat((_rest/_diasRest).toFixed(2)) : (metas.dia||0);
+    if(metaDiaRef <= 0) metaDiaRef = metas.dia||0;
     superDiaRef=metas.superDia||0; metaSemRef=metas.sem||0; superSemRef=metas.superSem||0;
     metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
     tkLabel=lojaNome();
@@ -3651,6 +3691,9 @@ function carregarDash(){
   document.getElementById("k-meta").textContent=fmt(metaDiaRef);
   const falta=Math.max(0,metaDiaRef-fatHj);
   document.getElementById("k-meta-s").textContent=falta>0?"Faltam "+fmt(falta):"✓ Meta!";
+  // Subtítulo explicativo da meta diária progressiva
+  const _kmetaL = document.getElementById("k-meta");
+  if(_kmetaL) _kmetaL.title = "Progressiva: (Meta - Realizado) ÷ Dias úteis restantes";
   document.getElementById("k-smeta").textContent=fmt(superDiaRef);
   const sfalta=Math.max(0,superDiaRef-fatHj);
   document.getElementById("k-smeta-s").textContent=sfalta>0?"Faltam "+fmt(sfalta):"✓ Super!";
@@ -4599,7 +4642,9 @@ function salvarFluxo(){
   const vend=D.vendedoras.find(v=>v.id===vendId);
   const loja=vend?vend.loja:lojaId();
   if(!D.fluxo) D.fluxo=[];
-  D.fluxo.push({id:"fx"+Date.now(),nome,origem,vendId,loja,valor,data,obs,ts:Date.now()});
+  const canal = document.getElementById("fx-canal")?.value||"loja";
+  const tipoCliente = document.getElementById("fx-novo")?.value||"novo";
+  D.fluxo.push({id:"fx"+Date.now(),nome,origem,canal,tipoCliente,vendId,loja,valor,data,obs,ts:Date.now()});
   save();
   showToast("✅ "+nome+" registrado como "+( ORIGENS[origem]?.label||origem));
   toggleFormFluxo();
