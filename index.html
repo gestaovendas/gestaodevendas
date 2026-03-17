@@ -78,9 +78,23 @@ try{
       const isAdm = email === "admin\u0040avatim.com";
 
       if(isAdm){
-        // Admin salva tudo num único documento (ele tem visão completa)
-        await setDoc(doc(db,"avatim","principal"), { dados: dadosJSON, ts: Date.now(), por: email });
-        console.log("[Avatim] ✅ Admin: tudo salvo");
+        // Admin: antes de salvar, garantir que campRealizados das lojas está completo
+        try {
+          const snapAtual = await getDoc(doc(db,"avatim","principal"));
+          if(snapAtual.exists()){
+            const atual = JSON.parse(snapAtual.data().dados||"{}");
+            // Preservar campRealizados que o admin pode não ter em memória ainda
+            if(atual.campRealizados && atual.campRealizados.length){
+              if(!D2.campRealizados) D2.campRealizados = [];
+              atual.campRealizados.forEach(r=>{
+                const ja = D2.campRealizados.findIndex(x=>x.id===r.id);
+                if(ja<0) D2.campRealizados.push(r); // preserva lançamentos das lojas
+              });
+            }
+          }
+        } catch(eMerge){ console.warn("[Avatim] merge preventivo admin:", eMerge.message); }
+        await setDoc(doc(db,"avatim","principal"), { dados: JSON.stringify(D2), ts: Date.now(), por: email });
+        console.log("[Avatim] ✅ Admin: tudo salvo (campRealizados preservados)");
       } else {
         // Loja salva SÓ seus dados no doc da loja (não toca nos outros)
         // Descobre o lojaId da loja logada
@@ -2260,7 +2274,8 @@ service cloud.firestore {
       <h1 class="pt">Painel de <span>Gestao</span></h1>
       <div class="ps">Visao geral da rede — faturamento, ticket medio e status de metas</div>
     </div>
-    <button class="btn-p" onclick="exportarRelatorioGestao()" style="font-size:12px;padding:8px 16px">⬇️ Exportar Relatório</button>
+    <button class="btn-p" onclick="exportarRelatorioGestao()" style="font-size:12px;padding:8px 16px">⬇️ Exportar CSV</button>
+    <button class="btn-p" onclick="compartilharWhatsApp()" style="font-size:12px;padding:8px 16px;background:rgba(37,211,102,.15);border-color:rgba(37,211,102,.4);color:#25d366">💬 WhatsApp</button>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div class="tabs" style="margin:0">
         <button class="tab active" id="gtab-hoje" onclick="tabGestao('hoje',this)">Hoje</button>
@@ -3941,7 +3956,7 @@ function renderRankHoje(){
   document.getElementById("rank-hoje").innerHTML=r.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
     const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div class="ritem"><div class="rpos ${cls[i]}">${i+1}</div><div class="rinfo"><div class="rn">${l.nome} ${badge}</div><div class="rv">${fmt(l.v)} &mdash; ${l.pct.toFixed(0)}% da meta</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?l.v/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${l.pct.toFixed(0)}%</div></div></div>`;
+    return `<div class="ritem"><div class="rpos ${cls[i]}">${i+1}</div><div class="rinfo"><div class="rn">${l.nome} ${badge}</div><div class="rv">${l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?l.v/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${l.pct.toFixed(0)}%</div></div></div>`;
   }).join("");
 }
 
@@ -3986,7 +4001,7 @@ function renderRankVendHoje(){
     const pct=metaRef>0?v.val/metaRef*100:0,c=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     const loja=LOJAS.find(l=>l.id===v.loja);
     const lojaTag=isAdmin()?`<span style="font-size:9px;color:var(--muted);margin-left:4px">${loja?.nome||""}</span>`:"";
-    return `<div class="ritem"><div class="rpos ${cls[i]}">${["🥇","🥈","🥉","4","5","6","7","8"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}${lojaTag}</div><div class="rv">${fmt(v.val)}${metaRef>0?" — "+pct.toFixed(0)+"% da meta":""}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?v.val/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${fmt(v.val)}</div></div></div>`;
+    return `<div class="ritem"><div class="rpos ${cls[i]}">${["🥇","🥈","🥉","4","5","6","7","8"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}${lojaTag}</div><div class="rv">${metaRef>0?pct.toFixed(0)+"% da meta":"-"}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?v.val/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
   }).join(""):"<div style='color:var(--muted);font-size:11px;padding:8px 0'>Sem lançamentos no período.</div>";
 }
 
@@ -4558,8 +4573,7 @@ function renderMetas(){
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)">
             <span style="font-size:11px;color:var(--texto)">${v.nome}</span>
             <div style="text-align:right">
-              <span style="font-size:12px;font-weight:700;color:${cv}">${fmt(vm)}</span>
-              <span style="font-size:9px;color:var(--muted);margin-left:4px">${pv.toFixed(0)}%</span>
+              <span style="font-size:12px;font-weight:700;color:${cv}">${pv.toFixed(0)}%</span>
             </div>
           </div>`;
         }).join("")}
@@ -5455,7 +5469,7 @@ function renderLojas(per="hoje"){
   document.getElementById("lojas-grid").innerHTML=ld.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
     const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${fmt(l.v)}</span><span>Meta ${fmt(l.meta)}</span></div></div>`;
+    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
   }).join("");
   const cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-lojas").innerHTML=ld.map((l,i)=>{
@@ -5483,10 +5497,9 @@ function renderLojas(per="hoje"){
           <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
-          <span>Fat: <strong style="color:${c}">${fmt(l.v)}</strong></span>
-          <span>Meta: ${fmt(l.meta)}</span>
+          <span>${l.pct>=120?'🏆 Super Meta!':l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}</span>
         </div>
-        ${somavv>0?`<div style="font-size:9px;color:var(--azul);margin-top:2px">∑ vendedoras: ${fmt(somavv)}</div>`:""}
+        
         <div style="font-size:9px;color:var(--muted);margin-top:2px">📍 último lançamento: <strong>${ultHora}</strong></div>
       </div>
       <div style="text-align:right;padding-left:8px">
@@ -5511,7 +5524,7 @@ function renderLojas(per="hoje"){
   }).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
   document.getElementById("rank-vend-rede").innerHTML=allVends.length?allVends.map((v,i)=>{
     const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
-    return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja} &mdash; ${fmt(v.val)}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
+    return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
 }
 
@@ -7383,8 +7396,8 @@ function renderRankings(tab) {
 
   // --- Podio das lojas ---
   const podioHtml = _buildPodio(ld.slice(0,3), l => ({
-    titulo: l.nome, sub: l.cnpj,
-    val: fmt(l.v), pct: l.pct, meta: fmt(l.meta), sm: fmt(l.sm)
+    titulo: l.nome, sub: '',
+    val: '', pct: l.pct, meta: '', sm: ''
   }));
   document.getElementById('rank-podio-lojas').innerHTML = podioHtml;
 
@@ -7401,7 +7414,7 @@ function renderRankings(tab) {
         <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0;width:100%">
           <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
         </div>
-        <div class="rv">${fmt(l.v)} de ${fmt(l.meta)} | Super: ${fmt(l.sm)}</div>
+        <div class="rv" style="font-size:9px;color:var(--muted)">${l.pct>=100?'✅ Meta atingida!':l.pct>=70?'Próximo da meta':'Abaixo da meta'}</div>
       </div>
       <div style="text-align:right">
         <div style="font-family:Playfair Display,serif;font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
@@ -7437,7 +7450,7 @@ function renderRankings(tab) {
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
               <div style="width:${maxV>0?v.val/maxV*100:0}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
-            <div class="rv">${loja?.nome||v.loja} &mdash; ${fmt(v.val)}</div>
+            <div class="rv">${loja?.nome||v.loja}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:13px;font-weight:700;color:${c}">${pct.toFixed(0)}%</div>
@@ -7758,8 +7771,8 @@ function renderRankingLoja() {
         <div style="height:6px;background:var(--cinza);border-radius:6px;overflow:hidden;margin:10px 0">
           <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};border-radius:6px;transition:width .8s"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
-          <span>${fmt(vLoja)} realizado</span><span>Meta ${fmt(meta)} | Super ${fmt(sm)}</span>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">
+          ${pct>=120?'🏆 Super Meta!':pct>=100?'✅ Meta atingida!':pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}
         </div>
       </div>
       <div style="text-align:center;padding:0 12px">
@@ -7785,10 +7798,10 @@ function renderRankingLoja() {
   // Podio
   document.getElementById('rank-podio-vends').innerHTML = vends.length >= 1
     ? _buildPodio(vends.slice(0,3), v => ({
-        titulo: v.nome, sub: fmt(v.mPer||v.metaMes)+'/per',
-        val: fmt(v.val),
+        titulo: v.nome, sub: v.lojaNome||'',
+        val: '',
         pct: (v.mPer||0)>0?v.val/(v.mPer||1)*100:0,
-        meta: fmt(v.mPer||v.metaMes), sm: fmt(v.superMetaMes||0)
+        meta: '', sm: ''
       }))
     : '';
 
@@ -7881,7 +7894,7 @@ function renderRankingAdmin() {
         </div>
         <div style="text-align:right">
           <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${cor}">${pct.toFixed(0)}%</div>
-          <div style="font-size:10px;color:var(--muted)">${fmt(vL)}</div>
+          <div style="font-size:10px;color:var(--muted)">${pct>=100?'✅ Meta!':pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
         </div>
       </div>
       <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin-bottom:12px">
@@ -7897,7 +7910,7 @@ function renderRankingAdmin() {
         return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03)">
           <div style="font-size:12px;width:18px;text-align:center">${['🥇','🥈','🥉','4','5'][i]}</div>
           <div style="flex:1;font-size:11px;font-weight:500">${v.nome}</div>
-          <div style="font-size:11px;color:${cv};font-weight:600">${fmt(v.val)}</div>
+          <div style="font-size:11px;color:${cv};font-weight:600">${pv.toFixed(0)}%</div>
           <div style="width:40px;height:3px;background:var(--cinza);border-radius:3px;overflow:hidden">
             <div style="width:${maxV>0?v.val/maxV*100:0}%;height:100%;background:${cv};border-radius:3px"></div>
           </div>
@@ -7928,11 +7941,9 @@ function _buildPodio(items, getInfo) {
       const bgPct = info.pct>=120?'rgba(139,92,246,.08)':info.pct>=100?'rgba(46,204,135,.06)':info.pct>=70?'rgba(201,168,76,.06)':'rgba(255,71,87,.05)';
       return `<div style="flex:1;max-width:220px;min-height:${h};background:${bgPct};border:1px solid ${brd};border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;transition:all .2s">
         <div style="font-size:32px;margin-bottom:6px">${med}</div>
-        <div style="font-size:13px;font-weight:700;margin-bottom:2px">${info.titulo}</div>
-        <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${info.sub}</div>
-        <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:900;color:${cor}">${info.val}</div>
-        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct.toFixed(0)}%</div>
-        <div style="font-size:9px;color:var(--muted);margin-top:3px">Meta: ${info.meta}</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${info.titulo}</div>
+        <div style="font-family:Playfair Display,serif;font-size:28px;font-weight:900;color:${cor}">${info.pct.toFixed(0)}%</div>
+        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct>=120?'🏆 Super Meta!':info.pct>=100?'✅ Meta!':info.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -8362,6 +8373,9 @@ function iniciarAutoRefresh(){
     if(pg==='dash')carregarDash();
     else if(pg==='lojas')renderLojas(_tabLojas);
     else if(pg==='rankings')renderRankings('rede');
+    else if(pg==='gestao')renderGestao();
+    else if(pg==='campanhas'){ renderCampLista(); if(typeof renderRelCamp==='function') renderRelCamp(); }
+    else if(pg==='metas')renderMetas();
   }
   syncAdmin();
   _autoRefreshTimer=setInterval(syncAdmin,30000);
@@ -8643,6 +8657,59 @@ function exportarRelatorioRanking(){
   showToast('Relatório exportado!');
 }
 
+function compartilharWhatsApp(){
+  const per = _gestaoPer || 'hoje';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const hj = hoje();
+  const perV = per==='hoje'?'dia':per;
+  const _hjW = hoje();
+
+  let txt = `📊 *RELATÓRIO AVATIM — ${perLabel.toUpperCase()}*\n`;
+  txt += `📅 ${hj.split('-').reverse().join('/')}\n\n`;
+
+  // Ranking Lojas
+  txt += `🏪 *RANKING DE LOJAS*\n`;
+  const ldW = LOJAS.map(l=>{
+    const m=getMetas(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const pct=meta>0?fat/meta*100:0;
+    return {nome:l.nome,fat,pct};
+  }).sort((a,b)=>b.pct-a.pct);
+  const medals=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣'];
+  ldW.forEach((l,i)=>{
+    const s = l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+    txt += `${medals[i]||i+1} ${l.nome} — ${s} *${l.pct.toFixed(0)}%*\n`;
+  });
+
+  // Top Vendedoras
+  txt += `\n👩 *TOP VENDEDORAS*\n`;
+  const vendsW = D.vendedoras.map(v=>{
+    const val=calcVendPer(v.id,perV);
+    const mMes=Number(v.metaMes)||0;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjW):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const pct=mPer>0?val/mPer*100:0;
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
+  }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,5);
+  vendsW.forEach((v,i)=>{
+    const s=v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+    txt += `${medals[i]} ${v.nome} (${v.loja}) — ${s} *${v.pct.toFixed(0)}%*\n`;
+  });
+
+  // Totais da rede
+  const totalFat = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)),0);
+  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
+  const pctRede = totalMeta>0?totalFat/totalMeta*100:0;
+  const sRede = pctRede>=120?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
+  txt += `\n📈 *REDE: ${sRede} ${pctRede.toFixed(0)}% da meta*\n`;
+  txt += `_Gerado pelo Avatim Gestão_`;
+
+  // Abrir WhatsApp
+  const url = 'https://wa.me/?text=' + encodeURIComponent(txt);
+  window.open(url, '_blank');
+}
+
 function exportarRelatorioGestao(){
   const per = _gestaoPer || 'hoje';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
@@ -8764,7 +8831,7 @@ function renderGestao() {
         <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
           <div style="width:${Math.min(100,l.fat/maxFat*100)}%;height:100%;background:${c};border-radius:4px"></div>
         </div>
-        <div class="rv">${fmt(l.fat)} / meta ${fmt(l.meta)}</div>
+        <div class="rv">${l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
       </div>
       <div style="text-align:right;min-width:48px">
         <div style="font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
@@ -8783,7 +8850,7 @@ function renderGestao() {
           <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
             <div style="width:${l.tm/maxTM*100}%;height:100%;background:var(--azul);border-radius:4px"></div>
           </div>
-          <div class="rv">${l.nat} atend. &middot; Fat: ${fmt(l.fat)}</div>
+          <div class="rv">${l.nat} atend.</div>
         </div>
         <div style="text-align:right;min-width:56px">
           <div style="font-size:16px;font-weight:700;color:var(--azul)">${fmt(l.tm)}</div>
@@ -8821,8 +8888,8 @@ function renderGestao() {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
         <div><span style="color:var(--muted)">Realizado</span><br><strong>${fmt(l.fat)}</strong></div>
-        <div><span style="color:var(--muted)">Meta</span><br><strong>${fmt(l.meta)}</strong></div>
-        <div><span style="color:var(--muted)">Super Meta</span><br><strong>${fmt(l.sm)}</strong></div>
+        <div><span style="color:var(--muted)">Meta</span></div>
+        <div><span style="color:var(--muted)">Super Meta</span></div>
         <div><span style="color:var(--muted)">TM</span><br><strong style="color:var(--azul)">${fmt(l.tm)}</strong>${l.ticket>0?` <span style="color:var(--muted)">(alvo:${fmt(l.ticket)})</span>`:''}</div>
         ${faltaMeta>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Meta</span> <strong style="color:var(--verm)">${fmt(faltaMeta)}</strong></div>`:''}
         ${l.pct>=100&&faltaSM>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Super</span> <strong style="color:var(--roxo)">${fmt(faltaSM)}</strong></div>`:''}
@@ -8860,7 +8927,7 @@ function renderGestao() {
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
               <div style="width:${v.val/maxV*100}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
-            <div class="rv">${v.lojaNome} &mdash; ${fmt(v.val)}</div>
+            <div class="rv">${v.lojaNome}</div>
           </div>
           <div style="text-align:right;min-width:44px">
             <div style="font-size:13px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
@@ -8895,11 +8962,11 @@ function renderGestao() {
           <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
             <div style="width:${Math.min(100,v.pct)}%;height:100%;background:${c};border-radius:3px"></div>
           </div>
-          <div class="rv">${fmt(v.val)} &mdash; ${v.mPer>0?v.pct.toFixed(0)+'% da meta':'-'}</div>
+          <div class="rv">${v.mPer>0?v.pct.toFixed(0)+'% da meta':'-'}</div>
         </div>
         <div style="text-align:right;min-width:56px">
           <div style="font-size:13px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
-          <div style="font-size:9px;color:var(--muted)">${fmt(v.mPer)} meta</div>
+          <div style="font-size:9px;color:var(--muted)">meta</div>
         </div>
       </div>`;
       }).join('')
