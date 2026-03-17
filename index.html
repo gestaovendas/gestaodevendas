@@ -1,9 +1,4 @@
-        <div style="display:flex;gap:4px;flex-shrink:0">
-          <button onclick="editarLancCamp(\'${l.id}\')"
-            style="font-size:9px;color:var(--azul);background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:5px;cursor:pointer;padding:2px 7px">✏️</button>
-          <button onclick="excluirLancCamp(\'${l.id}\')"
-            style="font-size:9px;color:var(--verm);background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:5px;cursor:pointer;padding:2px 7px">🗑</button>
-        </div><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -6204,8 +6199,12 @@ function renderHistoricoCamp(campId, lid){
           ${l.atend>0?`<span style="font-size:10px;color:var(--muted);margin-left:8px">${l.atend} atend · TM ${fmt(l.tm)}</span>`:''}
           ${l.obs?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${l.obs}</div>`:''}
         </div>
-        <button onclick="excluirLancCamp('${l.id}')"
-          style="font-size:9px;color:var(--verm);background:none;border:none;cursor:pointer;padding:0 4px;flex-shrink:0">✕</button>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="editarLancCamp(\'${l.id}\')"
+            style="font-size:9px;color:var(--azul);background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:5px;cursor:pointer;padding:2px 7px">✏️</button>
+          <button onclick="excluirLancCamp(\'${l.id}\')"
+            style="font-size:9px;color:var(--verm);background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:5px;cursor:pointer;padding:2px 7px">🗑</button>
+        </div>
       </div>
       ${vendRows?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;padding-left:80px">${vendRows}</div>`:''}
     </div>`;
