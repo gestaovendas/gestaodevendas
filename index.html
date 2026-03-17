@@ -915,6 +915,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="kcard verm"><div class="kl">GAP</div><div class="kv" id="m-gap">--</div><div class="ks" id="m-gap-s">Diferença</div></div>
     <div class="kcard azul"><div class="kl">Necessário/dia</div><div class="kv" id="m-ndp">--</div><div class="ks" id="m-ndp-s">Para bater meta</div></div>
     <div class="kcard laranja"><div class="kl">Projeção</div><div class="kv" id="m-proj">--</div><div class="ks" id="m-proj-s">Se manter ritmo</div></div>
+    <div class="kcard azul"><div class="kl">Ticket Médio</div><div class="kv" id="m-tm">--</div><div class="ks" id="m-tm-s">do período</div></div>
+    <div class="kcard"><div class="kl">Atendimentos</div><div class="kv" id="m-atend">--</div><div class="ks" id="m-atend-s">no período</div></div>
   </div>
 
   <!-- Painel de acompanhamento Hoje/Semana/Mês + Metas individuais (todos veem) -->
@@ -1272,6 +1274,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-rankings">
   <div class="ph">
     <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedoras por loja e ranking geral da rede</div></div>
+    <button class="btn-p" onclick="exportarRelatorioRanking()" style="font-size:12px;padding:8px 16px">⬇️ Exportar Relatório</button>
   </div>
   <div class="tabs">
     <button class="tab active" onclick="tabRank('rede',this)">Rede Geral</button>
@@ -2257,6 +2260,7 @@ service cloud.firestore {
       <h1 class="pt">Painel de <span>Gestao</span></h1>
       <div class="ps">Visao geral da rede — faturamento, ticket medio e status de metas</div>
     </div>
+    <button class="btn-p" onclick="exportarRelatorioGestao()" style="font-size:12px;padding:8px 16px">⬇️ Exportar Relatório</button>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div class="tabs" style="margin:0">
         <button class="tab active" id="gtab-hoje" onclick="tabGestao('hoje',this)">Hoje</button>
@@ -4465,6 +4469,23 @@ function renderMetas(){
     document.getElementById("m-proj").textContent="--";
     document.getElementById("m-proj-s").textContent="Se manter ritmo";
   }
+
+  // Ticket Médio e Atendimentos por período
+  const _perV = _tabMeta==='dia'?'dia':_tabMeta==='semana'?'semana':'mes';
+  const _tmVal  = isAdmin() ? calcTMRede(_perV) : calcTMLoja(lid, _perV);
+  const _natend = isAdmin()
+    ? LOJAS.reduce((s,l)=>s+calcNAtend(l.id,_perV),0)
+    : calcNAtend(lid, _perV);
+  const _tmEl = document.getElementById('m-tm');
+  const _atEl = document.getElementById('m-atend');
+  if(_tmEl) _tmEl.textContent = _tmVal>0 ? fmt(_tmVal) : '--';
+  if(document.getElementById('m-tm-s'))
+    document.getElementById('m-tm-s').textContent =
+      _tabMeta==='dia'?'ticket médio hoje':_tabMeta==='semana'?'ticket médio semana':'ticket médio mês';
+  if(_atEl) _atEl.textContent = _natend>0 ? _natend : '--';
+  if(document.getElementById('m-atend-s'))
+    document.getElementById('m-atend-s').textContent =
+      _tabMeta==='dia'?'atend. hoje':_tabMeta==='semana'?'atend. semana':'atend. mês';
 
   // Alerta de ritmo
   const alertaEl=document.getElementById("alerta-metas");
@@ -7850,7 +7871,11 @@ function renderRankingAdmin() {
         <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};border-radius:4px"></div>
       </div>
       ${vends.slice(0,5).map((v,i) => {
-        const pv = v.metaMes>0?v.val/v.metaMes*100:0;
+        const _mvMes = Number(v.metaMes)||0;
+        const _mvPer = per==='hoje'
+          ? metaDiaProgressiva(_mvMes, v.id, hj)
+          : per==='semana' ? parseFloat((_mvMes/4.33).toFixed(2)) : _mvMes;
+        const pv = _mvPer>0?v.val/_mvPer*100:0;
         const cv = pv>=120?'var(--roxo)':pv>=100?'var(--verde)':pv>=70?'var(--ouro)':'var(--muted)';
         return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03)">
           <div style="font-size:12px;width:18px;text-align:center">${['🥇','🥈','🥉','4','5'][i]}</div>
@@ -8556,6 +8581,99 @@ function tabGestao(per, el) {
   document.querySelectorAll('#page-gestao .tab').forEach(e => e.classList.remove('active'));
   if(el) el.classList.add('active');
   renderGestao();
+}
+
+function exportarRelatorioRanking(){
+  const per = _rankPerAdmin || 'hoje';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const hj = hoje();
+  let csv = 'RELATÓRIO DE RANKINGS AVATIM\n';
+  csv += 'Gerado em: '+hj+'\nPeríodo: '+perLabel+'\n\n';
+
+  // Ranking Lojas
+  csv += 'RANKING DE LOJAS\n';
+  csv += 'Posição,Loja,Faturamento,Meta,% Meta,TM\n';
+  const perV = per==='hoje'?'dia':per;
+  const ldExp = LOJAS.map(l=>{
+    const m=getMetas(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const pct=meta>0?fat/meta*100:0;
+    const tm=calcTMLoja(l.id,perV);
+    return {nome:l.nome,fat,meta,pct,tm};
+  }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
+  ldExp.forEach((l,i)=>{
+    csv += (i+1)+','+l.nome+','+l.fat.toFixed(2)+','+l.meta.toFixed(2)+','+l.pct.toFixed(1)+'%,'+l.tm.toFixed(2)+'\n';
+  });
+
+  // Ranking Vendedoras
+  csv += '\nRANKING DE VENDEDORAS\n';
+  csv += 'Posição,Nome,Loja,Faturamento,Meta Período,% Meta\n';
+  const hj2 = hoje();
+  const vendsExp = D.vendedoras.map(v=>{
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    const val=calcVendPer(v.id,perV);
+    const mMes=Number(v.metaMes)||0;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj2):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const pct=mPer>0?val/mPer*100:0;
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,mPer,pct};
+  }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct||b.val-a.val);
+  vendsExp.forEach((v,i)=>{
+    csv += (i+1)+','+v.nome+','+v.loja+','+v.val.toFixed(2)+','+v.mPer.toFixed(2)+','+v.pct.toFixed(1)+'%\n';
+  });
+
+  _downloadCSV(csv, 'ranking_avatim_'+hj+'.csv');
+  showToast('Relatório exportado!');
+}
+
+function exportarRelatorioGestao(){
+  const per = _gestaoPer || 'hoje';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const hj = hoje();
+  let csv = 'RELATÓRIO PAINEL DE GESTÃO AVATIM\n';
+  csv += 'Gerado em: '+hj+'\nPeríodo: '+perLabel+'\n\n';
+
+  // Status de lojas
+  csv += 'STATUS DAS LOJAS\n';
+  csv += 'Loja,Faturamento,Meta,% Meta,TM,Atendimentos,Projeção\n';
+  const perV = per==='hoje'?'dia':per;
+  LOJAS.forEach(l=>{
+    const m=getMetas(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const pct=meta>0?fat/meta*100:0;
+    const tm=calcTMLoja(l.id,perV);
+    const nat=calcNAtend(l.id,perV);
+    const proj=calcProjecao(l.id);
+    csv += l.nome+','+fat.toFixed(2)+','+meta.toFixed(2)+','+pct.toFixed(1)+'%,'+tm.toFixed(2)+','+nat+','+(proj?proj.projecao.toFixed(2):'--')+'\n';
+  });
+
+  // Top vendedoras
+  csv += '\nTOP VENDEDORAS\n';
+  csv += 'Nome,Loja,Faturamento,% Meta\n';
+  D.vendedoras.map(v=>{
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    const val=calcVendPer(v.id,perV);
+    const mMes=Number(v.metaMes)||0;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const pct=mPer>0?val/mPer*100:0;
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
+  }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).forEach((v,i)=>{
+    csv += v.nome+','+v.loja+','+v.val.toFixed(2)+','+v.pct.toFixed(1)+'%\n';
+  });
+
+  _downloadCSV(csv, 'gestao_avatim_'+hj+'.csv');
+  showToast('Relatório exportado!');
+}
+
+function _downloadCSV(csv, filename){
+  const bom = '\uFEFF'; // UTF-8 BOM para Excel reconhecer acentos
+  const blob = new Blob([bom+csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 function renderGestao() {
