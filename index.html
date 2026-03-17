@@ -3302,6 +3302,12 @@ function calcDia(lid, data){
   let t=0;
   vends.forEach(v=>{ t+=Number(D.vendasVend[v.id]?.[hj]?.val||0); });
   if(t===0 && vends.length===0) t=Number(D.vendas[lid]?.[hj]?.fat||0);
+  // Se não há lançamento normal e não há vendasVend, verificar campRealizados do dia
+  if(t===0){
+    t = (D.campRealizados||[])
+      .filter(r=>r.lojaId===lid && r.data===hj)
+      .reduce((s,r)=>s+r.fat, 0);
+  }
   return t;
 }
 function calcSem(lid){
@@ -3319,6 +3325,12 @@ function calcSem(lid){
   let t=0;
   vends.forEach(v=>{ dias.forEach(d=>{ t+=Number(D.vendasVend[v.id]?.[d]?.val||0); }); });
   if(t===0 && vends.length===0) dias.forEach(d=>{ t+=Number(D.vendas[lid]?.[d]?.fat||0); });
+  // Fallback: campRealizados da semana
+  if(t===0){
+    t = (D.campRealizados||[])
+      .filter(r=>r.lojaId===lid && dias.includes(r.data))
+      .reduce((s,r)=>s+r.fat, 0);
+  }
   return t;
 }
 function calcMes(lid){
@@ -3333,6 +3345,12 @@ function calcMes(lid){
   });
   if(t===0 && vends.length===0){
     Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{ if(d.startsWith(mes)) t+=Number(vd.fat||0); });
+  }
+  // Se ainda zero, considerar campRealizados do mês
+  if(t===0){
+    t = (D.campRealizados||[])
+      .filter(r=>r.lojaId===lid && r.data && r.data.startsWith(mes))
+      .reduce((s,r)=>s+r.fat, 0);
   }
   return t;
 }
@@ -6233,6 +6251,60 @@ function salvarCampReal(){
     D.campRealizados.push(lancamento);
     showToast('Dia lançado! ✅');
   }
+
+  // ── SOMAR AUTOMATICAMENTE NO FATURAMENTO DO DIA (D.vendas) ──
+  // Calcular total de TODAS as campanhas desta loja nesta data
+  const totalCampDia = D.campRealizados
+    .filter(r => r.lojaId === lid && r.data === data)
+    .reduce((s, r) => s + r.fat, 0);
+
+  const totalAtendCampDia = D.campRealizados
+    .filter(r => r.lojaId === lid && r.data === data)
+    .reduce((s, r) => s + (r.atend||0), 0);
+
+  // Pegar o lançamento normal do dia (se existir) e somar com campanha
+  if(!D.vendas[lid]) D.vendas[lid] = {};
+  const lancNormal = D.vendas[lid][data] || {};
+  const fatNormal  = lancNormal.fat || 0;
+
+  // Se já tem lançamento normal, preservar e apenas registrar campanha como complemento
+  // Se não tem lançamento normal, criar com os dados da campanha
+  if(fatNormal === 0){
+    // Sem lançamento normal: criar baseado na campanha
+    D.vendas[lid][data] = {
+      fat:    totalCampDia,
+      trans:  totalAtendCampDia || totalCampDia > 0 ? (totalAtendCampDia || 1) : 0,
+      cli:    totalAtendCampDia || 0,
+      clinov: lancNormal.clinov || 0,
+      visit:  lancNormal.visit  || 0,
+      tm:     totalAtendCampDia > 0 ? totalCampDia / totalAtendCampDia : 0,
+      obs:    lancNormal.obs || '',
+      deCampanha: true,
+      ts:     Date.now()
+    };
+  } else {
+    // Já tem lançamento normal: NÃO sobrescrever — apenas registrar campanha à parte
+    // O dashboard vai usar calcFatComCamp() que soma os dois
+  }
+
+  // Salvar também nas vendedoras (vendasVend) se foram preenchidas
+  const vendsComVal = Object.entries(vendsVals);
+  if(vendsComVal.length > 0){
+    vendsComVal.forEach(([vId, vFat])=>{
+      if(!D.vendasVend[vId]) D.vendasVend[vId] = {};
+      const jaTem = D.vendasVend[vId][data];
+      if(!jaTem || (jaTem.deCampanha)){
+        // Só sobrescreve se não existe ou se veio de campanha anterior
+        D.vendasVend[vId][data] = {
+          val:   vFat,
+          trans: 1,
+          deCampanha: true,
+          ts:    Date.now()
+        };
+      }
+    });
+  }
+
   save();
   // Limpar campos mas manter campanha selecionada
   document.getElementById('camp-real-fat').value='';
@@ -6441,7 +6513,7 @@ function renderCampLista(){
               <button onclick="excluirCampReal('${r.id}')" style="margin-top:6px;font-size:9px;color:var(--verm);background:none;border:none;cursor:pointer;padding:0">✕ remover</button>
             </div>`;
           }).join('')}
-        </div>
+      </div>
       </div>` : (isAdmin()&&!reaisFiltrados.length?`
       <div style="border-top:1px solid var(--borda);padding-top:12px;margin-top:4px">
         <div style="font-size:11px;color:var(--muted);text-align:center;padding:12px">${_campFiltroLoja?(LOJAS.find(l=>l.id===_campFiltroLoja)?.nome||_campFiltroLoja)+' ainda não lançou realizado':'Nenhuma loja lançou realizado ainda'}</div>
@@ -8591,77 +8663,6 @@ function renderGestao() {
       ` : `<div style="font-size:11px;color:var(--muted)">Sem lancamentos no mes.</div>`}
     </div>`;
   }).join('');
-}
-
-</script>
-</body>
-</html${(()=>{
-            // Agrupar todos lançamentos diários por loja
-            const grp = {};
-            reais.forEach(r=>{
-              if(!grp[r.lojaId]) grp[r.lojaId]={lojaId:r.lojaId,nome:r.lojaNome,fat:0,atend:0,dias:0};
-              grp[r.lojaId].fat   += r.fat;
-              grp[r.lojaId].atend += (r.atend||0);
-              grp[r.lojaId].dias  += 1;
-            });
-            return Object.values(grp).map(g=>{
-              const metaR = (obj.metasPorLoja&&obj.metasPorLoja[g.lojaId])||obj.metaLoja||0;
-              const pct2  = metaR>0?g.fat/metaR*100:0;
-              const tm2   = g.atend>0?g.fat/g.atend:0;
-              const c2    = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
-              return `<div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:10px">
-                <div style="font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">${g.nome}</div>
-                <div style="font-size:16px;font-weight:800;color:${c2}">${fmt(g.fat)}</div>
-                ${metaR>0?`<div style="font-size:10px;color:${c2};margin-top:2px">${pct2.toFixed(0)}% da meta · ${fmt(metaR)}</div>`:''}
-                ${g.atend>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px">👥 ${g.atend} atend · TM ${fmt(tm2)}</div>`:''}
-                <div style="font-size:9px;color:var(--muted);margin-top:2px">📅 ${g.dias} dia(s) lançado(s)</div>
-              </div>`;
-            }).join('');
-          })()}
-        </div>
-      </div>` : (isAdmin()&&!reaisFiltrados.length?`
-      <div style="border-top:1px solid var(--borda);padding-top:12px;margin-top:4px">
-        <div style="font-size:11px;color:var(--muted);text-align:center;padding:12px">${_campFiltroLoja?(LOJAS.find(l=>l.id===_campFiltroLoja)?.nome||_campFiltroLoja)+' ainda não lançou realizado':'Nenhuma loja lançou realizado ainda'}</div>
-      </div>`:'');
-
-    // ── VIEW LOJA: meu realizado ──────────────────────────────
-    const faltaLoja  = metaLoja>0 ? Math.max(0, metaLoja-meuReal?.fat||0) : 0;
-    const meuRealView = !isAdmin() && meuReal ? `
-      <div style="margin-top:12px;background:rgba(46,204,135,.05);border:1px solid rgba(46,204,135,.18);border-radius:10px;padding:12px 14px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:9px;font-weight:700;color:var(--verde);letter-spacing:.8px;margin-bottom:6px">✅ SEU REALIZADO · ${meuReal.dias} dia(s) lançado(s)</div>
-            <div style="font-size:22px;font-weight:800;color:${corLoja}">${fmt(meuReal.fat)}</div>
-            ${metaLoja>0?`
-            <div style="font-size:11px;color:${corLoja};margin-top:2px">${pctLoja.toFixed(0)}% da meta de ${fmt(metaLoja)}</div>
-            <div style="font-size:11px;color:var(--verm);margin-top:2px">${faltaLoja>0?'Falta: '+fmt(faltaLoja):'🏆 Meta atingida!'}</div>`:''}
-            ${meuReal.atend>0?`<div style="font-size:11px;color:var(--muted);margin-top:4px">👥 ${meuReal.atend} atend · TM ${fmt(meuReal.tm)}</div>`:''}
-          </div>
-          <button onclick="abrirFormCampRealPara('${obj.id}')"
-            style="font-size:11px;background:rgba(201,168,76,.1);color:var(--ouro);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:600">+ Lançar Dia</button>
-        </div>
-        ${metaLoja>0?`
-        <div style="margin-top:10px">
-          <div style="height:7px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
-            <div style="height:100%;width:${Math.min(100,pctLoja).toFixed(1)}%;background:${corLoja};border-radius:99px;transition:width .5s"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:9px;margin-top:4px;color:var(--muted)">
-            <span>${fmt(meuReal.fat)} realizado</span><span>${fmt(metaLoja)} meta</span>
-          </div>
-        </div>`:''}
-      </div>` : '';
-
-    const semRealView = !isAdmin() && !meuReal ? `
-      <div style="margin-top:12px;padding:12px;background:rgba(201,168,76,.04);border:1px dashed rgba(201,168,76,.2);border-radius:10px;text-align:center">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Você ainda não lançou o realizado desta campanha</div>
-        <button class="btn-p" onclick="abrirFormCampRealPara('${obj.id}')" style="font-size:11px;padding:7px 18px">+ Lançar Realizado</button>
-      </div>` : '';
-
-    return `<div style="background:var(--card2);border:1px solid ${corBorda};border-radius:16px;padding:18px;margin-bottom:14px">
-      ${header}${orientacao}${produtosFoco}${rankVendHTML}${tabelaReais}${meuRealView}${semRealView}
-    </div>`;
-  }).join('');
-}
 
 // Formatar data dd/mm
 function fmtData(d){
@@ -10768,6 +10769,8 @@ function renderGestao() {
       ` : `<div style="font-size:11px;color:var(--muted)">Sem lancamentos no mes.</div>`}
     </div>`;
   }).join('');
+}
+
 }
 
 </script>
