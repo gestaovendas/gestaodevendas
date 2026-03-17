@@ -1014,7 +1014,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">Equipe Cadastrada</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Nome</th><th>Cargo</th><th>Loja</th><th>Meta Mes</th><th>Super Meta</th><th>Realizado</th><th>% Meta</th><th>Projecao</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>Cargo</th><th>Loja</th><th>Meta Mês</th><th>Meta Dia</th><th>Super Meta</th><th>Realizado</th><th>% Meta</th><th>Projeção</th><th></th></tr></thead>
         <tbody id="tbody-vend"></tbody>
       </table>
     </div>
@@ -3183,10 +3183,14 @@ function mesAnterior(){
 function metaDiaProgressiva(metaMes, vendId, dataRef){
   if(!metaMes || metaMes<=0) return 0;
   dataRef = dataRef || hoje();
-  const [y,m,d] = dataRef.split("-").map(Number);
-  const diasNoMes = new Date(y, m, 0).getDate();
-  const diasRestantes = diasNoMes - d + 1; // inclui hoje
-  // Acumulado até ONTEM
+  // Usar calendário da loja da vendedora
+  const vObj = D.vendedoras.find(v=>v.id===vendId);
+  const lid   = vObj?.loja || '';
+  const diasRestantes = lid ? diasAbertosRestantes(lid) : (() => {
+    const [y,m,d] = dataRef.split('-').map(Number);
+    return new Date(y,m,0).getDate() - d + 1;
+  })();
+  // Acumulado até ONTEM (exclusive)
   let acumulado = 0;
   if(D.vendasVend[vendId]){
     Object.entries(D.vendasVend[vendId]).forEach(([dt, vd])=>{
@@ -3961,11 +3965,20 @@ function renderRankVendHoje(){
     return t;
   }
   let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  vends=vends.map(v=>({...v,val:calcVendP(v),pct:Number(v.metaMes)>0?calcVendP(v)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
+  vends=vends.map(v=>{
+    const _val = calcVendP(v);
+    const _metaMes = Number(v.metaMes)||0;
+    const _metaPer = per==="hoje"
+      ? metaDiaProgressiva(_metaMes, v.id, hj)
+      : per==="semana"
+        ? parseFloat((_metaMes/4.33).toFixed(2))
+        : _metaMes;
+    return {...v, val:_val, pct:_metaPer>0?_val/_metaPer*100:0, metaPer:_metaPer};
+  }).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
   const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx","rx","rx","rx"];
   const ativos=vends.filter(v=>v.val>0);
   document.getElementById("rank-vend-hoje").innerHTML=ativos.length?ativos.map((v,i)=>{
-    const metaRef=per==="hoje"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hj):per==="semana"?(Number(v.metaMes)||0)/4.33:Number(v.metaMes)||0;
+    const metaRef=v.metaPer||0;
     const pct=metaRef>0?v.val/metaRef*100:0,c=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     const loja=LOJAS.find(l=>l.id===v.loja);
     const lojaTag=isAdmin()?`<span style="font-size:9px;color:var(--muted);margin-left:4px">${loja?.nome||""}</span>`:"";
@@ -5084,11 +5097,16 @@ function renderTabelaVend(){
     const projPct=proj&&v.metaMes>0?proj/v.metaMes*100:0;
     const projC=projPct>=100?"var(--verde)":projPct>=70?"var(--ouro)":"var(--verm)";
     const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
+    const metaDia = metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje());
+    const vHj = D.vendasVend[v.id]?.[hoje()]?.val||0;
+    const pctDia = metaDia>0 ? vHj/metaDia*100 : 0;
+    const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':'var(--verm)';
     return `<tr>
       <td><strong>${v.nome}</strong></td>
       <td>${cargoBadge}</td>
       <td style="font-size:11px">${loja?.nome||v.loja}</td>
       <td>${fmt(v.metaMes)}</td>
+      <td><span style="font-size:11px;color:${corDia}">${fmt(metaDia)}</span><br><span style="font-size:9px;color:${corDia}">${pctDia.toFixed(0)}% hoje</span></td>
       <td style="color:var(--roxo)">${fmt(v.superMetaMes||0)}</td>
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
@@ -5457,9 +5475,21 @@ function renderLojas(per="hoje"){
     </div>`;
   }).join("");
   // Ranking vendedoras da rede
-  let allVends=D.vendedoras.map(v=>({...v,val:calcVendPer(v.id,per==="hoje"?"dia":per),pct:Number(v.metaMes)>0?calcVendPer(v.id,per==="hoje"?"dia":per)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
+  let allVends=D.vendedoras.map(v=>{
+    const _val = calcVendPer(v.id, per==="hoje"?"dia":per);
+    const _metaMes = Number(v.metaMes)||0;
+    // Meta correta por período
+    const _lid = v.loja;
+    const _metaPer = per==="hoje"
+      ? metaDiaProgressiva(_metaMes, v.id, hoje())
+      : per==="semana"
+        ? parseFloat((_metaMes/4.33).toFixed(2))
+        : _metaMes;
+    const _pct = _metaPer>0 ? _val/_metaPer*100 : 0;
+    return {...v, val:_val, pct:_pct, metaPer:_metaPer};
+  }).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
   document.getElementById("rank-vend-rede").innerHTML=allVends.length?allVends.map((v,i)=>{
-    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.metaMes>0?v.val/v.metaMes*100:0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
+    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja} &mdash; ${fmt(v.val)}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
 }
