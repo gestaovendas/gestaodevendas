@@ -3044,7 +3044,7 @@ async function waitForFirebase(timeout=5000){
 }
 
 async function loadFromFirestore(){
-  const ok = await waitForFirebase(8000); // mais tempo para Firebase iniciar
+  const ok = await waitForFirebase(8000);
   if(!ok){
     console.warn("[Avatim] Firebase não disponível — usando localStorage");
     return false;
@@ -3054,10 +3054,42 @@ async function loadFromFirestore(){
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       const remoto = JSON.parse(dadosJSON);
-      // Merge inteligente: dados remotos têm prioridade (são mais recentes e completos)
-      D = remoto;
+      // Merge completo: remoto tem prioridade mas preserva estruturas locais
+      // Campos simples: remoto sobrescreve
+      if(remoto.metasLoja)   D.metasLoja   = remoto.metasLoja;
+      if(remoto.vendedoras)  D.vendedoras  = remoto.vendedoras;
+      if(remoto.campanhas)   D.campanhas   = remoto.campanhas;
+      if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+      if(remoto.arquivos)    D.arquivos    = remoto.arquivos;
+      if(remoto.metasProd)   D.metasProd   = remoto.metasProd;
+      if(remoto.realProd)    D.realProd    = remoto.realProd;
+      if(remoto.fluxo)       D.fluxo       = remoto.fluxo;
+      if(remoto.configCom)   D.configCom   = remoto.configCom;
+      if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
+      if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
+      // Vendas e vendasVend: deep merge por loja/vendedora/dia
+      if(remoto.vendas){
+        Object.entries(remoto.vendas).forEach(([lid,dias])=>{
+          if(!D.vendas[lid]) D.vendas[lid]={};
+          Object.assign(D.vendas[lid], dias);
+        });
+      }
+      if(remoto.vendasVend){
+        Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+          if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+          Object.assign(D.vendasVend[vid], dias);
+        });
+      }
+      // campRealizados: merge por id (inclui lançamentos de todas as lojas)
+      if(remoto.campRealizados && remoto.campRealizados.length){
+        if(!D.campRealizados) D.campRealizados=[];
+        remoto.campRealizados.forEach(r=>{
+          const i = D.campRealizados.findIndex(x=>x.id===r.id);
+          if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+        });
+      }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados e merged do Firestore!");
+      console.log("[Avatim] ✅ Dados carregados do Firestore! campRealizados:", D.campRealizados?.length||0);
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -3525,7 +3557,35 @@ function nav(pg){
   ({rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
-    estoque:()=>{initCampData();renderCampLista();renderEstqCritico();trocarAbaEstoque('camp');},
+    estoque:()=>{
+      initCampData();
+      trocarAbaEstoque('camp');
+      // Admin: sincroniza dados frescos das lojas antes de renderizar
+      if(isAdmin() && window.fsCarregar){
+        (async()=>{
+          try{
+            const json = await window.fsCarregar();
+            if(json){
+              const remoto = JSON.parse(json);
+              // Merge campRealizados das lojas no D local
+              if(remoto.campRealizados && remoto.campRealizados.length){
+                if(!D.campRealizados) D.campRealizados=[];
+                remoto.campRealizados.forEach(r=>{
+                  const i=D.campRealizados.findIndex(x=>x.id===r.id);
+                  if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+                });
+                localStorage.setItem('avatim_v5',JSON.stringify(D));
+              }
+            }
+          }catch(e){ console.warn('[Avatim] sync campanhas:', e.message); }
+          renderCampLista();
+          renderEstqCritico();
+        })();
+      } else {
+        renderCampLista();
+        renderEstqCritico();
+      }
+    },
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
     arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>renderPainelDia()})[pg]?.();
 }
@@ -5501,7 +5561,30 @@ function toggleRelCamp(){
   if(!el) return;
   const abrindo = el.style.display==='none';
   el.style.display = abrindo ? 'block' : 'none';
-  if(abrindo) popularSelectRelCamp(), renderRelCamp();
+  if(!abrindo) return;
+  popularSelectRelCamp();
+  // Admin: busca dados frescos antes de renderizar o relatório
+  if(isAdmin() && window.fsCarregar){
+    (async()=>{
+      try{
+        const json = await window.fsCarregar();
+        if(json){
+          const remoto = JSON.parse(json);
+          if(remoto.campRealizados && remoto.campRealizados.length){
+            if(!D.campRealizados) D.campRealizados=[];
+            remoto.campRealizados.forEach(r=>{
+              const i=D.campRealizados.findIndex(x=>x.id===r.id);
+              if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+            });
+            localStorage.setItem('avatim_v5',JSON.stringify(D));
+          }
+        }
+      }catch(e){ console.warn('[Avatim] sync rel campanhas:', e.message); }
+      renderRelCamp();
+    })();
+  } else {
+    renderRelCamp();
+  }
 }
 
 function popularSelectRelCamp(){
