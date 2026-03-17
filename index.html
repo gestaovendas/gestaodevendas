@@ -6450,6 +6450,8 @@ function salvarCampReal(){
   }
 
   save();
+  // Atualizar dashboard com o novo faturamento
+  setTimeout(()=>carregarDash(), 300);
   // Limpar campos mas manter campanha selecionada
   document.getElementById('camp-real-fat').value='';
   document.getElementById('camp-real-atend').value='';
@@ -8925,7 +8927,7 @@ function renderGestao() {
           <div class="rinfo">
             <div class="rn">${v.nome}</div>
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
-              <div style="width:${v.val/maxV*100}%;height:100%;background:${c};border-radius:3px"></div>
+              <div style="width:${v.val/maxVF*100}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
             <div class="rv">${v.lojaNome}</div>
           </div>
