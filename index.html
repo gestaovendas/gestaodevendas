@@ -1,4 +1,9 @@
-<!DOCTYPE html>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="editarLancCamp(\'${l.id}\')"
+            style="font-size:9px;color:var(--azul);background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:5px;cursor:pointer;padding:2px 7px">✏️</button>
+          <button onclick="excluirLancCamp(\'${l.id}\')"
+            style="font-size:9px;color:var(--verm);background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:5px;cursor:pointer;padding:2px 7px">🗑</button>
+        </div><!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -6208,6 +6213,37 @@ function renderHistoricoCamp(campId, lid){
     + `<div style="padding:8px 0;font-size:11px;font-weight:700;color:var(--ouro)">Total acumulado: ${fmt(total)}</div>`;
 }
 
+function editarLancCamp(id){
+  const lanc = (D.campRealizados||[]).find(r=>r.id===id);
+  if(!lanc){ showToast('Lançamento não encontrado','err'); return; }
+  // Abrir form de realizado já preenchido
+  abrirFormCampReal();
+  setTimeout(()=>{
+    const sel = document.getElementById('camp-sel-real');
+    if(sel){ sel.value = lanc.campId; atualizarObjetivoCamp(); }
+    const dataEl = document.getElementById('camp-real-data');
+    if(dataEl) dataEl.value = lanc.data||hoje();
+    const fatEl = document.getElementById('camp-real-fat');
+    if(fatEl) fatEl.value = (lanc.fat||0).toFixed(2).replace('.',',');
+    const atendEl = document.getElementById('camp-real-atend');
+    if(atendEl) atendEl.value = lanc.atend||'';
+    const obsEl = document.getElementById('camp-real-obs');
+    if(obsEl) obsEl.value = lanc.obs||'';
+    calcTMCampReal();
+    atualizarProgrCamp();
+    // Preencher campos de vendedoras
+    if(lanc.vendedoras){
+      setTimeout(()=>{
+        Object.entries(lanc.vendedoras).forEach(([vId,val])=>{
+          const el = document.getElementById('camp-vend-'+vId);
+          if(el) el.value = (val||0).toFixed(2).replace('.',',');
+        });
+      }, 200);
+    }
+    showToast('Edite os valores e salve novamente');
+  }, 150);
+}
+
 function excluirLancCamp(id){
   if(!confirm('Remover este lançamento?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
@@ -6445,7 +6481,10 @@ function renderCampLista(){
     // Ranking de vendedoras consolidado
     const rankVend = {};
     // Se filtro de loja ativo, ranking só conta vendedoras daquela loja
-    const reaisParaRank = _campFiltroLoja ? reais.filter(r=>r.lojaId===_campFiltroLoja) : reais;
+    // Loja só vê ranking das suas próprias vendedoras; admin vê todas (ou filtro ativo)
+    const reaisParaRank = _campFiltroLoja
+      ? reais.filter(r=>r.lojaId===_campFiltroLoja)
+      : (!isAdmin() ? reais.filter(r=>r.lojaId===lid) : reais);
     reaisParaRank.forEach(r=>{
       if(!r.vendedoras) return;
       Object.entries(r.vendedoras).forEach(([vId,val])=>{
@@ -6455,7 +6494,14 @@ function renderCampLista(){
         if(vObj){ rankVend[vId].nome = vObj.nome; rankVend[vId].loja = vObj.loja; }
       });
     });
-    const rankVendArr = Object.values(rankVend).sort((a,b)=>b.val-a.val);
+    let rankVendArr = Object.entries(rankVend)
+      .map(([vId,v])=>({...v, vId}))
+      .filter(v=>{
+        if(isAdmin() || _campFiltroLoja) return true; // admin e filtro ativo veem tudo
+        const vObj = D.vendedoras.find(x=>x.id===v.vId);
+        return !vObj || vObj.loja===lid; // loja só vê suas vendedoras
+      })
+      .sort((a,b)=>b.val-a.val);
     const rankVendHTML = rankVendArr.length ? `
       <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
         <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-bottom:10px">🏆 RANKING DE VENDEDORAS</div>
