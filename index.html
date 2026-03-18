@@ -3653,6 +3653,29 @@ function nav(pg){
           renderCampLista();
           renderEstqCritico();
         })();
+      } else if(window.fsCarregar){
+        // Loja: sincroniza campRealizados e campObjetivos antes de renderizar
+        (async()=>{
+          try{
+            const json = await window.fsCarregar();
+            if(json){
+              const remoto = JSON.parse(json);
+              // Atualizar campObjetivos (vem do doc principal)
+              if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+              // Merge campRealizados desta loja
+              if(remoto.campRealizados && remoto.campRealizados.length){
+                if(!D.campRealizados) D.campRealizados=[];
+                remoto.campRealizados.forEach(r=>{
+                  const i=D.campRealizados.findIndex(x=>x.id===r.id);
+                  if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+                });
+                localStorage.setItem('avatim_v5',JSON.stringify(D));
+              }
+            }
+          }catch(e){ console.warn('[Avatim] sync campanhas loja:', e.message); }
+          renderCampLista();
+          renderEstqCritico();
+        })();
       } else {
         renderCampLista();
         renderEstqCritico();
@@ -3702,7 +3725,10 @@ function carregarDash(){
     const _rest     = Math.max(0, (metas.mes||0) - _acum);
     metaDiaRef = _diasRest > 0 ? parseFloat((_rest/_diasRest).toFixed(2)) : (metas.dia||0);
     if(metaDiaRef <= 0) metaDiaRef = metas.dia||0;
-    superDiaRef=metas.superDia||0; metaSemRef=metas.sem||0; superSemRef=metas.superSem||0;
+    // Super meta diária também progressiva: (superMes - realizado) ÷ dias restantes
+    const _restSuper = Math.max(0, (metas.superMes||0) - _acum);
+    superDiaRef = _diasRest > 0 ? parseFloat((_restSuper/_diasRest).toFixed(2)) : (metas.superDia||0);
+    if(superDiaRef <= 0) superDiaRef = metas.superDia||0; metaSemRef=metas.sem||0; superSemRef=metas.superSem||0;
     metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
     tkLabel=lojaNome();
   }
@@ -8304,7 +8330,52 @@ async function saveWithSync(opts={}){
 // Admin: sync a cada 30s
 function iniciarAutoRefresh(){
   if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
-  if(!isAdmin()) return;
+  
+  // Sync para LOJA: busca dados do Firebase a cada 60s
+  if(!isAdmin()){
+    async function syncLoja(){
+      try{
+        const ok = await waitForFirebase(3000);
+        if(!ok || !window.fsCarregar) return;
+        const dadosJSON = await window.fsCarregar();
+        if(!dadosJSON) return;
+        const remoto = JSON.parse(dadosJSON);
+        // Atualizar campObjetivos (vem do doc principal — admin gerencia)
+        if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+        // Merge só vendas e vendasVend desta loja
+        const lid = lojaId();
+        if(remoto.vendas?.[lid]){
+          if(!D.vendas[lid]) D.vendas[lid]={};
+          Object.assign(D.vendas[lid], remoto.vendas[lid]);
+        }
+        if(remoto.vendasVend){
+          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+            const v = D.vendedoras.find(x=>x.id===vid);
+            if(v && v.loja===lid){
+              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+              Object.assign(D.vendasVend[vid], dias);
+            }
+          });
+        }
+        if(remoto.campRealizados?.length){
+          if(!D.campRealizados) D.campRealizados=[];
+          remoto.campRealizados.forEach(r=>{
+            const i=D.campRealizados.findIndex(x=>x.id===r.id);
+            if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+          });
+        }
+        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        const pg=document.querySelector('.page.active')?.id?.replace('page-','');
+        if(pg==='dash') carregarDash();
+        else if(pg==='metas') renderMetas();
+        else if(pg==='lanc') renderHistoricoLanc?.();
+        console.log('[Avatim] 🔄 syncLoja: dados atualizados');
+      }catch(e){ console.warn('[Avatim] syncLoja erro:', e.message); }
+    }
+    syncLoja();
+    _autoRefreshTimer = setInterval(syncLoja, 60000);
+    return;
+  }
   async function syncAdmin(){
     const hj=hoje();
     if(SB_OK()){
