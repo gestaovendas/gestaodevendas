@@ -3704,11 +3704,16 @@ function carregarDash(){
     realSem=LOJAS.reduce((s,l)=>s+calcSem(l.id),0);
     realMes=LOJAS.reduce((s,l)=>s+calcMes(l.id),0);
     // Admin: meta diária progressiva = soma das metas restantes ÷ dias úteis médios
+    // Meta diária progressiva da rede: (meta restante de cada loja) ÷ dias úteis restantes
     metaDiaRef=LOJAS.reduce((s,l)=>{
       const prog=metaDiaLojaProgressiva(l.id,hj)||{};
       return s+(prog.dia||getMetas(l.id).dia||0);
     },0);
-    superDiaRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superDia||0),0);
+    // Super meta diária progressiva: mesma lógica
+    superDiaRef=LOJAS.reduce((s,l)=>{
+      const prog=metaDiaLojaProgressiva(l.id,hj)||{};
+      return s+(prog.superDia||getMetas(l.id).superDia||0);
+    },0);
     metaSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).sem||0),0);
     superSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superSem||0),0);
     metaMesRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).mes||0),0);
@@ -4050,12 +4055,14 @@ function renderPainelDia(){
   const lid = lojaId();
   const per = _painelPer;
 
-  // Atualizar metas
+  // Atualizar metas — progressivas
   const m = getMetas(lid)||{};
+  const _progPainel = metaDiaLojaProgressiva(lid, hoje())||{};
   const metaDia = document.getElementById('lanc-meta-dia');
   const metaSem = document.getElementById('lanc-meta-sem');
   const metaMes = document.getElementById('lanc-meta-mes');
-  if(metaDia) metaDia.textContent = fmt(m.dia||0);
+  // Meta dia: progressiva (meta restante ÷ dias úteis restantes)
+  if(metaDia) metaDia.textContent = fmt(_progPainel.dia>0 ? _progPainel.dia : (m.dia||0));
   if(metaSem) metaSem.textContent = fmt(m.sem||0);
   if(metaMes) metaMes.textContent = fmt(m.mes||0);
 
@@ -4135,13 +4142,29 @@ function carregarVendsForm(lidOverride){
     if(oldWrap) oldWrap.remove();
   }
 
-  // Preencher boxes de meta dia/semana da loja selecionada
-  const progLoja = metaDiaLojaProgressiva(lid, hj);
-  const metasSem = getMetas(lid);
+  // Preencher boxes de meta dia/semana/mês — admin vê REDE, loja vê a sua
+  let _mDia, _mSem, _mMes;
+  if(isAdmin() && !lidOverride){
+    // Admin sem loja selecionada: mostrar soma da rede
+    _mDia = LOJAS.reduce((s,l)=>{
+      const p = metaDiaLojaProgressiva(l.id, hj);
+      return s + (p.dia||0);
+    }, 0);
+    _mSem = LOJAS.reduce((s,l)=>s+(getMetas(l.id).sem||0), 0);
+    _mMes = LOJAS.reduce((s,l)=>s+(getMetas(l.id).mes||0), 0);
+  } else {
+    const progLoja = metaDiaLojaProgressiva(lid, hj);
+    const metasSel = getMetas(lid);
+    _mDia = progLoja.dia||0;
+    _mSem = metasSel.sem||0;
+    _mMes = metasSel.mes||0;
+  }
   const elDia=document.getElementById("lanc-meta-dia");
   const elSem=document.getElementById("lanc-meta-sem");
-  if(elDia) elDia.textContent = progLoja.dia>0 ? fmt(progLoja.dia) : "—";
-  if(elSem) elSem.textContent = metasSem.sem>0 ? fmt(metasSem.sem) : "—";
+  const elMes=document.getElementById("lanc-meta-mes");
+  if(elDia) elDia.textContent = _mDia>0 ? fmt(_mDia) : "—";
+  if(elSem) elSem.textContent = _mSem>0 ? fmt(_mSem) : "—";
+  if(elMes) elMes.textContent = _mMes>0 ? fmt(_mMes) : "—";
 
   // Atualiza consolidado e histórico sempre que a loja muda
   renderConsolidadoLanc(lid);
