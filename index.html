@@ -142,14 +142,16 @@ try{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
               pedaco.vendasVend[vid] = Object.assign({}, dias, pedaco.vendasVend[vid]);
             });
-            // Preservar campRealizados existentes no Firestore + adicionar novos
-            if(existing.campRealizados && existing.campRealizados.length){
-              const novos = pedaco.campRealizados || [];
+            // campRealizados: pedaco é AUTORITATIVO (já tem todos os registros desta loja)
+            // NÃO readicionar registros do Firebase — evita que exclusões "voltem"
+            // Se pedaco está vazio e existing tem dados, pode ser carregamento inicial — preservar
+            if(existing.campRealizados && existing.campRealizados.length && pedaco.campRealizados.length === 0){
+              // Só preserva se pedaco está VAZIO (primeiro carregamento) — não se houve exclusão
+              // Usa _campExcluidos como tombstone para distinguir os casos
+              const excluidos = D._campExcluidos || [];
               existing.campRealizados.forEach(r=>{
-                const jaExiste = novos.findIndex(x=>x.id===r.id);
-                if(jaExiste<0) novos.push(r); // preserva os que não foram sobrescritos
+                if(!excluidos.includes(r.id)) pedaco.campRealizados.push(r);
               });
-              pedaco.campRealizados = novos;
             }
             // Merge fluxo: preserva registros existentes
             if(existing.fluxo && existing.fluxo.length){
@@ -261,10 +263,12 @@ try{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
                 Object.assign(base.vendasVend[vid], dias);
               });
-              // Merge campRealizados desta loja ao base
+              // Merge campRealizados desta loja ao base (respeitando tombstones)
               if(pedaco.campRealizados && pedaco.campRealizados.length){
                 if(!base.campRealizados) base.campRealizados=[];
+                const excluidos = D._campExcluidos || [];
                 pedaco.campRealizados.forEach(r=>{
+                  if(excluidos.includes(r.id)) return; // não trazer de volta excluídos
                   const rIdx = base.campRealizados.findIndex(x=>x.id===r.id);
                   if(rIdx>=0) base.campRealizados[rIdx]=r;
                   else base.campRealizados.push(r);
@@ -3016,6 +3020,7 @@ if(!D.vendasVend) D.vendasVend={};
 if(!D.campanhas)  D.campanhas=[];
 if(!D.campObjetivos)  D.campObjetivos=[];
 if(!D.campRealizados) D.campRealizados=[];
+if(!D._campExcluidos)  D._campExcluidos=[];
 if(!D.arquivos)   D.arquivos=[];
 if(!D.metasProd)  D.metasProd=[];
 if(!D.realProd)   D.realProd={};
@@ -3078,7 +3083,8 @@ function save(){
     const temDados = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0)
                   || Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0)
                   || (D.metasLoja && Object.keys(D.metasLoja).length>0)
-                  || (D.campRealizados && D.campRealizados.length>0); // campanha conta como dado válido
+                  || (D.campRealizados && D.campRealizados.length>0)
+                  || (D.fluxo && D.fluxo.length>0); // fluxo conta como dado válido
     if(!temDados && !isAdmin()){
       console.warn("[Avatim] save() bloqueado — dados vazios, evitando sobrescrever Firebase");
       return;
@@ -6458,6 +6464,9 @@ function editarLancCamp(id){
 function excluirLancCamp(id){
   if(!confirm('Remover este lançamento?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
+  // Registrar ID excluído como tombstone para evitar que o Firebase traga de volta
+  if(!D._campExcluidos) D._campExcluidos = [];
+  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
   save();
   const campId = document.getElementById('camp-sel-real')?.value;
   if(campId){ renderHistoricoCamp(campId, lojaId()); atualizarObjetivoCamp(); }
@@ -8436,7 +8445,9 @@ function iniciarAutoRefresh(){
         }
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
+          const excluidos = D._campExcluidos || [];
           remoto.campRealizados.forEach(r=>{
+            if(excluidos.includes(r.id)) return; // não trazer de volta excluídos
             const i=D.campRealizados.findIndex(x=>x.id===r.id);
             if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
           });
