@@ -115,7 +115,8 @@ try{
         const pedaco = {
           vendas:     { [lid]: D2.vendas?.[lid]||{} },
           vendasVend: {},
-          campRealizados: [] // lançamentos desta loja nas campanhas
+          campRealizados: [],
+          fluxo: [] // registros de atendimento/origem desta loja
         };
         // Inclui vendas das vendedoras desta loja
         Object.entries(D2.vendasVend||{}).forEach(([vid, vdata])=>{
@@ -124,6 +125,8 @@ try{
         });
         // Inclui realizados de campanha desta loja
         pedaco.campRealizados = (D2.campRealizados||[]).filter(r=>r.lojaId===lid);
+        // Inclui registros de fluxo/origem desta loja
+        pedaco.fluxo = (D2.fluxo||[]).filter(r=>r.loja===lid);
 
         const docId = "loja_"+lid;
         // Merge com o que já existe no Firestore — NUNCA sobrescreve com dados vazios
@@ -147,6 +150,14 @@ try{
                 if(jaExiste<0) novos.push(r); // preserva os que não foram sobrescritos
               });
               pedaco.campRealizados = novos;
+            }
+            // Merge fluxo: preserva registros existentes
+            if(existing.fluxo && existing.fluxo.length){
+              const novosFluxo = pedaco.fluxo || [];
+              existing.fluxo.forEach(r=>{
+                if(!novosFluxo.find(x=>x.id===r.id)) novosFluxo.push(r);
+              });
+              pedaco.fluxo = novosFluxo;
             }
           }
         }catch(e2){ console.warn("[Avatim] Merge preventivo falhou:", e2.message); }
@@ -210,6 +221,13 @@ try{
                   else base.campRealizados.push(r);
                 });
               }
+              // Merge fluxo desta loja
+              if(pedaco.fluxo && pedaco.fluxo.length){
+                if(!base.fluxo) base.fluxo=[];
+                pedaco.fluxo.forEach(r=>{
+                  if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+                });
+              }
               console.log("[Avatim] ✅ Merge loja:", lid);
             }
           }catch(e2){ console.warn("[Avatim] Erro merge loja "+lid+":", e2.message); }
@@ -252,7 +270,14 @@ try{
                   else base.campRealizados.push(r);
                 });
               }
-              console.log("[Avatim] ✅ Loja "+lid+" carregada (incl. campRealizados)");
+              // Merge fluxo desta loja ao base
+              if(pedaco.fluxo && pedaco.fluxo.length){
+                if(!base.fluxo) base.fluxo=[];
+                pedaco.fluxo.forEach(r=>{
+                  if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+                });
+              }
+              console.log("[Avatim] ✅ Loja "+lid+" carregada (incl. campRealizados + fluxo)");
             }
           }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
         }
@@ -8387,11 +8412,19 @@ function iniciarAutoRefresh(){
             if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
           });
         }
+        // Merge fluxo: preserva registros locais e adiciona remotos
+        if(remoto.fluxo?.length){
+          if(!D.fluxo) D.fluxo=[];
+          remoto.fluxo.forEach(r=>{
+            if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
+          });
+        }
         localStorage.setItem('avatim_v5', JSON.stringify(D));
         const pg=document.querySelector('.page.active')?.id?.replace('page-','');
         if(pg==='dash') carregarDash();
         else if(pg==='metas') renderMetas();
         else if(pg==='lanc') renderHistoricoLanc?.();
+        else if(pg==='fluxo') renderFluxo?.();
         console.log('[Avatim] 🔄 syncLoja: dados atualizados');
       }catch(e){ console.warn('[Avatim] syncLoja erro:', e.message); }
     }
