@@ -822,6 +822,12 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
           <div style="font-size:12px;font-weight:600">🏆 Ranking Vendedoras</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <div style="display:flex;background:var(--cinza);border-radius:6px;overflow:hidden;border:1px solid var(--borda)">
+              <button id="rank-vend-ord-fat" onclick="setRankVendOrdem('fat')"
+                style="font-size:10px;padding:4px 10px;background:var(--ouro);color:#000;font-weight:600;border:none;cursor:pointer">💰 Fat.</button>
+              <button id="rank-vend-ord-meta" onclick="setRankVendOrdem('meta')"
+                style="font-size:10px;padding:4px 10px;background:transparent;color:var(--muted);border:none;cursor:pointer">🎯 Meta%</button>
+            </div>
             <select id="rank-vend-periodo" onchange="renderRankVendHoje()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:10px;outline:none">
               <option value="hoje">Hoje</option>
               <option value="semana">Semana</option>
@@ -938,6 +944,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-metas">
   <div class="ph">
     <div><h1 class="pt">Metas &amp; <span>KPIs</span></h1><div class="ps" id="metas-subtitulo">Performance da sua loja</div></div>
+    <button class="btn-p" onclick="exportarPDFRelatorio()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
   </div>
   <div class="tabs">
     <button class="tab active" onclick="tabM('dia',this)">Hoje</button>
@@ -1313,7 +1320,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-rankings">
   <div class="ph">
     <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedoras por loja e ranking geral da rede</div></div>
-    <button class="btn-p" onclick="exportarRelatorioRanking()" style="font-size:12px;padding:8px 16px">⬇️ Exportar Relatório</button>
+    <button class="btn-p" onclick="exportarRelatorioRanking()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
+    <button class="btn-p" onclick="exportarPDFRanking()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
   </div>
   <div class="tabs">
     <button class="tab active" onclick="tabRank('rede',this)">Rede Geral</button>
@@ -1921,7 +1929,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="btn-p" onclick="gerarRel()">Gerar</button>
       <button class="btn-s" onclick="exportarCSV()">CSV</button>
       <button class="btn-s" onclick="copiarWhats()">WhatsApp</button>
-      <button class="btn-s" onclick="window.print()">Imprimir</button>
+      <button class="btn-s" onclick="exportarPDFRelatorio()" style="background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
     </div>
   </div>
   <div id="rel-content"><div class="sc" style="text-align:center;padding:48px"><div style="font-size:36px;margin-bottom:14px">&#8803;</div><div style="font-size:14px;color:var(--muted)">Selecione o período e clique em "Gerar"</div></div></div>
@@ -2299,7 +2307,8 @@ service cloud.firestore {
       <h1 class="pt">Painel de <span>Gestao</span></h1>
       <div class="ps">Visao geral da rede — faturamento, ticket medio e status de metas</div>
     </div>
-    <button class="btn-p" onclick="exportarRelatorioGestao()" style="font-size:12px;padding:8px 16px">⬇️ Exportar CSV</button>
+    <button class="btn-p" onclick="exportarRelatorioGestao()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
+    <button class="btn-p" onclick="exportarPDFGestao()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
     <button class="btn-p" onclick="compartilharWhatsApp()" style="font-size:12px;padding:8px 16px;background:rgba(37,211,102,.15);border-color:rgba(37,211,102,.4);color:#25d366">💬 WhatsApp</button>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div class="tabs" style="margin:0">
@@ -4016,6 +4025,26 @@ function renderRankHoje(){
   }).join("");
 }
 
+let _rankVendOrdem = 'fat'; // 'fat' = faturamento | 'meta' = % da meta
+
+function setRankVendOrdem(ordem){
+  _rankVendOrdem = ordem;
+  // Atualizar visual dos botões
+  const btnFat  = document.getElementById('rank-vend-ord-fat');
+  const btnMeta = document.getElementById('rank-vend-ord-meta');
+  if(btnFat){
+    btnFat.style.background  = ordem==='fat'  ? 'var(--ouro)' : 'transparent';
+    btnFat.style.color       = ordem==='fat'  ? '#000'        : 'var(--muted)';
+    btnFat.style.fontWeight  = ordem==='fat'  ? '600'         : '400';
+  }
+  if(btnMeta){
+    btnMeta.style.background = ordem==='meta' ? 'var(--azul)' : 'transparent';
+    btnMeta.style.color      = ordem==='meta' ? '#fff'        : 'var(--muted)';
+    btnMeta.style.fontWeight = ordem==='meta' ? '600'         : '400';
+  }
+  renderRankVendHoje();
+}
+
 function renderRankVendHoje(){
   const lid=lojaId(), hj=hoje();
   const per=document.getElementById("rank-vend-periodo")?.value||"hoje";
@@ -4049,7 +4078,7 @@ function renderRankVendHoje(){
         ? parseFloat((_metaMes/4.33).toFixed(2))
         : _metaMes;
     return {...v, val:_val, pct:_metaPer>0?_val/_metaPer*100:0, metaPer:_metaPer};
-  }).sort((a,b)=>b.val-a.val||b.pct-a.pct).slice(0,8);  // ordena por faturamento
+  }).sort((a,b)=> _rankVendOrdem==='meta' ? (b.pct-a.pct||b.val-a.val) : (b.val-a.val||b.pct-a.pct)).slice(0,8);
   const max=vends[0]?.val||1,cls=["r1","r2","r3","rx","rx","rx","rx","rx"];
   const ativos=vends.filter(v=>v.val>0);
   document.getElementById("rank-vend-hoje").innerHTML=ativos.length?ativos.map((v,i)=>{
@@ -8839,6 +8868,273 @@ function compartilharWhatsApp(){
   window.open(url, '_blank');
 }
 
+
+function gerarPDF(titulo, htmlContent) {
+  // Abrir janela de impressão com conteúdo formatado
+  const janela = window.open('', '_blank', 'width=900,height=700');
+  if(!janela){ showToast('Permita popups para gerar PDF', 'err'); return; }
+  
+  // Pegar variáveis CSS do tema atual
+  const estilos = `
+    body { font-family: 'DM Sans', Arial, sans-serif; background: #fff; color: #111; margin: 20px; }
+    h1 { font-size: 22px; font-weight: 700; color: #111; margin-bottom: 4px; }
+    h2 { font-size: 15px; font-weight: 600; color: #444; margin: 18px 0 8px; border-bottom: 2px solid #eee; padding-bottom: 4px; }
+    .subtitulo { font-size: 12px; color: #666; margin-bottom: 20px; }
+    .data-rel { font-size: 11px; color: #888; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
+    th { background: #f5f5f5; font-weight: 600; padding: 8px 10px; text-align: left; border-bottom: 2px solid #ddd; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #eee; }
+    tr:nth-child(even) td { background: #fafafa; }
+    .badge-ok   { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+    .badge-warn { background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+    .badge-bad  { background: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+    .badge-roxo { background: #e2d9f3; color: #4a235a; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+    .kgrid-pdf  { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .kcard-pdf  { border: 1px solid #ddd; border-radius: 8px; padding: 14px; text-align: center; }
+    .kcard-pdf .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .kcard-pdf .valor { font-size: 20px; font-weight: 700; color: #111; }
+    .kcard-pdf .sub   { font-size: 10px; color: #666; margin-top: 2px; }
+    .rodape { margin-top: 30px; border-top: 1px solid #eee; padding-top: 12px; font-size: 10px; color: #999; text-align: center; }
+    @media print {
+      body { margin: 10px; }
+      button { display: none !important; }
+      .no-print { display: none !important; }
+    }
+  `;
+  
+  const agora = new Date().toLocaleString('pt-BR');
+  const loja  = isAdmin() ? 'Avatim — Rede Completa' : lojaNome();
+  
+  janela.document.write(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>${titulo} — Avatim</title>
+  <style>${estilos}</style>
+</head>
+<body>
+  <h1>📊 ${titulo}</h1>
+  <div class="subtitulo">${loja}</div>
+  <div class="data-rel">Gerado em ${agora}</div>
+  ${htmlContent}
+  <div class="rodape">Avatim Gestão Comercial — ${agora}</div>
+  <scr'+'ipt>
+    window.onload = function(){ 
+      setTimeout(function(){ window.print(); }, 500); 
+    };
+  </scr'+'ipt>
+</body>
+</html>`);
+  janela.document.close();
+}
+
+function exportarPDFRanking() {
+  const per = document.getElementById('rank-periodo')?.value || 'mes';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const hj = hoje();
+  const perV = per==='hoje'?'dia':per;
+  const _hjR = hoje();
+
+  // Ranking de lojas
+  const ldR = LOJAS.map(l=>{
+    const m=getMetas(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const pct=meta>0?fat/meta*100:0;
+    return {nome:l.nome,fat,meta,pct};
+  }).sort((a,b)=>b.pct-a.pct);
+
+  const rowsLojas = ldR.map((l,i)=>{
+    const badge = l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const label = l.pct>=120?'Super Meta!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo';
+    return `<tr>
+      <td>${['🥇','🥈','🥉'][i]||i+1}</td>
+      <td><strong>${l.nome}</strong></td>
+      <td>${l.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${label}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Top vendedoras
+  const vendsR = D.vendedoras.map(v=>{
+    const val=calcVendPer(v.id,perV);
+    const mMes=Number(v.metaMes)||0;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjR):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const pct=mPer>0?val/mPer*100:0;
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,mPer};
+  }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,15);
+
+  const rowsVends = vendsR.map((v,i)=>{
+    const badge = v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    return `<tr>
+      <td>${['🥇','🥈','🥉'][i]||i+1}</td>
+      <td><strong>${v.nome}</strong></td>
+      <td>${v.loja}</td>
+      <td>${v.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Total da rede
+  const totalFat  = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)),0);
+  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
+  const pctRede   = totalMeta>0?totalFat/totalMeta*100:0;
+
+  const html = `
+    <div class="kgrid-pdf">
+      <div class="kcard-pdf">
+        <div class="label">Período</div>
+        <div class="valor" style="font-size:16px">${perLabel}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">% da Meta — Rede</div>
+        <div class="valor" style="color:${pctRede>=100?'#28a745':pctRede>=70?'#ffc107':'#dc3545'}">${pctRede.toFixed(0)}%</div>
+      </div>
+    </div>
+    <h2>🏪 Ranking das Lojas</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsLojas}</tbody>
+    </table>
+    <h2>👩 Top Vendedoras da Rede</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsVends}</tbody>
+    </table>`;
+
+  gerarPDF('Rankings — ' + perLabel, html);
+}
+
+function exportarPDFGestao() {
+  const per = _gestaoPer || 'hoje';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const perV = per==='hoje'?'dia':per;
+  const _hjG = hoje();
+
+  const ldG = LOJAS.map(l=>{
+    const m=getMetas(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const pct=meta>0?fat/meta*100:0;
+    const tm=calcTMLoja(l.id,perV);
+    const proj=calcProjecao(l.id);
+    return {nome:l.nome,fat,meta,pct,tm,proj:proj?.projecao||0};
+  }).sort((a,b)=>b.pct-a.pct);
+
+  const rowsG = ldG.map((l,i)=>{
+    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    return `<tr>
+      <td>${['🥇','🥈','🥉'][i]||i+1}</td>
+      <td><strong>${l.nome}</strong></td>
+      <td>${l.pct.toFixed(0)}%</td>
+      <td>${fmt(l.tm)}</td>
+      <td>${l.proj>0?fmt(l.proj):'—'}</td>
+      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td>
+    </tr>`;
+  }).join('');
+
+  const vendsG = D.vendedoras.map(v=>{
+    const val=calcVendPer(v.id,perV);
+    const mMes=Number(v.metaMes)||0;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjG):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const pct=mPer>0?val/mPer*100:0;
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
+  }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,10);
+
+  const rowsVG = vendsG.map((v,i)=>{
+    const badge=v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    return `<tr>
+      <td>${['🥇','🥈','🥉'][i]||i+1}</td>
+      <td><strong>${v.nome}</strong></td>
+      <td>${v.loja}</td>
+      <td>${v.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+    </tr>`;
+  }).join('');
+
+  const html = `
+    <h2>📊 Status das Lojas — ${perLabel}</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>TM</th><th>Projeção Mês</th><th>Status</th></tr></thead>
+      <tbody>${rowsG}</tbody>
+    </table>
+    <h2>👩 Top Vendedoras</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsVG}</tbody>
+    </table>`;
+
+  gerarPDF('Painel de Gestão — ' + perLabel, html);
+}
+
+function exportarPDFRelatorio() {
+  const lid = lojaId();
+  const hj  = hoje();
+  const m   = getMetas(lid);
+  const realMes = calcMes(lid);
+  const realSem = calcSem(lid);
+  const realDia = calcDia(lid);
+  const pctMes  = m.mes>0?realMes/m.mes*100:0;
+  const pctSem  = m.sem>0?realSem/m.sem*100:0;
+  const tm      = calcTMLoja(lid, 'mes');
+  const proj    = isAdmin()?calcProjecaoRede():calcProjecao(lid);
+  const loja    = isAdmin()?'Rede Completa':lojaNome();
+
+  // Tabela de vendedoras do mês
+  const vends = D.vendedoras.filter(v=>isAdmin()||v.loja===lid)
+    .map(v=>{
+      const vm=calcVendPer(v.id,'mes');
+      const pct=v.metaMes>0?vm/v.metaMes*100:0;
+      const badge=pct>=120?'roxo':pct>=100?'ok':pct>=70?'warn':'bad';
+      const lj=LOJAS.find(l=>l.id===v.loja);
+      return {nome:v.nome,loja:lj?.nome||v.loja,vm,pct,badge};
+    }).sort((a,b)=>b.pct-a.pct);
+
+  const rowsV = vends.map((v,i)=>`<tr>
+    <td>${i+1}</td>
+    <td><strong>${v.nome}</strong></td>
+    ${isAdmin()?`<td>${v.loja}</td>`:''}
+    <td>${v.pct.toFixed(0)}%</td>
+    <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+  </tr>`).join('');
+
+  const html = `
+    <div class="kgrid-pdf">
+      <div class="kcard-pdf">
+        <div class="label">Realizado Mês</div>
+        <div class="valor" style="color:${pctMes>=100?'#28a745':pctMes>=70?'#ffc107':'#dc3545'}">${pctMes.toFixed(0)}%</div>
+        <div class="sub">${fmt(realMes)}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Meta do Mês</div>
+        <div class="valor">${fmt(m.mes)}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Realizado Semana</div>
+        <div class="valor">${pctSem.toFixed(0)}%</div>
+        <div class="sub">${fmt(realSem)}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Ticket Médio Mês</div>
+        <div class="valor">${fmt(tm)}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Projeção do Mês</div>
+        <div class="valor" style="color:#dc3545">${proj?fmt(proj.projecao):'—'}</div>
+        <div class="sub">${proj?proj.projecao/m.mes*100|0+'% da meta':''}</div>
+      </div>
+    </div>
+    <h2>👩 Performance das Vendedoras — Este Mês</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th>${isAdmin()?'<th>Loja</th>':''}<th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsV}</tbody>
+    </table>`;
+
+  gerarPDF('Relatório — ' + loja, html);
+}
+
 function exportarRelatorioGestao(){
   const per = _gestaoPer || 'hoje';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
@@ -9124,44 +9420,6 @@ function renderGestao() {
 }
 
 // Formatar data dd/mm
-function fmtData(d){
-  if(!d) return '';
-  const p=d.split('-');
-  return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;
-}
-
-function editarCampObj(id){
-  initCampData();
-  const obj = D.campObjetivos.find(o=>o.id===id);
-  if(!obj){ showToast('Campanha não encontrada','err'); return; }
-  abrirFormCampObj();
-  _editandoCampObjId = id;
-  setTimeout(()=>{
-    // Título e botão
-    const titulo = document.getElementById('camp-form-titulo');
-    const btn    = document.getElementById('camp-salvar-btn');
-    if(titulo) titulo.textContent = 'Editar Campanha';
-    if(btn)    btn.textContent    = 'Salvar Alterações';
-    // Preencher campos
-    const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.value=val||''; };
-    set('camp-tipo-obj', obj.tipo);
-    set('camp-nome-obj', obj.nome);
-    set('camp-ini-obj',  obj.ini);
-    set('camp-fim-obj',  obj.fim);
-    set('camp-obs-obj',  obj.obs||'');
-    set('camp-meta-rede', obj.metaRede>0 ? obj.metaRede.toFixed(2).replace('.',',') : '');
-    // Metas por loja
-    const lojaIds = ['mooca','ibirapuera','leopoldina','jarpaul','santana','perdizes','pinheiros'];
-    lojaIds.forEach(lid=>{
-      const val = obj.metasPorLoja&&obj.metasPorLoja[lid] ? obj.metasPorLoja[lid].toFixed(2).replace('.',',') : '';
-      set('camp-meta-'+lid, val);
-    });
-    calcMetaRedeCamp();
-    // Produtos
-    _campProdsObj = obj.produtos ? [...obj.produtos] : [];
-    renderProdsSelecionados();
-  }, 120);
-}
 
 
 </script>
