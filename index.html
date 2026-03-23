@@ -3291,12 +3291,7 @@ function calcMesAte(lid, dataRef){
       if(dt.startsWith(mes) && dt <= dataRef) total += Number(vd.fat||0);
     });
   }
-  // Incluir campRealizados do mês até dataRef (marcados como deCampanha evitam dupla contagem)
-  const campTotal = (D.campRealizados||[])
-    .filter(r=>r.lojaId===lid && r.data && r.data.startsWith(mes) && r.data<=dataRef)
-    .reduce((s,r)=>s+r.fat, 0);
-  // Só adiciona se não há lançamento normal do dia (evita dupla contagem)
-  if(total===0 && campTotal>0) total = campTotal;
+  // Campanha é métrica separada — não entra no acumulado do mês
   return total;
 }
 function diasDoMes(mesRef){
@@ -3396,12 +3391,7 @@ function calcDia(lid, data){
   let t=0;
   vends.forEach(v=>{ t+=Number(D.vendasVend[v.id]?.[hj]?.val||0); });
   if(t===0 && vends.length===0) t=Number(D.vendas[lid]?.[hj]?.fat||0);
-  // Se não há lançamento normal e não há vendasVend, verificar campRealizados do dia
-  if(t===0){
-    t = (D.campRealizados||[])
-      .filter(r=>r.lojaId===lid && r.data===hj)
-      .reduce((s,r)=>s+r.fat, 0);
-  }
+  // Campanha é métrica separada — não entra no realizado do dia
   return t;
 }
 function calcSem(lid){
@@ -3419,12 +3409,7 @@ function calcSem(lid){
   let t=0;
   vends.forEach(v=>{ dias.forEach(d=>{ t+=Number(D.vendasVend[v.id]?.[d]?.val||0); }); });
   if(t===0 && vends.length===0) dias.forEach(d=>{ t+=Number(D.vendas[lid]?.[d]?.fat||0); });
-  // Fallback: campRealizados da semana
-  if(t===0){
-    t = (D.campRealizados||[])
-      .filter(r=>r.lojaId===lid && dias.includes(r.data))
-      .reduce((s,r)=>s+r.fat, 0);
-  }
+  // Campanha é métrica separada — não entra no realizado da semana
   return t;
 }
 function calcMes(lid){
@@ -3440,12 +3425,7 @@ function calcMes(lid){
   if(t===0 && vends.length===0){
     Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{ if(d.startsWith(mes)) t+=Number(vd.fat||0); });
   }
-  // Se ainda zero, considerar campRealizados do mês
-  if(t===0){
-    t = (D.campRealizados||[])
-      .filter(r=>r.lojaId===lid && r.data && r.data.startsWith(mes))
-      .reduce((s,r)=>s+r.fat, 0);
-  }
+  // Campanha é métrica separada — não entra no realizado do mês
   return t;
 }
 // TM = Faturamento Total / Atendimentos totais (trans); se não tiver, usa contagem de vendedoras com lançamento
@@ -6267,6 +6247,7 @@ function abrirFormCampReal(){
   document.getElementById('camp-prog-wrap').style.display='none';
 }
 function fecharFormCampReal(){
+  window._editandoLancCampId = null; // limpar edição ao fechar
   document.getElementById('form-camp-real').style.display='none';
 }
 function atualizarObjetivoCamp(){
@@ -6433,6 +6414,8 @@ function renderHistoricoCamp(campId, lid){
 function editarLancCamp(id){
   const lanc = (D.campRealizados||[]).find(r=>r.id===id);
   if(!lanc){ showToast('Lançamento não encontrado','err'); return; }
+  // Guardar ID do lançamento sendo editado
+  window._editandoLancCampId = id;
   // Abrir form de realizado já preenchido
   abrirFormCampReal();
   setTimeout(()=>{
@@ -6491,8 +6474,12 @@ function salvarCampReal(){
   const lid      = lojaId();
   const lojaNome = LOJAS.find(l=>l.id===lid)?.nome||lid;
 
-  // Verificar se já tem lançamento desta loja nesta data desta campanha
-  const existIdx = D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid && r.data===data);
+  // Verificar se está editando um lançamento existente (pelo ID) ou se já tem na mesma data
+  const editId = window._editandoLancCampId || null;
+  const existIdx = editId
+    ? D.campRealizados.findIndex(r=>r.id===editId)
+    : D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid && r.data===data);
+  window._editandoLancCampId = null; // limpar após usar
   const vendsVals = getVendCampVals();
   const lancamento = {
     id: existIdx>=0 ? D.campRealizados[existIdx].id : 'real_'+Date.now(),
@@ -6508,58 +6495,6 @@ function salvarCampReal(){
     showToast('Dia lançado! ✅');
   }
 
-  // ── SOMAR AUTOMATICAMENTE NO FATURAMENTO DO DIA (D.vendas) ──
-  // Calcular total de TODAS as campanhas desta loja nesta data
-  const totalCampDia = D.campRealizados
-    .filter(r => r.lojaId === lid && r.data === data)
-    .reduce((s, r) => s + r.fat, 0);
-
-  const totalAtendCampDia = D.campRealizados
-    .filter(r => r.lojaId === lid && r.data === data)
-    .reduce((s, r) => s + (r.atend||0), 0);
-
-  // Pegar o lançamento normal do dia (se existir) e somar com campanha
-  if(!D.vendas[lid]) D.vendas[lid] = {};
-  const lancNormal = D.vendas[lid][data] || {};
-  const fatNormal  = lancNormal.fat || 0;
-
-  // Se já tem lançamento normal, preservar e apenas registrar campanha como complemento
-  // Se não tem lançamento normal, criar com os dados da campanha
-  if(fatNormal === 0){
-    // Sem lançamento normal: criar baseado na campanha
-    D.vendas[lid][data] = {
-      fat:    totalCampDia,
-      trans:  totalAtendCampDia || totalCampDia > 0 ? (totalAtendCampDia || 1) : 0,
-      cli:    totalAtendCampDia || 0,
-      clinov: lancNormal.clinov || 0,
-      visit:  lancNormal.visit  || 0,
-      tm:     totalAtendCampDia > 0 ? totalCampDia / totalAtendCampDia : 0,
-      obs:    lancNormal.obs || '',
-      deCampanha: true,
-      ts:     Date.now()
-    };
-  } else {
-    // Já tem lançamento normal: NÃO sobrescrever — apenas registrar campanha à parte
-    // O dashboard vai usar calcFatComCamp() que soma os dois
-  }
-
-  // Salvar também nas vendedoras (vendasVend) se foram preenchidas
-  const vendsComVal = Object.entries(vendsVals);
-  if(vendsComVal.length > 0){
-    vendsComVal.forEach(([vId, vFat])=>{
-      if(!D.vendasVend[vId]) D.vendasVend[vId] = {};
-      const jaTem = D.vendasVend[vId][data];
-      if(!jaTem || (jaTem.deCampanha)){
-        // Só sobrescreve se não existe ou se veio de campanha anterior
-        D.vendasVend[vId][data] = {
-          val:   vFat,
-          trans: 1,
-          deCampanha: true,
-          ts:    Date.now()
-        };
-      }
-    });
-  }
 
   save();
   // Atualizar dashboard com o novo faturamento
