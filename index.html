@@ -454,9 +454,16 @@ function limparAzureConfig(){
 // Guia completo: ver arquivo avatim_cosmos_db.md
 // ============================================================
 const COSMOS_CONFIG = {
-  endpoint: "",   // Ex: https://avatim-cosmos.documents.azure.com:443/
-  key:      "",   // Primary Key (em Keys no portal Azure)
-  database: "avatimdb"
+  endpoint:   "",           // Ex: https://avatim-cosmos.documents.azure.com:443/
+  key:        "",           // Primary Key (em Keys no portal Azure)
+  database:   "avatimdb",
+  containers: {             // Mapeamento de alias → nome real do container
+    vendas:       "vendas",
+    vendasVend:   "vendas_vendedora",
+    metasLoja:    "metas_loja",
+    vendedoras:   "vendedoras",
+    campRealizados:"camp_realizados"
+  }
 };
 
 // ============================================================
@@ -940,12 +947,44 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc">
     <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Realizado</div>
     <div id="vend-lanc-grid"></div>
+
+  <!-- BARRA DE SALVAR -->
+  <div id="lanc-salvar-bar" style="display:none;background:var(--card2);border:1px solid rgba(201,168,76,.3);border-radius:12px;padding:14px 18px;margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Total do dia</div>
+      <div style="font-size:24px;font-weight:700;color:var(--ouro)" id="lanc-soma-total">R$ 0,00</div>
+      <div style="font-size:10px;color:var(--muted)" id="lanc-data-ref"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="limparCamposLanc()" style="font-size:12px">🗑️ Limpar</button>
+      <button class="btn-p" onclick="salvarLanc()" style="font-size:14px;padding:10px 28px;font-weight:700">💾 Salvar Lançamento</button>
+    </div>
+  </div>
   </div>
 
   <!-- CONSOLIDADO DIA / SEMANA / MÊS + TM -->
   <div class="sc" id="lanc-consolidado" style="margin-top:0">
     <div class="st" style="margin-bottom:12px">📊 Consolidado — TM por Período</div>
     <div id="lanc-consolidado-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+  </div>
+
+  <!-- DIAGNÓSTICO DO MÊS -->
+  <div class="sc" id="lanc-diagnostico" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div class="st" style="margin:0">🧠 Diagnóstico do Mês</div>
+      <button class="btn-s" onclick="gerarDiagnostico()" style="font-size:11px">🔄 Atualizar</button>
+    </div>
+    <div id="lanc-diag-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+      <div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Clique em Atualizar para gerar o diagnóstico</div>
+    </div>
+  </div>
+
+  <!-- ANÁLISE DE CRESCIMENTO DE CLIENTES -->
+  <div class="sc" id="lanc-crescimento" style="margin-top:12px">
+    <div class="st" style="margin-bottom:14px">📈 Crescimento de Clientes — Mês a Mês</div>
+    <div id="lanc-cresc-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
+      <div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Atualize o diagnóstico para ver a análise</div>
+    </div>
   </div>
 
   <!-- HISTÓRICO DE LANÇAMENTOS -->
@@ -3721,12 +3760,239 @@ function nav(pg){
       }
     },
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
-    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>renderPainelDia()})[pg]?.();
+    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{renderPainelDia();setTimeout(()=>gerarDiagnostico(),400);}})[pg]?.();
 }
 
 // ============================================================
 // DASHBOARD
 // ============================================================
+function gerarDiagnostico(){
+  const selLoja = document.getElementById("lanc-loja-sel");
+  const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
+  const hj  = hoje();
+  const mes  = hj.slice(0,7);
+  const loja = LOJAS.find(l=>l.id===lid);
+  const m    = getMetas(lid);
+
+  // ── KPIs do mês atual ──────────────────────────────────────
+  const realMes  = calcMes(lid);
+  const pctMes   = m.mes>0 ? realMes/m.mes*100 : 0;
+  const tmMes    = calcTMLoja(lid,'mes');
+  const natMes   = calcNAtend(lid,'mes');
+  const diasUtil = diasAbertosRestantes(lid);
+  const diasPass = diasDoMes(mes) - diasUtil;
+  const mediaDir = diasPass>0 ? realMes/diasPass : 0;
+  const diasFalt = diasUtil;
+  const restante = Math.max(0, m.mes - realMes);
+  const necDia   = diasFalt>0 ? restante/diasFalt : 0;
+
+  // ── Análise por vendedora ────────────────────────────────────
+  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vendsData = vends.map(v=>{
+    const vm  = calcVendPer(v.id,'mes');
+    const vd  = calcVendPer(v.id,'dia');
+    const mV  = Number(v.metaMes)||0;
+    const pct = mV>0 ? vm/mV*100 : 0;
+    // Atendimentos do mês
+    let nat=0;
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,d])=>{
+      if(dt.startsWith(mes)) nat+=Number(d.trans||d.cli||0);
+    });
+    const tm  = nat>0 ? vm/nat : 0;
+    return {...v,vm,vd,pct,nat,tm,mV};
+  }).sort((a,b)=>b.pct-a.pct);
+
+  // ── Comparação meses anteriores ──────────────────────────────
+  const meses = [];
+  for(let i=0;i<4;i++){
+    const d = new Date(hj+'-01');
+    d.setMonth(d.getMonth()-i);
+    const mStr = d.toISOString().slice(0,7);
+    let fat=0, nat=0;
+    vends.forEach(v=>{
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){ fat+=Number(dd.val||0); nat+=Number(dd.trans||dd.cli||0); }
+      });
+    });
+    // fallback D.vendas — FORA do loop de vendedoras para evitar multiplicação
+    if(fat===0){
+      Object.entries(D.vendas[lid]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){ fat+=Number(dd.fat||0); nat+=Number(dd.trans||0); }
+      });
+    }
+    const label = i===0?'Este mês':i===1?'Mês ant.':mStr.slice(0,7);
+    meses.push({mes:mStr,label,fat,nat,tm:nat>0?fat/nat:0});
+  }
+
+  // ── Identificar potencializador e ofensor ───────────────────
+  const melhor = vendsData[0];
+  const pior   = vendsData[vendsData.length-1];
+  const acima  = vendsData.filter(v=>v.pct>=100).length;
+  const abaixo = vendsData.filter(v=>v.pct<70).length;
+
+  // ── Tendência de clientes ────────────────────────────────────
+  const crescClientes = meses.length>=2 && meses[1].nat>0
+    ? ((meses[0].nat - meses[1].nat)/meses[1].nat*100)
+    : 0;
+  const crescFat = meses.length>=2 && meses[1].fat>0
+    ? ((meses[0].fat - meses[1].fat)/meses[1].fat*100)
+    : 0;
+
+  // ── Cor por status ───────────────────────────────────────────
+  const corPct = pctMes>=100?'var(--verde)':pctMes>=70?'var(--ouro)':'var(--verm)';
+  const corNec = necDia>mediaDir?'var(--verm)':'var(--verde)';
+  const corCres = crescFat>=0?'var(--verde)':'var(--verm)';
+  const corCresClientes = crescClientes>=0?'var(--verde)':'var(--verm)';
+
+  // ── Render do diagnóstico ────────────────────────────────────
+  const grid = document.getElementById('lanc-diag-grid');
+  if(!grid) return;
+
+  grid.innerHTML = `
+    <!-- Card Status Geral -->
+    <div style="background:var(--card2);border:1px solid ${corPct};border-radius:12px;padding:16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Status do Mês</div>
+      <div style="font-size:28px;font-weight:900;color:${corPct}">${pctMes.toFixed(0)}%</div>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0">${fmt(realMes)} de ${fmt(m.mes)}</div>
+      <div style="height:6px;background:var(--cinza);border-radius:6px;overflow:hidden;margin:8px 0">
+        <div style="width:${Math.min(100,pctMes)}%;height:100%;background:${corPct};border-radius:6px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Falta ${fmt(restante)} • ${diasFalt} dias úteis restantes</div>
+      <div style="margin-top:6px;font-size:12px;font-weight:600;color:${corNec}">Necessário/dia: ${fmt(necDia)}</div>
+    </div>
+
+    <!-- Card Equipe -->
+    <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👩 Performance da Equipe</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div style="text-align:center;background:rgba(46,204,135,.08);border-radius:8px;padding:8px">
+          <div style="font-size:22px;font-weight:700;color:var(--verde)">${acima}</div>
+          <div style="font-size:9px;color:var(--muted)">✅ Na meta</div>
+        </div>
+        <div style="text-align:center;background:rgba(239,68,68,.08);border-radius:8px;padding:8px">
+          <div style="font-size:22px;font-weight:700;color:var(--verm)">${abaixo}</div>
+          <div style="font-size:9px;color:var(--muted)">🔴 Abaixo 70%</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Ranking equipe</div>
+      ${vendsData.map((v,i)=>{
+        const corV = v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
+        const icon = v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+          <span style="font-size:11px">${icon} ${v.nome}</span>
+          <span style="font-size:11px;font-weight:600;color:${corV}">${v.pct.toFixed(0)}%</span>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Card Potencializador e Ofensor -->
+    <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚡ Potencializador & Ofensor</div>
+      ${melhor?`<div style="background:rgba(46,204,135,.08);border:1px solid rgba(46,204,135,.2);border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-size:9px;color:var(--verde);font-weight:600;margin-bottom:4px">🏆 MAIOR POTENCIALIZADOR</div>
+        <div style="font-size:13px;font-weight:700">${melhor.nome}</div>
+        <div style="font-size:11px;color:var(--muted)">${fmt(melhor.vm)} vendidos • ${melhor.pct.toFixed(0)}% da meta</div>
+        <div style="font-size:10px;color:var(--verde);margin-top:2px">TM: ${fmt(melhor.tm)} • ${melhor.nat} atend.</div>
+      </div>`:''}
+      ${pior&&vendsData.length>1?`<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px">
+        <div style="font-size:9px;color:var(--verm);font-weight:600;margin-bottom:4px">⚠️ MAIOR OFENSOR</div>
+        <div style="font-size:13px;font-weight:700">${pior.nome}</div>
+        <div style="font-size:11px;color:var(--muted)">${fmt(pior.vm)} vendidos • ${pior.pct.toFixed(0)}% da meta</div>
+        <div style="font-size:10px;color:var(--verm);margin-top:2px">TM: ${fmt(pior.tm)} • ${pior.nat} atend.</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">Necessita de ${fmt(Math.max(0,pior.mV-pior.vm))} para bater a meta</div>
+      </div>`:''} 
+      <div style="margin-top:10px;font-size:10px;color:var(--muted)">TM médio da loja: <strong style="color:var(--texto)">${fmt(tmMes)}</strong></div>
+    </div>
+
+    <!-- Card Tendência de Crescimento -->
+    <div style="background:var(--card2);border:1px solid ${corCres};border-radius:12px;padding:16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📈 Tendência de Faturamento</div>
+      <div style="font-size:26px;font-weight:900;color:${corCres}">${crescFat>=0?'+':''}${crescFat.toFixed(1)}%</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
+      ${meses.map((m2,i)=>{
+        const maxF = Math.max(...meses.map(x=>x.fat),1);
+        const w = m2.fat>0 ? (m2.fat/maxF*100).toFixed(0) : 0;
+        const cor2 = i===0?'var(--azul)':'var(--cinza)';
+        return `<div style="margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+            <span style="color:var(--muted)">${m2.label}</span>
+            <span style="color:var(--texto);font-weight:600">${m2.fat>0?fmt(m2.fat):'Sem dados'}</span>
+          </div>
+          <div style="height:4px;background:var(--cinza);border-radius:4px">
+            <div style="width:${w}%;height:100%;background:${cor2};border-radius:4px"></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  // ── Render análise de crescimento de clientes ────────────────
+  const crescGrid = document.getElementById('lanc-cresc-grid');
+  if(crescGrid){
+    crescGrid.innerHTML = `
+      <!-- Tendência clientes -->
+      <div style="background:var(--card2);border:1px solid ${corCresClientes};border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👥 Clientes Atendidos</div>
+        <div style="font-size:26px;font-weight:900;color:${corCresClientes}">${crescClientes>=0?'+':''}${crescClientes.toFixed(1)}%</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
+        ${meses.map((m2,i)=>{
+          const maxN = Math.max(...meses.map(x=>x.nat),1);
+          const w2 = m2.nat>0 ? (m2.nat/maxN*100).toFixed(0) : 0;
+          const cor3 = i===0?'var(--roxo)':'var(--cinza)';
+          return `<div style="margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:var(--muted)">${m2.label}</span>
+              <span style="color:var(--texto);font-weight:600">${m2.nat>0?m2.nat+' atend.':'Sem dados'}</span>
+            </div>
+            <div style="height:4px;background:var(--cinza);border-radius:4px">
+              <div style="width:${w2}%;height:100%;background:${cor3};border-radius:4px"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Ticket médio mês a mês -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🎫 Ticket Médio — Evolução</div>
+        ${meses.map((m2,i)=>{
+          const maxTM = Math.max(...meses.map(x=>x.tm),1);
+          const w3 = m2.tm>0 ? (m2.tm/maxTM*100).toFixed(0) : 0;
+          const cor4 = i===0?'var(--ouro)':'var(--cinza)';
+          return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:var(--muted)">${m2.label}</span>
+              <span style="color:var(--texto);font-weight:600">${m2.tm>0?fmt(m2.tm):'—'}</span>
+            </div>
+            <div style="height:4px;background:var(--cinza);border-radius:4px">
+              <div style="width:${w3}%;height:100%;background:${cor4};border-radius:4px"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- KPIs por vendedora -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📋 KPIs por Vendedora</div>
+        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
+          <span>Vendedora</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span><span style="text-align:right">Atend.</span>
+        </div>
+        ${vendsData.map(v=>{
+          const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
+          return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="font-weight:600;color:${corV2}">${v.nome.split(' ')[0]}</span>
+            <span style="text-align:right;color:var(--muted)">${v.pct.toFixed(0)}%</span>
+            <span style="text-align:right;color:var(--muted)">${v.tm>0?fmt(v.tm):'—'}</span>
+            <span style="text-align:right;color:var(--muted)">${v.nat||'—'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  showToast('✅ Diagnóstico atualizado!');
+}
+
+
 function carregarDash(){
   // Garantir que D está inicializado
   if(!D.metasLoja) D.metasLoja={};
@@ -4288,8 +4554,11 @@ function carregarVendsForm(lidOverride){
               style="width:54px;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:10px 6px;color:var(--azul);font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
           </div>
         </div>
-        <div id="vlpct_${v.id}" style="font-size:10px;margin-top:4px;text-align:right;color:${corD}">
-          ${valAtual>0?pctDia.toFixed(0)+"% da meta":"—"}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <div id="vlpct_${v.id}" style="font-size:10px;color:${corD}">
+            ${valAtual>0?pctDia.toFixed(0)+"% da meta":"—"}
+          </div>
+          ${valAtual>0?`<button onclick="limparVend('${v.id}')" title="Limpar" style="font-size:10px;color:var(--muted);background:none;border:none;cursor:pointer;padding:0 4px">✕</button>`:""}
         </div>
       </div>`;
     }).join("")}
@@ -4317,6 +4586,14 @@ function atualizarSomaDia(){
   if(somaEl) somaEl.textContent=fmt(soma);
   const somaBx=document.getElementById("soma-vend-box");
   if(somaBx) somaBx.style.display=soma>0?"block":"none";
+  // Atualizar barra de salvar
+  const somaTotal=document.getElementById("lanc-soma-total");
+  const salvarBar=document.getElementById("lanc-salvar-bar");
+  const dataRef=document.getElementById("lanc-data-ref");
+  const dataEl=document.getElementById("l-data");
+  if(somaTotal) somaTotal.textContent=fmt(soma);
+  if(dataRef&&dataEl) dataRef.textContent="Data: "+fmtData(dataEl?.value||hoje());
+  if(salvarBar) salvarBar.style.display=soma>0?"flex":"none";
   // % da meta do dia da loja
   const pctEl=document.getElementById("soma-pct-meta");
   if(pctEl&&soma>0){
@@ -4328,6 +4605,28 @@ function atualizarSomaDia(){
     }
   }
 }
+
+function limparVend(vendId){
+  const el = document.getElementById("vlanc_"+vendId);
+  const at = document.getElementById("vatend_"+vendId);
+  if(el){ el.value=''; }
+  if(at){ at.value=''; }
+  atualizarSomaDia();
+  atualizarCardVend(vendId, 0, 0);
+}
+
+function limparCamposLanc(){
+  const selLoja = document.getElementById("lanc-loja-sel");
+  const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
+  D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+    const el = document.getElementById("vlanc_"+v.id);
+    const at = document.getElementById("vatend_"+v.id);
+    if(el) el.value='';
+    if(at) at.value='';
+  });
+  atualizarSomaDia();
+}
+
 
 function salvarLanc(){
   const selLoja=document.getElementById("lanc-loja-sel");
@@ -8609,6 +8908,8 @@ function preencherFBForm(){
   const si=document.getElementById('fb-sync-info');
   if(si) si.style.display=FB_OK()?'block':'none';
 }
+function preencherFormFB(){ if(typeof preencherFBForm==="function") preencherFBForm(); }
+
 function salvarFBConfig(){
   const ak=(document.getElementById('fb-apikey')?.value||'').trim();
   const pi=(document.getElementById('fb-projectid')?.value||'').trim();
