@@ -523,6 +523,25 @@ const CosmosDB = {
     try{const r=await this._req("GET","dbs/"+this._db,"dbs","dbs/"+this._db);return!!r;}catch(e){return false;}
   }
 };
+
+// ── Funções auxiliares ────────────────────────────────────────
+function maskBR(el){
+  let v = el.value.replace(/\D/g,'');
+  if(!v){ el.value=''; return; }
+  v = (parseInt(v)/100).toFixed(2);
+  el.value = v.replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+function selecionarProdCamp(cod, nome){
+  const el = document.getElementById('camp-prod-sel');
+  if(el) el.value = cod + ' — ' + nome;
+  const elHid = document.getElementById('camp-prod-cod');
+  if(elHid) elHid.value = cod;
+  showToast('Produto selecionado: '+nome);
+}
+function sincronizarCosmosParaLocal(){
+  // Stub — Cosmos desabilitado nesta versão
+  console.log('[Avatim] sincronizarCosmosParaLocal: Cosmos não configurado');
+}
 </script>
 
 <style>
@@ -1715,31 +1734,31 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Linha 1: tipos de campanha -->
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px;min-width:36px">TIPO</span>
-        <button class="btn-s" onclick="filtrarCampTipo('')" id="camp-fil-todos" style="opacity:1">Todas</button>
-        <button class="btn-s" onclick="filtrarCampTipo('NATAL')" id="camp-fil-NATAL">🎄 Natal</button>
-        <button class="btn-s" onclick="filtrarCampTipo('BLACK')" id="camp-fil-BLACK">🖤 Black</button>
-        <button class="btn-s" onclick="filtrarCampTipo('OFERTAS')" id="camp-fil-OFERTAS">🏷️ Ofertas</button>
-        <button class="btn-s" onclick="filtrarCampTipo('DIA_CONSUMIDOR')" id="camp-fil-DIA_CONSUMIDOR">🛍️ Consumidor</button>
-        <button class="btn-s" onclick="filtrarCampTipo('DIA_MAES')" id="camp-fil-DIA_MAES">💐 Mães</button>
-        <button class="btn-s" onclick="filtrarCampTipo('DIA_NAMORADOS')" id="camp-fil-DIA_NAMORADOS">❤️ Namorados</button>
-        <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO">📌 Outro</button>
+        <button class="btn-s" onclick="filtrarCampTipo('')" id="camp-fil-todos-adm" style="opacity:1">Todas</button>
+        <button class="btn-s" onclick="filtrarCampTipo('NATAL')" id="camp-fil-NATAL-adm">🎄 Natal</button>
+        <button class="btn-s" onclick="filtrarCampTipo('BLACK')" id="camp-fil-BLACK-adm">🖤 Black</button>
+        <button class="btn-s" onclick="filtrarCampTipo('OFERTAS')" id="camp-fil-OFERTAS-adm">🏷️ Ofertas</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_CONSUMIDOR')" id="camp-fil-DIA_CONSUMIDOR-adm">🛍️ Consumidor</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_MAES')" id="camp-fil-DIA_MAES-adm">💐 Mães</button>
+        <button class="btn-s" onclick="filtrarCampTipo('DIA_NAMORADOS')" id="camp-fil-DIA_NAMORADOS-adm">❤️ Namorados</button>
+        <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO-adm">📌 Outro</button>
       </div>
 
       <!-- Linha 2: filtro por loja (só admin vê) -->
-      <div id="camp-fil-lojas-wrap" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+      <div id="camp-fil-lojas-wrap-adm" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px;min-width:36px">LOJA</span>
-        <button class="btn-s" onclick="filtrarCampLoja('')" id="camp-fil-loja-todas" style="opacity:1">Todas</button>
-        <button class="btn-s" onclick="filtrarCampLoja('mooca')" id="camp-fil-loja-mooca">🛍️ Mooca</button>
-        <button class="btn-s" onclick="filtrarCampLoja('ibirapuera')" id="camp-fil-loja-ibirapuera">🛍️ Ibirapuera</button>
-        <button class="btn-s" onclick="filtrarCampLoja('leopoldina')" id="camp-fil-loja-leopoldina">🏪 Leopoldina</button>
-        <button class="btn-s" onclick="filtrarCampLoja('jarpaul')" id="camp-fil-loja-jarpaul">🏪 Jd. Paulista</button>
-        <button class="btn-s" onclick="filtrarCampLoja('santana')" id="camp-fil-loja-santana">🏪 Santana</button>
-        <button class="btn-s" onclick="filtrarCampLoja('perdizes')" id="camp-fil-loja-perdizes">🏪 Perdizes</button>
-        <button class="btn-s" onclick="filtrarCampLoja('pinheiros')" id="camp-fil-loja-pinheiros">🏪 Pinheiros</button>
+        <button class="btn-s" onclick="filtrarCampLoja('')" id="camp-fil-loja-todas-adm" style="opacity:1">Todas</button>
+        <button class="btn-s" onclick="filtrarCampLoja('mooca')" id="camp-fil-loja-mooca-adm">🛍️ Mooca</button>
+        <button class="btn-s" onclick="filtrarCampLoja('ibirapuera')" id="camp-fil-loja-ibirapuera-adm">🛍️ Ibirapuera</button>
+        <button class="btn-s" onclick="filtrarCampLoja('leopoldina')" id="camp-fil-loja-leopoldina-adm">🏪 Leopoldina</button>
+        <button class="btn-s" onclick="filtrarCampLoja('jarpaul')" id="camp-fil-loja-jarpaul-adm">🏪 Jd. Paulista</button>
+        <button class="btn-s" onclick="filtrarCampLoja('santana')" id="camp-fil-loja-santana-adm">🏪 Santana</button>
+        <button class="btn-s" onclick="filtrarCampLoja('perdizes')" id="camp-fil-loja-perdizes-adm">🏪 Perdizes</button>
+        <button class="btn-s" onclick="filtrarCampLoja('pinheiros')" id="camp-fil-loja-pinheiros-adm">🏪 Pinheiros</button>
       </div>
 
     </div>
-    <div id="camp-lista">--</div>
+    <div id="camp-lista-adm">--</div>
   </div>
 
   <!-- ABA ESTOQUE & PRODUTOS -->
@@ -4002,7 +4021,7 @@ function salvarRealProd(){
 function renderRankHoje(){
   const hj=hoje();
   const lojasRank = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
-  const r=lojasRank.map(l=>{const m=getMetas(l.id),v=calcDia(l.id);return{...l,v,m:m.dia,sm:m.superDia,pct:m.dia>0?v/m.dia*100:0};}).sort((a,b)=>b.v-a.v);
+  const r=lojasRank.map(l=>{const m=getMetas(l.id),v=calcDia(l.id);return{...l,v,m:m.dia,sm:m.superDia,pct:m.dia>0?v/m.dia*100:0};}).sort((a,b)=>b.pct-a.pct||b.v-a.v);
   const max=r[0]?.v||1,cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-hoje").innerHTML=r.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
@@ -5547,7 +5566,7 @@ function renderLojas(per="hoje"){
     const meta=per==="hoje"?m.dia:per==="semana"?m.sem:m.mes;
     const smeta=per==="hoje"?m.superDia:per==="semana"?m.superSem:m.superMes;
     return{...l,v,meta,smeta,pct:meta>0?v/meta*100:0};
-  }).sort((a,b)=>b.v-a.v);
+  }).sort((a,b)=>b.pct-a.pct||b.v-a.v);  // ordena por % da meta
   const tot=ld.reduce((s,l)=>s+l.v,0),med=ld.filter(l=>l.v>0).reduce((s,l,_,a)=>s+l.pct/a.length,0)||0;
   document.getElementById("rede-total").textContent=fmt(tot);
   document.getElementById("rede-periodo").textContent=per==="hoje"?"Hoje":per==="semana"?"Semana":"Mes";
@@ -7175,7 +7194,7 @@ function gerarRel(){
     const metaTM=m.ticket||150;
     const pctTM=metaTM>0?tm/metaTM*100:0;
     return{...l,fat,pct,tm,nV,metaTM,pctTM,meta:metaRef,sm:smRef};
-  }).sort((a,b)=>b.fat-a.fat);
+  }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
 
   const vends=D.vendedoras.map(v=>{
     const val = isMes ? calcVendPer(v.id,"mes") : calcVendPer(v.id,"semana");
@@ -7765,7 +7784,7 @@ function buscarHistLoja(){
       const idealV=valorIdealPeriodo(metaV,de,ate);
       const gapV=fat2-idealV;
       return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,idealV,gapV};
-    }).sort((a,b)=>b.fat-a.fat);
+    }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
     pv.innerHTML=vendsData.length?`<div style="overflow-x:auto"><table class="dtable">
       <thead><tr><th>#</th><th>Vendedora</th><th>Realizado</th><th>Ideal</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
       <tbody>${vendsData.map((v,i)=>{
@@ -8001,18 +8020,6 @@ function _buildPodio(items, getInfo) {
 // ============================================================
 // CONFIG PAGE — TABS E AZURE
 // ============================================================
-function tabCfg(tab, el){
-  document.querySelectorAll('#page-config > .tabs .tab').forEach(e=>e.classList.remove('active'));
-  el.classList.add('active');
-  ['lojas','supabase','firebase','deploy','sql','cosmos'].forEach(t=>{
-    const d=document.getElementById('cfg-tab-'+t);
-    if(d) d.style.display = t===tab?'block':'none';
-  });
-  if(tab==='firebase') { if(typeof preencherFBForm==='function') preencherFBForm(); }
-  if(tab==='supabase') { if(typeof preencherFormSB==='function') preencherFormSB(); }
-  if(tab==='cosmos') preencherFormCosmos();
-  if(tab==='sql')    preencherFormSQL();
-}
 
 function salvarAzureConfig(){
   const cfg = {
@@ -8062,28 +8069,7 @@ function preencherFormSQL(){
   if(el('sql-user'))   el('sql-user').value   = s.user||'';
 }
 
-async function testarCosmos(){
-  const st = document.getElementById('cosmos-status');
-  if(!st) return;
-  st.style.display='block';
-  st.style.color='var(--ouro)';
-  st.textContent='⏳ Testando conexao com Cosmos DB...';
-  if(!COSMOS_OK && !(document.getElementById('cosmos-endpoint')?.value)){
-    st.style.color='var(--verm)';
-    st.textContent='❌ Preencha o Endpoint e a Primary Key primeiro.';
-    return;
-  }
-  try {
-    const r = await cosmosQuery('vendas', 'SELECT TOP 1 c.id FROM c');
-    st.style.color='var(--verde)';
-    st.textContent='✅ Conexao OK! Cosmos DB respondeu com sucesso.';
-    const ls=document.getElementById('cosmos-last-sync');
-    if(ls) ls.textContent=new Date().toLocaleTimeString('pt-BR');
-  } catch(e) {
-    st.style.color='var(--verm)';
-    st.textContent='❌ Erro: '+e.message+'. Verifique endpoint, key e CORS no portal Azure.';
-  }
-}
+async 
 
 function testarConexaoSQL(){
   const st = document.getElementById('sql-status');
@@ -8184,32 +8170,6 @@ async function cosmosQuery(container, sql){
 // ============================================================
 // SYNC: salvar no Cosmos quando salvar localmente
 // ============================================================
-function saveWithSync(opts={}){
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
-  if(COSMOS_OK){
-    // Salvar lançamento do dia
-    if(opts.lancamento){
-      const {lid,data,dados} = opts.lancamento;
-      cosmosSave("vendas", {id:`${lid}_${data}`, loja_id:lid, data, ...dados, _ts: Date.now()});
-    }
-    // Salvar venda de vendedora
-    if(opts.vendaVend){
-      const {vendId,data,dados} = opts.vendaVend;
-      cosmosSave("vendasVend", {id:`${vendId}_${data}`, vendedora_id:vendId, data, ...dados, _ts:Date.now()});
-    }
-    // Salvar meta de loja
-    if(opts.meta){
-      const {lid,dados} = opts.meta;
-      cosmosSave("metas", {id:`meta_${lid}`, loja_id:lid, ...dados, _ts:Date.now()});
-    }
-  }
-}
-
-// ============================================================
-// PAINEL ADMIN TEMPO REAL
-// ============================================================
-let _autoRefreshTimer = null;
-let _mesMeta = ''; // mês selecionado na tela de Metas por Loja (YYYY-MM)
 let _ultimaSync = null;
 
 function salvarConfigCosmos(){
@@ -8222,15 +8182,7 @@ function salvarConfigCosmos(){
   CosmosDB.init();
   testarCosmos();
 }
-async function testarCosmos(){
-  const el=document.getElementById("cosmos-status-txt");
-  if(el) el.innerHTML='<span style="color:var(--ouro)">Testando...</span>';
-  const ok=await CosmosDB.testarConexao();
-  if(el) el.innerHTML=ok
-    ? '<span style="color:var(--verde)">✅ Conectado com sucesso ao Azure Cosmos DB!</span>'
-    : '<span style="color:var(--verm)">❌ Falha na conexão. Verifique endpoint e key.</span>';
-  if(ok){showToast("Cosmos DB conectado!");sincronizarCosmosParaLocal();}
-}
+async 
 // Restaurar config Cosmos salva
 function restaurarConfigCosmos(){
   try{
@@ -8328,14 +8280,14 @@ async function saveWithSync(opts={}){
   const hoje_ts = new Date().toISOString();
   if(opts.lancamento){
     const {lid,data,dados}=opts.lancamento;
-    const docSB={loja_id:lid,data_venda:data,faturamento:dados.fat||0,num_transacoes:dados.trans||0,tm_itens_venda:dados.tm||0,clientes_total:dados.cli||0,clientes_novos:dados.clinov||0,visitantes:dados.visit||0,observacao:dados.obs||'',lancado_por:D._user?.email||'',atualizado_em:hoje_ts};
+    const docSB={loja_id:lid,data_venda:data,faturamento:dados.fat||0,num_transacoes:dados.trans||0,tm_itens_venda:dados.tm||0,clientes_total:dados.cli||0,clientes_novos:dados.clinov||0,visitantes:dados.visit||0,observacao:dados.obs||'',lancado_por:window._currentUser?.email||'',atualizado_em:hoje_ts};
     if(SB_OK()) await sbUpsert('lancamentos',docSB);
     if(FB_OK()) await fbSet('lancamentos',`${lid}_${data}`,{...docSB,loja_id:lid});
   }
   if(opts.vendaVend){
     const {vendId,data,dados}=opts.vendaVend;
     const vend=D.vendedoras.find(v=>v.id===vendId);
-    const docSB={vendedora_id:vendId,loja_id:vend?.loja||'',data_venda:data,valor_vendido:dados.val||0,num_transacoes:dados.trans||0,lancado_por:D._user?.email||'',atualizado_em:hoje_ts};
+    const docSB={vendedora_id:vendId,loja_id:vend?.loja||'',data_venda:data,valor_vendido:dados.val||0,num_transacoes:dados.trans||0,lancado_por:window._currentUser?.email||'',atualizado_em:hoje_ts};
     if(SB_OK()) await sbUpsert('vendas_vendedora',docSB);
     if(FB_OK()) await fbSet('vendas_vendedora',`${vendId}_${data}`,docSB);
   }
@@ -8502,16 +8454,6 @@ function toggleAdvCfg(btn){
   const show = btn.textContent.includes("▼");
   document.querySelectorAll(".cfg-avancado-tab").forEach(e=>e.style.display=show?"inline-flex":"none");
   btn.textContent = show ? "⚙️ Avançado ▲" : "⚙️ Avançado ▼";
-}
-function tabCfg(tab,el){
-  document.querySelectorAll('#page-config > .tabs .tab').forEach(e=>e.classList.remove('active'));
-  el.classList.add('active');
-  ['lojas','supabase','firebase','deploy'].forEach(t=>{
-    const d=document.getElementById('cfg-tab-'+t);
-    if(d)d.style.display=t===tab?'block':'none';
-  });
-  if(tab==='supabase')preencherFormSB();
-  if(tab==='firebase')preencherFormFB();
 }
 function preencherFormSB(){
   const el=id=>document.getElementById(id);
