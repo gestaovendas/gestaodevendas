@@ -134,13 +134,26 @@ try{
           const snapExist = await getDoc(doc(db,"avatim",docId));
           if(snapExist.exists()){
             const existing = JSON.parse(snapExist.data().dados||"{}");
-            // Deep merge: preserva dias já gravados
+            // Merge de vendas: pedaco é AUTORITATIVO
+            // Só adiciona dias do Firebase que NÃO existem no pedaco local (não readiciona excluídos)
             if(existing.vendas?.[lid]){
-              Object.assign(pedaco.vendas[lid], existing.vendas[lid], pedaco.vendas[lid]);
+              Object.entries(existing.vendas[lid]).forEach(([dt,dados])=>{
+                if(!(dt in pedaco.vendas[lid])){
+                  // Dia está no Firebase mas não no local — só adiciona se for futuro ou não foi excluído
+                  // Verificar tombstone de vendas excluídas
+                  const excDias = D._vendasExcluidas?.[lid] || [];
+                  if(!excDias.includes(dt)) pedaco.vendas[lid][dt] = dados;
+                }
+              });
             }
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
-              pedaco.vendasVend[vid] = Object.assign({}, dias, pedaco.vendasVend[vid]);
+              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              Object.entries(dias).forEach(([dt,dados])=>{
+                if(!(dt in pedaco.vendasVend[vid]) && !excDiasV.includes(dt)){
+                  pedaco.vendasVend[vid][dt] = dados;
+                }
+              });
             });
             // campRealizados: pedaco é AUTORITATIVO (já tem todos os registros desta loja)
             // NÃO readicionar registros do Firebase — evita que exclusões "voltem"
@@ -3415,7 +3428,7 @@ function diasPassadosNoMes(){
 function calcMetasAuto(mes, ticket, superMes){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*1.255);
-  const DU = diasDoMes(mesAtual()), SW = 4.33;  // dias reais do mês atual
+  const DU = diasDoMes(mesAtual())||30, SW = 4.33;  // dias reais do mês (||30 evita divisão por zero)
   // Manter 2 casas decimais para que a soma das metas diárias/semanais bata com a mensal
   const dia      = parseFloat((mes/DU).toFixed(2));
   const sem      = parseFloat((mes/SW).toFixed(2));
@@ -3760,7 +3773,7 @@ function nav(pg){
       }
     },
     fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
-    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{renderPainelDia();setTimeout(()=>gerarDiagnostico(),400);}})[pg]?.();
+    arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
 }
 
 // ============================================================
@@ -3768,7 +3781,7 @@ function nav(pg){
 // ============================================================
 function gerarDiagnostico(){
   const selLoja = document.getElementById("lanc-loja-sel");
-  const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
+  const lid = (isAdmin() && selLoja && selLoja.value) ? selLoja.value : (isAdmin() ? LOJAS[0]?.id||lojaId() : lojaId());
   const hj  = hoje();
   const mes  = hj.slice(0,7);
   const loja = LOJAS.find(l=>l.id===lid);
@@ -3780,7 +3793,7 @@ function gerarDiagnostico(){
   const tmMes    = calcTMLoja(lid,'mes');
   const natMes   = calcNAtend(lid,'mes');
   const diasUtil = diasAbertosRestantes(lid);
-  const diasPass = diasDoMes(mes) - diasUtil;
+  const diasPass = diasAbertosPassados(lid);   // corrigido: era diasDoMes-diasUtil (misturava dias calendário com dias úteis)
   const mediaDir = diasPass>0 ? realMes/diasPass : 0;
   const diasFalt = diasUtil;
   const restante = Math.max(0, m.mes - realMes);
@@ -4796,9 +4809,10 @@ function editarLanc(lid, data){
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
     const reg = D.vendasVend[v.id]?.[data];
     const valEl = document.getElementById("vlanc_"+v.id);
-    const transEl = document.getElementById("vtrans_"+v.id);
-    if(valEl && reg) valEl.value = reg.val||0;
-    if(transEl && reg) transEl.value = reg.trans||0;
+    const transEl = document.getElementById("vatend_"+v.id);
+    const valFmtEdit = (reg?.val||0)>0 ? (reg.val).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}) : "";
+    if(valEl && reg) valEl.value = valFmtEdit;
+    if(transEl && reg) transEl.value = reg.trans||reg.cli||0;
     // Atualizar percentual visual
     const pct = document.getElementById("vlpct_"+v.id);
     if(pct && reg && v.metaMes>0) pct.textContent = ((reg.val||0)/v.metaMes*100).toFixed(0)+"%";
@@ -4806,9 +4820,13 @@ function editarLanc(lid, data){
   // Obs
   const obsEl = document.getElementById("l-obs");
   if(obsEl && D.vendas[lid]?.[data]) obsEl.value = D.vendas[lid][data].obs||"";
-  // Scroll para o topo do formulário
-  document.getElementById("page-lanc")?.scrollIntoView({behavior:"smooth"});
-  showToast("✏️ Dados do dia "+data.split("-").reverse().join("/")+" carregados. Corrija e salve!", "ok");
+  // Navegar para o painel do dia e atualizar total
+  nav("lanc");
+  setTimeout(()=>{
+    document.getElementById("page-lanc")?.scrollIntoView({behavior:"smooth"});
+    atualizarSomaDia();
+  }, 350);
+  showToast("✏️ Dados de "+data.split("-").reverse().join("/")+" carregados. Corrija e salve!", "ok");
 }
 
 function limparLanc(){
@@ -5093,13 +5111,13 @@ function salvarFluxo(){
   const valor=parseBR(document.getElementById("fx-valor").value)||0;
   const data=document.getElementById("fx-data").value||hoje();
   const obs=document.getElementById("fx-obs").value.trim();
-  if(!nome){showToast("Informe o nome do cliente!","err");return;}
+  const nomeF = nome || "Cliente Anônimo";
   const vend=D.vendedoras.find(v=>v.id===vendId);
   const loja=vend?vend.loja:lojaId();
   if(!D.fluxo) D.fluxo=[];
   const canal = document.getElementById("fx-canal")?.value||"loja";
   const tipoCliente = document.getElementById("fx-novo")?.value||"novo";
-  D.fluxo.push({id:"fx"+Date.now(),nome,origem,canal,tipoCliente,vendId,loja,valor,data,obs,ts:Date.now()});
+  D.fluxo.push({id:"fx"+Date.now(),nome:nomeF,origem,canal,tipoCliente,vendId,loja,valor,data,obs,ts:Date.now()});
   save();
   showToast("✅ "+nome+" registrado como "+( ORIGENS[origem]?.label||origem));
   toggleFormFluxo();
@@ -5378,6 +5396,10 @@ function editarLancVend(vendId, data){
 function excluirLancVend(vendId, data, btn){
   const dFmt = data.split('-').reverse().join('/');
   if(!confirm('Excluir lançamento de '+dFmt+' desta vendedora?')) return;
+  // Tombstone para impedir que o Firebase reinsira
+  if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
+  if(!D._vendasVendExcluidas[vendId]) D._vendasVendExcluidas[vendId] = [];
+  if(!D._vendasVendExcluidas[vendId].includes(data)) D._vendasVendExcluidas[vendId].push(data);
   if(D.vendasVend[vendId]) delete D.vendasVend[vendId][data];
   save();
   showToast('🗑️ Lançamento de '+dFmt+' excluído.', 'ok');
@@ -5399,10 +5421,17 @@ function editarLancDia(lid, data){
 function excluirLancDia(lid, data, btn){
   const dFmt = data.split('-').reverse().join('/');
   if(!confirm('Excluir TODOS os lançamentos de '+dFmt+' desta loja? Esta ação não pode ser desfeita.')) return;
+  // Tombstone para impedir que o Firebase reinsira
+  if(!D._vendasExcluidas) D._vendasExcluidas = {};
+  if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid] = [];
+  if(!D._vendasExcluidas[lid].includes(data)) D._vendasExcluidas[lid].push(data);
   // Remove D.vendas do dia
   if(D.vendas[lid]) delete D.vendas[lid][data];
   // Remove vendasVend de todas as vendedoras da loja naquele dia
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+    if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
+    if(!D._vendasVendExcluidas[v.id]) D._vendasVendExcluidas[v.id] = [];
+    if(!D._vendasVendExcluidas[v.id].includes(data)) D._vendasVendExcluidas[v.id].push(data);
     if(D.vendasVend[v.id]) delete D.vendasVend[v.id][data];
   });
   save();
@@ -7757,7 +7786,7 @@ function renderRankings(tab) {
     const sm   = per==='hoje'   ? m.superDia : per==='semana' ? m.superSem : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
     return {...l, v, meta, sm, pct};
-  }).sort((a,b) => b.v - a.v);
+  }).sort((a,b) => b.pct - a.pct || b.v - a.v);  // corrigido: ordena por % da meta (desempate: faturamento bruto)
 
   const totRede = ld.reduce((s,l)=>s+l.v, 0);
 
@@ -8320,87 +8349,7 @@ function _buildPodio(items, getInfo) {
 // CONFIG PAGE — TABS E AZURE
 // ============================================================
 
-function salvarAzureConfig(){
-  const cfg = {
-    sql:{
-      server: document.getElementById('sql-server')?.value||'',
-      db:     document.getElementById('sql-db')?.value||'avatim',
-      user:   document.getElementById('sql-user')?.value||'',
-      pass:   document.getElementById('sql-pass')?.value||''
-    },
-    cosmos:{
-      endpoint: document.getElementById('cosmos-endpoint')?.value||'',
-      key:      document.getElementById('cosmos-key')?.value||'',
-      dbid:     document.getElementById('cosmos-dbid')?.value||'avatim'
-    }
-  };
-  localStorage.setItem('avatim_azure_cfg', JSON.stringify(cfg));
-  // Atualiza COSMOS_CONFIG em memória
-  if(cfg.cosmos.endpoint && cfg.cosmos.key){
-    COSMOS_CONFIG.endpoint = cfg.cosmos.endpoint;
-    COSMOS_CONFIG.key      = cfg.cosmos.key;
-    COSMOS_CONFIG.database = cfg.cosmos.dbid;
-    const ci=document.getElementById('cosmos-sync-info');
-    const cb=document.getElementById('cosmos-badge');
-    if(ci) ci.style.display='block';
-    if(cb) cb.style.display='block';
-  }
-}
-
-function preencherFormCosmos(){
-  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
-  const c = cfg.cosmos||{};
-  const el = id => document.getElementById(id);
-  if(el('cosmos-endpoint')) el('cosmos-endpoint').value = c.endpoint||COSMOS_CONFIG.endpoint!=='SUA_COSMOS_ENDPOINT'?COSMOS_CONFIG.endpoint:'';
-  if(el('cosmos-key'))      el('cosmos-key').value      = c.key     ||COSMOS_CONFIG.key!=='SUA_COSMOS_KEY'?COSMOS_CONFIG.key:'';
-  if(el('cosmos-dbid'))     el('cosmos-dbid').value     = c.dbid    ||'avatim';
-  const ativo = COSMOS_OK||(c.endpoint&&c.key);
-  const ci=document.getElementById('cosmos-sync-info');
-  if(ci) ci.style.display = ativo?'block':'none';
-}
-
-function preencherFormSQL(){
-  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
-  const s = cfg.sql||{};
-  const el = id => document.getElementById(id);
-  if(el('sql-server')) el('sql-server').value = s.server||'';
-  if(el('sql-db'))     el('sql-db').value     = s.db||'avatim';
-  if(el('sql-user'))   el('sql-user').value   = s.user||'';
-}
-
 async 
-
-function testarConexaoSQL(){
-  const st = document.getElementById('sql-status');
-  if(!st) return;
-  st.style.display='block';
-  st.style.color='var(--ouro)';
-  st.innerHTML='⏳ Azure SQL nao pode ser conectado diretamente do browser por segurança.<br>'
-    +'Use o <strong>Azure Query Editor</strong> no portal ou <strong>Azure Data Studio</strong> para executar o script SQL.<br>'
-    +'Connection string salva localmente para referencia.';
-}
-
-function copiarConnString(){
-  const s = document.getElementById('sql-server')?.value||'seu-servidor';
-  const d = document.getElementById('sql-db')?.value||'avatim';
-  const u = document.getElementById('sql-user')?.value||'usuario';
-  const cs = `Server=tcp:${s},1433;Initial Catalog=${d};Persist Security Info=False;User ID=${u};Password={sua_senha};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;`;
-  navigator.clipboard?.writeText(cs).then(()=>showToast('Connection string copiada!')).catch(()=>{
-    const t=document.createElement('textarea');t.value=cs;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);showToast('Copiado!');
-  });
-}
-
-function limparAzureConfig(){
-  localStorage.removeItem('avatim_azure_cfg');
-  ['cosmos-endpoint','cosmos-key','cosmos-dbid','sql-server','sql-user','sql-pass'].forEach(id=>{
-    const el=document.getElementById(id);if(el)el.value='';
-  });
-  document.getElementById('sql-db')?.setAttribute('value','avatim');
-  document.getElementById('cosmos-dbid')?.setAttribute('value','avatim');
-  const ci=document.getElementById('cosmos-sync-info');
-  if(ci) ci.style.display='none';
-  showToast('Configuracoes Azure limpas.');
-}
 
 // Carregar config salva ao iniciar
 (function carregarAzureSalvo(){
@@ -8618,14 +8567,20 @@ function iniciarAutoRefresh(){
         const lid = lojaId();
         if(remoto.vendas?.[lid]){
           if(!D.vendas[lid]) D.vendas[lid]={};
-          Object.assign(D.vendas[lid], remoto.vendas[lid]);
+          const excDias = D._vendasExcluidas?.[lid] || [];
+          Object.entries(remoto.vendas[lid]).forEach(([dt,dados])=>{
+            if(!excDias.includes(dt)) D.vendas[lid][dt] = dados;
+          });
         }
         if(remoto.vendasVend){
           Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
             const v = D.vendedoras.find(x=>x.id===vid);
             if(v && v.loja===lid){
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              Object.assign(D.vendasVend[vid], dias);
+              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              Object.entries(dias).forEach(([dt,dados])=>{
+                if(!excDiasV.includes(dt)) D.vendasVend[vid][dt] = dados;
+              });
             }
           });
         }
