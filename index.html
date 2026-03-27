@@ -6787,90 +6787,160 @@ function exportarRelCamp(){
 function exportarPDFCamp(){
   initCampData();
   const filtroId = document.getElementById('rel-camp-sel')?.value||'';
-  let objs = filtroId ? D.campObjetivos.filter(o=>o.id===filtroId) : [...D.campObjetivos];
-  objs = objs.filter(o=>!o.arquivada); // só ativas
-  const campIds = objs.map(o=>o.id);
-  const reaisAll = D.campRealizados.filter(r=>campIds.includes(r.campId));
+  const lid = lojaId();
 
-  // KPIs gerais
+  // Usar os mesmos filtros do relatório de campanhas na tela
+  let objs = filtroId
+    ? D.campObjetivos.filter(o=>o.id===filtroId)
+    : [...D.campObjetivos];
+
+  if(!objs.length){
+    showToast('Nenhuma campanha para exportar.','err');
+    return;
+  }
+
+  const campIds = objs.map(o=>o.id);
+  let reaisAll = D.campRealizados.filter(r=>campIds.includes(r.campId));
+  if(!isAdmin()) reaisAll = reaisAll.filter(r=>r.lojaId===lid);
+
+  // ── Agregação por loja (igual ao renderRelCamp) ──────────────
+  const porLojaMap={};
+  LOJAS.forEach(l=>{ porLojaMap[l.id]={id:l.id,nome:l.nome,fat:0,atend:0,meta:0}; });
+  objs.forEach(o=>{
+    LOJAS.forEach(l=>{
+      const lancs = reaisAll.filter(r=>r.campId===o.id&&r.lojaId===l.id);
+      porLojaMap[l.id].fat   += lancs.reduce((s,r)=>s+r.fat,0);
+      porLojaMap[l.id].atend += lancs.reduce((s,r)=>s+(r.atend||0),0);
+      porLojaMap[l.id].meta  += (o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0;
+    });
+  });
+  const rankLojas = Object.values(porLojaMap)
+    .filter(l=>l.fat>0||l.meta>0)
+    .sort((a,b)=>{ const pa=a.meta>0?a.fat/a.meta:0,pb=b.meta>0?b.fat/b.meta:0; return pb-pa||b.fat-a.fat; });
+
+  // ── Agregação por vendedora ───────────────────────────────────
+  const porVendMap={};
+  reaisAll.forEach(r=>{
+    if(!r.vendedoras) return;
+    Object.entries(r.vendedoras).forEach(([vId,val])=>{
+      if(!porVendMap[vId]){
+        const vObj=D.vendedoras.find(v=>v.id===vId);
+        porVendMap[vId]={nome:vObj?.nome||vId, loja:LOJAS.find(l=>l.id===vObj?.loja)?.nome||'', fat:0};
+      }
+      porVendMap[vId].fat+=Number(val)||0;
+    });
+  });
+  const rankVends = Object.values(porVendMap).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+
+  // ── KPIs gerais ───────────────────────────────────────────────
   const totalFatC = reaisAll.reduce((s,r)=>s+r.fat,0);
   const totalAtdC = reaisAll.reduce((s,r)=>s+(r.atend||0),0);
-  const lojasComReal = [...new Set(reaisAll.map(r=>r.lojaId))].length;
-
-  // Ranking lojas
-  const porLoja={};
-  LOJAS.forEach(l=>{porLoja[l.id]={nome:l.nome,fat:0,atend:0,meta:0};});
-  reaisAll.forEach(r=>{ if(porLoja[r.lojaId]){porLoja[r.lojaId].fat+=r.fat;porLoja[r.lojaId].atend+=(r.atend||0);} });
-  objs.forEach(o=>{ LOJAS.forEach(l=>{ const m=(o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0; porLoja[l.id].meta+=m; }); });
-  const rankLojas = Object.values(porLoja).filter(l=>l.fat>0||l.meta>0).sort((a,b)=>{
-    const pa=a.meta>0?a.fat/a.meta:0, pb=b.meta>0?b.fat/b.meta:0;
-    return pb-pa||b.fat-a.fat;
-  });
-
-  // Ranking vendedoras
-  const porVend={};
-  reaisAll.forEach(r=>{ if(!r.vendedoras)return; Object.entries(r.vendedoras).forEach(([vId,val])=>{
-    if(!porVend[vId]){const vObj=D.vendedoras.find(v=>v.id===vId);porVend[vId]={nome:vObj?.nome||vId,loja:LOJAS.find(l=>l.id===vObj?.loja)?.nome||'',fat:0};}
-    porVend[vId].fat+=Number(val)||0;
-  });});
-  const rankVends = Object.values(porVend).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+  const tmGeral   = totalAtdC>0?totalFatC/totalAtdC:0;
+  const lojasComLanc = rankLojas.filter(l=>l.fat>0).length;
+  const totalMeta = rankLojas.reduce((s,l)=>s+l.meta,0);
+  const pctGeral  = totalMeta>0?totalFatC/totalMeta*100:0;
 
   const medals=['🥇','🥈','🥉'];
+  const agora = new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
 
-  const rowsLojas = rankLojas.map((l,i)=>{
-    const pct=l.meta>0?l.fat/l.meta*100:0;
-    const badge=pct>=100?'ok':pct>=70?'warn':'bad';
-    const tm=l.atend>0?l.fat/l.atend:0;
-    return `<tr><td>${medals[i]||(i+1)+'º'}</td><td><strong>${l.nome}</strong></td>
-      <td>${fmt(l.fat)}</td><td>${l.meta>0?fmt(l.meta):'—'}</td>
-      <td>${l.meta>0?`<span class="badge-${badge}">${pct.toFixed(0)}%</span>`:'—'}</td>
-      <td>${l.atend||0}</td><td>${tm>0?fmt(tm):'—'}</td></tr>`;
-  }).join('');
+  // ── Tabela: Ranking de Lojas ──────────────────────────────────
+  const rowsLojas = rankLojas.length
+    ? rankLojas.map((l,i)=>{
+        const pct=l.meta>0?l.fat/l.meta*100:null;
+        const badge=pct===null?'':pct>=100?'ok':pct>=70?'warn':'bad';
+        const tm=l.atend>0?l.fat/l.atend:0;
+        return `<tr>
+          <td>${medals[i]||(i+1)+'º'}</td>
+          <td><strong>${l.nome}</strong></td>
+          <td>${l.fat>0?fmt(l.fat):'<span style="color:#aaa">—</span>'}</td>
+          <td>${l.meta>0?fmt(l.meta):'<span style="color:#aaa">—</span>'}</td>
+          <td>${pct!==null?`<span class="badge-${badge}">${pct.toFixed(0)}%</span>`:'<span style="color:#aaa">—</span>'}</td>
+          <td>${l.atend||'<span style="color:#aaa">—</span>'}</td>
+          <td>${tm>0?fmt(tm):'<span style="color:#aaa">—</span>'}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:16px">Nenhum lançamento registrado.</td></tr>';
 
-  const rowsVends = rankVends.map((v,i)=>`<tr>
-    <td>${medals[i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
-    <td>${v.loja}</td><td>${fmt(v.fat)}</td></tr>`).join('');
+  // ── Tabela: Ranking de Vendedoras ─────────────────────────────
+  const rowsVends = rankVends.length
+    ? rankVends.map((v,i)=>`<tr>
+        <td>${medals[i]||(i+1)+'º'}</td>
+        <td><strong>${v.nome}</strong></td>
+        <td>${v.loja}</td>
+        <td>${fmt(v.fat)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px">Sem lançamentos com vendedoras registradas.</td></tr>';
 
-  // Detalhe por campanha
+  // ── Tabela: Detalhe por Campanha ──────────────────────────────
   const rowsCamps = objs.map(o=>{
-    const info2=CAMP_TIPOS[o.tipo]||{emoji:'📌',label:o.tipo};
-    const reaisO=reaisAll.filter(r=>r.campId===o.id);
-    const fatO=reaisO.reduce((s,r)=>s+r.fat,0);
-    const metaO=LOJAS.reduce((s,l)=>s+((o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0),0);
-    const pctO=metaO>0?fatO/metaO*100:0;
-    const badge=pctO>=100?'ok':pctO>=70?'warn':'bad';
-    const per=o.ini&&o.fim?o.ini.split('-').reverse().join('/')+' – '+o.fim.split('-').reverse().join('/'):'—';
-    return `<tr><td>${info2.emoji} <strong>${o.nome}</strong></td><td>${info2.label}</td>
-      <td>${fmt(fatO)}</td><td>${metaO>0?fmt(metaO):'—'}</td>
-      <td>${metaO>0?`<span class="badge-${badge}">${pctO.toFixed(0)}%</span>`:'—'}</td>
-      <td>${per}</td></tr>`;
+    const info2 = CAMP_TIPOS[o.tipo]||{emoji:'📌',label:o.tipo};
+    const reaisO = reaisAll.filter(r=>r.campId===o.id);
+    const fatO   = reaisO.reduce((s,r)=>s+r.fat,0);
+    const atdO   = reaisO.reduce((s,r)=>s+(r.atend||0),0);
+    const metaO  = isAdmin()
+      ? LOJAS.reduce((s,l)=>s+((o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0),0)
+      : (o.metasPorLoja&&o.metasPorLoja[lid])||o.metaLoja||0;
+    const pctO   = metaO>0?fatO/metaO*100:null;
+    const badge  = pctO===null?'':pctO>=100?'ok':pctO>=70?'warn':'bad';
+    const per    = o.ini&&o.fim ? o.ini.split('-').reverse().join('/')+' a '+o.fim.split('-').reverse().join('/') : '—';
+    const lojasO = [...new Set(reaisO.map(r=>r.lojaId))].length;
+    return `<tr>
+      <td>${info2.emoji} <strong>${o.nome}</strong></td>
+      <td>${info2.label}</td>
+      <td>${fatO>0?fmt(fatO):'<span style="color:#aaa">Sem lançamento</span>'}</td>
+      <td>${metaO>0?fmt(metaO):'<span style="color:#aaa">—</span>'}</td>
+      <td>${pctO!==null?`<span class="badge-${badge}">${pctO.toFixed(0)}%</span>`:'<span style="color:#aaa">—</span>'}</td>
+      <td>${atdO||'—'}</td>
+      <td>${isAdmin()?lojasO+'/'+LOJAS.length:per}</td>
+      <td>${per}</td>
+    </tr>`;
   }).join('');
 
-  const html=`
+  const nomeRelatorio = filtroId
+    ? (objs[0]?.nome||'Campanha')
+    : 'Todas as Campanhas';
+
+  const html = `
     <div class="kgrid-pdf">
-      <div class="kcard-pdf"><div class="label">Total Faturado</div><div class="valor">${fmt(totalFatC)}</div></div>
-      <div class="kcard-pdf"><div class="label">Campanhas</div><div class="valor">${objs.length}</div></div>
-      <div class="kcard-pdf"><div class="label">Lojas com Lançamento</div><div class="valor">${lojasComReal}<span style="font-size:13px;font-weight:400"> de ${LOJAS.length}</span></div></div>
-      <div class="kcard-pdf"><div class="label">Atendimentos</div><div class="valor">${totalAtdC||'—'}</div></div>
+      <div class="kcard-pdf">
+        <div class="label">Total Faturado</div>
+        <div class="valor" style="color:${pctGeral>=100?'#28a745':pctGeral>0?'#1a1a2e':'#aaa'}">${totalFatC>0?fmt(totalFatC):'R$ 0,00'}</div>
+        <div class="sub">${totalMeta>0?pctGeral.toFixed(0)+'% da meta':''}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Campanhas</div>
+        <div class="valor">${objs.length}</div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">Lojas com Lançamento</div>
+        <div class="valor">${lojasComLanc}<span style="font-size:13px;font-weight:400"> / ${LOJAS.length}</span></div>
+      </div>
+      <div class="kcard-pdf">
+        <div class="label">TM Médio</div>
+        <div class="valor">${tmGeral>0?fmt(tmGeral):'—'}</div>
+        <div class="sub">${totalAtdC>0?totalAtdC+' atend.':''}</div>
+      </div>
     </div>
-    <h2>🏪 Ranking de Lojas</h2>
+
+    <h2>🏪 Ranking de Lojas — Atingimento</h2>
     <table>
       <thead><tr><th>#</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>TM</th></tr></thead>
-      <tbody>${rowsLojas||'<tr><td colspan="7">Sem dados.</td></tr>'}</tbody>
+      <tbody>${rowsLojas}</tbody>
     </table>
-    ${rankVends.length?`
+
     <h2>👩 Ranking de Vendedoras</h2>
     <table>
       <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturado na Campanha</th></tr></thead>
       <tbody>${rowsVends}</tbody>
-    </table>`:''}
+    </table>
+
     <h2>📋 Detalhe por Campanha</h2>
     <table>
-      <thead><tr><th>Campanha</th><th>Tipo</th><th>Faturado</th><th>Meta Total</th><th>%</th><th>Período</th></tr></thead>
-      <tbody>${rowsCamps||'<tr><td colspan="6">Sem dados.</td></tr>'}</tbody>
+      <thead><tr><th>Campanha</th><th>Tipo</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>${isAdmin()?'Lojas':'Período'}</th><th>Período</th></tr></thead>
+      <tbody>${rowsCamps||'<tr><td colspan="8" style="text-align:center;color:#aaa;padding:16px">Sem campanhas.</td></tr>'}</tbody>
     </table>`;
 
-  gerarPDF('Relatório de Campanhas', html);
+  gerarPDF('Relatório de Campanhas — ' + nomeRelatorio, html);
 }
 
 // ── PRODUTOS EM DESTAQUE NO OBJETIVO ────────────────────────
