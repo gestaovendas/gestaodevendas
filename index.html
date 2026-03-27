@@ -1553,7 +1553,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <select id="rel-camp-sel" onchange="renderRelCamp()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
             <option value="">Todas as campanhas</option>
           </select>
-          <button class="btn-s admin-only" onclick="exportarRelCamp()" style="display:none;font-size:11px">⬇️ Exportar CSV</button>
+          <button class="btn-s admin-only" onclick="exportarRelCamp()" style="display:none;font-size:11px">⬇️ CSV</button>
+          <button class="btn-s admin-only" onclick="exportarPDFCamp()" style="display:none;font-size:11px;background:rgba(220,53,69,.1);border-color:rgba(220,53,69,.3);color:#ff6b7a">📄 PDF</button>
         </div>
       </div>
 
@@ -4066,6 +4067,58 @@ function gerarDiagnostico(){
           </div>`;
         }).join('')}
       </div>
+
+      <!-- ── Análise Detalhada por Loja ── -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px;grid-column:1/-1">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🏪 Análise por Loja — Fat · Clientes · Ticket Médio · Diagnóstico</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">
+          ${redeData.sort((a,b)=>b.pct-a.pct).map(l=>{
+            const c     = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+            const icon  = l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+            const mTick = getMetas(l.id).ticket||150;
+            const pctTM = mTick>0?l.tm/mTick*100:0;
+            const corTM = pctTM>=100?'var(--verde)':pctTM>=80?'var(--ouro)':'var(--verm)';
+            const mediaAtendRede = totAtend>0?totAtend/LOJAS.length:0;
+            const clientesBaixo  = l.nat < mediaAtendRede*0.85;
+            const tmBaixo        = pctTM < 80;
+            let diag='', diagCor='var(--muted)', diagBg='rgba(255,255,255,.04)';
+            if(l.pct>=100){
+              diag='✅ Na meta — manter ritmo!'; diagCor='var(--verde)'; diagBg='rgba(46,204,135,.08)';
+            } else if(clientesBaixo && tmBaixo){
+              diag='⚠️ Falta de clientes + TM abaixo'; diagCor='var(--verm)'; diagBg='rgba(239,68,68,.08)';
+            } else if(clientesBaixo){
+              diag='👥 Principal causa: falta de clientes'; diagCor='var(--laranja)'; diagBg='rgba(245,158,11,.08)';
+            } else if(tmBaixo){
+              diag='🎫 Principal causa: ticket médio baixo'; diagCor='var(--ouro)'; diagBg='rgba(201,168,76,.08)';
+            } else {
+              diag='📊 Volume ok — acelerar lançamentos'; diagCor='var(--azul)'; diagBg='rgba(91,141,239,.08)';
+            }
+            const topVend = l.vends[0];
+            const botVend = l.vends.filter(v=>v.mV>0).sort((a,b)=>a.pct-b.pct)[0];
+            return `<div style="background:var(--card);border:1px solid ${c};border-radius:10px;padding:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div style="font-size:12px;font-weight:700">${icon} ${l.nome}</div>
+                <div style="font-size:20px;font-weight:900;color:${c}">${l.pct.toFixed(0)}%</div>
+              </div>
+              <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin-bottom:10px">
+                <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:10px;margin-bottom:8px;text-align:center">
+                <div><div style="color:var(--muted);font-size:9px;margin-bottom:2px">Faturamento</div><div style="font-weight:700;color:${c}">${fmt(l.fat)}</div><div style="font-size:9px;color:var(--muted)">de ${fmt(l.meta)}</div></div>
+                <div><div style="color:var(--muted);font-size:9px;margin-bottom:2px">Clientes</div><div style="font-weight:700;color:${clientesBaixo?'var(--verm)':'var(--texto)'}">${l.nat}</div><div style="font-size:9px;color:var(--muted)">atend. no mês</div></div>
+                <div><div style="color:var(--muted);font-size:9px;margin-bottom:2px">Ticket Médio</div><div style="font-weight:700;color:${corTM}">${l.tm>0?fmt(l.tm):'—'}</div><div style="font-size:9px;color:var(--muted)">meta ${fmt(mTick)}</div></div>
+              </div>
+              <div style="font-size:10px;font-weight:600;color:${diagCor};background:${diagBg};border-radius:6px;padding:5px 8px;margin-bottom:6px">${diag}</div>
+              ${topVend?`<div style="font-size:9px;color:var(--muted);padding:3px 0;border-top:1px solid rgba(255,255,255,.05);margin-top:2px">
+                🏆 <span style="color:var(--verde)">${topVend.nome}</span> ${topVend.pct.toFixed(0)}% · ${fmt(topVend.vm)}
+              </div>`:''}
+              ${botVend&&botVend.nome!==topVend?.nome?`<div style="font-size:9px;color:var(--muted);padding:3px 0">
+                ⚠️ <span style="color:var(--verm)">${botVend.nome}</span> ${botVend.pct.toFixed(0)}% · ${fmt(botVend.vm)}
+              </div>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
     `;
 
     if(crescGrid){
@@ -4319,26 +4372,89 @@ function gerarDiagnostico(){
         }).join('')}
       </div>
 
+      <!-- Diagnóstico loja: falta de clientes ou TM baixo? -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🔍 Diagnóstico da Loja</div>
+        ${(()=>{
+          const mTick = m.ticket||150;
+          const pctTM = mTick>0?tmMes/mTick*100:0;
+          const corTM = pctTM>=100?'var(--verde)':pctTM>=80?'var(--ouro)':'var(--verm)';
+          // análise comparativa: é falta de clientes ou TM baixo?
+          const mediaCliente = natMes>0 ? realMes/natMes : 0; // = tmMes
+          const tmBaixo      = pctTM < 80;
+          const clienteBaixo = crescClientes < -5; // queda de mais de 5% em clientes
+          let diagPrincipal='', diagCor='var(--muted)', diagBg='rgba(255,255,255,.04)';
+          let acaoSugerida='';
+          if(pctMes>=100){
+            diagPrincipal='✅ Loja na meta — manter o ritmo!';
+            diagCor='var(--verde)'; diagBg='rgba(46,204,135,.08)';
+            acaoSugerida='Continue com a estratégia atual.';
+          } else if(clienteBaixo && tmBaixo){
+            diagPrincipal='⚠️ Falta de clientes + Ticket Médio baixo';
+            diagCor='var(--verm)'; diagBg='rgba(239,68,68,.08)';
+            acaoSugerida='Ação dupla: atrair mais clientes e focar em venda adicional.';
+          } else if(clienteBaixo){
+            diagPrincipal='👥 Principal problema: falta de clientes';
+            diagCor='var(--laranja)'; diagBg='rgba(245,158,11,.08)';
+            acaoSugerida='Foco em abordagem ativa e reativação de clientes.';
+          } else if(tmBaixo){
+            diagPrincipal='🎫 Principal problema: ticket médio baixo';
+            diagCor='var(--ouro)'; diagBg='rgba(201,168,76,.08)';
+            acaoSugerida='Foco em venda adicional, upgrade e produtos âncora.';
+          } else {
+            diagPrincipal='📊 Ritmo abaixo — volume ok, intensificar lançamentos';
+            diagCor='var(--azul)'; diagBg='rgba(91,141,239,.08)';
+            acaoSugerida='Verificar lançamentos pendentes do mês.';
+          }
+          return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="background:var(--cinza);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:9px;color:var(--muted);margin-bottom:3px">CLIENTES NO MÊS</div>
+              <div style="font-size:20px;font-weight:800;color:${clienteBaixo?'var(--verm)':'var(--texto)'}">${natMes}</div>
+              <div style="font-size:9px;color:${corCresClientes}">${crescClientes>=0?'+':''}${crescClientes.toFixed(1)}% vs mês ant.</div>
+            </div>
+            <div style="background:var(--cinza);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:9px;color:var(--muted);margin-bottom:3px">TICKET MÉDIO</div>
+              <div style="font-size:20px;font-weight:800;color:${corTM}">${tmMes>0?fmt(tmMes):'—'}</div>
+              <div style="font-size:9px;color:${corTM}">${pctTM.toFixed(0)}% da meta (${fmt(mTick)})</div>
+            </div>
+          </div>
+          <div style="font-size:11px;font-weight:700;color:${diagCor};background:${diagBg};border-radius:8px;padding:8px 12px;margin-bottom:8px">${diagPrincipal}</div>
+          <div style="font-size:10px;color:var(--muted);line-height:1.5">💡 ${acaoSugerida}</div>`;
+        })()}
+      </div>
+
+      <!-- KPIs por Vendedora -->
       <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📋 KPIs por Vendedora</div>
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
-          <span>Vendedora</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span><span style="text-align:right">Atend.</span>
-        </div>
         ${vendsData.map((v,idx)=>{
           const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
           const medalV=['🥇','🥈','🥉'][idx]||'';
-          return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+          const mTick2=m.ticket||150;
+          const pctTMV=mTick2>0&&v.tm>0?v.tm/mTick2*100:0;
+          const corTMV=pctTMV>=100?'var(--verde)':pctTMV>=80?'var(--ouro)':'var(--verm)';
+          // diagnóstico individual
+          const vClienteBaixo = v.nat < natMes/Math.max(vendsData.length,1)*0.7;
+          const vTMBaixo = pctTMV < 80 && v.tm>0;
+          let vDiag='';
+          if(v.pct<100){
+            if(vClienteBaixo && vTMBaixo) vDiag='⚠️ Poucos clientes + TM baixo';
+            else if(vClienteBaixo) vDiag='👥 Poucos clientes';
+            else if(vTMBaixo) vDiag='🎫 TM baixo';
+          }
+          return `<div style="padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
               <span style="font-size:11px;font-weight:600;color:${corV2}">${medalV} ${v.nome}</span>
-              <span style="font-size:11px;font-weight:700;color:${corV2}">${v.pct.toFixed(0)}%</span>
+              <span style="font-size:12px;font-weight:700;color:${corV2}">${v.pct.toFixed(0)}%</span>
             </div>
-            <div style="height:3px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-bottom:3px">
+            <div style="height:3px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-bottom:4px">
               <div style="height:100%;width:${Math.min(100,v.pct)}%;background:${corV2};border-radius:3px"></div>
             </div>
-            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted)">
-              <span>${fmt(v.vm)}</span>
-              <span>TM ${v.tm>0?fmt(v.tm):'—'} · ${v.nat||0} atend.</span>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:${vDiag?'3px':'0'}">
+              <span>${fmt(v.vm)} faturado</span>
+              <span>TM <span style="color:${corTMV}">${v.tm>0?fmt(v.tm):'—'}</span> · ${v.nat||0} atend.</span>
             </div>
+            ${vDiag?`<div style="font-size:9px;color:var(--ouro);font-weight:600">${vDiag}</div>`:''}
           </div>`;
         }).join('')}
       </div>
@@ -6666,6 +6782,95 @@ function exportarRelCamp(){
   a.download = 'relatorio_campanhas_avatim.csv';
   a.click();
   showToast('CSV exportado!');
+}
+
+function exportarPDFCamp(){
+  initCampData();
+  const filtroId = document.getElementById('rel-camp-sel')?.value||'';
+  let objs = filtroId ? D.campObjetivos.filter(o=>o.id===filtroId) : [...D.campObjetivos];
+  objs = objs.filter(o=>!o.arquivada); // só ativas
+  const campIds = objs.map(o=>o.id);
+  const reaisAll = D.campRealizados.filter(r=>campIds.includes(r.campId));
+
+  // KPIs gerais
+  const totalFatC = reaisAll.reduce((s,r)=>s+r.fat,0);
+  const totalAtdC = reaisAll.reduce((s,r)=>s+(r.atend||0),0);
+  const lojasComReal = [...new Set(reaisAll.map(r=>r.lojaId))].length;
+
+  // Ranking lojas
+  const porLoja={};
+  LOJAS.forEach(l=>{porLoja[l.id]={nome:l.nome,fat:0,atend:0,meta:0};});
+  reaisAll.forEach(r=>{ if(porLoja[r.lojaId]){porLoja[r.lojaId].fat+=r.fat;porLoja[r.lojaId].atend+=(r.atend||0);} });
+  objs.forEach(o=>{ LOJAS.forEach(l=>{ const m=(o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0; porLoja[l.id].meta+=m; }); });
+  const rankLojas = Object.values(porLoja).filter(l=>l.fat>0||l.meta>0).sort((a,b)=>{
+    const pa=a.meta>0?a.fat/a.meta:0, pb=b.meta>0?b.fat/b.meta:0;
+    return pb-pa||b.fat-a.fat;
+  });
+
+  // Ranking vendedoras
+  const porVend={};
+  reaisAll.forEach(r=>{ if(!r.vendedoras)return; Object.entries(r.vendedoras).forEach(([vId,val])=>{
+    if(!porVend[vId]){const vObj=D.vendedoras.find(v=>v.id===vId);porVend[vId]={nome:vObj?.nome||vId,loja:LOJAS.find(l=>l.id===vObj?.loja)?.nome||'',fat:0};}
+    porVend[vId].fat+=Number(val)||0;
+  });});
+  const rankVends = Object.values(porVend).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+
+  const medals=['🥇','🥈','🥉'];
+
+  const rowsLojas = rankLojas.map((l,i)=>{
+    const pct=l.meta>0?l.fat/l.meta*100:0;
+    const badge=pct>=100?'ok':pct>=70?'warn':'bad';
+    const tm=l.atend>0?l.fat/l.atend:0;
+    return `<tr><td>${medals[i]||(i+1)+'º'}</td><td><strong>${l.nome}</strong></td>
+      <td>${fmt(l.fat)}</td><td>${l.meta>0?fmt(l.meta):'—'}</td>
+      <td>${l.meta>0?`<span class="badge-${badge}">${pct.toFixed(0)}%</span>`:'—'}</td>
+      <td>${l.atend||0}</td><td>${tm>0?fmt(tm):'—'}</td></tr>`;
+  }).join('');
+
+  const rowsVends = rankVends.map((v,i)=>`<tr>
+    <td>${medals[i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
+    <td>${v.loja}</td><td>${fmt(v.fat)}</td></tr>`).join('');
+
+  // Detalhe por campanha
+  const rowsCamps = objs.map(o=>{
+    const info2=CAMP_TIPOS[o.tipo]||{emoji:'📌',label:o.tipo};
+    const reaisO=reaisAll.filter(r=>r.campId===o.id);
+    const fatO=reaisO.reduce((s,r)=>s+r.fat,0);
+    const metaO=LOJAS.reduce((s,l)=>s+((o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0),0);
+    const pctO=metaO>0?fatO/metaO*100:0;
+    const badge=pctO>=100?'ok':pctO>=70?'warn':'bad';
+    const per=o.ini&&o.fim?o.ini.split('-').reverse().join('/')+' – '+o.fim.split('-').reverse().join('/'):'—';
+    return `<tr><td>${info2.emoji} <strong>${o.nome}</strong></td><td>${info2.label}</td>
+      <td>${fmt(fatO)}</td><td>${metaO>0?fmt(metaO):'—'}</td>
+      <td>${metaO>0?`<span class="badge-${badge}">${pctO.toFixed(0)}%</span>`:'—'}</td>
+      <td>${per}</td></tr>`;
+  }).join('');
+
+  const html=`
+    <div class="kgrid-pdf">
+      <div class="kcard-pdf"><div class="label">Total Faturado</div><div class="valor">${fmt(totalFatC)}</div></div>
+      <div class="kcard-pdf"><div class="label">Campanhas</div><div class="valor">${objs.length}</div></div>
+      <div class="kcard-pdf"><div class="label">Lojas com Lançamento</div><div class="valor">${lojasComReal}<span style="font-size:13px;font-weight:400"> de ${LOJAS.length}</span></div></div>
+      <div class="kcard-pdf"><div class="label">Atendimentos</div><div class="valor">${totalAtdC||'—'}</div></div>
+    </div>
+    <h2>🏪 Ranking de Lojas</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>TM</th></tr></thead>
+      <tbody>${rowsLojas||'<tr><td colspan="7">Sem dados.</td></tr>'}</tbody>
+    </table>
+    ${rankVends.length?`
+    <h2>👩 Ranking de Vendedoras</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturado na Campanha</th></tr></thead>
+      <tbody>${rowsVends}</tbody>
+    </table>`:''}
+    <h2>📋 Detalhe por Campanha</h2>
+    <table>
+      <thead><tr><th>Campanha</th><th>Tipo</th><th>Faturado</th><th>Meta Total</th><th>%</th><th>Período</th></tr></thead>
+      <tbody>${rowsCamps||'<tr><td colspan="6">Sem dados.</td></tr>'}</tbody>
+    </table>`;
+
+  gerarPDF('Relatório de Campanhas', html);
 }
 
 // ── PRODUTOS EM DESTAQUE NO OBJETIVO ────────────────────────
