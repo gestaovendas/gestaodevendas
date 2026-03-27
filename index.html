@@ -21,16 +21,19 @@ const firebaseConfig = {
 };
 
 // Senhas reais para autenticação Firebase (mesmo usuário do SHA-256)
+// Credenciais ofuscadas — não editar manualmente
+const _k = 0x5A;
+const _d = s => atob(s).split("").map(c=>String.fromCharCode(c.charCodeAt(0)^_k)).join("");
 const FB_SENHAS = {
-  "admin\u0040avatim.com":      "M@vida1801",
-  "mooca\u0040avatim.com":      "M@2018g",
-  "lorena\u0040avatim.com":     "L@2018g",
-  "leopoldina\u0040avatim.com": "W@2018g",
-  "perdizes\u0040avatim.com":   "P@2018g",
-  "santana\u0040avatim.com":    "S@nt2018g",
-  "pinheiros\u0040avatim.com":  "@LT2018g",
-  "ibirapuera\u0040avatim.com": "Sh@p2018g",
-  "jarpaul\u0040avatim.com":    "L@2018g"
+  "admin\u0040avatim.com":      _d("FxosMz47a2Jqaw=="),
+  "mooca\u0040avatim.com":      _d("FxpoamtiPQ=="),
+  "lorena\u0040avatim.com":     _d("FhpoamtiPQ=="),
+  "leopoldina\u0040avatim.com": _d("DRpoamtiPQ=="),
+  "perdizes\u0040avatim.com":   _d("ChpoamtiPQ=="),
+  "santana\u0040avatim.com":    _d("CRo0Lmhqa2I9"),
+  "pinheiros\u0040avatim.com":  _d("GhYOaGprYj0="),
+  "ibirapuera\u0040avatim.com": _d("CTIaKmhqa2I9"),
+  "jarpaul\u0040avatim.com":    _d("FhpoamtiPQ==")
 };
 
 try{
@@ -141,14 +144,14 @@ try{
                 if(!(dt in pedaco.vendas[lid])){
                   // Dia está no Firebase mas não no local — só adiciona se for futuro ou não foi excluído
                   // Verificar tombstone de vendas excluídas
-                  const excDias = D._vendasExcluidas?.[lid] || [];
+                  const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
                   if(!excDias.includes(dt)) pedaco.vendas[lid][dt] = dados;
                 }
               });
             }
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
-              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
               Object.entries(dias).forEach(([dt,dados])=>{
                 if(!(dt in pedaco.vendasVend[vid]) && !excDiasV.includes(dt)){
                   pedaco.vendasVend[vid][dt] = dados;
@@ -312,7 +315,12 @@ try{
     if(window._localLogin) return;
     window._currentUser = user;
     if(user){
-      window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+      try {
+        window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+      } catch(eU) {
+        window._userLoja = {id:"desconhecido",nome:user.email};
+        console.warn("[Avatim] Erro ao carregar USUARIOS:", eU.message);
+      }
       if(typeof showApp==="function") showApp();
     } else {
       if(typeof showLogin==="function") showLogin();
@@ -3243,6 +3251,11 @@ async function loadFromFirestore(){
     return false;
   }catch(e){
     console.warn("[Avatim] loadFromFirestore erro:", e.message);
+    // Feedback visual se for erro de rede/offline
+    if(e.code==='unavailable' || e.message?.includes('network') || !navigator.onLine){
+      const demo=document.getElementById("demo-box");
+      if(demo){ demo.style.display="block"; demo.innerHTML='<span style="color:var(--verm)">⚠️ Sem conexão — usando dados locais</span>'; }
+    }
     return false;
   }
 }
@@ -4642,6 +4655,8 @@ function limparCamposLanc(){
 
 
 function salvarLanc(){
+  if(window._salvandoLanc){ showToast("Salvamento em andamento...","warn"); return; }
+  window._salvandoLanc = true;
   const selLoja=document.getElementById("lanc-loja-sel");
   const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
   const data=document.getElementById("l-data").value;
@@ -4679,6 +4694,7 @@ function salvarLanc(){
   carregarDash();
   renderHistoricoLanc();
   nav("dash");
+  window._salvandoLanc = false;
 }
 
 function renderConsolidadoLanc(lid){
@@ -8647,7 +8663,7 @@ function iniciarAutoRefresh(){
         const lid = lojaId();
         if(remoto.vendas?.[lid]){
           if(!D.vendas[lid]) D.vendas[lid]={};
-          const excDias = D._vendasExcluidas?.[lid] || [];
+          const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
           Object.entries(remoto.vendas[lid]).forEach(([dt,dados])=>{
             if(!excDias.includes(dt)) D.vendas[lid][dt] = dados;
           });
@@ -8657,7 +8673,7 @@ function iniciarAutoRefresh(){
             const v = D.vendedoras.find(x=>x.id===vid);
             if(v && v.loja===lid){
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
               Object.entries(dias).forEach(([dt,dados])=>{
                 if(!excDiasV.includes(dt)) D.vendasVend[vid][dt] = dados;
               });
