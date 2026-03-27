@@ -3222,17 +3222,49 @@ async function loadFromFirestore(){
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
-      // Vendas e vendasVend: deep merge por loja/vendedora/dia
+      // Tombstones: carregar do remoto (preservar exclusoes feitas em qualquer dispositivo)
+      if(remoto._vendasExcluidas){
+        if(!D._vendasExcluidas) D._vendasExcluidas={};
+        Object.entries(remoto._vendasExcluidas).forEach(([lid,datas])=>{
+          if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid]=[];
+          datas.forEach(dt=>{ if(!D._vendasExcluidas[lid].includes(dt)) D._vendasExcluidas[lid].push(dt); });
+        });
+      }
+      if(remoto._vendasVendExcluidas){
+        if(!D._vendasVendExcluidas) D._vendasVendExcluidas={};
+        Object.entries(remoto._vendasVendExcluidas).forEach(([vid,datas])=>{
+          if(!D._vendasVendExcluidas[vid]) D._vendasVendExcluidas[vid]=[];
+          datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
+        });
+      }
+      // Vendas e vendasVend: deep merge respeitando tombstones
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
-          Object.assign(D.vendas[lid], dias);
+          const excl = D._vendasExcluidas?.[lid] || [];
+          Object.entries(dias).forEach(([dt,val])=>{
+            if(!excl.includes(dt)) D.vendas[lid][dt]=val;
+          });
         });
       }
       if(remoto.vendasVend){
         Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
           if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-          Object.assign(D.vendasVend[vid], dias);
+          const excl = D._vendasVendExcluidas?.[vid] || [];
+          Object.entries(dias).forEach(([dt,val])=>{
+            if(!excl.includes(dt)) D.vendasVend[vid][dt]=val;
+          });
+        });
+      }
+      // Garantir remocao final dos dias tombstoned
+      if(D._vendasExcluidas){
+        Object.entries(D._vendasExcluidas).forEach(([lid,datas])=>{
+          datas.forEach(dt=>{ if(D.vendas[lid]) delete D.vendas[lid][dt]; });
+        });
+      }
+      if(D._vendasVendExcluidas){
+        Object.entries(D._vendasVendExcluidas).forEach(([vid,datas])=>{
+          datas.forEach(dt=>{ if(D.vendasVend[vid]) delete D.vendasVend[vid][dt]; });
         });
       }
       // campRealizados: merge por id (inclui lançamentos de todas as lojas)
@@ -3831,7 +3863,7 @@ function gerarDiagnostico(){
   // ── Comparação meses anteriores ──────────────────────────────
   const meses = [];
   for(let i=0;i<4;i++){
-    const d = new Date(hj+'-01');
+    const d = new Date(mes+'-01');
     d.setMonth(d.getMonth()-i);
     const mStr = d.toISOString().slice(0,7);
     let fat=0, nat=0;
@@ -4756,10 +4788,17 @@ function renderConsolidadoLanc(lid){
 
 function deletarLanc(lid, data){
   if(!confirm("Excluir lançamento de "+data+"? Isso remove os dados de todas as vendedoras neste dia.")) return;
+  // Tombstone para impedir que o Firebase reinsira
+  if(!D._vendasExcluidas) D._vendasExcluidas = {};
+  if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid] = [];
+  if(!D._vendasExcluidas[lid].includes(data)) D._vendasExcluidas[lid].push(data);
   // Remove lançamento da loja
   if(D.vendas[lid]) delete D.vendas[lid][data];
-  // Remove vendas de cada vendedora
+  // Remove vendas de cada vendedora (com tombstone individual)
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+    if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
+    if(!D._vendasVendExcluidas[v.id]) D._vendasVendExcluidas[v.id] = [];
+    if(!D._vendasVendExcluidas[v.id].includes(data)) D._vendasVendExcluidas[v.id].push(data);
     if(D.vendasVend[v.id]) delete D.vendasVend[v.id][data];
   });
   save();
