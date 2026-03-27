@@ -796,7 +796,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sb-sec admin-only" style="display:none">
     <div class="sb-lbl">Administracao</div>
     <button class="ni admin-only" onclick="nav('metaslojas')" id="nav-metaslojas" style="display:none"><span class="ic">&#127919;</span>Metas por Loja</button>
-    <button class="ni admin-only" onclick="nav('metaprod')" id="nav-metaprod" style="display:none"><span class="ic">&#11088;</span>Metas Produtos</button>
+
     <button class="ni admin-only" onclick="nav('gestao')" id="nav-gestao" style="display:none"><span class="ic">&#128200;</span>Painel Gestao</button>
     <button class="ni admin-only" onclick="nav('relatorio')" id="nav-relatorio" style="display:none"><span class="ic">&#8803;</span>Relatorio Semanal</button>
     <button class="ni admin-only" onclick="nav('arquivos')" id="nav-arquivos" style="display:none"><span class="ic">&#8857;</span>Arquivos</button>
@@ -913,21 +913,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           </div>
         </div>
       </div>
-      <!-- Meta de Produtos (loja vê) -->
-      <div class="rcard" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">🎯 Meta de Produtos</div>
-          <button onclick="nav('metaprod')" class="btn-s admin-only" style="padding:4px 10px;font-size:10px;display:none">Gerenciar</button>
-        </div>
-        <div id="painel-metaprod-dash">
-          <div style="font-size:11px;color:var(--muted);padding:8px 0">Nenhuma meta de produto ativa.</div>
-        </div>
-        <!-- Campo para loja preencher realizado de produto -->
-        <div id="form-real-prod" style="margin-top:10px;display:none">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:600">ATUALIZAR REALIZADOS</div>
-          <div id="prod-real-inputs"></div>
-        </div>
-      </div>
+
     </div>
   </div>
 </div>
@@ -1975,38 +1961,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
 </div>
 
-<!-- METAS PRODUTOS (ADMIN) -->
-<div class="page" id="page-metaprod">
-  <div class="ph">
-    <div><h1 class="pt">Metas de <span>Produtos</span></h1><div class="ps">Metas de venda por produto</div></div>
-    <button class="btn-p" onclick="toggleFormMetaProd()">+ Nova Meta</button>
-  </div>
-  <div id="form-metaprod" style="display:none">
-    <div class="sc">
-      <div class="st">Definir Meta de Produto</div>
-      <div class="igrid">
-        <div class="ig" style="grid-column:span 2"><label>Produto</label>
-          <input type="text" id="mp-busca" placeholder="Digite o nome..." oninput="buscarProdMeta(this.value)" autocomplete="off">
-          <div id="mp-sugest" style="margin-top:5px"></div>
-        </div>
-        <div class="ig"><label>Meta Qtd/Mes</label><input type="number" id="mp-qtd" placeholder="20"></div>
-        <div class="ig"><label>Meta Valor/Mes (R$)</label><input type="text" inputmode="decimal" id="mp-val" placeholder="0.00" step="0.01"></div>
-        <div class="ig"><label>Loja Alvo</label>
-          <select id="mp-vig"><option>Todas as lojas</option>
-            <option>Mooca Plaza</option><option>Vila Leopoldina</option><option>Perdizes</option>
-            <option>Santana</option><option>Jardim Paulista</option><option>Alto de Pinheiros</option><option>Shopping Ibirapuera</option>
-          </select>
-        </div>
-        <div class="ig"><label>Estrategia / Obs</label><input type="text" id="mp-obs" placeholder="Ex: push na entrada..."></div>
-      </div>
-      <div class="btn-r"><button class="btn-p" onclick="salvarMetaProd()">Salvar</button><button class="btn-s" onclick="toggleFormMetaProd()">Cancelar</button></div>
-    </div>
-  </div>
-  <div class="sc"><div class="st">Metas Ativas</div><div style="overflow-x:auto">
-    <table class="dtable"><thead><tr><th>Produto</th><th>Loja</th><th>Meta Qtd</th><th>Meta Valor</th><th>Observacao</th><th></th></tr></thead>
-    <tbody id="tbody-metaprod"></tbody></table>
-  </div></div>
-</div>
 
 <!-- RELATORIO (ADMIN) -->
 <div class="page" id="page-relatorio">
@@ -3487,6 +3441,70 @@ function calcMetasAuto(mes, ticket, superMes){
   const superSem = parseFloat((superMes/SW).toFixed(2));
   return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:DU, sw:SW};
 }
+
+// ── NOVA LÓGICA DE META SEMANAL PROGRESSIVA (35/25/25/15%) ──────────────────
+// Retorna o número da semana do mês (1-4) para uma data
+function semanaDoMes(data){
+  const dia = Number((data||hoje()).split('-')[2]);
+  if(dia <= 7)  return 1;
+  if(dia <= 14) return 2;
+  if(dia <= 21) return 3;
+  return 4;
+}
+
+// Percentual de cada semana sobre a meta mensal
+const PERC_SEM = [0, 0.35, 0.25, 0.25, 0.15]; // índice 1-4
+
+// Retorna a meta semanal PROGRESSIVA da loja para a semana atual
+// Leva em conta o realizado acumulado e redistribui o restante
+function metaSemanaProgressiva(lid, semana){
+  semana = semana || semanaDoMes(hoje());
+  const m = getMetas(lid);
+  const metaMes = m.mes || 0;
+  if(!metaMes) return 0;
+
+  // Calcular o que já foi realizado até o fim da semana anterior
+  const hj = hoje();
+  const mes = hj.slice(0, 7);
+  const fimSemAnt = semana > 1 ? mes + '-' + String((semana-1)*7).padStart(2,'0') : null;
+
+  let acumAntSem = 0;
+  if(fimSemAnt){
+    const vends = D.vendedoras.filter(v=>v.loja===lid);
+    vends.forEach(v=>{
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
+        if(dt.startsWith(mes) && dt <= fimSemAnt) acumAntSem += Number(vd.val||0);
+      });
+    });
+    if(acumAntSem === 0 && vends.length===0){
+      Object.entries(D.vendas[lid]||{}).forEach(([dt,vd])=>{
+        if(dt.startsWith(mes) && dt <= fimSemAnt) acumAntSem += Number(vd.fat||0);
+      });
+    }
+  }
+
+  // Meta original desta semana
+  const metaOrigSem = metaMes * PERC_SEM[semana];
+
+  // Percetual acumulado das semanas anteriores
+  let percAcum = 0;
+  for(let s=1; s<semana; s++) percAcum += PERC_SEM[s];
+  const metaAcumEsperada = metaMes * percAcum;
+
+  // Gap: o que faltou ou sobrou nas semanas anteriores
+  const gap = acumAntSem - metaAcumEsperada;
+
+  // Meta desta semana = meta original - gap (absorve desvio)
+  const metaProgressiva = Math.max(0, metaOrigSem - gap);
+
+  return parseFloat(metaProgressiva.toFixed(2));
+}
+
+// Retorna meta semanal para uso no carregarDash (loja ou rede)
+function getMetaSemLoja(lid){
+  return metaSemanaProgressiva(lid, semanaDoMes(hoje()));
+}
+
 function getMetas(lid, mesRef){
   mesRef = mesRef||mesAtual();
   const lm = D.metasLoja[lid]||{};
@@ -3762,7 +3780,7 @@ function logout(){
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  const pgsAdmin=['metaslojas','metaprod','relatorio','config','arquivos','lojas','rankings','gestao'];
+  const pgsAdmin=['metaslojas','relatorio','config','arquivos','lojas','rankings','gestao'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
@@ -3823,7 +3841,7 @@ function nav(pg){
         renderEstqCritico();
       }
     },
-    fluxo:renderFluxo,metaslojas:renderMetasLojas,metaprod:renderTabelaMetaProd,
+    fluxo:renderFluxo,metaslojas:renderMetasLojas
     arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
 }
 
@@ -4253,7 +4271,7 @@ function carregarDash(){
       const prog=metaDiaLojaProgressiva(l.id,hj)||{};
       return s+(prog.superDia||getMetas(l.id).superDia||0);
     },0);
-    metaSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).sem||0),0);
+    metaSemRef=LOJAS.reduce((s,l)=>s+getMetaSemLoja(l.id),0);
     superSemRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superSem||0),0);
     metaMesRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).mes||0),0);
     superMesRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superMes||0),0);
@@ -4272,7 +4290,7 @@ function carregarDash(){
     // Super meta diária também progressiva: (superMes - realizado) ÷ dias restantes
     const _restSuper = Math.max(0, (metas.superMes||0) - _acum);
     superDiaRef = _diasRest > 0 ? parseFloat((_restSuper/_diasRest).toFixed(2)) : (metas.superDia||0);
-    if(superDiaRef <= 0) superDiaRef = metas.superDia||0; metaSemRef=metas.sem||0; superSemRef=metas.superSem||0;
+    if(superDiaRef <= 0) superDiaRef = metas.superDia||0; metaSemRef=getMetaSemLoja(lid); superSemRef=metas.superSem||0;
     metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
     tkLabel=lojaNome();
   }
@@ -4390,7 +4408,6 @@ function carregarDash(){
   if(pcN) pcN.textContent=novos;
 
   // Painel meta de produtos
-  renderMetaProdDash();
 
   // Mostrar/esconder Ranking Lojas vs Loja
   const btnAdm=document.getElementById("btn-alllojas");
@@ -4433,90 +4450,7 @@ function gerarDicas(v,m,pD){
   document.getElementById("dicas-dash").innerHTML=ds.map(d=>`<div class="di"><div class="dot" style="background:${d.c}"></div><div class="dtxt" style="color:var(--texto)">${d.t}</div></div>`).join("");
 }
 
-function renderMetaProdDash(){
-  const lid=lojaId(), hj=hoje();
-  const el=document.getElementById("painel-metaprod-dash");
-  const formEl=document.getElementById("form-real-prod");
-  const inpsEl=document.getElementById("prod-real-inputs");
-  if(!el) return;
-  const hoje_dt=new Date();
-  const metas=(D.metasProd||[]).filter(mp=>{
-    if(!mp.ativa) return false;
-    const ini=mp.dtIni?new Date(mp.dtIni):null;
-    const fim=mp.dtFim?new Date(mp.dtFim):null;
-    if(ini && hoje_dt<ini) return false;
-    if(fim && hoje_dt>fim) return false;
-    return true;
-  });
-  if(!metas.length){
-    el.innerHTML="<div style='font-size:11px;color:var(--muted);padding:4px 0'>Nenhuma meta de produto ativa.</div>";
-    if(formEl) formEl.style.display="none";
-    return;
-  }
-  // Realizado por produto (salvo em D.realProd[lid][data][prodId])
-  if(!D.realProd) D.realProd={};
-  if(!D.realProd[lid]) D.realProd[lid]={};
-  const realHj=D.realProd[lid][hj]||{};
 
-  el.innerHTML=metas.map(mp=>{
-    const meta=Number(mp.val)||0;
-    const real=Number(realHj[mp.id])||0;
-    const pct=meta>0?Math.min(120,real/meta*100):0;
-    const cor=pct>=100?"var(--verde)":pct>=70?"var(--ouro)":real>0?"var(--verm)":"var(--muted)";
-    const barCor=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
-    return `<div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-        <span style="font-weight:600">${mp.nome}</span>
-        <span style="color:${cor};font-weight:700">${real} / ${meta} un. (${pct.toFixed(0)}%)</span>
-      </div>
-      <div style="height:6px;background:var(--cinza);border-radius:3px;overflow:hidden">
-        <div style="width:${Math.min(100,pct)}%;height:100%;background:${barCor};border-radius:3px;transition:width .4s"></div>
-      </div>
-    </div>`;
-  }).join("");
-
-  // Form para preencher realizado
-  if(formEl && inpsEl){
-    formEl.style.display="block";
-    inpsEl.innerHTML=metas.map(mp=>{
-      const real=Number(realHj[mp.id])||0;
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:11px;flex:1;color:var(--texto)">${mp.nome}</span>
-        <input type="text" inputmode="numeric" id="rp_${mp.id}"
-          value="${real||''}" placeholder="0"
-          style="width:80px;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:13px;font-weight:600;text-align:center;outline:none"
-          onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='var(--borda)'">
-        <span style="font-size:10px;color:var(--muted)">/ ${mp.val} un.</span>
-      </div>`;
-    }).join("")+`<button onclick="salvarRealProd()" class="btn-p" style="width:100%;margin-top:6px;padding:8px">💾 Salvar Realizado</button>`;
-  }
-}
-
-function salvarRealProd(){
-  const lid=lojaId(), hj=hoje();
-  if(!D.realProd) D.realProd={};
-  if(!D.realProd[lid]) D.realProd[lid]={};
-  if(!D.realProd[lid][hj]) D.realProd[lid][hj]={};
-  const hoje_dt=new Date();
-  const metas=(D.metasProd||[]).filter(mp=>{
-    if(!mp.ativa) return false;
-    const ini=mp.dtIni?new Date(mp.dtIni):null;
-    const fim=mp.dtFim?new Date(mp.dtFim):null;
-    if(ini && hoje_dt<ini) return false;
-    if(fim && hoje_dt>fim) return false;
-    return true;
-  });
-  metas.forEach(mp=>{
-    const inp=document.getElementById("rp_"+mp.id);
-    if(inp){
-      const val=parseInt(inp.value)||0;
-      D.realProd[lid][hj][mp.id]=val;
-    }
-  });
-  save();
-  showToast("Realizado de produtos salvo!");
-  renderMetaProdDash();
-}
 
 function renderRankHoje(){
   const hj=hoje();
@@ -4580,7 +4514,7 @@ function renderRankVendHoje(){
     const _metaPer = per==="hoje"
       ? metaDiaProgressiva(_metaMes, v.id, hj)
       : per==="semana"
-        ? parseFloat((_metaMes/4.33).toFixed(2))
+        ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((_metaMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2)); })()
         : _metaMes;
     return {...v, val:_val, pct:_metaPer>0?_val/_metaPer*100:0, metaPer:_metaPer};
   }).sort((a,b)=> _rankVendOrdem==='meta' ? (b.pct-a.pct||b.val-a.val) : (b.val-a.val||b.pct-a.pct)).slice(0,8);
@@ -5223,7 +5157,7 @@ function renderMetas(){
         <div style="padding:8px 14px">
         ${vls.map(v=>{
           const vm=calcVendPer(v.id,_tabMeta);
-          const mv=_tabMeta==="dia"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje()):_tabMeta==="semana"?parseFloat(((Number(v.metaMes)||0)/4.33).toFixed(2)):Number(v.metaMes)||0;
+          const mv=_tabMeta==="dia"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje()):_tabMeta==="semana"?(()=>{const _sw=semanaDoMes(hoje());return parseFloat(((Number(v.metaMes)||0)*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():Number(v.metaMes)||0;
           const pv=mv>0?vm/mv*100:0;
           const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)">
@@ -5243,7 +5177,7 @@ function renderMetas(){
       const metaVend=_tabMeta==="dia"
         ? metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje())
         : _tabMeta==="semana"
-          ? parseFloat(((Number(v.metaMes)||0)/4.33).toFixed(2))
+          ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat(((Number(v.metaMes)||0)*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})()
           : Number(v.metaMes)||0;
       const pv=metaVend>0?vm/metaVend*100:0;
       const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
@@ -6184,7 +6118,7 @@ function renderLojas(per="hoje"){
     const _metaPer = per==="hoje"
       ? metaDiaProgressiva(_metaMes, v.id, hoje())
       : per==="semana"
-        ? parseFloat((_metaMes/4.33).toFixed(2))
+        ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((_metaMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2)); })()
         : _metaMes;
     const _pct = _metaPer>0 ? _val/_metaPer*100 : 0;
     return {...v, val:_val, pct:_pct, metaPer:_metaPer};
@@ -7717,21 +7651,6 @@ function atualizaResumoRede(){
 // METAS PRODUTOS
 // ============================================================
 let _mpSel="";
-function toggleFormMetaProd(){const f=document.getElementById("form-metaprod");f.style.display=f.style.display==="none"?"block":"none";}
-function buscarProdMeta(q){
-  if(!q||q.length<2){document.getElementById("mp-sugest").innerHTML="";return;}
-  document.getElementById("mp-sugest").innerHTML=PRODUTOS.filter(p=>p.n.toLowerCase().includes(q.toLowerCase())).slice(0,5).map(p=>`<div class="sugest-item" onclick="selecionarProdMeta('${p.c}','${p.n.replace(/'/g,"")}')">${p.n} &middot; Saldo: ${p.s}</div>`).join("");
-}
-function selecionarProdMeta(cod,nome){_mpSel=cod;document.getElementById("mp-busca").value=nome;document.getElementById("mp-sugest").innerHTML="";}
-function salvarMetaProd(){
-  const prod=document.getElementById("mp-busca").value.trim();if(!prod){showToast("Selecione um produto!","err");return;}
-  D.metasProd.push({id:"mp"+Date.now(),cod:_mpSel,prod,qtd:parseInt(document.getElementById("mp-qtd").value)||0,val:parseBR(document.getElementById("mp-val").value)||0,vig:document.getElementById("mp-vig").value,obs:document.getElementById("mp-obs").value,criadoEm:hoje()});
-  save();showToast("Meta de produto salva!");toggleFormMetaProd();document.getElementById("mp-busca").value="";renderTabelaMetaProd();
-}
-function excluirMetaProd(id){D.metasProd=D.metasProd.filter(m=>m.id!==id);save();renderTabelaMetaProd();}
-function renderTabelaMetaProd(){
-  document.getElementById("tbody-metaprod").innerHTML=D.metasProd.length?D.metasProd.map(m=>`<tr><td><strong>${m.prod}</strong></td><td style="font-size:11px;color:var(--muted)">${m.vig}</td><td>${m.qtd>0?m.qtd+" un.":"--"}</td><td style="color:var(--ouro)">${m.val>0?fmt(m.val):"--"}</td><td style="font-size:11px;color:var(--muted)">${m.obs||"--"}</td><td><button onclick="excluirMetaProd('${m.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">x</button></td></tr>`).join(""):"<tr><td colspan='6' style='color:var(--muted);text-align:center;padding:20px'>Nenhuma meta de produto.</td></tr>";
-}
 
 // ============================================================
 // RELATORIO
@@ -7758,7 +7677,7 @@ function gerarRel(){
   const vends=D.vendedoras.map(v=>{
     const val = isMes ? calcVendPer(v.id,"mes") : calcVendPer(v.id,"semana");
     const metaMes=Number(v.metaMes)||0;
-    const metaVend = isMes ? metaMes : parseFloat((metaMes/4.33).toFixed(2));
+    const metaVend = isMes ? metaMes : (()=>{const _sw=semanaDoMes(hoje());return parseFloat((metaMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})();
     const pct=metaVend>0?val/metaVend*100:0;
     // TM individual
     const vd=D.vendasVend[v.id]||{};
@@ -7925,7 +7844,7 @@ function exportarCSV(){
   const col=isMes?'Mes':'Semana';
   const ld=LOJAS.map(l=>({nome:l.nome,val:isMes?calcMes(l.id):calcSem(l.id),meta:isMes?(getMetas(l.id).mes||0):(getMetas(l.id).sem||0)}));
   let csv="Loja,Faturamento "+col+",Meta "+col+"\n"+ld.map(l=>`${l.nome},${l.val.toFixed(2)},${l.meta.toFixed(2)}`).join("\n");
-  const vends=D.vendedoras.map(v=>({nome:v.nome,loja:LOJAS.find(l=>l.id===v.loja)?.nome||v.loja,val:isMes?calcVendPer(v.id,"mes"):calcVendPer(v.id,"semana"),meta:isMes?(Number(v.metaMes)||0):parseFloat(((Number(v.metaMes)||0)/4.33).toFixed(2))}));
+  const vends=D.vendedoras.map(v=>({nome:v.nome,loja:LOJAS.find(l=>l.id===v.loja)?.nome||v.loja,val:isMes?calcVendPer(v.id,"mes"):calcVendPer(v.id,"semana"),meta:isMes?(Number(v.metaMes)||0):(()=>{const _sw=semanaDoMes(hoje());return parseFloat(((Number(v.metaMes)||0)*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})()}));
   if(vends.length)csv+="\n\nVendedora,Loja,Faturamento "+col+",Meta "+col+"\n"+vends.map(v=>`${v.nome},${v.loja},${v.val.toFixed(2)},${v.meta.toFixed(2)}`).join("\n");
   const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="avatim_relatorio_"+per+"_"+hoje()+".csv";a.click();showToast("CSV "+col+" exportado!");
 }
@@ -8107,7 +8026,7 @@ function renderRankings(tab) {
     const mMes  = Number(v.metaMes)||0;
     const mPer  = per==='hoje'
       ? metaDiaProgressiva(mMes, v.id, hj)
-      : per==='semana' ? parseFloat((mMes/4.33).toFixed(2)) : mMes;
+      : per==='semana' ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((mMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2)); })() : mMes;
     const pct   = mPer>0 ? val/mPer*100 : 0;
     const tm    = calcTMVend(v.id, perV);
     const trans = (() => {
@@ -8439,7 +8358,7 @@ function renderRankingLoja() {
       const _mMes = Number(v.metaMes)||0;
       const _mPer = per==='hoje'
         ? metaDiaProgressiva(_mMes, v.id, hj)
-        : per==='semana' ? parseFloat((_mMes/4.33).toFixed(2)) : _mMes;
+        : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})() : _mMes;
       const _pct  = _mPer>0 ? _val/_mPer*100 : 0;
       return {...v, val:_val, pct:_pct, mPer:_mPer};
     })
@@ -8554,7 +8473,7 @@ function renderRankingAdmin() {
         const _mvMes = Number(v.metaMes)||0;
         const _mvPer = per==='hoje'
           ? metaDiaProgressiva(_mvMes, v.id, hj)
-          : per==='semana' ? parseFloat((_mvMes/4.33).toFixed(2)) : _mvMes;
+          : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mvMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})() : _mvMes;
         const pv = _mvPer>0?v.val/_mvPer*100:0;
         const cv = pv>=120?'var(--roxo)':pv>=100?'var(--verde)':pv>=70?'var(--ouro)':'var(--muted)';
         return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03)">
@@ -9281,7 +9200,7 @@ function exportarRelatorioRanking(){
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj2):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj2):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,mPer,pct};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct||b.val-a.val);
@@ -9323,7 +9242,7 @@ function compartilharWhatsApp(){
   const vendsW = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjW):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjW):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
@@ -9437,7 +9356,7 @@ function exportarPDFRanking() {
   const vendsR = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjR):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjR):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,mPer};
@@ -9515,7 +9434,7 @@ function exportarPDFGestao() {
   const vendsG = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjG):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjG):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
@@ -9642,7 +9561,7 @@ function exportarRelatorioGestao(){
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj):per==='semana'?parseFloat((mMes/4.33).toFixed(2)):mMes;
+    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).forEach((v,i)=>{
@@ -9664,21 +9583,27 @@ function _downloadCSV(csv, filename){
 }
 
 function renderGestao() {
-  const per = _gestaoPer;
+  const per  = _gestaoPer;
   const perV = per === 'hoje' ? 'dia' : per;
-  const cls = ['r1','r2','r3','rx','rx','rx','rx'];
+  const hj   = hoje();
+  const cls  = ['r1','r2','r3','rx','rx','rx','rx'];
 
-  // ── Dados das lojas
+  // ── Dados das lojas — meta semanal usa progressiva 35/25/25/15%
   const ld = LOJAS.map(l => {
-    const m   = getMetas(l.id);
-    const fat = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
-    const meta= per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
-    const sm  = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
-    const pct = meta>0 ? fat/meta*100 : 0;
-    const tm  = calcTMLoja(l.id, perV);
-    const nat = calcNAtend(l.id, perV);
-    return {...l, fat, meta, sm, pct, tm, nat};
-  }).sort((a,b) => b.fat - a.fat);
+    const m    = getMetas(l.id);
+    const fat  = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
+    const meta = per==='hoje' ? m.dia : per==='semana' ? getMetaSemLoja(l.id) : m.mes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const pct  = meta>0 ? fat/meta*100 : 0;
+    const tm   = calcTMLoja(l.id, perV);
+    const nat  = calcNAtend(l.id, perV);
+    const ticket = m.ticket||0;
+    return {...l, fat, meta, sm, pct, tm, nat, ticket};
+  });
+
+  const ldByFat  = [...ld].sort((a,b)=>b.fat-a.fat);
+  const ldByMeta = [...ld].sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
+  const ldByTM   = [...ld].filter(l=>l.nat>0).sort((a,b)=>b.tm-a.tm);
 
   // ── KPIs topo
   const totFat   = ld.reduce((s,l)=>s+l.fat,0);
@@ -9707,34 +9632,51 @@ function renderGestao() {
       <div class="ks">${superMeta} na super meta</div>
     </div>
     <div class="kcard azul" style="padding:16px">
-      <div class="kl">Ticket Medio da Rede</div>
+      <div class="kl">TM Médio da Rede</div>
       <div class="kv" style="font-size:20px">${fmt(tmRede)}</div>
       <div class="ks">${totAtend} atendimentos</div>
     </div>
     <div class="kcard roxo" style="padding:16px">
-      <div class="kl">Melhor Loja</div>
-      <div class="kv" style="font-size:15px">${ld[0]?.nome||'--'}</div>
-      <div class="ks">${fmt(ld[0]?.fat)} (${ld[0]?.pct.toFixed(0)}%)</div>
+      <div class="kl">Maior Faturamento</div>
+      <div class="kv" style="font-size:15px">${ldByFat[0]?.nome||'--'}</div>
+      <div class="ks">${fmt(ldByFat[0]?.fat||0)} (${(ldByFat[0]?.pct||0).toFixed(0)}%)</div>
     </div>
     <div class="kcard verm" style="padding:16px">
       <div class="kl">Precisa de Atencao</div>
-      <div class="kv" style="font-size:15px">${ld[ld.length-1]?.nome||'--'}</div>
-      <div class="ks">${ld[ld.length-1]?.pct.toFixed(0)}% da meta</div>
+      <div class="kv" style="font-size:15px">${[...ld].sort((a,b)=>a.pct-b.pct)[0]?.nome||'--'}</div>
+      <div class="ks">${([...ld].sort((a,b)=>a.pct-b.pct)[0]?.pct||0).toFixed(0)}% da meta</div>
     </div>`;
 
-  // ── Ranking Faturamento Lojas
-  const maxFat = ld[0]?.fat||1;
-  document.getElementById('gestao-rank-fat-lojas').innerHTML = ld.map((l,i) => {
-    const c = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-    const badge = l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':'';
+  // ── Ranking 1: Maior Faturamento Lojas
+  const maxFatG = ldByFat[0]?.fat||1;
+  document.getElementById('gestao-rank-fat-lojas').innerHTML = ldByFat.map((l,i)=>{
+    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
-      <div class="rpos ${cls[i]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+      <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
-        <div class="rn">${l.nome} ${badge}</div>
-        <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
-          <div style="width:${Math.min(100,l.fat/maxFat*100)}%;height:100%;background:${c};border-radius:4px"></div>
+        <div class="rn">${l.nome}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+          <div style="width:${maxFatG>0?l.fat/maxFatG*100:0}%;height:100%;background:${c};border-radius:3px"></div>
         </div>
-        <div class="rv">${l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
+        <div class="rv">${l.pct.toFixed(0)}% da meta</div>
+      </div>
+      <div style="text-align:right;min-width:60px">
+        <div style="font-size:13px;font-weight:700;color:${c}">${fmt(l.fat)}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Ranking 2: Mais Próximo da Meta Lojas
+  document.getElementById('gestao-rank-meta-lojas').innerHTML = ldByMeta.map((l,i)=>{
+    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    return `<div class="ritem">
+      <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+      <div class="rinfo">
+        <div class="rn">${l.nome}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+          <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+        </div>
+        <div class="rv">${fmt(l.fat)} realizado</div>
       </div>
       <div style="text-align:right;min-width:48px">
         <div style="font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
@@ -9742,16 +9684,15 @@ function renderGestao() {
     </div>`;
   }).join('');
 
-  // ── Ranking TM Lojas
-  const ldTM = [...ld].filter(l=>l.nat>0).sort((a,b)=>b.tm-a.tm);
-  const maxTM = ldTM[0]?.tm||1;
-  document.getElementById('gestao-rank-tm-lojas').innerHTML = ldTM.length
-    ? ldTM.map((l,i) => `<div class="ritem">
-        <div class="rpos ${cls[i]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+  // ── Ranking 3: Maior TM Lojas
+  const maxTMG = ldByTM[0]?.tm||1;
+  document.getElementById('gestao-rank-tm-lojas').innerHTML = ldByTM.length
+    ? ldByTM.map((l,i)=>`<div class="ritem">
+        <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
         <div class="rinfo">
           <div class="rn">${l.nome}</div>
-          <div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:5px 0">
-            <div style="width:${l.tm/maxTM*100}%;height:100%;background:var(--azul);border-radius:4px"></div>
+          <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+            <div style="width:${maxTMG>0?l.tm/maxTMG*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
           </div>
           <div class="rv">${l.nat} atend.</div>
         </div>
@@ -9763,20 +9704,9 @@ function renderGestao() {
     : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
 
   // ── Status de metas — cards por loja
-  const ldOrig = LOJAS.map(l => {
-    const m   = getMetas(l.id);
-    const fat = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
-    const meta= per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
-    const sm  = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
-    const pct = meta>0 ? fat/meta*100 : 0;
-    const tm  = calcTMLoja(l.id, perV);
-    const nat = calcNAtend(l.id, perV);
-    const ticket = m.ticket||0;
-    return {...l, fat, meta, sm, pct, tm, nat, ticket};
-  });
-  document.getElementById('gestao-status-lojas').innerHTML = ldOrig.map(l => {
-    const c  = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-    const bg = l.pct>=120?'rgba(139,92,246,.08)':l.pct>=100?'rgba(52,211,153,.08)':l.pct>=70?'rgba(251,191,36,.06)':'rgba(239,68,68,.06)';
+  document.getElementById('gestao-status-lojas').innerHTML = ld.map(l => {
+    const c   = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const bg  = l.pct>=120?'rgba(139,92,246,.08)':l.pct>=100?'rgba(52,211,153,.08)':l.pct>=70?'rgba(251,191,36,.06)':'rgba(239,68,68,.06)';
     const icon= l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
     const faltaMeta = Math.max(0, l.meta - l.fat);
     const faltaSM   = Math.max(0, l.sm - l.fat);
@@ -9786,94 +9716,100 @@ function renderGestao() {
         <div style="font-size:18px;font-weight:900;color:${c}">${l.pct.toFixed(0)}%</div>
       </div>
       <div style="height:5px;background:var(--cinza);border-radius:5px;overflow:hidden;margin-bottom:10px;position:relative">
-        <div style="width:${Math.min(100,l.fat/Math.max(l.sm,1)*100)}%;height:100%;background:${c};border-radius:5px"></div>
-        ${l.meta>0?`<div style="position:absolute;top:0;left:${Math.min(100,l.meta/Math.max(l.sm,l.fat,1)*100)}%;width:2px;height:100%;background:rgba(255,255,255,.5)"></div>`:''}
+        <div style="width:${l.sm>0?Math.min(100,l.fat/l.sm*100):Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:5px"></div>
+        ${l.meta>0&&l.sm>l.meta?`<div style="position:absolute;top:0;left:${Math.min(99,l.meta/l.sm*100)}%;width:2px;height:100%;background:rgba(255,255,255,.5)"></div>`:''}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
         <div><span style="color:var(--muted)">Realizado</span><br><strong>${fmt(l.fat)}</strong></div>
-        <div><span style="color:var(--muted)">Meta</span></div>
-        <div><span style="color:var(--muted)">Super Meta</span></div>
-        <div><span style="color:var(--muted)">TM</span><br><strong style="color:var(--azul)">${fmt(l.tm)}</strong>${l.ticket>0?` <span style="color:var(--muted)">(alvo:${fmt(l.ticket)})</span>`:''}</div>
+        <div><span style="color:var(--muted)">Meta</span><br><strong>${fmt(l.meta)}</strong></div>
+        <div><span style="color:var(--muted)">TM</span><br><strong style="color:var(--azul)">${fmt(l.tm)}</strong></div>
+        <div><span style="color:var(--muted)">Atend.</span><br><strong>${l.nat}</strong></div>
         ${faltaMeta>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Meta</span> <strong style="color:var(--verm)">${fmt(faltaMeta)}</strong></div>`:''}
         ${l.pct>=100&&faltaSM>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Super</span> <strong style="color:var(--roxo)">${fmt(faltaSM)}</strong></div>`:''}
       </div>
     </div>`;
   }).join('');
 
-  // ── Top vendedoras faturamento
-  const _hj2 = hoje();
-  const allV = D.vendedoras
-    .map(v => {
-      const loja   = LOJAS.find(l=>l.id===v.loja);
-      const val    = calcVendPer(v.id, perV);
-      const mMes   = Number(v.metaMes)||0;
-      const mPer   = per==='hoje'
-        ? metaDiaProgressiva(mMes, v.id, _hj2)
-        : per==='semana' ? parseFloat((mMes/4.33).toFixed(2)) : mMes;
-      const pct    = mPer>0 ? val/mPer*100 : 0;
-      return {...v, val, pct, mPer, lojaNome:loja?.nome||v.loja};
-    })
-    .filter(v=>v.val>0);
-  // Top FATURAMENTO — ordenado por valor absoluto
-  const allVFat  = [...allV].sort((a,b)=>b.val-a.val).slice(0,8);
-  // Top % META — ordenado por % atingimento
-  const allVMeta = [...allV].sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
-  const maxV = allV[0]?.val||1;
+  // ── Dados de todas as vendedoras
+  const allVBase = D.vendedoras.map(v => {
+    const loja  = LOJAS.find(l=>l.id===v.loja);
+    const val   = calcVendPer(v.id, perV);
+    const mMes  = Number(v.metaMes)||0;
+    const sw    = semanaDoMes(hj);
+    const mPer  = per==='hoje'
+      ? metaDiaProgressiva(mMes, v.id, hj)
+      : per==='semana'
+        ? parseFloat((mMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2))
+        : mMes;
+    const pct   = mPer>0 ? val/mPer*100 : 0;
+    const tm    = calcTMVend(v.id, perV);
+    return {...v, val, pct, mPer, tm, lojaNome:loja?.nome||v.loja};
+  }).filter(v=>v.val>0);
+
+  const maxVG  = [...allVBase].sort((a,b)=>b.val-a.val)[0]?.val||1;
+  const maxTMV = [...allVBase].filter(v=>v.tm>0).sort((a,b)=>b.tm-a.tm)[0]?.tm||1;
+
+  // ── Ranking 4: Maior Faturamento Vendedoras
+  const allVFat = [...allVBase].sort((a,b)=>b.val-a.val).slice(0,8);
   document.getElementById('gestao-rank-fat-vends').innerHTML = allVFat.length
-    ? allVFat.map((v,i) => {
-        const c = v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
-        const maxVF = allVFat[0]?.val||1;
+    ? allVFat.map((v,i)=>{
+        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
             <div class="rn">${v.nome}</div>
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
-              <div style="width:${v.val/maxVF*100}%;height:100%;background:${c};border-radius:3px"></div>
+              <div style="width:${maxVG>0?v.val/maxVG*100:0}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
             <div class="rv">${v.lojaNome}</div>
           </div>
-          <div style="text-align:right;min-width:44px">
-            <div style="font-size:13px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
+          <div style="text-align:right;min-width:60px">
+            <div style="font-size:13px;font-weight:700;color:${c}">${fmt(v.val)}</div>
+            <div style="font-size:9px;color:var(--muted)">${v.pct.toFixed(0)}%</div>
           </div>
         </div>`;
       }).join('')
     : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
 
-  // ── Top vendedoras % da Meta (crescimento)
-  const _hjMeta = hoje();
-  const allVMeta2 = D.vendedoras
-    .map(v => {
-      const loja  = LOJAS.find(l=>l.id===v.loja);
-      const val   = calcVendPer(v.id, perV);
-      const mMes  = Number(v.metaMes)||0;
-      const mPer  = per==='hoje'
-        ? metaDiaProgressiva(mMes, v.id, _hjMeta)
-        : per==='semana' ? parseFloat((mMes/4.33).toFixed(2)) : mMes;
-      const pct   = mPer>0 ? val/mPer*100 : 0;
-      return {...v, val, pct, mPer, lojaNome:loja?.nome||v.loja};
-    })
-    .filter(v=>v.val>0)
-    .sort((a,b)=>b.pct-a.pct||b.val-a.val)
-    .slice(0,8);
-  document.getElementById('gestao-rank-tm-vends').innerHTML = allVMeta2.length
-    ? allVMeta2.map((v,i) => {
-        const c = v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+  // ── Ranking 5: Maior % da Meta Vendedoras
+  const allVMeta = [...allVBase].sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
+  document.getElementById('gestao-rank-meta-vends').innerHTML = allVMeta.length
+    ? allVMeta.map((v,i)=>{
+        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
+          <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+          <div class="rinfo">
+            <div class="rn">${v.nome}</div>
+            <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+              <div style="width:${Math.min(100,v.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+            </div>
+            <div class="rv">${v.lojaNome} · ${fmt(v.val)}</div>
+          </div>
+          <div style="text-align:right;min-width:48px">
+            <div style="font-size:16px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
+          </div>
+        </div>`;
+      }).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
+
+  // ── Ranking 6: Maior TM Vendedoras
+  const allVTM = [...allVBase].filter(v=>v.tm>0).sort((a,b)=>b.tm-a.tm).slice(0,8);
+  document.getElementById('gestao-rank-tm-vends').innerHTML = allVTM.length
+    ? allVTM.map((v,i)=>`<div class="ritem">
         <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
         <div class="rinfo">
-          <div class="rn">${v.nome} <span style="font-size:9px;color:var(--muted)">${v.lojaNome}</span></div>
+          <div class="rn">${v.nome}</div>
           <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
-            <div style="width:${Math.min(100,v.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+            <div style="width:${maxTMV>0?v.tm/maxTMV*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
           </div>
-          <div class="rv">${v.mPer>0?v.pct.toFixed(0)+'% da meta':'-'}</div>
+          <div class="rv">${v.lojaNome}</div>
         </div>
         <div style="text-align:right;min-width:56px">
-          <div style="font-size:13px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
-          <div style="font-size:9px;color:var(--muted)">meta</div>
+          <div style="font-size:16px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">TM</div>
         </div>
-      </div>`;
-      }).join('')
-    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lançamentos no periodo.</div>";
+      </div>`).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
 
   // ── Projecao do mes por loja
   document.getElementById('gestao-projecao').innerHTML = LOJAS.map(l => {
