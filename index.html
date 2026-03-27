@@ -1761,6 +1761,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="btn-s" onclick="filtrarCampTipo('OUTRO')" id="camp-fil-OUTRO">📌 Outro</button>
   </div>
 
+  <!-- FILTRO ATIVAS / ARQUIVADAS -->
+  <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+    <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px">STATUS</span>
+    <button class="btn-s" id="camp-fil-status-ativas" onclick="filtrarCampStatus('ativas')" style="opacity:1">✅ Ativas</button>
+    <button class="btn-s" id="camp-fil-status-arquivadas" onclick="filtrarCampStatus('arquivadas')">📦 Arquivadas</button>
+    <button class="btn-s" id="camp-fil-status-todas" onclick="filtrarCampStatus('todas')">Todas</button>
+  </div>
   <!-- LISTA DE CAMPANHAS -->
   <div id="camp-lista">--</div>
 
@@ -1811,6 +1818,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <button class="btn-s" onclick="filtrarCampLoja('pinheiros')" id="camp-fil-loja-pinheiros-adm">🏪 Pinheiros</button>
       </div>
 
+    </div>
+    <!-- FILTRO ATIVAS / ARQUIVADAS (admin) -->
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+      <span style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.6px">STATUS</span>
+      <button class="btn-s" id="camp-fil-status-ativas-adm" onclick="filtrarCampStatus('ativas')" style="opacity:1">✅ Ativas</button>
+      <button class="btn-s" id="camp-fil-status-arquivadas-adm" onclick="filtrarCampStatus('arquivadas')">📦 Arquivadas</button>
+      <button class="btn-s" id="camp-fil-status-todas-adm" onclick="filtrarCampStatus('todas')">Todas</button>
     </div>
     <div id="camp-lista-adm">--</div>
   </div>
@@ -3178,7 +3192,13 @@ async function loadFromFirestore(){
       if(remoto.arquivos)    D.arquivos    = remoto.arquivos;
       if(remoto.metasProd)   D.metasProd   = remoto.metasProd;
       if(remoto.realProd)    D.realProd    = remoto.realProd;
-      if(remoto.fluxo)       D.fluxo       = remoto.fluxo;
+      // fluxo: merge por ID (nunca sobrescrever — evita perda de registros novos)
+      if(remoto.fluxo && remoto.fluxo.length){
+        if(!D.fluxo) D.fluxo=[];
+        remoto.fluxo.forEach(r=>{
+          if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
+        });
+      }
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
@@ -3748,20 +3768,38 @@ async function login(){
   errEl.style.display="none";
   if(!email||!senha){errEl.textContent="Preencha e-mail e senha.";errEl.style.display="block";return;}
   const u=(window.USUARIOS||{})[email];
-  if(!u){errEl.textContent="E-mail não encontrado.";errEl.style.display="block";return;}
-  if(window.crypto&&window.crypto.subtle){
+  if(!u){errEl.textContent="E-mail não cadastrado. Verifique o e-mail.";errEl.style.display="block";return;}
+  // Verificar hash SHA-256 (funciona em HTTPS e localhost)
+  if(window.crypto && window.crypto.subtle){
     try{
-      const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(senha));
-      const hash=Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
-      if(u.hash!==hash){errEl.textContent="Senha incorreta.";errEl.style.display="block";return;}
-      window._localLogin=true;
-      window._currentUser={email};window._userLoja=u;
-      // Autenticar no Firebase em background (necessário para Firestore)
+      const buf  = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(senha));
+      const hash = Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
+      if(u.hash !== hash){
+        errEl.textContent="Senha incorreta. Tente novamente.";
+        errEl.style.display="block";
+        document.getElementById("lsenha").value="";
+        document.getElementById("lsenha").focus();
+        return;
+      }
+      window._localLogin  = true;
+      window._currentUser = {email};
+      window._userLoja    = u;
       if(window.fbLogin) window.fbLogin(email);
-      showApp();return;
-    }catch(e){}
+      showApp();
+      return;
+    }catch(e){
+      // crypto.subtle falhou — mostrar erro real
+      errEl.textContent="Erro ao verificar senha: "+e.message;
+      errEl.style.display="block";
+      return;
+    }
   }
-  errEl.textContent="Use o GitHub Pages (HTTPS) para acessar.";errEl.style.display="block";
+  // Fallback: crypto.subtle não disponível (HTTP sem localhost)
+  // Usar hash simples como fallback de emergência
+  const hashFallback = _hashSimples(senha);
+  const hashFallbackU = _hashSimples(u.hash); // não compara — avisa ao usuário
+  errEl.textContent="⚠️ Acesse via HTTPS (GitHub Pages) ou localhost para entrar com segurança.";
+  errEl.style.display="block";
 }
 function _hashSimples(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h.toString(16);}
 
@@ -3841,7 +3879,7 @@ function nav(pg){
         renderEstqCritico();
       }
     },
-    fluxo:renderFluxo,metaslojas:renderMetasLojas
+    fluxo:renderFluxo,metaslojas:renderMetasLojas,
     arquivos:()=>renderArquivos("todos"),gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
 }
 
@@ -6645,8 +6683,9 @@ const CAMP_TIPOS = {
   OUTRO:          {label:'Outro',              emoji:'📌'},
 };
 
-let _campFiltroAtivo = '';
-let _campFiltroLoja  = ''; // filtro por loja (só admin)
+let _campFiltroAtivo  = '';
+let _campFiltroLoja   = ''; // filtro por loja (só admin)
+let _campFiltroStatus = 'ativas'; // 'ativas' | 'arquivadas' | 'todas'
 
 function filtrarCampTipo(tipo){
   _campFiltroAtivo = tipo;
@@ -7054,10 +7093,19 @@ function renderCampLista(){
     });
   }
 
+  // Filtro por STATUS (ativas / arquivadas / todas)
+  if(_campFiltroStatus === 'ativas')      objs = objs.filter(o=>!o.arquivada);
+  else if(_campFiltroStatus === 'arquivadas') objs = objs.filter(o=>!!o.arquivada);
+
   objs.sort((a,b)=>b.ini.localeCompare(a.ini));
 
   if(!objs.length){
-    el.innerHTML=`<div style="text-align:center;padding:48px;color:var(--muted);font-size:13px">${isAdmin()?'Nenhuma campanha criada. Clique em "+ Objetivo" para começar.':'Nenhuma campanha disponível no momento.'}</div>`;
+    const msg = _campFiltroStatus==='arquivadas'
+      ? 'Nenhuma campanha arquivada.'
+      : _campFiltroStatus==='ativas'
+        ? (isAdmin()?'Nenhuma campanha ativa. Use "+ Objetivo" para criar.':'Nenhuma campanha ativa no momento.')
+        : (isAdmin()?'Nenhuma campanha criada.':'Nenhuma campanha disponível.');
+    el.innerHTML=`<div style="text-align:center;padding:48px;color:var(--muted);font-size:13px">${msg}</div>`;
     return;
   }
 
@@ -7097,7 +7145,7 @@ function renderCampLista(){
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:42px;height:42px;border-radius:12px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${info.emoji}</div>
           <div>
-            <div style="font-size:15px;font-weight:700;letter-spacing:-.2px">${obj.nome}</div>
+            <div style="font-size:15px;font-weight:700;letter-spacing:-.2px">${obj.nome}${obj.arquivada?' <span style="font-size:10px;color:var(--muted);font-weight:400;background:rgba(255,255,255,.06);border:1px solid var(--borda);border-radius:12px;padding:2px 8px">📦 Arquivada</span>':''}</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">
               <span style="font-size:10px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 10px;border-radius:20px;font-weight:600">${info.label}</span>
               <span style="font-size:10px;color:var(--muted)">📅 ${fmtData(obj.ini)} → ${fmtData(obj.fim)}</span>
@@ -7122,6 +7170,7 @@ function renderCampLista(){
         </div>
         ${isAdmin()?`<div style="display:flex;gap:6px;flex-wrap:wrap">
           <button onclick="editarCampObj('${obj.id}')" style="font-size:10px;color:var(--azul);background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:5px 12px;cursor:pointer">✏️ Editar</button>
+          <button onclick="arquivarCampObj('${obj.id}')" style="font-size:10px;color:var(--ouro);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:8px;padding:5px 12px;cursor:pointer">${obj.arquivada?'♻️ Reativar':'📦 Arquivar'}</button>
           <button onclick="excluirCampObj('${obj.id}')" style="font-size:10px;color:var(--verm);background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:5px 12px;cursor:pointer">🗑 Excluir</button>
         </div>`:''}
       </div>`;
@@ -7318,6 +7367,32 @@ function excluirCampObj(id){
   D.campObjetivos = D.campObjetivos.filter(o=>o.id!==id);
   D.campRealizados = D.campRealizados.filter(r=>r.campId!==id);
   save(); renderCampLista();
+}
+// ── Arquivar/reativar campanha ─────────────────────────────────────
+function arquivarCampObj(id){
+  const obj = D.campObjetivos.find(o=>o.id===id);
+  if(!obj) return;
+  const acao = obj.arquivada ? 'Reativar' : 'Arquivar';
+  if(!confirm(acao+' esta campanha?')) return;
+  obj.arquivada = !obj.arquivada;
+  save();
+  showToast(obj.arquivada ? '📦 Campanha arquivada.' : '✅ Campanha reativada.');
+  renderCampLista();
+}
+
+// ── Filtro por status (ativas / arquivadas / todas) ─────────────────
+function filtrarCampStatus(status){
+  _campFiltroStatus = status;
+  // Atualizar visual dos botões (loja e admin)
+  ['','- adm'].forEach(sfx => {
+    const s = sfx.replace('- ','').replace(' ','');
+    const sfxId = sfx.trim() ? '-adm' : '';
+    ['ativas','arquivadas','todas'].forEach(st=>{
+      const btn = document.getElementById('camp-fil-status-'+st+(sfxId?'-adm':''));
+      if(btn) btn.style.opacity = st===status ? '1' : '0.5';
+    });
+  });
+  renderCampLista();
 }
 // ── EDITAR / APAGAR realizado (pela loja) ───────────────────
 function editarCampReal(id){
@@ -9618,8 +9693,8 @@ function renderGestao() {
   document.getElementById('gestao-kpis').innerHTML = `
     <div class="kcard ouro" style="padding:16px">
       <div class="kl">Faturamento Rede</div>
-      <div class="kv" style="font-size:20px">${fmt(totFat)}</div>
-      <div class="ks">Meta: ${fmt(totMeta)}</div>
+      <div class="kv" style="font-size:20px">${totFat>0?fmt(totFat):'--'}</div>
+      <div class="ks">${totFat>0?'Meta: '+fmt(totMeta):'Sem lançamentos no período'}</div>
     </div>
     <div class="kcard" style="padding:16px;border-color:${crRede}">
       <div class="kl">% da Meta da Rede</div>
