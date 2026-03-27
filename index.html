@@ -9499,62 +9499,56 @@ function compartilharWhatsApp(){
 
 
 function gerarPDF(titulo, htmlContent) {
-  // Abrir janela de impressão com conteúdo formatado
-  const janela = window.open('', '_blank', 'width=900,height=700');
+  const janela = window.open('', '_blank', 'width=960,height=800');
   if(!janela){ showToast('Permita popups para gerar PDF', 'err'); return; }
-  
-  // Pegar variáveis CSS do tema atual
+
   const estilos = `
-    body { font-family: 'DM Sans', Arial, sans-serif; background: #fff; color: #111; margin: 20px; }
-    h1 { font-size: 22px; font-weight: 700; color: #111; margin-bottom: 4px; }
-    h2 { font-size: 15px; font-weight: 600; color: #444; margin: 18px 0 8px; border-bottom: 2px solid #eee; padding-bottom: 4px; }
-    .subtitulo { font-size: 12px; color: #666; margin-bottom: 20px; }
-    .data-rel { font-size: 11px; color: #888; margin-bottom: 24px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
-    th { background: #f5f5f5; font-weight: 600; padding: 8px 10px; text-align: left; border-bottom: 2px solid #ddd; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
-    td { padding: 7px 10px; border-bottom: 1px solid #eee; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #fff; color: #111; margin: 0; padding: 20px 28px; font-size: 13px; }
+    h1 { font-size: 22px; font-weight: 700; color: #1a1a2e; margin: 0 0 2px; }
+    h2 { font-size: 14px; font-weight: 700; color: #333; margin: 22px 0 8px; border-bottom: 2px solid #e0e0e0; padding-bottom: 5px; text-transform: uppercase; letter-spacing: .5px; }
+    .subtitulo { font-size: 12px; color: #666; margin-bottom: 4px; }
+    .data-rel   { font-size: 11px; color: #999; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid #eee; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 18px; page-break-inside: auto; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    th { background: #f0f0f0; font-weight: 700; padding: 8px 10px; text-align: left; border-bottom: 2px solid #ccc; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: #444; }
+    td { padding: 7px 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
     tr:nth-child(even) td { background: #fafafa; }
-    .badge-ok   { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-    .badge-warn { background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-    .badge-bad  { background: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-    .badge-roxo { background: #e2d9f3; color: #4a235a; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-    .kgrid-pdf  { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .kcard-pdf  { border: 1px solid #ddd; border-radius: 8px; padding: 14px; text-align: center; }
-    .kcard-pdf .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
-    .kcard-pdf .valor { font-size: 20px; font-weight: 700; color: #111; }
-    .kcard-pdf .sub   { font-size: 10px; color: #666; margin-top: 2px; }
-    .rodape { margin-top: 30px; border-top: 1px solid #eee; padding-top: 12px; font-size: 10px; color: #999; text-align: center; }
+    .badge-ok   { background: #d4edda; color: #155724; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .badge-warn { background: #fff3cd; color: #856404; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .badge-bad  { background: #f8d7da; color: #721c24; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .badge-roxo { background: #e9d8fd; color: #4a235a; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .kgrid-pdf  { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
+    .kcard-pdf  { border: 1px solid #ddd; border-radius: 8px; padding: 12px; text-align: center; background: #fafafa; }
+    .kcard-pdf .label { font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 4px; }
+    .kcard-pdf .valor { font-size: 20px; font-weight: 700; color: #111; line-height: 1.2; }
+    .kcard-pdf .sub   { font-size: 10px; color: #666; margin-top: 3px; }
+    .bar-wrap { background: #eee; border-radius: 4px; height: 5px; width: 100%; overflow: hidden; margin-top: 3px; }
+    .bar-fill { height: 100%; border-radius: 4px; }
+    .rodape { margin-top: 28px; border-top: 1px solid #eee; padding-top: 10px; font-size: 10px; color: #aaa; text-align: center; }
+    .print-btn { position: fixed; top: 12px; right: 12px; background: #1a1a2e; color: #fff; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; z-index: 999; }
     @media print {
-      body { margin: 10px; }
-      button { display: none !important; }
-      .no-print { display: none !important; }
+      .print-btn { display: none !important; }
+      body { padding: 10px 16px; }
+      h2 { page-break-before: auto; }
     }
   `;
-  
+
   const agora = new Date().toLocaleString('pt-BR');
   const loja  = isAdmin() ? 'Avatim — Rede Completa' : lojaNome();
-  
-  janela.document.write(`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <title>${titulo} — Avatim</title>
-  <style>${estilos}</style>
-</head>
-<body>
-  <h1>📊 ${titulo}</h1>
-  <div class="subtitulo">${loja}</div>
-  <div class="data-rel">Gerado em ${agora}</div>
-  ${htmlContent}
-  <div class="rodape">Avatim Gestão Comercial — ${agora}</div>
-  <scr'+'ipt>
-    window.onload = function(){ 
-      setTimeout(function(){ window.print(); }, 500); 
-    };
-  </scr'+'ipt>
-</body>
-</html>`);
+
+  janela.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>' + titulo + ' — Avatim</title><style>' + estilos + '</style></head><body>' +
+    '<button class="print-btn" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>' +
+    '<h1>📊 ' + titulo + '</h1>' +
+    '<div class="subtitulo">' + loja + '</div>' +
+    '<div class="data-rel">Gerado em ' + agora + '</div>' +
+    htmlContent +
+    '<div class="rodape">Avatim Gestão Comercial — ' + agora + '</div>' +
+    '</body></html>');
   janela.document.close();
+  // Não dispara print automático — usuário clica no botão ou usa Ctrl+P
+  // Isso evita que o dialog abra antes do conteúdo carregar completamente
 }
 
 function exportarPDFRanking() {
@@ -9610,26 +9604,96 @@ function exportarPDFRanking() {
   const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
   const pctRede   = totalMeta>0?totalFat/totalMeta*100:0;
 
+  // Rankings adicionais
+  const ldByFatR = [...ldR].sort((a,b)=>b.fat-a.fat);
+  const ldTMR2   = LOJAS.map(l=>({
+    nome:l.nome,
+    tm: calcTMLoja(l.id,perV),
+    nat: calcNAtend(l.id,perV),
+    fat: per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)
+  })).filter(l=>l.nat>0).sort((a,b)=>b.tm-a.tm);
+
+  // Vendedoras por faturamento
+  const vendsRFat = [...vendsR].sort((a,b)=>b.val-a.val).slice(0,15);
+  // Vendedoras por TM
+  const vendsRTM  = D.vendedoras.map(v=>{
+    const val=calcVendPer(v.id,perV);
+    const trans = (() => {
+      const vd=D.vendasVend[v.id]||{};let t=0;
+      if(perV==='dia') t=Number(vd[hj]?.trans||0);
+      else if(perV==='semana'){ const hd=new Date();hd.setHours(0,0,0,0);const diff=hd.getDay()===0?6:hd.getDay()-1;const seg=new Date(hd);seg.setDate(hd.getDate()-diff);for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd)t+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);} }
+      else { const mes2=hj.slice(0,7);Object.entries(vd).forEach(([d,r])=>{if(d.startsWith(mes2))t+=Number(r.trans||0);}); }
+      return t;
+    })();
+    const tm2=trans>0?val/trans:0;
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    return {nome:v.nome,loja:loja?.nome||v.loja,tm:tm2,val,trans};
+  }).filter(v=>v.tm>0).sort((a,b)=>b.tm-a.tm).slice(0,15);
+
+  const rowsFatLojas = ldByFatR.map((l,i)=>{
+    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    return `<tr><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
+      <td>${fmt(l.fat)}</td><td>${l.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+  }).join('');
+
+  const rowsTMLoja = ldTMR2.map((l,i)=>`<tr>
+    <td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
+    <td>${fmt(l.tm)}</td><td>${l.nat} atend.</td><td>${fmt(l.fat)}</td></tr>`).join('');
+
+  const rowsVendsFat = vendsRFat.map((v,i)=>{
+    const badge=v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    return `<tr><td>${i+1}</td><td><strong>${v.nome}</strong></td><td>${v.loja}</td>
+      <td>${fmt(v.val)}</td><td>${v.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+  }).join('');
+
+  const rowsVendsTM = vendsRTM.map((v,i)=>`<tr>
+    <td>${i+1}</td><td><strong>${v.nome}</strong></td><td>${v.loja}</td>
+    <td>${fmt(v.tm)}</td><td>${v.trans} atend.</td></tr>`).join('');
+
   const html = `
     <div class="kgrid-pdf">
-      <div class="kcard-pdf">
-        <div class="label">Período</div>
-        <div class="valor" style="font-size:16px">${perLabel}</div>
-      </div>
-      <div class="kcard-pdf">
-        <div class="label">% da Meta — Rede</div>
-        <div class="valor" style="color:${pctRede>=100?'#28a745':pctRede>=70?'#ffc107':'#dc3545'}">${pctRede.toFixed(0)}%</div>
-      </div>
+      <div class="kcard-pdf"><div class="label">Período</div><div class="valor" style="font-size:15px">${perLabel}</div></div>
+      <div class="kcard-pdf"><div class="label">% da Meta — Rede</div><div class="valor" style="color:${pctRede>=100?'#28a745':pctRede>=70?'#e6a817':'#dc3545'}">${pctRede.toFixed(0)}%</div></div>
+      <div class="kcard-pdf"><div class="label">Faturamento Rede</div><div class="valor">${fmt(totalFat)}</div></div>
+      <div class="kcard-pdf"><div class="label">Lojas na Meta</div><div class="valor">${ldR.filter(l=>l.pct>=100).length}/${LOJAS.length}</div></div>
     </div>
-    <h2>🏪 Ranking das Lojas</h2>
+
+    <h2>🏆 Lojas — Maior Faturamento</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsFatLojas}</tbody>
+    </table>
+
+    <h2>🎯 Lojas — Mais Próximo da Meta</h2>
     <table>
       <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
       <tbody>${rowsLojas}</tbody>
     </table>
-    <h2>👩 Top Vendedoras da Rede</h2>
+
+    <h2>🎫 Lojas — Maior Ticket Médio</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>TM</th><th>Atend.</th><th>Faturamento</th></tr></thead>
+      <tbody>${rowsTMLoja.length?rowsTMLoja:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
+    </table>
+
+    <h2>👩 Vendedoras — Maior % da Meta</h2>
     <table>
       <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
-      <tbody>${rowsVends}</tbody>
+      <tbody>${rowsVends.length?rowsVends:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
+    </table>
+
+    <h2>💰 Vendedoras — Maior Faturamento</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsVendsFat.length?rowsVendsFat:'<tr><td colspan="6">Sem dados.</td></tr>'}</tbody>
+    </table>
+
+    <h2>🎫 Vendedoras — Maior Ticket Médio</h2>
+    <table>
+      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>TM</th><th>Atend.</th></tr></thead>
+      <tbody>${rowsVendsTM.length?rowsVendsTM:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
     </table>`;
 
   gerarPDF('Rankings — ' + perLabel, html);
@@ -9683,16 +9747,67 @@ function exportarPDFGestao() {
     </tr>`;
   }).join('');
 
+  // Rankings adicionais lojas: por faturamento e TM
+  const ldByFatPDF = [...ldG].sort((a,b)=>b.fat-a.fat);
+  const ldByTMPDF  = [...ldG].filter(l=>l.tm>0).sort((a,b)=>b.tm-a.tm);
+  // Total rede
+  const totFatG  = ldG.reduce((s,l)=>s+l.fat,0);
+  const totMetaG = ldG.reduce((s,l)=>s+l.meta,0);
+  const pctRedeG = totMetaG>0?totFatG/totMetaG*100:0;
+
+  const rowsFat = ldByFatPDF.map((l,i)=>{
+    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    return `<tr><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
+      <td>${fmt(l.fat)}</td><td>${l.pct.toFixed(0)}%</td>
+      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+  }).join('');
+
+  const rowsTM = ldByTMPDF.map((l,i)=>`<tr>
+    <td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
+    <td>${fmt(l.tm)}</td><td>${l.pct.toFixed(0)}%</td></tr>`).join('');
+
+  const rowsProj = ldG.map(l=>`<tr>
+    <td><strong>${l.nome}</strong></td>
+    <td>${fmt(l.fat)}</td>
+    <td>${l.proj>0?fmt(l.proj):'—'}</td>
+    <td>${l.proj>0&&l.meta>0?(l.proj/l.meta*100).toFixed(0)+'%':'—'}</td></tr>`).join('');
+
   const html = `
-    <h2>📊 Status das Lojas — ${perLabel}</h2>
+    <div class="kgrid-pdf">
+      <div class="kcard-pdf"><div class="label">Faturamento Rede</div><div class="valor">${fmt(totFatG)}</div></div>
+      <div class="kcard-pdf"><div class="label">% da Meta</div><div class="valor" style="color:${pctRedeG>=100?'#28a745':pctRedeG>=70?'#e6a817':'#dc3545'}">${pctRedeG.toFixed(0)}%</div></div>
+      <div class="kcard-pdf"><div class="label">Lojas na Meta</div><div class="valor">${ldG.filter(l=>l.pct>=100).length}/${LOJAS.length}</div></div>
+      <div class="kcard-pdf"><div class="label">Período</div><div class="valor" style="font-size:15px">${perLabel}</div></div>
+    </div>
+
+    <h2>🏆 Ranking — Maior Faturamento por Loja</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>TM</th><th>Projeção Mês</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja</th><th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${rowsFat}</tbody>
+    </table>
+
+    <h2>🎯 Ranking — Mais Próximo da Meta</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>TM</th><th>Projeção</th><th>Status</th></tr></thead>
       <tbody>${rowsG}</tbody>
     </table>
-    <h2>👩 Top Vendedoras</h2>
+
+    <h2>🎫 Ranking — Maior Ticket Médio por Loja</h2>
+    <table>
+      <thead><tr><th>#</th><th>Loja</th><th>TM</th><th>% Meta</th></tr></thead>
+      <tbody>${rowsTM.length?rowsTM:'<tr><td colspan="4">Sem dados de atendimento no período.</td></tr>'}</tbody>
+    </table>
+
+    <h2>👩 Ranking Vendedoras — Maior % da Meta</h2>
     <table>
       <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
-      <tbody>${rowsVG}</tbody>
+      <tbody>${rowsVG.length?rowsVG:'<tr><td colspan="5">Sem lançamentos no período.</td></tr>'}</tbody>
+    </table>
+
+    <h2>📈 Projeção do Mês por Loja</h2>
+    <table>
+      <thead><tr><th>Loja</th><th>Realizado</th><th>Projeção</th><th>% da Meta</th></tr></thead>
+      <tbody>${rowsProj}</tbody>
     </table>`;
 
   gerarPDF('Painel de Gestão — ' + perLabel, html);
@@ -9729,11 +9844,30 @@ function exportarPDFRelatorio() {
     <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
   </tr>`).join('');
 
+  // Lançamentos diários do mês para a loja
+  const mes2 = hj.slice(0,7);
+  const diasMap = {};
+  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  vendsLoja.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
+      if(!dt.startsWith(mes2)) return;
+      if(!diasMap[dt]) diasMap[dt]={fat:0,trans:0};
+      diasMap[dt].fat   += Number(vd.val||0);
+      diasMap[dt].trans += Number(vd.trans||0);
+    });
+  });
+  const diasList = Object.entries(diasMap).sort((a,b)=>a[0].localeCompare(b[0]));
+  const rowsDias = diasList.map(([dt,d])=>{
+    const tm2=d.trans>0?d.fat/d.trans:0;
+    const dFmt=dt.split('-').reverse().join('/');
+    return `<tr><td>${dFmt}</td><td>${fmt(d.fat)}</td><td>${d.trans}</td><td>${tm2>0?fmt(tm2):'—'}</td></tr>`;
+  }).join('');
+
   const html = `
     <div class="kgrid-pdf">
       <div class="kcard-pdf">
         <div class="label">Realizado Mês</div>
-        <div class="valor" style="color:${pctMes>=100?'#28a745':pctMes>=70?'#ffc107':'#dc3545'}">${pctMes.toFixed(0)}%</div>
+        <div class="valor" style="color:${pctMes>=100?'#28a745':pctMes>=70?'#e6a817':'#dc3545'}">${pctMes.toFixed(0)}%</div>
         <div class="sub">${fmt(realMes)}</div>
       </div>
       <div class="kcard-pdf">
@@ -9751,15 +9885,29 @@ function exportarPDFRelatorio() {
       </div>
       <div class="kcard-pdf">
         <div class="label">Projeção do Mês</div>
-        <div class="valor" style="color:#dc3545">${proj?fmt(proj.projecao):'—'}</div>
-        <div class="sub">${proj?proj.projecao/m.mes*100|0+'% da meta':''}</div>
+        <div class="valor" style="color:${proj&&proj.projecao>=m.mes?'#28a745':'#dc3545'}">${proj?fmt(proj.projecao):'—'}</div>
+        <div class="sub">${proj&&m.mes>0?Math.round(proj.projecao/m.mes*100)+'% da meta':''}</div>
       </div>
     </div>
+
     <h2>👩 Performance das Vendedoras — Este Mês</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th>${isAdmin()?'<th>Loja</th>':''}<th>% Meta</th><th>Status</th></tr></thead>
-      <tbody>${rowsV}</tbody>
-    </table>`;
+      <thead><tr><th>#</th><th>Vendedora</th>${isAdmin()?'<th>Loja</th>':''}<th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <tbody>${vends.map((v,i)=>`<tr>
+        <td>${i+1}</td><td><strong>${v.nome}</strong></td>
+        ${isAdmin()?`<td>${v.loja}</td>`:''}
+        <td>${fmt(v.vm)}</td>
+        <td>${v.pct.toFixed(0)}%</td>
+        <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+      </tr>`).join('')}</tbody>
+    </table>
+
+    ${diasList.length?`
+    <h2>📅 Lançamentos Diários — ${mes2.split('-').reverse().join('/')}</h2>
+    <table>
+      <thead><tr><th>Data</th><th>Faturamento</th><th>Atendimentos</th><th>Ticket Médio</th></tr></thead>
+      <tbody>${rowsDias}</tbody>
+    </table>`:''}`;
 
   gerarPDF('Relatório — ' + loja, html);
 }
