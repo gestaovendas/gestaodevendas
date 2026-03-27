@@ -3173,7 +3173,7 @@ async function waitForFirebase(timeout=5000){
 }
 
 async function loadFromFirestore(){
-  const ok = await waitForFirebase(8000);
+  const ok = await waitForFirebase(3000);
   if(!ok){
     console.warn("[Avatim] Firebase não disponível — usando localStorage");
     return false;
@@ -3740,16 +3740,21 @@ function showApp(){
     if(btnAdm) btnAdm.style.display="inline-flex";
   }
 
-  // Carregar dados do Firestore primeiro, depois renderizar
-  loadFromFirestore().then(()=>{
-    carregarVendsForm();
-    preencherSelectVends();
-    carregarDash();
-  }).catch(()=>{
-    // Fallback: usar localStorage se Firestore falhar
-    carregarVendsForm();
-    preencherSelectVends();
-    carregarDash();
+  // Renderizar IMEDIATAMENTE com dados do localStorage
+  // Firebase carrega em background e atualiza automaticamente
+  carregarVendsForm();
+  preencherSelectVends();
+  carregarDash();
+  // Tentar carregar do Firestore em background (não bloqueia a tela)
+  loadFromFirestore().then(sincronizado=>{
+    if(sincronizado){
+      // Dados atualizados — re-renderizar silenciosamente
+      carregarVendsForm();
+      preencherSelectVends();
+      carregarDash();
+    }
+  }).catch(e=>{
+    console.warn("[Avatim] Firestore background load falhou:", e?.message||e);
   });
   renderProdutos("","");
   iniciarAutoRefresh();
@@ -3832,13 +3837,12 @@ async function login(){
     window._currentUser = {email};
     window._userLoja    = u;
     if(window.fbLogin) window.fbLogin(email);
+    if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
     showApp();
   }catch(e){
     errEl.textContent="Erro ao verificar senha. Tente novamente.";
     errEl.style.display="block";
     if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
-  } finally {
-    if(btn && btn.disabled){ btn.disabled=false; btn.textContent="Entrar"; }
   }
 }
 
