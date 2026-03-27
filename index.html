@@ -1419,32 +1419,40 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab" onclick="tabRankPer('semana',this,'rede')">Semana</button>
       <button class="tab" onclick="tabRankPer('mes',this,'rede')">Mes</button>
     </div>
-    <!-- Podio das 3 primeiras lojas -->
+    <!-- Podio: top 3 lojas mais proximas da meta -->
     <div id="rank-podio-lojas" style="margin-bottom:20px"></div>
-    <!-- Ranking completo lojas -->
-    <div class="g2" style="margin-bottom:16px">
-      <div class="rcard">
-        <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--ouro)">🏪 Ranking das 7 Lojas</div>
-        <div id="rank-full-lojas">--</div>
-      </div>
-      <div class="rcard">
-        <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--ouro)">👩 Top Vendedoras da Rede</div>
-        <div id="rank-full-vends-rede">--</div>
-      </div>
-    </div>
     <!-- KPIs consolidados -->
-    <div class="sc">
+    <div class="sc" style="margin-bottom:14px">
       <div class="st">Consolidado da Rede</div>
       <div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))" id="rank-kpis-rede"></div>
     </div>
-    <!-- Ranking TM da Rede -->
-    <div class="g2" style="margin-top:16px">
+    <!-- 3 Rankings de Lojas -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px">
       <div class="rcard">
-        <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--azul)">🎯 Ranking Ticket Médio — Lojas</div>
-        <div id="rank-tm-lojas">--</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Lojas</div>
+        <div id="rank-full-lojas">--</div>
       </div>
       <div class="rcard">
-        <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--azul)">🎯 Ranking Ticket Médio — Vendedoras</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Mais Próximo da Meta — Lojas</div>
+        <div id="rank-meta-lojas">--</div>
+      </div>
+      <div class="rcard">
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Lojas</div>
+        <div id="rank-tm-lojas">--</div>
+      </div>
+    </div>
+    <!-- 3 Rankings de Vendedoras -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px">
+      <div class="rcard">
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedoras</div>
+        <div id="rank-full-vends-rede">--</div>
+      </div>
+      <div class="rcard">
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedoras</div>
+        <div id="rank-meta-vends-rede">--</div>
+      </div>
+      <div class="rcard">
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedoras</div>
         <div id="rank-tm-vends">--</div>
       </div>
     </div>
@@ -2405,20 +2413,18 @@ service cloud.firestore {
   <!-- KPIs TOPO -->
   <div id="gestao-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px"></div>
 
-  <!-- GRID PRINCIPAL -->
-  <div class="g2" style="gap:14px;margin-bottom:14px">
-    <!-- Ranking Faturamento Lojas -->
+  <!-- RANKINGS LOJAS (3 categorias) -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px">
     <div class="rcard">
-      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--ouro);display:flex;align-items:center;gap:6px">
-        &#127942; Ranking Faturamento — Lojas
-      </div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Lojas</div>
       <div id="gestao-rank-fat-lojas">--</div>
     </div>
-    <!-- Ranking TM Lojas -->
     <div class="rcard">
-      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--azul);display:flex;align-items:center;gap:6px">
-        &#127919; Ranking Ticket Medio — Lojas
-      </div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Mais Próximo da Meta — Lojas</div>
+      <div id="gestao-rank-meta-lojas">--</div>
+    </div>
+    <div class="rcard">
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Lojas</div>
       <div id="gestao-rank-tm-lojas">--</div>
     </div>
   </div>
@@ -2429,18 +2435,18 @@ service cloud.firestore {
     <div id="gestao-status-lojas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;padding:4px 0"></div>
   </div>
 
-  <!-- RANKING TOP VENDEDORAS -->
-  <div class="g2" style="gap:14px;margin-bottom:14px">
+  <!-- RANKINGS VENDEDORAS (3 categorias) -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px">
     <div class="rcard">
-      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--verde);display:flex;align-items:center;gap:6px">
-        &#128101; Top Vendedoras — Faturamento
-      </div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedoras</div>
       <div id="gestao-rank-fat-vends">--</div>
     </div>
     <div class="rcard">
-      <div style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--azul);display:flex;align-items:center;gap:6px">
-        🏆 Top Vendedoras — % da Meta
-      </div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedoras</div>
+      <div id="gestao-rank-meta-vends">--</div>
+    </div>
+    <div class="rcard">
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedoras</div>
       <div id="gestao-rank-tm-vends">--</div>
     </div>
   </div>
@@ -3826,13 +3832,203 @@ function nav(pg){
 // ============================================================
 function gerarDiagnostico(){
   const selLoja = document.getElementById("lanc-loja-sel");
-  const lid = (isAdmin() && selLoja && selLoja.value) ? selLoja.value : (isAdmin() ? LOJAS[0]?.id||lojaId() : lojaId());
   const hj  = hoje();
-  const mes  = hj.slice(0,7);
+  const mes = hj.slice(0,7);
+
+  // Admin: diagnóstico de toda a rede
+  if(isAdmin()){
+    const grid = document.getElementById('lanc-diag-grid');
+    const crescGrid = document.getElementById('lanc-cresc-grid');
+    if(!grid) return;
+
+    // KPIs da rede no mês
+    const redeData = LOJAS.map(l => {
+      const m    = getMetas(l.id);
+      const fat  = calcMes(l.id);
+      const meta = m.mes||0;
+      const pct  = meta>0 ? fat/meta*100 : 0;
+      const tm   = calcTMLoja(l.id,'mes');
+      const nat  = calcNAtend(l.id,'mes');
+      const vends = D.vendedoras.filter(v=>v.loja===l.id).map(v=>{
+        const vm  = calcVendPer(v.id,'mes');
+        const mV  = Number(v.metaMes)||0;
+        const pV  = mV>0?vm/mV*100:0;
+        let nat2=0;
+        Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,d])=>{ if(dt.startsWith(mes)) nat2+=Number(d.trans||d.cli||0); });
+        const tmV = nat2>0 ? vm/nat2 : 0;
+        return {...v, vm, mV, pct:pV, nat:nat2, tm:tmV};
+      }).sort((a,b)=>b.pct-a.pct);
+      return {...l, fat, meta, pct, tm, nat, vends};
+    }).sort((a,b)=>b.fat-a.fat);
+
+    const totFat  = redeData.reduce((s,l)=>s+l.fat, 0);
+    const totMeta = redeData.reduce((s,l)=>s+l.meta, 0);
+    const pctRede = totMeta>0 ? totFat/totMeta*100 : 0;
+    const totAtend= redeData.reduce((s,l)=>s+l.nat, 0);
+    const tmRede  = totAtend>0 ? totFat/totAtend : 0;
+    const crRede  = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
+    const nasMeta = redeData.filter(l=>l.pct>=100).length;
+
+    // Comparação meses anteriores (rede)
+    const meses = [];
+    for(let i=0;i<4;i++){
+      const d = new Date(mes+'-01');
+      d.setMonth(d.getMonth()-i);
+      const mStr = d.toISOString().slice(0,7);
+      let fat2=0, nat2=0;
+      D.vendedoras.forEach(v=>{
+        Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+          if(dt.startsWith(mStr)){ fat2+=Number(dd.val||0); nat2+=Number(dd.trans||dd.cli||0); }
+        });
+      });
+      const label = i===0?'Este mês':i===1?'Mês ant.':mStr;
+      meses.push({mes:mStr,label,fat:fat2,nat:nat2,tm:nat2>0?fat2/nat2:0});
+    }
+    const crescFat = meses.length>=2&&meses[1].fat>0 ? (meses[0].fat-meses[1].fat)/meses[1].fat*100 : 0;
+    const crescNat = meses.length>=2&&meses[1].nat>0 ? (meses[0].nat-meses[1].nat)/meses[1].nat*100 : 0;
+
+    // Top potencializador e ofensor da rede (vendedoras)
+    const todasVends = redeData.flatMap(l=>l.vends.map(v=>({...v,lojaNome:l.nome})));
+    const melhorVend = [...todasVends].sort((a,b)=>b.pct-a.pct)[0];
+    const piorVend   = [...todasVends].filter(v=>v.mV>0).sort((a,b)=>a.pct-b.pct)[0];
+
+    grid.innerHTML = `
+      <!-- Status Rede -->
+      <div style="background:var(--card2);border:1px solid ${crRede};border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Status da Rede</div>
+        <div style="font-size:28px;font-weight:900;color:${crRede}">${pctRede.toFixed(0)}%</div>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0">${fmt(totFat)} de ${fmt(totMeta)}</div>
+        <div style="height:6px;background:var(--cinza);border-radius:6px;overflow:hidden;margin:8px 0">
+          <div style="width:${Math.min(100,pctRede)}%;height:100%;background:${crRede};border-radius:6px"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${nasMeta} de ${LOJAS.length} lojas na meta</div>
+        <div style="margin-top:6px;font-size:12px;font-weight:600;color:var(--azul)">TM Rede: ${fmt(tmRede)} · ${totAtend} atend.</div>
+      </div>
+
+      <!-- Ranking Lojas no mês -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">🏪 Lojas — % da Meta</div>
+        ${redeData.sort((a,b)=>b.pct-a.pct).map(l=>{
+          const c=l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+          const icon=l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <div style="flex:1">
+              <div style="font-size:11px;font-weight:600">${icon} ${l.nome}</div>
+              <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:3px 0">
+                <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+              </div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:${c};margin-left:10px;min-width:36px;text-align:right">${l.pct.toFixed(0)}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Potencializador & Ofensor da Rede -->
+      <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚡ Potencializador & Ofensor da Rede</div>
+        ${melhorVend?`<div style="background:rgba(46,204,135,.08);border:1px solid rgba(46,204,135,.2);border-radius:8px;padding:10px;margin-bottom:8px">
+          <div style="font-size:9px;color:var(--verde);font-weight:600;margin-bottom:4px">🏆 MAIOR POTENCIALIZADOR</div>
+          <div style="font-size:13px;font-weight:700">${melhorVend.nome}</div>
+          <div style="font-size:10px;color:var(--muted)">${melhorVend.lojaNome} · ${fmt(melhorVend.vm)} · ${melhorVend.pct.toFixed(0)}% meta</div>
+          <div style="font-size:10px;color:var(--verde)">TM: ${fmt(melhorVend.tm)} · ${melhorVend.nat} atend.</div>
+        </div>`:''}
+        ${piorVend?`<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px">
+          <div style="font-size:9px;color:var(--verm);font-weight:600;margin-bottom:4px">⚠️ MAIOR OFENSOR</div>
+          <div style="font-size:13px;font-weight:700">${piorVend.nome}</div>
+          <div style="font-size:10px;color:var(--muted)">${piorVend.lojaNome} · ${fmt(piorVend.vm)} · ${piorVend.pct.toFixed(0)}% meta</div>
+          <div style="font-size:10px;color:var(--verm)">Necessita ${fmt(Math.max(0,piorVend.mV-piorVend.vm))} p/ bater a meta</div>
+        </div>`:''}
+      </div>
+
+      <!-- Tendência de Faturamento da Rede -->
+      <div style="background:var(--card2);border:1px solid ${crescFat>=0?'var(--verde)':'var(--verm)'};border-radius:12px;padding:16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📈 Tendência de Faturamento — Rede</div>
+        <div style="font-size:26px;font-weight:900;color:${crescFat>=0?'var(--verde)':'var(--verm)'}">${crescFat>=0?'+':''}${crescFat.toFixed(1)}%</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
+        ${meses.map((m2,i)=>{
+          const maxF=Math.max(...meses.map(x=>x.fat),1);
+          const w=m2.fat>0?(m2.fat/maxF*100).toFixed(0):0;
+          return `<div style="margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:var(--muted)">${m2.label}</span>
+              <span style="color:var(--texto);font-weight:600">${m2.fat>0?fmt(m2.fat):'Sem dados'}</span>
+            </div>
+            <div style="height:4px;background:var(--cinza);border-radius:4px">
+              <div style="width:${w}%;height:100%;background:${i===0?'var(--azul)':'var(--cinza)'};border-radius:4px;border:${i===0?'':'1px solid rgba(255,255,255,.1)'}"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+
+    if(crescGrid){
+      crescGrid.innerHTML = `
+        <!-- Clientes Atendidos -->
+        <div style="background:var(--card2);border:1px solid ${crescNat>=0?'var(--verde)':'var(--verm)'};border-radius:12px;padding:16px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👥 Clientes Atendidos — Rede</div>
+          <div style="font-size:26px;font-weight:900;color:${crescNat>=0?'var(--verde)':'var(--verm)'}">${crescNat>=0?'+':''}${crescNat.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
+          ${meses.map((m2,i)=>{
+            const maxN=Math.max(...meses.map(x=>x.nat),1);
+            const w2=m2.nat>0?(m2.nat/maxN*100).toFixed(0):0;
+            return `<div style="margin-bottom:6px">
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+                <span style="color:var(--muted)">${m2.label}</span>
+                <span style="color:var(--texto);font-weight:600">${m2.nat>0?m2.nat+' atend.':'Sem dados'}</span>
+              </div>
+              <div style="height:4px;background:var(--cinza);border-radius:4px">
+                <div style="width:${w2}%;height:100%;background:${i===0?'var(--roxo)':'var(--cinza)'};border-radius:4px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+
+        <!-- Ticket Médio da Rede -->
+        <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🎫 Ticket Médio — Evolução Rede</div>
+          ${meses.map((m2,i)=>{
+            const maxTM2=Math.max(...meses.map(x=>x.tm),1);
+            const w3=m2.tm>0?(m2.tm/maxTM2*100).toFixed(0):0;
+            return `<div style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+                <span style="color:var(--muted)">${m2.label}</span>
+                <span style="color:var(--texto);font-weight:600">${m2.tm>0?fmt(m2.tm):'—'}</span>
+              </div>
+              <div style="height:4px;background:var(--cinza);border-radius:4px">
+                <div style="width:${w3}%;height:100%;background:${i===0?'var(--ouro)':'var(--cinza)'};border-radius:4px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+
+        <!-- KPIs por Loja (ranking vendedoras top) -->
+        <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">👩 Top Vendedoras da Rede</div>
+          <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
+            <span>Vendedora</span><span style="text-align:right">%</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span>
+          </div>
+          ${todasVends.sort((a,b)=>b.pct-a.pct).slice(0,8).map(v=>{
+            const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
+            return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+              <span style="font-weight:600;color:${corV2}">${v.nome.split(' ')[0]}</span>
+              <span style="text-align:right;color:var(--muted)">${v.pct.toFixed(0)}%</span>
+              <span style="text-align:right;color:var(--muted)">${fmt(v.vm)}</span>
+              <span style="text-align:right;color:var(--muted)">${v.tm>0?fmt(v.tm):'—'}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    showToast('✅ Diagnóstico da rede atualizado!');
+    return;
+  }
+
+  // Modo loja (não admin)
+  const lid = lojaId();
   const loja = LOJAS.find(l=>l.id===lid);
   const m    = getMetas(lid);
 
-  // ── KPIs do mês atual ──────────────────────────────────────
   const realMes  = calcMes(lid);
   const pctMes   = m.mes>0 ? realMes/m.mes*100 : 0;
   const tmMes    = calcTMLoja(lid,'mes');
@@ -3844,23 +4040,19 @@ function gerarDiagnostico(){
   const restante = Math.max(0, m.mes - realMes);
   const necDia   = diasFalt>0 ? restante/diasFalt : 0;
 
-  // ── Análise por vendedora ────────────────────────────────────
   const vends = D.vendedoras.filter(v=>v.loja===lid);
   const vendsData = vends.map(v=>{
     const vm  = calcVendPer(v.id,'mes');
-    const vd  = calcVendPer(v.id,'dia');
     const mV  = Number(v.metaMes)||0;
     const pct = mV>0 ? vm/mV*100 : 0;
-    // Atendimentos do mês
     let nat=0;
     Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,d])=>{
       if(dt.startsWith(mes)) nat+=Number(d.trans||d.cli||0);
     });
     const tm  = nat>0 ? vm/nat : 0;
-    return {...v,vm,vd,pct,nat,tm,mV};
+    return {...v,vm,pct,nat,tm,mV};
   }).sort((a,b)=>b.pct-a.pct);
 
-  // ── Comparação meses anteriores ──────────────────────────────
   const meses = [];
   for(let i=0;i<4;i++){
     const d = new Date(mes+'-01');
@@ -3872,42 +4064,32 @@ function gerarDiagnostico(){
         if(dt.startsWith(mStr)){ fat+=Number(dd.val||0); nat+=Number(dd.trans||dd.cli||0); }
       });
     });
-    // fallback D.vendas — FORA do loop de vendedoras para evitar multiplicação
     if(fat===0){
       Object.entries(D.vendas[lid]||{}).forEach(([dt,dd])=>{
         if(dt.startsWith(mStr)){ fat+=Number(dd.fat||0); nat+=Number(dd.trans||0); }
       });
     }
-    const label = i===0?'Este mês':i===1?'Mês ant.':mStr.slice(0,7);
+    const label = i===0?'Este mês':i===1?'Mês ant.':mStr;
     meses.push({mes:mStr,label,fat,nat,tm:nat>0?fat/nat:0});
   }
 
-  // ── Identificar potencializador e ofensor ───────────────────
   const melhor = vendsData[0];
   const pior   = vendsData[vendsData.length-1];
   const acima  = vendsData.filter(v=>v.pct>=100).length;
   const abaixo = vendsData.filter(v=>v.pct<70).length;
 
-  // ── Tendência de clientes ────────────────────────────────────
-  const crescClientes = meses.length>=2 && meses[1].nat>0
-    ? ((meses[0].nat - meses[1].nat)/meses[1].nat*100)
-    : 0;
-  const crescFat = meses.length>=2 && meses[1].fat>0
-    ? ((meses[0].fat - meses[1].fat)/meses[1].fat*100)
-    : 0;
+  const crescClientes = meses.length>=2&&meses[1].nat>0 ? ((meses[0].nat-meses[1].nat)/meses[1].nat*100) : 0;
+  const crescFat = meses.length>=2&&meses[1].fat>0 ? ((meses[0].fat-meses[1].fat)/meses[1].fat*100) : 0;
 
-  // ── Cor por status ───────────────────────────────────────────
   const corPct = pctMes>=100?'var(--verde)':pctMes>=70?'var(--ouro)':'var(--verm)';
   const corNec = necDia>mediaDir?'var(--verm)':'var(--verde)';
   const corCres = crescFat>=0?'var(--verde)':'var(--verm)';
   const corCresClientes = crescClientes>=0?'var(--verde)':'var(--verm)';
 
-  // ── Render do diagnóstico ────────────────────────────────────
   const grid = document.getElementById('lanc-diag-grid');
   if(!grid) return;
 
   grid.innerHTML = `
-    <!-- Card Status Geral -->
     <div style="background:var(--card2);border:1px solid ${corPct};border-radius:12px;padding:16px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Status do Mês</div>
       <div style="font-size:28px;font-weight:900;color:${corPct}">${pctMes.toFixed(0)}%</div>
@@ -3919,7 +4101,6 @@ function gerarDiagnostico(){
       <div style="margin-top:6px;font-size:12px;font-weight:600;color:${corNec}">Necessário/dia: ${fmt(necDia)}</div>
     </div>
 
-    <!-- Card Equipe -->
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👩 Performance da Equipe</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
@@ -3933,9 +4114,9 @@ function gerarDiagnostico(){
         </div>
       </div>
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Ranking equipe</div>
-      ${vendsData.map((v,i)=>{
-        const corV = v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
-        const icon = v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+      ${vendsData.map(v=>{
+        const corV=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
+        const icon=v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
           <span style="font-size:11px">${icon} ${v.nome}</span>
           <span style="font-size:11px;font-weight:600;color:${corV}">${v.pct.toFixed(0)}%</span>
@@ -3943,7 +4124,6 @@ function gerarDiagnostico(){
       }).join('')}
     </div>
 
-    <!-- Card Potencializador e Ofensor -->
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚡ Potencializador & Ofensor</div>
       ${melhor?`<div style="background:rgba(46,204,135,.08);border:1px solid rgba(46,204,135,.2);border-radius:8px;padding:10px;margin-bottom:8px">
@@ -3958,19 +4138,18 @@ function gerarDiagnostico(){
         <div style="font-size:11px;color:var(--muted)">${fmt(pior.vm)} vendidos • ${pior.pct.toFixed(0)}% da meta</div>
         <div style="font-size:10px;color:var(--verm);margin-top:2px">TM: ${fmt(pior.tm)} • ${pior.nat} atend.</div>
         <div style="font-size:10px;color:var(--muted);margin-top:4px">Necessita de ${fmt(Math.max(0,pior.mV-pior.vm))} para bater a meta</div>
-      </div>`:''} 
+      </div>`:''}
       <div style="margin-top:10px;font-size:10px;color:var(--muted)">TM médio da loja: <strong style="color:var(--texto)">${fmt(tmMes)}</strong></div>
     </div>
 
-    <!-- Card Tendência de Crescimento -->
     <div style="background:var(--card2);border:1px solid ${corCres};border-radius:12px;padding:16px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📈 Tendência de Faturamento</div>
       <div style="font-size:26px;font-weight:900;color:${corCres}">${crescFat>=0?'+':''}${crescFat.toFixed(1)}%</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
       ${meses.map((m2,i)=>{
-        const maxF = Math.max(...meses.map(x=>x.fat),1);
-        const w = m2.fat>0 ? (m2.fat/maxF*100).toFixed(0) : 0;
-        const cor2 = i===0?'var(--azul)':'var(--cinza)';
+        const maxF=Math.max(...meses.map(x=>x.fat),1);
+        const w=m2.fat>0?(m2.fat/maxF*100).toFixed(0):0;
+        const cor2=i===0?'var(--azul)':'var(--cinza)';
         return `<div style="margin-bottom:6px">
           <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
             <span style="color:var(--muted)">${m2.label}</span>
@@ -3984,19 +4163,17 @@ function gerarDiagnostico(){
     </div>
   `;
 
-  // ── Render análise de crescimento de clientes ────────────────
   const crescGrid = document.getElementById('lanc-cresc-grid');
   if(crescGrid){
     crescGrid.innerHTML = `
-      <!-- Tendência clientes -->
       <div style="background:var(--card2);border:1px solid ${corCresClientes};border-radius:12px;padding:16px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👥 Clientes Atendidos</div>
         <div style="font-size:26px;font-weight:900;color:${corCresClientes}">${crescClientes>=0?'+':''}${crescClientes.toFixed(1)}%</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:12px">vs mês anterior</div>
         ${meses.map((m2,i)=>{
-          const maxN = Math.max(...meses.map(x=>x.nat),1);
-          const w2 = m2.nat>0 ? (m2.nat/maxN*100).toFixed(0) : 0;
-          const cor3 = i===0?'var(--roxo)':'var(--cinza)';
+          const maxN=Math.max(...meses.map(x=>x.nat),1);
+          const w2=m2.nat>0?(m2.nat/maxN*100).toFixed(0):0;
+          const cor3=i===0?'var(--roxo)':'var(--cinza)';
           return `<div style="margin-bottom:6px">
             <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
               <span style="color:var(--muted)">${m2.label}</span>
@@ -4009,13 +4186,12 @@ function gerarDiagnostico(){
         }).join('')}
       </div>
 
-      <!-- Ticket médio mês a mês -->
       <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🎫 Ticket Médio — Evolução</div>
         ${meses.map((m2,i)=>{
-          const maxTM = Math.max(...meses.map(x=>x.tm),1);
-          const w3 = m2.tm>0 ? (m2.tm/maxTM*100).toFixed(0) : 0;
-          const cor4 = i===0?'var(--ouro)':'var(--cinza)';
+          const maxTM=Math.max(...meses.map(x=>x.tm),1);
+          const w3=m2.tm>0?(m2.tm/maxTM*100).toFixed(0):0;
+          const cor4=i===0?'var(--ouro)':'var(--cinza)';
           return `<div style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
               <span style="color:var(--muted)">${m2.label}</span>
@@ -4028,7 +4204,6 @@ function gerarDiagnostico(){
         }).join('')}
       </div>
 
-      <!-- KPIs por vendedora -->
       <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📋 KPIs por Vendedora</div>
         <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
@@ -4049,6 +4224,7 @@ function gerarDiagnostico(){
 
   showToast('✅ Diagnóstico atualizado!');
 }
+
 
 
 function carregarDash(){
@@ -7831,69 +8007,134 @@ function tabRankPer(per, el, ctx) {
 function renderRankings(tab) {
   const per = _rankPer;
   const hj  = hoje();
+  const perV = per==='hoje'?'dia':per;
+  const cls  = ['r1','r2','r3','rx','rx','rx','rx'];
 
-  // --- Lojas ---
+  // --- Dados de todas as lojas ---
   const ld = LOJAS.map(l => {
     const m    = getMetas(l.id);
-    const v    = per==='hoje'   ? calcDia(l.id)
-                : per==='semana' ? calcSem(l.id) : calcMes(l.id);
-    const meta = per==='hoje'   ? m.dia : per==='semana' ? m.sem : m.mes;
-    const sm   = per==='hoje'   ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
+    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
-    return {...l, v, meta, sm, pct};
-  }).sort((a,b) => b.v - a.v);
+    const tm   = calcTMLoja(l.id, perV);
+    const nat  = calcNAtend(l.id, perV);
+    return {...l, v, meta, sm, pct, tm, nat};
+  });
 
-  const totRede = ld.reduce((s,l)=>s+l.v, 0);
+  const totRede   = ld.reduce((s,l)=>s+l.v, 0);
+  const metaTotal = ld.reduce((s,l)=>s+l.meta, 0);
+  const pctRede   = metaTotal>0 ? totRede/metaTotal*100 : 0;
+  const cr        = pctRede>=120?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
 
-  // --- Podio das lojas ---
-  const podioHtml = _buildPodio(ld.slice(0,3), l => ({
-    titulo: l.nome, sub: '',
-    val: '', pct: l.pct, meta: '', sm: ''
+  // --- KPIs consolidados ---
+  document.getElementById('rank-kpis-rede').innerHTML = `
+    <div class="kcard ouro" style="padding:14px"><div class="kl">Total Rede</div><div class="kv" style="font-size:18px">${fmt(totRede)}</div></div>
+    <div class="kcard" style="padding:14px;border-color:${cr}"><div class="kl">% da Meta</div><div class="kv" style="font-size:18px;color:${cr}">${pctRede.toFixed(0)}%</div></div>
+    <div class="kcard verde" style="padding:14px"><div class="kl">Lojas na Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=100).length}/${LOJAS.length}</div></div>
+    <div class="kcard roxo" style="padding:14px"><div class="kl">Super Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=120).length}</div><div class="ks">lojas acima de 120%</div></div>
+    <div class="kcard azul" style="padding:14px"><div class="kl">Melhor Loja</div><div class="kv" style="font-size:14px">${[...ld].sort((a,b)=>b.pct-a.pct)[0]?.nome||'--'}</div></div>
+    <div class="kcard verm" style="padding:14px"><div class="kl">Precisa Atencao</div><div class="kv" style="font-size:14px">${[...ld].sort((a,b)=>a.pct-b.pct)[0]?.nome||'--'}</div></div>`;
+
+  // --- Podio: top 3 por % da meta ---
+  const ldMeta = [...ld].sort((a,b)=>b.pct-a.pct||b.v-a.v);
+  document.getElementById('rank-podio-lojas').innerHTML = _buildPodio(ldMeta.slice(0,3), l=>({
+    titulo: l.nome, sub:'', val:'', pct:l.pct, meta:'', sm:''
   }));
-  document.getElementById('rank-podio-lojas').innerHTML = podioHtml;
 
-  // --- Lista completa lojas ---
-  const max = ld[0]?.v || 1;
-  const cls = ['r1','r2','r3','rx','rx','rx','rx'];
-  document.getElementById('rank-full-lojas').innerHTML = ld.map((l,i) => {
-    const c = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-    const badge = l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':'';
+  // --- Ranking 1: Maior Faturamento Lojas ---
+  const ldFat = [...ld].sort((a,b)=>b.v-a.v);
+  const maxFat = ldFat[0]?.v||1;
+  document.getElementById('rank-full-lojas').innerHTML = ldFat.map((l,i)=>{
+    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
-      <div class="rpos ${cls[i]}">${i+1}</div>
+      <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
-        <div class="rn">${l.nome} ${badge}</div>
-        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0;width:100%">
-          <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+        <div class="rn">${l.nome}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+          <div style="width:${maxFat>0?l.v/maxFat*100:0}%;height:100%;background:${c};border-radius:3px"></div>
         </div>
-        <div class="rv" style="font-size:9px;color:var(--muted)">${l.pct>=100?'✅ Meta atingida!':l.pct>=70?'Próximo da meta':'Abaixo da meta'}</div>
+        <div class="rv">${l.pct.toFixed(0)}% da meta</div>
       </div>
-      <div style="text-align:right">
-        <div style="font-family:Playfair Display,serif;font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
+      <div style="text-align:right;min-width:60px">
+        <div style="font-size:13px;font-weight:700;color:${c}">${fmt(l.v)}</div>
       </div>
     </div>`;
   }).join('');
 
-  // --- Top vendedoras da rede ---
-  const perV = per==='hoje'?'dia':per;
-  const _hjRede = hoje();
-  const allV = D.vendedoras
-    .map(v => {
-      const val  = calcVendPer(v.id, perV);
-      const mMes = Number(v.metaMes)||0;
-      const mPer = per==='hoje'
-        ? metaDiaProgressiva(mMes, v.id, _hjRede)
-        : per==='semana' ? parseFloat((mMes/4.33).toFixed(2)) : mMes;
-      const pct  = mPer>0 ? val/mPer*100 : 0;
-      return {...v, val, pct, mPer};
-    })
-    .sort((a,b) => b.val-a.val)   // ordena por FATURAMENTO
-    .slice(0, 10);
-  const maxV = allV[0]?.val || 1;
-  document.getElementById('rank-full-vends-rede').innerHTML = allV.length
-    ? allV.map((v,i) => {
-        const loja = LOJAS.find(l=>l.id===v.loja);
-        const pct  = v.pct||0;
-        const c    = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--muted)';
+  // --- Ranking 2: Mais Próximo da Meta Lojas ---
+  document.getElementById('rank-meta-lojas').innerHTML = ldMeta.map((l,i)=>{
+    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    return `<div class="ritem">
+      <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+      <div class="rinfo">
+        <div class="rn">${l.nome}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+          <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
+        </div>
+        <div class="rv">${fmt(l.v)} realizado</div>
+      </div>
+      <div style="text-align:right;min-width:48px">
+        <div style="font-size:16px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // --- Ranking 3: Maior TM Lojas ---
+  const ldTM = [...ld].filter(l=>l.nat>0).sort((a,b)=>b.tm-a.tm);
+  const maxTM = ldTM[0]?.tm||1;
+  document.getElementById('rank-tm-lojas').innerHTML = ldTM.length
+    ? ldTM.map((l,i)=>`<div class="ritem">
+        <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+        <div class="rinfo">
+          <div class="rn">${l.nome}</div>
+          <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+            <div style="width:${maxTM>0?l.tm/maxTM*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
+          </div>
+          <div class="rv">${l.nat} atend.</div>
+        </div>
+        <div style="text-align:right;min-width:56px">
+          <div style="font-size:14px;font-weight:700;color:var(--azul)">${fmt(l.tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">TM</div>
+        </div>
+      </div>`).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
+
+  // --- Dados de todas as vendedoras ---
+  const allVBase = D.vendedoras.map(v => {
+    const loja  = LOJAS.find(l=>l.id===v.loja);
+    const val   = calcVendPer(v.id, perV);
+    const mMes  = Number(v.metaMes)||0;
+    const mPer  = per==='hoje'
+      ? metaDiaProgressiva(mMes, v.id, hj)
+      : per==='semana' ? parseFloat((mMes/4.33).toFixed(2)) : mMes;
+    const pct   = mPer>0 ? val/mPer*100 : 0;
+    const tm    = calcTMVend(v.id, perV);
+    const trans = (() => {
+      const vd=D.vendasVend[v.id]||{};
+      let t=0;
+      if(perV==='dia'){ t=Number(vd[hj]?.trans||0); }
+      else if(perV==='semana'){
+        const hd=new Date();hd.setHours(0,0,0,0);
+        const diff=hd.getDay()===0?6:hd.getDay()-1;
+        const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
+        for(let k=0;k<7;k++){const dd=new Date(seg);dd.setDate(seg.getDate()+k);if(dd<=hd){t+=Number(vd[dd.toISOString().slice(0,10)]?.trans||0);}}
+      } else {
+        const mes2=hj.slice(0,7);
+        Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes2))t+=Number(vd2.trans||0);});
+      }
+      return t;
+    })();
+    return {...v, val, pct, mPer, tm, trans, lojaNome:loja?.nome||v.loja};
+  }).filter(v=>v.val>0);
+
+  const maxV = [...allVBase].sort((a,b)=>b.val-a.val)[0]?.val||1;
+
+  // --- Ranking 4: Maior Faturamento Vendedoras ---
+  const allVFat = [...allVBase].sort((a,b)=>b.val-a.val).slice(0,10);
+  document.getElementById('rank-full-vends-rede').innerHTML = allVFat.length
+    ? allVFat.map((v,i)=>{
+        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
@@ -7901,100 +8142,58 @@ function renderRankings(tab) {
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
               <div style="width:${maxV>0?v.val/maxV*100:0}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
-            <div class="rv">${loja?.nome||v.loja}</div>
+            <div class="rv">${v.lojaNome} · ${v.pct.toFixed(0)}% meta</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:13px;font-weight:700;color:${c}">${pct.toFixed(0)}%</div>
+          <div style="text-align:right;min-width:60px">
+            <div style="font-size:13px;font-weight:700;color:${c}">${fmt(v.val)}</div>
           </div>
         </div>`;
       }).join('')
     : "<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
 
-  // --- KPIs consolidados ---
-  const metaTotal = ld.reduce((s,l)=>s+l.meta, 0);
-  const pctRede   = metaTotal>0 ? totRede/metaTotal*100 : 0;
-  const cr        = pctRede>=120?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
-  document.getElementById('rank-kpis-rede').innerHTML = `
-    <div class="kcard ouro" style="padding:14px"><div class="kl">Total Rede</div><div class="kv" style="font-size:18px">${fmt(totRede)}</div></div>
-    <div class="kcard" style="padding:14px;border-color:${cr}"><div class="kl">% da Meta</div><div class="kv" style="font-size:18px;color:${cr}">${pctRede.toFixed(0)}%</div></div>
-    <div class="kcard verde" style="padding:14px"><div class="kl">Lojas na Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=100).length}/${LOJAS.length}</div></div>
-    <div class="kcard roxo" style="padding:14px"><div class="kl">Super Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=120).length}</div><div class="ks">lojas acima de 125%</div></div>
-    <div class="kcard azul" style="padding:14px"><div class="kl">Melhor Loja</div><div class="kv" style="font-size:14px">${ld[0]?.nome||'--'}</div><div class="ks">${fmt(ld[0]?.v)}</div></div>
-    <div class="kcard verm" style="padding:14px"><div class="kl">Precisa de Atencao</div><div class="kv" style="font-size:14px">${ld[ld.length-1]?.nome||'--'}</div><div class="ks">${ld[ld.length-1]?.pct.toFixed(0)}% da meta</div></div>`;
-
-  // ── Ranking TM das Lojas
-  const perTM = per==='hoje'?'dia':per;
-  const ldTM = LOJAS.map(l=>({
-    ...l,
-    tm: calcTMLoja(l.id, perTM),
-    n:  calcNVendas(l.id, perTM),
-    fat: per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)
-  })).filter(l=>l.n>0).sort((a,b)=>b.tm-a.tm);
-  const clsTM=['r1','r2','r3','rx','rx','rx','rx'];
-  const maxTM = ldTM[0]?.tm||1;
-  document.getElementById('rank-tm-lojas').innerHTML = ldTM.length
-    ? ldTM.map((l,i)=>{
-        const c=i===0?'var(--ouro)':i===1?'var(--muted)':i===2?'#cd7f32':'var(--texto)';
+  // --- Ranking 5: Maior % da Meta Vendedoras ---
+  const allVMeta = [...allVBase].sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
+  const maxPct = allVMeta[0]?.pct||1;
+  document.getElementById('rank-meta-vends-rede').innerHTML = allVMeta.length
+    ? allVMeta.map((v,i)=>{
+        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
-          <div class="rpos ${clsTM[i]}">${['🥇','🥈','🥉'][i]||i+1}</div>
-          <div class="rinfo">
-            <div class="rn">${l.nome}</div>
-            <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
-              <div style="width:${maxTM>0?l.tm/maxTM*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
-            </div>
-            <div class="rv">${l.n} vendas · Fat: ${fmt(l.fat)}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:15px;font-weight:700;color:var(--azul)">${fmt(l.tm)}</div>
-            <div style="font-size:9px;color:var(--muted)">TM/venda</div>
-          </div>
-        </div>`;
-      }).join('')
-    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lançamentos no período.</div>";
-
-  // ── Ranking TM das Vendedoras da rede
-  const allVTM = D.vendedoras.map(v=>{
-    const loja=LOJAS.find(l=>l.id===v.loja);
-    const tm = calcTMVend(v.id, perTM);
-    const fat = calcVendPer(v.id, perTM);
-    const trans = (() => {
-      const vd=D.vendasVend[v.id]||{};
-      let t=0;
-      if(perTM==='dia'){ t=Number(vd[hoje()]?.trans||0); }
-      else if(perTM==='semana'){
-        const hd=new Date();hd.setHours(0,0,0,0);
-        const diff=hd.getDay()===0?6:hd.getDay()-1;
-        const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
-        for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){t+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);}}
-      } else {
-        const mes=hoje().slice(0,7);
-        Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes))t+=Number(vd2.trans||0);});
-      }
-      return t;
-    })();
-    const nV = fat>0 ? 1 : 0; // manter compatibilidade display
-    return {...v, fat, nV, trans, tm, lojaNome:loja?.nome||v.loja};
-  }).filter(v=>v.fat>0).sort((a,b)=>b.tm-a.tm).slice(0,10);
-  const maxVTM=allVTM[0]?.tm||1;
-  document.getElementById('rank-tm-vends').innerHTML = allVTM.length
-    ? allVTM.map((v,i)=>{
-        return `<div class="ritem">
-          <div class="rpos ${clsTM[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+          <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
             <div class="rn">${v.nome}</div>
             <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
-              <div style="width:${maxVTM>0?v.tm/maxVTM*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
+              <div style="width:${Math.min(100,v.pct)}%;height:100%;background:${c};border-radius:3px"></div>
             </div>
-            <div class="rv">${v.lojaNome} · ${v.trans||v.nV} atend.</div>
+            <div class="rv">${v.lojaNome} · ${fmt(v.val)}</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:15px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
-            <div style="font-size:9px;color:var(--muted)">TM/venda</div>
+          <div style="text-align:right;min-width:48px">
+            <div style="font-size:16px;font-weight:700;color:${c}">${v.pct.toFixed(0)}%</div>
           </div>
         </div>`;
       }).join('')
-    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lançamentos no período.</div>";
+    : "<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
+
+  // --- Ranking 6: Maior TM Vendedoras ---
+  const allVTM = [...allVBase].filter(v=>v.tm>0).sort((a,b)=>b.tm-a.tm).slice(0,10);
+  const maxVTM = allVTM[0]?.tm||1;
+  document.getElementById('rank-tm-vends').innerHTML = allVTM.length
+    ? allVTM.map((v,i)=>`<div class="ritem">
+        <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
+        <div class="rinfo">
+          <div class="rn">${v.nome}</div>
+          <div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden;margin:4px 0">
+            <div style="width:${maxVTM>0?v.tm/maxVTM*100:0}%;height:100%;background:var(--azul);border-radius:3px"></div>
+          </div>
+          <div class="rv">${v.lojaNome} · ${v.trans||0} atend.</div>
+        </div>
+        <div style="text-align:right;min-width:56px">
+          <div style="font-size:14px;font-weight:700;color:var(--azul)">${fmt(v.tm)}</div>
+          <div style="font-size:9px;color:var(--muted)">TM</div>
+        </div>
+      </div>`).join('')
+    : "<div style='color:var(--muted);font-size:11px;padding:8px'>Sem lancamentos no periodo.</div>";
 }
+
 
 // ─── helpers: valor ideal e gap ───────────────────────
 function valorIdealPeriodo(metaMes, de, ate){
