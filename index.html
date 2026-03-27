@@ -1566,6 +1566,12 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div id="rel-camp-ranking"></div>
       </div>
 
+      <!-- Ranking vendedoras -->
+      <div class="admin-only" style="margin-bottom:18px;display:none">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">👩 RANKING DE VENDEDORAS</div>
+        <div id="rel-camp-rank-vend"></div>
+      </div>
+
       <!-- Tabela detalhada -->
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">📋 DETALHAMENTO POR LOJA</div>
@@ -1741,6 +1747,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.6px;margin-bottom:8px">📅 LANÇAMENTOS ANTERIORES</div>
         <div id="camp-historico-lista" style="max-height:180px;overflow-y:auto"></div>
       </div>
+      <!-- Ranking vendedoras desta campanha -->
+      <div id="camp-rank-vend-wrap" style="display:none;margin-top:14px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);border-radius:10px;padding:12px"></div>
 
       <div class="btn-r" style="margin-top:14px">
         <button class="btn-p" onclick="salvarCampReal()">Salvar Dia</button>
@@ -4106,13 +4114,21 @@ function gerarDiagnostico(){
           <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
             <span>Vendedora</span><span style="text-align:right">%</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span>
           </div>
-          ${todasVends.sort((a,b)=>b.pct-a.pct).slice(0,8).map(v=>{
+          ${todasVends.sort((a,b)=>b.pct-a.pct).slice(0,10).map((v,idx)=>{
             const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
-            return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
-              <span style="font-weight:600;color:${corV2}">${v.nome.split(' ')[0]}</span>
-              <span style="text-align:right;color:var(--muted)">${v.pct.toFixed(0)}%</span>
-              <span style="text-align:right;color:var(--muted)">${fmt(v.vm)}</span>
-              <span style="text-align:right;color:var(--muted)">${v.tm>0?fmt(v.tm):'—'}</span>
+            const medalV=['🥇','🥈','🥉'][idx]||'';
+            return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+                <span style="font-size:11px;font-weight:600;color:${corV2}">${medalV} ${v.nome}</span>
+                <span style="font-size:11px;font-weight:700;color:${corV2}">${v.pct.toFixed(0)}%</span>
+              </div>
+              <div style="height:3px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-bottom:3px">
+                <div style="height:100%;width:${Math.min(100,v.pct)}%;background:${corV2};border-radius:3px"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted)">
+                <span>${v.lojaNome||''}</span>
+                <span>${fmt(v.vm)} · TM ${v.tm>0?fmt(v.tm):'—'} · ${v.nat} atend.</span>
+              </div>
             </div>`;
           }).join('')}
         </div>
@@ -4308,13 +4324,21 @@ function gerarDiagnostico(){
         <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
           <span>Vendedora</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span><span style="text-align:right">Atend.</span>
         </div>
-        ${vendsData.map(v=>{
+        ${vendsData.map((v,idx)=>{
           const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
-          return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
-            <span style="font-weight:600;color:${corV2}">${v.nome.split(' ')[0]}</span>
-            <span style="text-align:right;color:var(--muted)">${v.pct.toFixed(0)}%</span>
-            <span style="text-align:right;color:var(--muted)">${v.tm>0?fmt(v.tm):'—'}</span>
-            <span style="text-align:right;color:var(--muted)">${v.nat||'—'}</span>
+          const medalV=['🥇','🥈','🥉'][idx]||'';
+          return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+              <span style="font-size:11px;font-weight:600;color:${corV2}">${medalV} ${v.nome}</span>
+              <span style="font-size:11px;font-weight:700;color:${corV2}">${v.pct.toFixed(0)}%</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-bottom:3px">
+              <div style="height:100%;width:${Math.min(100,v.pct)}%;background:${corV2};border-radius:3px"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted)">
+              <span>${fmt(v.vm)}</span>
+              <span>TM ${v.tm>0?fmt(v.tm):'—'} · ${v.nat||0} atend.</span>
+            </div>
           </div>`;
         }).join('')}
       </div>
@@ -6522,6 +6546,48 @@ function renderRelCamp(){
     rankEl.innerHTML = '';
   }
 
+  // ── RANKING DE VENDEDORAS (admin) ───────────────────────────
+  const rankVendEl = document.getElementById('rel-camp-rank-vend');
+  if(rankVendEl && isAdmin()){
+    // Agregar vendas por vendedora somando todos os realizados filtrados
+    const porVend = {};
+    reaisAll.forEach(r=>{
+      if(!r.vendedoras) return;
+      Object.entries(r.vendedoras).forEach(([vId,val])=>{
+        if(!porVend[vId]) porVend[vId]={fat:0, loja:'', nome:''};
+        porVend[vId].fat += Number(val)||0;
+        if(!porVend[vId].nome){
+          const vObj = D.vendedoras.find(v=>v.id===vId);
+          if(vObj){
+            porVend[vId].nome  = vObj.nome;
+            porVend[vId].loja  = LOJAS.find(l=>l.id===vObj.loja)?.nome||vObj.loja;
+          }
+        }
+      });
+    });
+    const rvList2 = Object.values(porVend).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+    const rvMax2  = rvList2[0]?.fat||1;
+    const medals3 = ['🥇','🥈','🥉'];
+    rankVendEl.innerHTML = rvList2.length
+      ? rvList2.map((v,i)=>{
+          const c = i===0?'var(--ouro)':i===1?'var(--muted)':i===2?'#cd7f32':'var(--texto)';
+          const bw = Math.round(v.fat/rvMax2*100);
+          return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <div style="width:24px;text-align:center;font-size:15px;flex-shrink:0">${medals3[i]||((i+1)+'º')}</div>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:600">${v.nome||'?'} <span style="font-size:9px;color:var(--muted)">${v.loja}</span></span>
+                <span style="font-size:12px;font-weight:700;color:${c}">${fmt(v.fat)}</span>
+              </div>
+              <div style="height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${bw}%;background:${c};border-radius:3px;transition:width .5s"></div>
+              </div>
+            </div>
+          </div>`;
+        }).join('')
+      : '<div style="color:var(--muted);font-size:12px;padding:8px">Sem lançamentos com vendedoras registradas.</div>';
+  }
+
   // ── TABELA DETALHADA ────────────────────────────────────────
   const tbody = document.getElementById('rel-camp-tbody');
   // Montar linhas: uma por loja por campanha (somando todos os lançamentos diários)
@@ -7003,6 +7069,49 @@ function renderHistoricoCamp(campId, lid){
     </div>`;
   }).join('')
     + `<div style="padding:8px 0;font-size:11px;font-weight:700;color:var(--ouro)">Total acumulado: ${fmt(total)}</div>`;
+
+  // ── Ranking de vendedoras nesta campanha/loja ─────────────────
+  const rankVendWrap = document.getElementById('camp-rank-vend-wrap');
+  if(rankVendWrap){
+    // Agregar vendas por vendedora somando todos os lançamentos
+    const rankVend = {};
+    lancs.forEach(l=>{
+      if(l.vendedoras){
+        Object.entries(l.vendedoras).forEach(([vId, val])=>{
+          if(!rankVend[vId]) rankVend[vId]={fat:0, nome:''};
+          rankVend[vId].fat += Number(val)||0;
+          const vObj = D.vendedoras.find(v=>v.id===vId);
+          if(vObj) rankVend[vId].nome = vObj.nome;
+        });
+      }
+    });
+    const rvList = Object.values(rankVend).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+    const rvMax  = rvList[0]?.fat||1;
+    const medals3 = ['🥇','🥈','🥉'];
+    if(rvList.length){
+      rankVendWrap.style.display='';
+      rankVendWrap.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏆 Ranking Vendedoras — Campanha</div>
+        ${rvList.map((v,i)=>{
+          const c = i===0?'var(--ouro)':i===1?'var(--muted)':i===2?'#cd7f32':'var(--texto)';
+          const barW = Math.round(v.fat/rvMax*100);
+          return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0">
+            <div style="width:20px;font-size:14px;text-align:center">${medals3[i]||(i+1)+'º'}</div>
+            <div style="flex:1">
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+                <span style="font-weight:600">${v.nome||vId}</span>
+                <span style="font-weight:700;color:${c}">${fmt(v.fat)}</span>
+              </div>
+              <div style="height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${barW}%;background:${c};border-radius:3px;transition:width .4s"></div>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}`;
+    } else {
+      rankVendWrap.style.display='none';
+    }
+  }
 }
 
 function editarLancCamp(id){
@@ -7466,7 +7575,11 @@ function editarCampReal(id){
 function excluirCampRealLoja(id){
   if(!confirm('Remover seu realizado desta campanha?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  save(); showToast('Realizado removido'); renderCampLista();
+  if(!D._campExcluidos) D._campExcluidos=[];
+  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+  save();
+  showToast('🗑️ Realizado removido.');
+  renderCampLista();
 }
 
 function abrirFormCampRealPara(campId){
@@ -7480,7 +7593,11 @@ function abrirFormCampRealPara(campId){
 function excluirCampReal(id){
   if(!confirm('Remover este realizado?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  save(); renderCampLista();
+  if(!D._campExcluidos) D._campExcluidos=[];
+  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+  save();
+  showToast('🗑️ Realizado removido.');
+  renderCampLista();
 }
 
 // Funções legadas mantidas para compatibilidade
@@ -7926,14 +8043,14 @@ function gerarRel(){
         </div>
       </div>
       ${(()=>{
-        var rankedTM = ld.slice().sort(function(a,b){ return b.pctTM!==a.pctTM ? b.pctTM-a.pctTM : b.tm-a.tm; });
+        var rankedTM = ld.slice().filter(function(l){return l.tm>0;}).sort(function(a,b){ return b.tm-a.tm; });
         var BAR_H2 = 180;
         var nomes2 = {"Mooca Plaza":"Mooca","Vila Leopoldina":"V.Leopold.","Perdizes":"Perdizes","Santana":"Santana","Jardim Paulista":"J.Paulista","Alto de Pinheiros":"Pinheiros","Shopping Ibirapuera":"Ibirapuera"};
         var medals2 = ["🥇","🥈","🥉"];
         var h2 = '<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H2+100)+'px">';
         rankedTM.forEach(function(l, i){
-          var corTM2 = l.pctTM>=100?"#2ECC87":l.pctTM>=80?"#C9A84C":"#ef4444";
-          var hTM   = l.pctTM>0 ? Math.max(8, Math.round(l.pctTM/rankedTM[0].pctTM*BAR_H2)) : 6;
+          var corTM2 = l.pctTM>=100?"#2ECC87":l.pctTM>=80?"#C9A84C":"#ef4444"; var metaTMLabel = l.metaTM>0?" · meta: "+fmt(l.metaTM):"";
+          var hTM   = l.tm>0 ? Math.max(8, Math.round(l.tm/rankedTM[0].tm*BAR_H2)) : 6;
           var nome2 = nomes2[l.nome]||l.nome;
           var medal2 = i<3 ? medals2[i] : (i+1)+"º";
           h2+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">';
@@ -8688,9 +8805,7 @@ function preencherFormSQL(){
   if(el('sql-user'))   el('sql-user').value   = s.user||'';
 }
 
-async 
-
-function testarConexaoSQL(){
+async function testarConexaoSQL(){
   const st = document.getElementById('sql-status');
   if(!st) return;
   st.style.display='block';
@@ -8801,7 +8916,6 @@ function salvarConfigCosmos(){
   CosmosDB.init();
   testarCosmos();
 }
-async 
 // Restaurar config Cosmos salva
 function restaurarConfigCosmos(){
   try{
