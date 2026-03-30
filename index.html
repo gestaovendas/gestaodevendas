@@ -212,45 +212,49 @@ try{
       }
 
       if(isAdm){
-        // Admin faz merge com todos os docs de loja
+        // Admin lê TODOS os docs de loja em PARALELO (muito mais rápido que sequencial)
         const LOJAS_IDS = ["mooca","leopoldina","perdizes","santana","jarpaul","pinheiros","ibirapuera"];
-        for(const lid of LOJAS_IDS){
+        const snaps = await Promise.allSettled(
+          LOJAS_IDS.map(lid => getDoc(doc(db,"avatim","loja_"+lid)))
+        );
+        snaps.forEach((result, idx) => {
+          const lid = LOJAS_IDS[idx];
+          if(result.status !== 'fulfilled'){ console.warn("[Avatim] Erro loja "+lid+":", result.reason?.message); return; }
+          const snap = result.value;
+          if(!snap.exists()){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
           try{
-            const snap = await getDoc(doc(db,"avatim","loja_"+lid));
-            if(snap.exists()){
-              const pedaco = JSON.parse(snap.data().dados);
-              // Merge vendas da loja
-              if(!base.vendas) base.vendas={};
-              Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
-                if(!base.vendas[l]) base.vendas[l]={};
-                Object.assign(base.vendas[l], dias);
+            const pedaco = JSON.parse(snap.data().dados||"{}");
+            // Merge vendas da loja
+            if(!base.vendas) base.vendas={};
+            Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
+              if(!base.vendas[l]) base.vendas[l]={};
+              Object.assign(base.vendas[l], dias);
+            });
+            if(!base.vendasVend) base.vendasVend={};
+            Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
+              if(!base.vendasVend[vid]) base.vendasVend[vid]={};
+              Object.assign(base.vendasVend[vid], dias);
+            });
+            // Merge campRealizados desta loja
+            if(pedaco.campRealizados && pedaco.campRealizados.length){
+              if(!base.campRealizados) base.campRealizados=[];
+              pedaco.campRealizados.forEach(r=>{
+                const idx2 = base.campRealizados.findIndex(x=>x.id===r.id);
+                if(idx2>=0) base.campRealizados[idx2]=r;
+                else base.campRealizados.push(r);
               });
-              if(!base.vendasVend) base.vendasVend={};
-              Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
-                if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-                Object.assign(base.vendasVend[vid], dias);
-              });
-              // Merge campRealizados desta loja
-              if(pedaco.campRealizados && pedaco.campRealizados.length){
-                if(!base.campRealizados) base.campRealizados=[];
-                pedaco.campRealizados.forEach(r=>{
-                  const idx = base.campRealizados.findIndex(x=>x.id===r.id);
-                  if(idx>=0) base.campRealizados[idx]=r;
-                  else base.campRealizados.push(r);
-                });
-              }
-              // Merge fluxo desta loja
-              if(pedaco.fluxo && pedaco.fluxo.length){
-                if(!base.fluxo) base.fluxo=[];
-                pedaco.fluxo.forEach(r=>{
-                  if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
-                });
-              }
-              console.log("[Avatim] ✅ Merge loja:", lid);
             }
-          }catch(e2){ console.warn("[Avatim] Erro merge loja "+lid+":", e2.message); }
-        }
-        console.log("[Avatim] ✅ Admin: todos os dados carregados e merged");
+            // Merge fluxo desta loja
+            if(pedaco.fluxo && pedaco.fluxo.length){
+              if(!base.fluxo) base.fluxo=[];
+              pedaco.fluxo.forEach(r=>{
+                if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+              });
+            }
+            console.log("[Avatim] ✅ Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
+          }catch(e3){ console.warn("[Avatim] Parse erro loja "+lid+":", e3.message); }
+        });
+        console.log("[Avatim] ✅ Admin: todos os dados carregados em paralelo");
       } else {
         // Loja carrega só seus dados e faz merge sobre o base
         const lojaMap = {
@@ -816,7 +820,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div><h1 class="pt">Dashboard <span id="dash-lnome"></span></h1><div class="ps" id="dash-data"></div></div>
     <div style="display:flex;gap:8px;align-items:center">
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
-      <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde)"></div>
+      <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde);cursor:pointer" onclick="forceSyncAdmin()" title="Clique para sincronizar agora"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
     </div>
   </div>
@@ -3141,12 +3145,11 @@ function save(){
   _savePending = true;
   setTimeout(async ()=>{
     _savePending = false;
-    // Proteção: não gravar no Firebase se não há dados de vendas (evita sobrescrever com vazio)
     const temDados = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0)
                   || Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0)
                   || (D.metasLoja && Object.keys(D.metasLoja).length>0)
                   || (D.campRealizados && D.campRealizados.length>0)
-                  || (D.fluxo && D.fluxo.length>0); // fluxo conta como dado válido
+                  || (D.fluxo && D.fluxo.length>0);
     if(!temDados && !isAdmin()){
       console.warn("[Avatim] save() bloqueado — dados vazios, evitando sobrescrever Firebase");
       return;
@@ -3157,13 +3160,12 @@ function save(){
         await window.fsGravar(JSON.stringify(D));
       }catch(e){
         console.warn("[Avatim] save() erro:", e.message);
-        // Tenta novamente em 5s
         setTimeout(()=>{ if(window.fsGravar) window.fsGravar(JSON.stringify(D)); }, 5000);
       }
     } else {
       console.warn("[Avatim] Firebase indisponível — dado só no localStorage");
     }
-  }, 800);
+  }, 1500); // 1.5s debounce evita múltiplas gravações simultâneas
 }
 
 async function waitForFirebase(timeout=5000){
@@ -9400,15 +9402,13 @@ function iniciarAutoRefresh(){
         D.vendasVend[v.vendedora_id][v.data_venda||hj]={val:v.valor_vendido||0,trans:v.num_transacoes||0};
       });
     } else {
-      // Firebase — busca dados frescos do Firestore (merge de todas as lojas)
+      // Firebase Firestore — busca dados frescos em PARALELO (não sequencial)
       try{
         const ok = await waitForFirebase(3000);
         if(ok && window.fsCarregar){
           const dadosJSON = await window.fsCarregar();
           if(dadosJSON){
             const remoto = JSON.parse(dadosJSON);
-            // Merge cuidadoso: atualiza vendas e vendasVend sem perder outros dados
-            // Deep merge: preserva cada dia de cada loja/vendedora
             if(remoto.vendas){
               Object.entries(remoto.vendas).forEach(([lid,dias])=>{
                 if(!D.vendas[lid]) D.vendas[lid]={};
@@ -9421,13 +9421,19 @@ function iniciarAutoRefresh(){
                 Object.assign(D.vendasVend[vid], dias);
               });
             }
-            // Merge campRealizados das lojas
             if(remoto.campRealizados && remoto.campRealizados.length){
               if(!D.campRealizados) D.campRealizados=[];
               remoto.campRealizados.forEach(r=>{
                 const idx = D.campRealizados.findIndex(x=>x.id===r.id);
                 if(idx>=0) D.campRealizados[idx]=r;
                 else D.campRealizados.push(r);
+              });
+            }
+            // Merge fluxo
+            if(remoto.fluxo && remoto.fluxo.length){
+              if(!D.fluxo) D.fluxo=[];
+              remoto.fluxo.forEach(r=>{
+                if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
               });
             }
             localStorage.setItem('avatim_v5', JSON.stringify(D));
@@ -9438,17 +9444,90 @@ function iniciarAutoRefresh(){
     }
     const ts=new Date();
     const el=document.getElementById('sync-badge');
-    if(el)el.textContent='🔄 '+ts.toLocaleTimeString('pt-BR');
+    if(el) el.textContent='🔄 Sync: '+ts.toLocaleTimeString('pt-BR');
     const pg=document.querySelector('.page.active')?.id?.replace('page-','');
-    if(pg==='dash')carregarDash();
-    else if(pg==='lojas')renderLojas(_tabLojas);
-    else if(pg==='rankings')renderRankings('rede');
-    else if(pg==='gestao')renderGestao();
+    if(pg==='dash')       carregarDash();
+    else if(pg==='lojas') renderLojas(_tabLojas);
+    else if(pg==='rankings'){ renderRankings('rede'); }
+    else if(pg==='gestao'){ renderGestao(); }
     else if(pg==='campanhas'){ renderCampLista(); if(typeof renderRelCamp==='function') renderRelCamp(); }
-    else if(pg==='metas')renderMetas();
+    else if(pg==='metas') renderMetas();
+    else if(pg==='fluxo') { if(typeof renderFluxo==='function') renderFluxo(); }
+    else if(pg==='lanc')  { renderPainelDia(); }
   }
   syncAdmin();
   _autoRefreshTimer=setInterval(syncAdmin,30000);
+}
+
+// ── Sincronização forçada (admin clica no badge) ──────────────────
+async function forceSyncAdmin(){
+  const el = document.getElementById('sync-badge');
+  if(el){ el.textContent='⏳ Sincronizando...'; el.style.color='var(--ouro)'; }
+  try{
+    const ok = await waitForFirebase(5000);
+    if(!ok || !window.fsCarregar){
+      if(el){ el.textContent='❌ Firebase offline'; el.style.color='var(--verm)'; }
+      showToast('Firebase não disponível. Verifique a conexão.','err');
+      return;
+    }
+    const dadosJSON = await window.fsCarregar();
+    if(!dadosJSON){
+      if(el){ el.textContent='⚠️ Sem dados remotos'; el.style.color='var(--ouro)'; }
+      showToast('Nenhum dado remoto encontrado.','err');
+      return;
+    }
+    const remoto = JSON.parse(dadosJSON);
+    // Merge completo — igual ao loadFromFirestore mas sem sobrescrever tombstones locais
+    if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+    if(remoto.vendedoras)    D.vendedoras    = remoto.vendedoras;
+    if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+    if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
+    if(remoto.vendas){
+      Object.entries(remoto.vendas).forEach(([l,ds])=>{
+        if(!D.vendas[l]) D.vendas[l]={};
+        const excl = D._vendasExcluidas?.[l]||[];
+        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt)) D.vendas[l][dt]=val; });
+      });
+    }
+    if(remoto.vendasVend){
+      Object.entries(remoto.vendasVend).forEach(([v,ds])=>{
+        if(!D.vendasVend[v]) D.vendasVend[v]={};
+        const excl = D._vendasVendExcluidas?.[v]||[];
+        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt)) D.vendasVend[v][dt]=val; });
+      });
+    }
+    if(remoto.campRealizados?.length){
+      if(!D.campRealizados) D.campRealizados=[];
+      const excl = D._campExcluidos||[];
+      remoto.campRealizados.forEach(r=>{
+        if(excl.includes(r.id)) return;
+        const i=D.campRealizados.findIndex(x=>x.id===r.id);
+        if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
+      });
+    }
+    if(remoto.fluxo?.length){
+      if(!D.fluxo) D.fluxo=[];
+      remoto.fluxo.forEach(r=>{ if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r); });
+    }
+    localStorage.setItem('avatim_v5', JSON.stringify(D));
+    const ts = new Date().toLocaleTimeString('pt-BR');
+    if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
+    showToast('✅ Dados sincronizados!');
+    // Re-renderizar página ativa
+    const pg = document.querySelector('.page.active')?.id?.replace('page-','');
+    if(pg==='dash')          carregarDash();
+    else if(pg==='lojas')    renderLojas(_tabLojas);
+    else if(pg==='rankings') renderRankings('rede');
+    else if(pg==='gestao')   renderGestao();
+    else if(pg==='campanhas'){ renderCampLista(); if(typeof renderRelCamp==='function') renderRelCamp(); }
+    else if(pg==='lanc')     { renderPainelDia(); }
+    else if(pg==='fluxo')    { if(typeof renderFluxo==='function') renderFluxo(); }
+    else carregarDash();
+  }catch(e){
+    if(el){ el.textContent='❌ Erro sync'; el.style.color='var(--verm)'; }
+    showToast('Erro ao sincronizar: '+e.message,'err');
+    console.error('[Avatim] forceSyncAdmin erro:', e);
+  }
 }
 
 // Carregar config salva
