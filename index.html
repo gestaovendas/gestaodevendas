@@ -71,6 +71,9 @@ try{
 
   window.fsGravar = async function(dadosJSON){
     try{
+      console.log("[Avatim] fsGravar INICIO | email:", window._currentUser?.email,
+        "| vendas keys:", Object.keys(JSON.parse(dadosJSON).vendas||{}).join(","),
+        "| vendasVend keys:", Object.keys(JSON.parse(dadosJSON).vendasVend||{}).length + " vends");
       // Garantir autenticação SEMPRE antes de gravar
       if(!auth.currentUser){
         const email = window._currentUser?.email;
@@ -112,12 +115,33 @@ try{
           // Merge preventivo falhou — continua sem ele (não é crítico)
           console.warn("[Avatim] merge preventivo admin ignorado:", eMerge.code||eMerge.message);
         }
+        // [FIX CRÍTICO] Admin grava no principal APENAS config e metadados
+        // Vendas ficam EXCLUSIVAMENTE nos docs loja_* para evitar sobrescrever dados das lojas
+        const D2_principal = {
+          metasLoja:     D2.metasLoja     || {},
+          vendedoras:    D2.vendedoras    || [],
+          campanhas:     D2.campanhas     || [],
+          campObjetivos: D2.campObjetivos || [],
+          campRealizados:D2.campRealizados|| [],
+          arquivos:      D2.arquivos      || [],
+          metasProd:     D2.metasProd     || [],
+          realProd:      D2.realProd      || {},
+          configCom:     D2.configCom     || {},
+          fluxo:         D2.fluxo         || [],
+          saldosOverride:D2.saldosOverride|| {},
+          produtosExtras:D2.produtosExtras|| [],
+          _vendasExcluidas:    D2._vendasExcluidas     || {},
+          _vendasVendExcluidas:D2._vendasVendExcluidas || {},
+          _campExcluidos:      D2._campExcluidos       || []
+          // INTENCIONALMENTE sem: vendas, vendasVend
+          // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
+        };
         await setDoc(doc(db,"avatim","principal"), {
-          dados: JSON.stringify(D2),
+          dados: JSON.stringify(D2_principal),
           ts: Date.now(),
           por: email
         });
-        console.log("[Avatim] ✅ Admin: principal salvo");
+        console.log("[Avatim] ✅ Admin: principal salvo (config only — vendas nos docs das lojas)");
 
       } else {
         // Loja: gravar no doc da loja
@@ -132,78 +156,93 @@ try{
         };
         const lid = lojaMap[email];
         if(!lid){
-          // [FIX Bug1a] Feedback visual quando email nao esta mapeado
           console.warn("[Avatim] fsGravar: email nao mapeado para loja:", email);
           if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: loja nao identificada para este usuario. Contate o administrador.", "err");
           return;
         }
 
-        // Montar pedaço desta loja
-        const pedaco = {
-          vendas:        { [lid]: D2.vendas?.[lid]||{} },
-          vendasVend:    {},
-          campRealizados:[],
-          fluxo:         []
-        };
-        Object.entries(D2.vendasVend||{}).forEach(([vid, vdata])=>{
-          const vend = (D2.vendedoras||[]).find(v=>v.id===vid);
-          if(vend && vend.loja===lid) pedaco.vendasVend[vid] = vdata;
-        });
-        pedaco.campRealizados = (D2.campRealizados||[]).filter(r=>r.lojaId===lid);
-        pedaco.fluxo = (D2.fluxo||[]).filter(r=>r.loja===lid);
-
         const docId = "loja_"+lid;
+        const excDias  = D2._vendasExcluidas?.[lid] || [];
+        const excCamp  = D2._campExcluidos || [];
 
-        // Merge preventivo: preservar dados históricos do Firebase
+        // ── Montar payload: vendas consolidadas da loja ──────────
+        const vendasLoja = {};
+        Object.entries(D2.vendas?.[lid] || {}).forEach(([dt, dados]) => {
+          if(!excDias.includes(dt)) vendasLoja[dt] = dados;
+        });
+
+        // ── vendasVend: TODOS os vids de vendedoras desta loja ───
+        // Usa D2.vendedoras para descobrir quem é da loja,
+        // MAS também inclui qualquer vid que já existia no doc remoto
+        // para não perder dados históricos de vendedoras removidas.
+        const vendasVendLoja = {};
+        const vidsLoja = new Set(
+          (D2.vendedoras||[]).filter(v=>v.loja===lid).map(v=>v.id)
+        );
+        Object.entries(D2.vendasVend||{}).forEach(([vid, dias]) => {
+          if(!vidsLoja.has(vid)) return;
+          const excDiasV = D2._vendasVendExcluidas?.[vid] || [];
+          const diasFiltrados = {};
+          Object.entries(dias||{}).forEach(([dt, d]) => {
+            if(!excDiasV.includes(dt)) diasFiltrados[dt] = d;
+          });
+          if(Object.keys(diasFiltrados).length > 0) vendasVendLoja[vid] = diasFiltrados;
+        });
+
+        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !excCamp.includes(r.id));
+        const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid);
+
+        // ── Merge com Firebase: preservar histórico não presente localmente ──
         try{
           const snapExist = await getDoc(doc(db,"avatim",docId));
           if(snapExist.exists()){
             const existing = JSON.parse(snapExist.data().dados||"{}");
-            // Merge vendas: só adiciona dias que não existem localmente
-            if(existing.vendas?.[lid]){
-              const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
-              Object.entries(existing.vendas[lid]).forEach(([dt,dados])=>{
-                if(!(dt in pedaco.vendas[lid]) && !excDias.includes(dt)){
-                  pedaco.vendas[lid][dt] = dados;
-                }
-              });
-            }
-            // Merge vendasVend
-            Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
-              if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
-              const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
-              Object.entries(dias).forEach(([dt,dados])=>{
-                if(!(dt in pedaco.vendasVend[vid]) && !excDiasV.includes(dt)){
-                  pedaco.vendasVend[vid][dt] = dados;
-                }
+            // Vendas: adicionar dias do Firebase que não existem localmente
+            Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
+              if(!(dt in vendasLoja) && !excDias.includes(dt)) vendasLoja[dt] = dados;
+            });
+            // vendasVend: adicionar dias do Firebase que não existem localmente
+            Object.entries(existing.vendasVend||{}).forEach(([vid,dias]) => {
+              const excDiasV = D2._vendasVendExcluidas?.[vid] || [];
+              if(!vendasVendLoja[vid]) vendasVendLoja[vid] = {};
+              Object.entries(dias||{}).forEach(([dt,d]) => {
+                if(!(dt in vendasVendLoja[vid]) && !excDiasV.includes(dt)) vendasVendLoja[vid][dt] = d;
               });
             });
-            // Merge campRealizados (preservar se local está vazio)
-            if(existing.campRealizados?.length && pedaco.campRealizados.length === 0){
-              const excluidos = (typeof D !== "undefined" && D._campExcluidos) || [];
-              existing.campRealizados.forEach(r=>{
-                if(!excluidos.includes(r.id)) pedaco.campRealizados.push(r);
+            // campRealizados: merge por id
+            if(existing.campRealizados?.length){
+              existing.campRealizados.forEach(r => {
+                if(!excCamp.includes(r.id) && !campLoja.find(x=>x.id===r.id)) campLoja.push(r);
               });
             }
-            // Merge fluxo
+            // fluxo: merge por id
             if(existing.fluxo?.length){
-              existing.fluxo.forEach(r=>{
-                if(!pedaco.fluxo.find(x=>x.id===r.id)) pedaco.fluxo.push(r);
+              existing.fluxo.forEach(r => {
+                if(!fluxoLoja.find(x=>x.id===r.id)) fluxoLoja.push(r);
               });
             }
           }
         }catch(e2){
-          // Merge preventivo falhou — continua e grava o que temos
-          console.warn("[Avatim] merge preventivo loja ignorado:", e2.code||e2.message);
+          console.warn("[Avatim] merge preventivo ignorado:", e2.code||e2.message);
         }
 
-        await setDoc(doc(db,"avatim",docId), {
-          dados:  JSON.stringify(pedaco),
+        const payload = {
+          dados: JSON.stringify({
+            vendas:         { [lid]: vendasLoja },
+            vendasVend:     vendasVendLoja,
+            campRealizados: campLoja,
+            fluxo:          fluxoLoja
+          }),
           lojaId: lid,
           ts:     Date.now(),
           por:    email
-        });
-        console.log("[Avatim] ✅ Loja", lid, "salva | vendas:", Object.keys(pedaco.vendas[lid]||{}).length, "dias | vendasVend:", Object.keys(pedaco.vendasVend).length, "vends");
+        };
+
+        await setDoc(doc(db,"avatim",docId), payload);
+        console.log("[Avatim] ✅ Loja", lid,
+          "| vendas:", Object.keys(vendasLoja).length, "dias",
+          "| vendasVend:", Object.keys(vendasVendLoja).length, "vends",
+          "| camp:", campLoja.length);
       }
     }catch(e){
       console.error("[Avatim] ❌ fsGravar erro:", e.code||"?", e.message);
@@ -291,6 +330,7 @@ try{
             const snap = await getDoc(doc(db,"avatim","loja_"+lid));
             if(snap.exists()){
               const pedaco = JSON.parse(snap.data().dados);
+              // Copiar vendas do doc loja_* para o base (objeto retornado ao loadFromFirestore)
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
                 if(!base.vendas[l]) base.vendas[l]={};
@@ -3267,15 +3307,28 @@ async function loadFromFirestore(){
     const dadosJSON = await window.fsCarregar();
     if(dadosJSON){
       const remoto = JSON.parse(dadosJSON);
-      // Merge completo: remoto tem prioridade mas preserva estruturas locais
-      // Campos simples: remoto sobrescreve
-      if(remoto.metasLoja)   D.metasLoja   = remoto.metasLoja;
-      if(remoto.vendedoras)  D.vendedoras  = remoto.vendedoras;
-      if(remoto.campanhas)   D.campanhas   = remoto.campanhas;
+      // [FIX] Merge seguro: campos de configuracao sobrescrevem (vem do admin)
+      // Campos de vendas fazem MERGE para nao perder dados locais
+      if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+      if(remoto.campanhas)     D.campanhas     = remoto.campanhas;
       if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
-      if(remoto.arquivos)    D.arquivos    = remoto.arquivos;
-      if(remoto.metasProd)   D.metasProd   = remoto.metasProd;
-      if(remoto.realProd)    D.realProd    = remoto.realProd;
+      if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
+      if(remoto.metasProd)     D.metasProd     = remoto.metasProd;
+      if(remoto.realProd)      D.realProd      = remoto.realProd;
+      // [FIX] vendedoras: merge por id para nao apagar vendedoras locais
+      // (evita que versao antiga do Firebase apague vendedoras recentes)
+      if(remoto.vendedoras && remoto.vendedoras.length){
+        if(!D.vendedoras || !D.vendedoras.length){
+          D.vendedoras = remoto.vendedoras;
+        } else {
+          // Atualizar/adicionar vendedoras do remoto, preservar locais
+          remoto.vendedoras.forEach(rv => {
+            const idx = D.vendedoras.findIndex(lv => lv.id === rv.id);
+            if(idx >= 0) D.vendedoras[idx] = rv;
+            else D.vendedoras.push(rv);
+          });
+        }
+      }
       // fluxo: merge por ID (nunca sobrescrever — evita perda de registros novos)
       if(remoto.fluxo && remoto.fluxo.length){
         if(!D.fluxo) D.fluxo=[];
@@ -3301,36 +3354,19 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
-      // [FIX Race Condition] Dados locais pendentes (nao sincronizados) tem prioridade
-      // sobre dados remotos para evitar race condition entre save() e loadFromFirestore()
-      const _localPendente = window._pendingLocalData;
-
-      // Vendas e vendasVend: deep merge respeitando tombstones E dados locais pendentes
+      // ── VENDAS: LOCAL SEMPRE TEM PRIORIDADE ────────────────────────────
+      // Remoto só preenche dias que ainda NÃO existem localmente.
+      // Isso garante que um lançamento recém-feito nunca seja apagado
+      // por um sync do Firebase que ainda não recebeu o dado.
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            // [FIX] Se ha dado local pendente para este dia, ele tem prioridade
-            const localPendenteDia = _localPendente?.vendas?.[lid]?.[dt];
-            if(localPendenteDia) {
-              D.vendas[lid][dt] = localPendenteDia; // manter local mais recente
-            } else {
-              D.vendas[lid][dt] = val;
-            }
+            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
           });
         });
-        // [FIX] Garantir que dias locais pendentes existam mesmo nao estando no remoto
-        if(_localPendente?.vendas){
-          Object.entries(_localPendente.vendas).forEach(([lid,dias])=>{
-            if(!D.vendas[lid]) D.vendas[lid]={};
-            const excl = D._vendasExcluidas?.[lid] || [];
-            Object.entries(dias).forEach(([dt,val])=>{
-              if(!excl.includes(dt) && !D.vendas[lid][dt]) D.vendas[lid][dt]=val;
-            });
-          });
-        }
       }
       if(remoto.vendasVend){
         Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
@@ -3338,25 +3374,9 @@ async function loadFromFirestore(){
           const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            // [FIX] Se ha dado local pendente para esta vendedora/dia, ele tem prioridade
-            const localPendenteVend = _localPendente?.vendasVend?.[vid]?.[dt];
-            if(localPendenteVend) {
-              D.vendasVend[vid][dt] = localPendenteVend;
-            } else {
-              D.vendasVend[vid][dt] = val;
-            }
+            if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
           });
         });
-        // [FIX] Garantir que dados locais pendentes de vendedoras existam
-        if(_localPendente?.vendasVend){
-          Object.entries(_localPendente.vendasVend).forEach(([vid,dias])=>{
-            if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-            const excl = D._vendasVendExcluidas?.[vid] || [];
-            Object.entries(dias).forEach(([dt,val])=>{
-              if(!excl.includes(dt) && !D.vendasVend[vid][dt]) D.vendasVend[vid][dt]=val;
-            });
-          });
-        }
       }
       // Garantir remocao final dos dias tombstoned
       if(D._vendasExcluidas){
@@ -5283,6 +5303,12 @@ async function salvarLanc(){
       const tmV = vatend>0 ? parseFloat((vval/vatend).toFixed(2)) : 0;
       D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
     });
+
+    // [DIAGNÓSTICO] Confirmar o que vai ser gravado
+    console.log("[Avatim] salvarLanc: lid="+lid+" | data="+data+" | fat="+fat);
+    console.log("[Avatim] D.vendas[lid][data]:", JSON.stringify(D.vendas[lid]?.[data]));
+    console.log("[Avatim] vendasVend ids:", vendasParaSalvar.map(x=>x.v.id+"="+x.vval).join(", "));
+    console.log("[Avatim] email:", window._currentUser?.email, "| _userLoja:", JSON.stringify(window._userLoja));
 
     // [FIX Race Condition] Gravar no Firebase ANTES de recarregar a tela
     // para evitar que loadFromFirestore apague o dado recém-lançado
@@ -9672,50 +9698,23 @@ function iniciarAutoRefresh(){
         if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
         // Merge só vendas e vendasVend desta loja
         const lid = lojaId();
-        // [FIX Race Condition] Dados locais pendentes tem prioridade sobre remotos
-        const _lp = window._pendingLocalData;
-        if(remoto.vendas?.[lid]){
-          if(!D.vendas[lid]) D.vendas[lid]={};
-          const excDias = D._vendasExcluidas?.[lid] || [];
-          Object.entries(remoto.vendas[lid]).forEach(([dt,dados])=>{
-            if(excDias.includes(dt)) return;
-            // Local pendente tem prioridade
-            if(_lp?.vendas?.[lid]?.[dt]) D.vendas[lid][dt] = _lp.vendas[lid][dt];
-            else D.vendas[lid][dt] = dados;
-          });
-        }
-        // Garantir que dias locais pendentes nao se percam
-        if(_lp?.vendas?.[lid]){
-          if(!D.vendas[lid]) D.vendas[lid]={};
-          const excDias = D._vendasExcluidas?.[lid] || [];
-          Object.entries(_lp.vendas[lid]).forEach(([dt,dados])=>{
-            if(!excDias.includes(dt)) D.vendas[lid][dt] = dados;
+        // LOCAL SEMPRE TEM PRIORIDADE — remoto só preenche dias ausentes
+        const lid2 = lid; // alias para clareza
+        if(remoto.vendas?.[lid2]){
+          if(!D.vendas[lid2]) D.vendas[lid2]={};
+          const excDias = D._vendasExcluidas?.[lid2] || [];
+          Object.entries(remoto.vendas[lid2]).forEach(([dt,dados])=>{
+            if(!excDias.includes(dt) && !(dt in D.vendas[lid2])) D.vendas[lid2][dt] = dados;
           });
         }
         if(remoto.vendasVend){
           Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
             const v = D.vendedoras.find(x=>x.id===vid);
-            if(v && v.loja===lid){
+            if(v && v.loja===lid2){
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
               const excDiasV = D._vendasVendExcluidas?.[vid] || [];
               Object.entries(dias).forEach(([dt,dados])=>{
-                if(excDiasV.includes(dt)) return;
-                // Local pendente tem prioridade
-                if(_lp?.vendasVend?.[vid]?.[dt]) D.vendasVend[vid][dt] = _lp.vendasVend[vid][dt];
-                else D.vendasVend[vid][dt] = dados;
-              });
-            }
-          });
-        }
-        // Garantir que vendas de vendedoras pendentes nao se percam
-        if(_lp?.vendasVend){
-          Object.entries(_lp.vendasVend).forEach(([vid,dias])=>{
-            const v = D.vendedoras.find(x=>x.id===vid);
-            if(v && v.loja===lid){
-              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
-              Object.entries(dias).forEach(([dt,dados])=>{
-                if(!excDiasV.includes(dt)) D.vendasVend[vid][dt] = dados;
+                if(!excDiasV.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = dados;
               });
             }
           });
