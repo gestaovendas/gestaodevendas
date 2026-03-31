@@ -3308,13 +3308,16 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
-      // Vendas e vendasVend: deep merge respeitando tombstones
+      // [FIX BUG RAIZ] loadFromFirestore: dado local tem prioridade se mais recente.
+      // Remoto so substitui se: (a) nao existe local OU (b) remoto.ts > local.ts
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excl = D._vendasExcluidas?.[lid] || [];
-          Object.entries(dias).forEach(([dt,val])=>{
-            if(!excl.includes(dt)) D.vendas[lid][dt]=val;
+          Object.entries(dias).forEach(([dt,dr])=>{
+            if(excl.includes(dt)) return;
+            const dl = D.vendas[lid][dt];
+            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt]=dr;
           });
         });
       }
@@ -3322,8 +3325,10 @@ async function loadFromFirestore(){
         Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
           if(!D.vendasVend[vid]) D.vendasVend[vid]={};
           const excl = D._vendasVendExcluidas?.[vid] || [];
-          Object.entries(dias).forEach(([dt,val])=>{
-            if(!excl.includes(dt)) D.vendasVend[vid][dt]=val;
+          Object.entries(dias).forEach(([dt,dr])=>{
+            if(excl.includes(dt)) return;
+            const dl = D.vendasVend[vid][dt];
+            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt]=dr;
           });
         });
       }
@@ -5251,10 +5256,12 @@ async function salvarLanc(){
     D.vendas[lid][data] = dadosLanc;
 
     // Salvar vendas de cada vendedora em D
+    // [FIX BUG RAIZ] Incluir ts em cada registro de vendedora para comparação de prioridade no merge
+    const tsLanc = Date.now();
     vendasParaSalvar.forEach(({v, vval, vatend})=>{
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       const tmV = vatend>0 ? parseFloat((vval/vatend).toFixed(2)) : 0;
-      D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
+      D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV, ts:tsLanc};
     });
 
     // [FIX BUG4] Salvar localmente de forma síncrona e imediata
@@ -9570,11 +9577,16 @@ function iniciarAutoRefresh(){
         if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
         // Merge só vendas e vendasVend desta loja
         const lid = lojaId();
+        // [FIX BUG RAIZ] syncLoja: dado local tem prioridade se mais recente.
+        // Remoto so substitui se: (a) nao existe local OU (b) remoto.ts > local.ts
+        // Impede que auto-refresh sobrescreva lancamento recem feito com dado antigo do Firebase.
         if(remoto.vendas?.[lid]){
           if(!D.vendas[lid]) D.vendas[lid]={};
-          const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
-          Object.entries(remoto.vendas[lid]).forEach(([dt,dados])=>{
-            if(!excDias.includes(dt)) D.vendas[lid][dt] = dados;
+          const excDias = D._vendasExcluidas?.[lid] || [];
+          Object.entries(remoto.vendas[lid]).forEach(([dt,dr])=>{
+            if(excDias.includes(dt)) return;
+            const dl = D.vendas[lid][dt];
+            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt] = dr;
           });
         }
         if(remoto.vendasVend){
@@ -9582,9 +9594,11 @@ function iniciarAutoRefresh(){
             const v = D.vendedoras.find(x=>x.id===vid);
             if(v && v.loja===lid){
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
-              Object.entries(dias).forEach(([dt,dados])=>{
-                if(!excDiasV.includes(dt)) D.vendasVend[vid][dt] = dados;
+              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              Object.entries(dias).forEach(([dt,dr])=>{
+                if(excDiasV.includes(dt)) return;
+                const dl = D.vendasVend[vid][dt];
+                if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt] = dr;
               });
             }
           });
@@ -9652,16 +9666,27 @@ function iniciarAutoRefresh(){
           const dadosJSON = await window.fsCarregar();
           if(dadosJSON){
             const remoto = JSON.parse(dadosJSON);
+            // [FIX BUG RAIZ] syncAdmin: dado local tem prioridade se mais recente.
             if(remoto.vendas){
               Object.entries(remoto.vendas).forEach(([lid,dias])=>{
                 if(!D.vendas[lid]) D.vendas[lid]={};
-                Object.assign(D.vendas[lid], dias);
+                const excl = D._vendasExcluidas?.[lid] || [];
+                Object.entries(dias).forEach(([dt,dr])=>{
+                  if(excl.includes(dt)) return;
+                  const dl = D.vendas[lid][dt];
+                  if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt]=dr;
+                });
               });
             }
             if(remoto.vendasVend){
               Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
                 if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-                Object.assign(D.vendasVend[vid], dias);
+                const excl = D._vendasVendExcluidas?.[vid] || [];
+                Object.entries(dias).forEach(([dt,dr])=>{
+                  if(excl.includes(dt)) return;
+                  const dl = D.vendasVend[vid][dt];
+                  if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt]=dr;
+                });
               });
             }
             if(remoto.campRealizados && remoto.campRealizados.length){
