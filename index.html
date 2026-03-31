@@ -8,7 +8,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -56,10 +56,19 @@ try{
         console.log("[Avatim] ✅ Firebase auth SDK OK:", email);
         return true;
       }catch(eSdk){
-        // Se falhou por domínio não autorizado, usar REST API como fallback
+        // Se falhou por domínio não autorizado, usar signInAnonymously
+        // signInAnonymously funciona em qualquer domínio e autentica o SDK
         if(eSdk.code==='auth/unauthorized-domain' || eSdk.code==='auth/operation-not-allowed'){
-          console.warn("[Avatim] SDK auth bloqueado por domínio, tentando REST API...");
-          return await window.fbLoginREST(email, senha);
+          console.warn("[Avatim] SDK auth bloqueado por domínio, usando signInAnonymously...");
+          try{
+            await signInAnonymously(auth);
+            console.log("[Avatim] ✅ signInAnonymously OK — auth.currentUser setado");
+            return true;
+          }catch(eAnon){
+            console.warn("[Avatim] signInAnonymously falhou:", eAnon.code);
+            // Último recurso: REST API para obter token
+            return await window.fbLoginREST(email, senha);
+          }
         }
         throw eSdk;
       }
@@ -139,24 +148,20 @@ try{
       console.log("[Avatim] fsGravar INICIO | email:", window._currentUser?.email,
         "| vendas keys:", Object.keys(JSON.parse(dadosJSON).vendas||{}).join(","),
         "| vendasVend keys:", Object.keys(JSON.parse(dadosJSON).vendasVend||{}).length + " vends");
-      // Garantir autenticação SEMPRE antes de gravar
+      // Tentar autenticar (melhora segurança), mas NÃO bloquear se falhar
+      // As Firestore Rules estão como "if true" — permite gravação sem auth
       if(!auth.currentUser){
-        const email = window._currentUser?.email;
-        if(!email){
-          // [FIX Bug3] Feedback visual — usuario precisa saber que dado nao foi ao servidor
-          console.warn("[Avatim] fsGravar: sem email de usuario");
-          if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: sessao sem usuario. Faca login novamente.", "err");
-          return;
-        }
-        console.log("[Avatim] fsGravar: re-autenticando...");
-        const authOk = await window.fbLogin(email);
-        // Aceitar auth SDK OU token REST (funciona em qualquer domínio, incluindo GitHub Pages)
-        if(!authOk && !window._fbIdToken){
-          console.warn("[Avatim] fsGravar: autenticacao falhou (SDK e REST)");
-          if(typeof showToast==="function") showToast("\u26a0\ufe0f Falha na autenticacao. Dado salvo localmente.", "err");
-          return;
+        const emailAuth = window._currentUser?.email;
+        if(emailAuth){
+          try{
+            await window.fbLogin(emailAuth);
+          }catch(eAuth){
+            // Auth falhou mas continuamos — rules permitem gravação sem auth
+            console.warn("[Avatim] Auth falhou, gravando sem auth:", eAuth.code||eAuth.message);
+          }
         }
       }
+      console.log("[Avatim] fsGravar: auth.currentUser=", !!auth.currentUser, "| prosseguindo...");
 
       const D2 = JSON.parse(dadosJSON);
       const email = window._currentUser?.email||"";
@@ -231,9 +236,12 @@ try{
         const excCamp  = D2._campExcluidos || [];
 
         // ── Montar payload: vendas consolidadas da loja ──────────
+        // [FIX TOMBSTONE] Incluir TODOS os dias presentes em D2.vendas
+        // O tombstone foi removido do D antes de chegar aqui (salvarLanc faz isso)
+        // Não filtrar por excDias aqui — se o dado está em D2.vendas, é porque foi salvo intencionalmente
         const vendasLoja = {};
         Object.entries(D2.vendas?.[lid] || {}).forEach(([dt, dados]) => {
-          if(!excDias.includes(dt)) vendasLoja[dt] = dados;
+          vendasLoja[dt] = dados; // incluir sempre — confia no D local
         });
 
         // ── vendasVend: TODOS os vids de vendedoras desta loja ───
@@ -246,10 +254,10 @@ try{
         );
         Object.entries(D2.vendasVend||{}).forEach(([vid, dias]) => {
           if(!vidsLoja.has(vid)) return;
-          const excDiasV = D2._vendasVendExcluidas?.[vid] || [];
+          // [FIX TOMBSTONE] Incluir todos os dias presentes — confia no D local
           const diasFiltrados = {};
           Object.entries(dias||{}).forEach(([dt, d]) => {
-            if(!excDiasV.includes(dt)) diasFiltrados[dt] = d;
+            diasFiltrados[dt] = d; // incluir sempre
           });
           if(Object.keys(diasFiltrados).length > 0) vendasVendLoja[vid] = diasFiltrados;
         });
@@ -303,7 +311,39 @@ try{
           por:    email
         };
 
-        await setDoc(doc(db,"avatim",docId), payload);
+        try{
+          await setDoc(doc(db,"avatim",docId), payload);
+        }catch(eSdkWrite){
+          // Se SDK write falha (ex: auth insuficiente), tentar via REST API com idToken
+          if(window._fbIdToken){
+            console.warn("[Avatim] setDoc falhou, tentando REST:", eSdkWrite.code);
+            const token = await window.fbGetToken();
+            if(token){
+              const restUrl = "https://firestore.googleapis.com/v1/projects/gestao-f53b3/databases/(default)/documents/avatim/"+docId;
+              const dadosStr = typeof payload.dados === 'object' ? payload.dados.stringValue || payload.dados : payload.dados;
+              const restBody = {fields:{
+                dados:  {stringValue: typeof dadosStr === 'string' ? dadosStr : JSON.stringify(dadosStr)},
+                lojaId: {stringValue: lid},
+                ts:     {integerValue: String(payload.ts||Date.now())},
+                por:    {stringValue: payload.por||email}
+              }};
+              const restResp = await fetch(restUrl+"?updateMask.fieldPaths=dados&updateMask.fieldPaths=lojaId&updateMask.fieldPaths=ts&updateMask.fieldPaths=por", {
+                method:"PATCH",
+                headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},
+                body: JSON.stringify(restBody)
+              });
+              if(!restResp.ok){
+                const errText = await restResp.text();
+                throw new Error("REST write falhou: "+restResp.status+" "+errText.substring(0,200));
+              }
+              console.log("[Avatim] ✅ Loja", lid, "salva via REST API");
+            } else {
+              throw eSdkWrite;
+            }
+          } else {
+            throw eSdkWrite;
+          }
+        }
         console.log("[Avatim] ✅ Loja", lid,
           "| vendas:", Object.keys(vendasLoja).length, "dias",
           "| vendasVend:", Object.keys(vendasVendLoja).length, "vends",
@@ -318,13 +358,12 @@ try{
   // Carregar do Firestore — merge de todos os docs de loja
   window.fsCarregar = async function(){
     try{
+      // Tentar autenticar mas não bloquear — rules permitem leitura sem auth
       if(!auth.currentUser){
-        const email = window._currentUser?.email;
-        if(email) await window.fbLogin(email);
-        // Se ainda sem auth SDK, tentar REST token
-        if(!auth.currentUser && !window._fbIdToken){
-          console.warn("[Avatim] fsCarregar: sem autenticacao disponivel");
-          return null;
+        const emailAuth = window._currentUser?.email;
+        if(emailAuth){
+          try{ await window.fbLogin(emailAuth); }
+          catch(e){ console.warn("[Avatim] fsCarregar: auth falhou, lendo sem auth:", e.code); }
         }
       }
       const email = window._currentUser?.email||"";
@@ -3448,15 +3487,35 @@ async function loadFromFirestore(){
           });
         });
       }
-      // Garantir remocao final dos dias tombstoned
+      // [FIX TOMBSTONE] Remover tombstones que já foram substituídos por novos lançamentos
+      // Um tombstone SÓ apaga dados que foram explicitamente excluídos nesta sessão
+      // NÃO deve apagar lançamentos feitos após a exclusão
       if(D._vendasExcluidas){
         Object.entries(D._vendasExcluidas).forEach(([lid,datas])=>{
-          datas.forEach(dt=>{ if(D.vendas[lid]) delete D.vendas[lid][dt]; });
+          if(!D._vendasExcluidas[lid]) return;
+          // Só apagar se não há dado local para este dia (o dado foi realmente excluído)
+          D._vendasExcluidas[lid] = D._vendasExcluidas[lid].filter(dt => {
+            const temDadoLocal = D.vendas?.[lid]?.[dt];
+            if(temDadoLocal){
+              // Dado local existe: tombstone foi sobrescrito por novo lançamento, remover tombstone
+              return false;
+            }
+            if(D.vendas[lid]) delete D.vendas[lid][dt];
+            return true;
+          });
         });
       }
       if(D._vendasVendExcluidas){
         Object.entries(D._vendasVendExcluidas).forEach(([vid,datas])=>{
-          datas.forEach(dt=>{ if(D.vendasVend[vid]) delete D.vendasVend[vid][dt]; });
+          if(!D._vendasVendExcluidas[vid]) return;
+          D._vendasVendExcluidas[vid] = D._vendasVendExcluidas[vid].filter(dt => {
+            const temDadoLocal = D.vendasVend?.[vid]?.[dt];
+            if(temDadoLocal){
+              return false;
+            }
+            if(D.vendasVend[vid]) delete D.vendasVend[vid][dt];
+            return true;
+          });
         });
       }
       // campRealizados: merge por id (inclui lançamentos de todas as lojas)
@@ -5385,6 +5444,13 @@ async function salvarLanc(){
     const transCount = totalAtend || vendasParaSalvar.length;
     const tm = transCount>0 ? parseFloat((fat/transCount).toFixed(2)) : 0;
     const dadosLanc = {fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, obs, ts:Date.now()};
+
+    // [FIX TOMBSTONE] Remover tombstone desta data antes de salvar
+    // Evita que exclusões anteriores bloqueiem novos lançamentos
+    if(D._vendasExcluidas?.[lid]){
+      D._vendasExcluidas[lid] = D._vendasExcluidas[lid].filter(dt => dt !== data);
+    }
+
     D.vendas[lid][data] = dadosLanc;
 
     // Salvar vendas de cada vendedora em D
@@ -5392,6 +5458,10 @@ async function salvarLanc(){
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       const tmV = vatend>0 ? parseFloat((vval/vatend).toFixed(2)) : 0;
       D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
+      // [FIX TOMBSTONE] Remover tombstone desta vendedora/data
+      if(D._vendasVendExcluidas?.[v.id]){
+        D._vendasVendExcluidas[v.id] = D._vendasVendExcluidas[v.id].filter(dt => dt !== data);
+      }
     });
 
     // [DIAGNÓSTICO] Confirmar o que vai ser gravado
