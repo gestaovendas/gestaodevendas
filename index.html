@@ -72,35 +72,52 @@ try{
 
   window.fsGravar = async function(dadosJSON){
     try{
+      // Garantir autenticação SEMPRE antes de gravar
       if(!auth.currentUser){
         const email = window._currentUser?.email;
-        if(email) await window.fbLogin(email);
+        if(!email){
+          console.warn("[Avatim] fsGravar: sem email de usuário");
+          return;
+        }
+        console.log("[Avatim] fsGravar: re-autenticando...");
+        const authOk = await window.fbLogin(email);
+        if(!authOk || !auth.currentUser){
+          console.warn("[Avatim] fsGravar: autenticação falhou — dado salvo só no localStorage");
+          return;
+        }
       }
+
       const D2 = JSON.parse(dadosJSON);
       const email = window._currentUser?.email||"";
       const isAdm = email === "admin\u0040avatim.com";
 
       if(isAdm){
-        // Admin: antes de salvar, garantir que campRealizados das lojas está completo
+        // Admin: merge preventivo com campRealizados do Firestore
         try {
           const snapAtual = await getDoc(doc(db,"avatim","principal"));
           if(snapAtual.exists()){
             const atual = JSON.parse(snapAtual.data().dados||"{}");
-            // Preservar campRealizados que o admin pode não ter em memória ainda
             if(atual.campRealizados && atual.campRealizados.length){
               if(!D2.campRealizados) D2.campRealizados = [];
               atual.campRealizados.forEach(r=>{
                 const ja = D2.campRealizados.findIndex(x=>x.id===r.id);
-                if(ja<0) D2.campRealizados.push(r); // preserva lançamentos das lojas
+                if(ja<0) D2.campRealizados.push(r);
               });
             }
           }
-        } catch(eMerge){ console.warn("[Avatim] merge preventivo admin:", eMerge.message); }
-        await setDoc(doc(db,"avatim","principal"), { dados: JSON.stringify(D2), ts: Date.now(), por: email });
-        console.log("[Avatim] ✅ Admin: tudo salvo (campRealizados preservados)");
+        } catch(eMerge){
+          // Merge preventivo falhou — continua sem ele (não é crítico)
+          console.warn("[Avatim] merge preventivo admin ignorado:", eMerge.code||eMerge.message);
+        }
+        await setDoc(doc(db,"avatim","principal"), {
+          dados: JSON.stringify(D2),
+          ts: Date.now(),
+          por: email
+        });
+        console.log("[Avatim] ✅ Admin: principal salvo");
+
       } else {
-        // Loja salva SÓ seus dados no doc da loja (não toca nos outros)
-        // Descobre o lojaId da loja logada
+        // Loja: gravar no doc da loja
         const lojaMap = {
           "mooca\u0040avatim.com":      "mooca",
           "leopoldina\u0040avatim.com": "leopoldina",
@@ -112,43 +129,42 @@ try{
           "lorena\u0040avatim.com":     "jarpaul"
         };
         const lid = lojaMap[email];
-        if(!lid){ console.warn("[Avatim] lojaId desconhecido para:", email); return; }
+        if(!lid){
+          console.warn("[Avatim] fsGravar: email não mapeado para loja:", email);
+          return;
+        }
 
-        // Extrai só os dados desta loja
+        // Montar pedaço desta loja
         const pedaco = {
-          vendas:     { [lid]: D2.vendas?.[lid]||{} },
-          vendasVend: {},
-          campRealizados: [],
-          fluxo: [] // registros de atendimento/origem desta loja
+          vendas:        { [lid]: D2.vendas?.[lid]||{} },
+          vendasVend:    {},
+          campRealizados:[],
+          fluxo:         []
         };
-        // Inclui vendas das vendedoras desta loja
         Object.entries(D2.vendasVend||{}).forEach(([vid, vdata])=>{
           const vend = (D2.vendedoras||[]).find(v=>v.id===vid);
           if(vend && vend.loja===lid) pedaco.vendasVend[vid] = vdata;
         });
-        // Inclui realizados de campanha desta loja
         pedaco.campRealizados = (D2.campRealizados||[]).filter(r=>r.lojaId===lid);
-        // Inclui registros de fluxo/origem desta loja
         pedaco.fluxo = (D2.fluxo||[]).filter(r=>r.loja===lid);
 
         const docId = "loja_"+lid;
-        // Merge com o que já existe no Firestore — NUNCA sobrescreve com dados vazios
+
+        // Merge preventivo: preservar dados históricos do Firebase
         try{
           const snapExist = await getDoc(doc(db,"avatim",docId));
           if(snapExist.exists()){
             const existing = JSON.parse(snapExist.data().dados||"{}");
-            // Merge de vendas: pedaco é AUTORITATIVO
-            // Só adiciona dias do Firebase que NÃO existem no pedaco local (não readiciona excluídos)
+            // Merge vendas: só adiciona dias que não existem localmente
             if(existing.vendas?.[lid]){
+              const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
               Object.entries(existing.vendas[lid]).forEach(([dt,dados])=>{
-                if(!(dt in pedaco.vendas[lid])){
-                  // Dia está no Firebase mas não no local — só adiciona se for futuro ou não foi excluído
-                  // Verificar tombstone de vendas excluídas
-                  const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
-                  if(!excDias.includes(dt)) pedaco.vendas[lid][dt] = dados;
+                if(!(dt in pedaco.vendas[lid]) && !excDias.includes(dt)){
+                  pedaco.vendas[lid][dt] = dados;
                 }
               });
             }
+            // Merge vendasVend
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
               const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
@@ -158,37 +174,36 @@ try{
                 }
               });
             });
-            // campRealizados: pedaco é AUTORITATIVO (já tem todos os registros desta loja)
-            // NÃO readicionar registros do Firebase — evita que exclusões "voltem"
-            // Se pedaco está vazio e existing tem dados, pode ser carregamento inicial — preservar
-            if(existing.campRealizados && existing.campRealizados.length && pedaco.campRealizados.length === 0){
-              // Só preserva se pedaco está VAZIO (primeiro carregamento) — não se houve exclusão
-              // Usa _campExcluidos como tombstone para distinguir os casos
-              const excluidos = D._campExcluidos || [];
+            // Merge campRealizados (preservar se local está vazio)
+            if(existing.campRealizados?.length && pedaco.campRealizados.length === 0){
+              const excluidos = (typeof D !== "undefined" && D._campExcluidos) || [];
               existing.campRealizados.forEach(r=>{
                 if(!excluidos.includes(r.id)) pedaco.campRealizados.push(r);
               });
             }
-            // Merge fluxo: preserva registros existentes
-            if(existing.fluxo && existing.fluxo.length){
-              const novosFluxo = pedaco.fluxo || [];
+            // Merge fluxo
+            if(existing.fluxo?.length){
               existing.fluxo.forEach(r=>{
-                if(!novosFluxo.find(x=>x.id===r.id)) novosFluxo.push(r);
+                if(!pedaco.fluxo.find(x=>x.id===r.id)) pedaco.fluxo.push(r);
               });
-              pedaco.fluxo = novosFluxo;
             }
           }
-        }catch(e2){ console.warn("[Avatim] Merge preventivo falhou:", e2.message); }
+        }catch(e2){
+          // Merge preventivo falhou — continua e grava o que temos
+          console.warn("[Avatim] merge preventivo loja ignorado:", e2.code||e2.message);
+        }
+
         await setDoc(doc(db,"avatim",docId), {
-          dados:    JSON.stringify(pedaco),
-          lojaId:   lid,
-          ts:       Date.now(),
-          por:      email
+          dados:  JSON.stringify(pedaco),
+          lojaId: lid,
+          ts:     Date.now(),
+          por:    email
         });
-        console.log("[Avatim] ✅ Loja "+lid+" salva no doc "+docId);
+        console.log("[Avatim] ✅ Loja", lid, "salva | vendas:", Object.keys(pedaco.vendas[lid]||{}).length, "dias | vendasVend:", Object.keys(pedaco.vendasVend).length, "vends");
       }
     }catch(e){
-      console.warn("[Avatim] ❌ Erro ao salvar:", e.code, e.message);
+      console.error("[Avatim] ❌ fsGravar erro:", e.code||"?", e.message);
+      throw e; // propaga para o save() mostrar o toast de erro
     }
   };
 
@@ -3145,27 +3160,54 @@ function save(){
   _savePending = true;
   setTimeout(async ()=>{
     _savePending = false;
-    const temDados = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0)
-                  || Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0)
-                  || (D.metasLoja && Object.keys(D.metasLoja).length>0)
-                  || (D.campRealizados && D.campRealizados.length>0)
-                  || (D.fluxo && D.fluxo.length>0);
+    // Verificar se há dados reais para gravar
+    // Nota: para loja, os dados já foram inseridos em D antes de save() ser chamado
+    const temVendas    = Object.keys(D.vendas||{}).some(lid=>Object.keys(D.vendas[lid]||{}).length>0);
+    const temVendVend  = Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0);
+    const temMetas     = D.metasLoja && Object.keys(D.metasLoja).some(lid=>Object.keys(D.metasLoja[lid]||{}).length>0);
+    const temCamp      = D.campRealizados && D.campRealizados.length>0;
+    const temFluxo     = D.fluxo && D.fluxo.length>0;
+    const temDados     = temVendas || temVendVend || temMetas || temCamp || temFluxo;
+
+    // Bloquear SOMENTE se não há absolutamente nenhum dado E não é admin
+    // (admin sempre pode salvar metas, vendedoras, etc.)
     if(!temDados && !isAdmin()){
-      console.warn("[Avatim] save() bloqueado — dados vazios, evitando sobrescrever Firebase");
+      console.warn("[Avatim] save() bloqueado — nenhum dado para gravar");
       return;
     }
+
     const ok = await waitForFirebase(5000);
     if(ok && window.fsGravar){
       try{
         await window.fsGravar(JSON.stringify(D));
+        // Feedback visual de sync bem-sucedido (badge no topo)
+        const syncEl = document.getElementById('sync-badge');
+        if(syncEl && isAdmin()){
+          syncEl.textContent = '✅ Salvo: ' + new Date().toLocaleTimeString('pt-BR');
+          syncEl.style.color = 'var(--verde)';
+        }
       }catch(e){
-        console.warn("[Avatim] save() erro:", e.message);
-        setTimeout(()=>{ if(window.fsGravar) window.fsGravar(JSON.stringify(D)); }, 5000);
+        console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
+        // Mostrar erro para o usuário
+        showToast('⚠️ Salvo localmente. Firebase: ' + (e.code||e.message), 'warn');
+        // Tentar novamente em 10s
+        setTimeout(async ()=>{
+          if(window.fsGravar){
+            try{ await window.fsGravar(JSON.stringify(D)); }
+            catch(e2){ console.warn("[Avatim] Retry save falhou:", e2.message); }
+          }
+        }, 10000);
       }
     } else {
-      console.warn("[Avatim] Firebase indisponível — dado só no localStorage");
+      console.warn("[Avatim] Firebase indisponível — dado salvo só no localStorage");
+      // Tentar gravar quando Firebase ficar disponível
+      const retryOk = await waitForFirebase(30000);
+      if(retryOk && window.fsGravar){
+        try{ await window.fsGravar(JSON.stringify(D)); }
+        catch(e){ console.warn("[Avatim] save() retry falhou:", e.message); }
+      }
     }
-  }, 1500); // 1.5s debounce evita múltiplas gravações simultâneas
+  }, 1500);
 }
 
 async function waitForFirebase(timeout=5000){
@@ -3847,7 +3889,12 @@ async function login(){
     window._localLogin  = true;
     window._currentUser = {email};
     window._userLoja    = u;
-    if(window.fbLogin) window.fbLogin(email);
+    // Aguardar autenticação Firebase ANTES de mostrar o app
+    // Isso garante que auth.currentUser está pronto quando save() disparar
+    if(window.fbLogin){
+      try{ await window.fbLogin(email); }
+      catch(eFb){ console.warn("[Avatim] Firebase auth falhou, usando local:", eFb.code||eFb.message); }
+    }
     if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
     showApp();
   }catch(e){
