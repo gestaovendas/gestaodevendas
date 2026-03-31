@@ -530,16 +530,6 @@ function limparAzureConfig(){
   showToast('Configuracoes Azure limpas.');
 }
 
-// Carregar config salva ao iniciar
-(function carregarAzureSalvo(){
-  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
-  if(cfg.cosmos?.endpoint && cfg.cosmos?.key){
-    COSMOS_CONFIG.endpoint = cfg.cosmos.endpoint;
-    COSMOS_CONFIG.key      = cfg.cosmos.key;
-    COSMOS_CONFIG.database = cfg.cosmos.dbid||'avatim';
-  }
-})();
-
 // ============================================================
 // AZURE COSMOS DB — Configuracao
 // Preencha apos criar o banco no portal.azure.com
@@ -557,6 +547,16 @@ const COSMOS_CONFIG = {
     campRealizados:"camp_realizados"
   }
 };
+
+// Carregar config salva ao iniciar (após COSMOS_CONFIG estar definido)
+(function carregarAzureSalvo(){
+  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
+  if(cfg.cosmos?.endpoint && cfg.cosmos?.key){
+    COSMOS_CONFIG.endpoint = cfg.cosmos.endpoint;
+    COSMOS_CONFIG.key      = cfg.cosmos.key;
+    COSMOS_CONFIG.database = cfg.cosmos.dbid||'avatim';
+  }
+})();
 
 // ============================================================
 // COSMOS DB CLIENT — conecta direto via REST API
