@@ -255,16 +255,20 @@ try{
           if(!snap.exists()){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
           try{
             const pedaco = JSON.parse(snap.data().dados||"{}");
-            // Merge vendas da loja
+            // [FIX DEFINITIVO] fsCarregar admin: copiar sem sobrescrever dias ja existentes em base
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
               if(!base.vendas[l]) base.vendas[l]={};
-              Object.assign(base.vendas[l], dias);
+              Object.entries(dias).forEach(([dt,dr])=>{
+                if(!(dt in base.vendas[l])) base.vendas[l][dt] = dr;
+              });
             });
             if(!base.vendasVend) base.vendasVend={};
             Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
               if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-              Object.assign(base.vendasVend[vid], dias);
+              Object.entries(dias).forEach(([dt,dr])=>{
+                if(!(dt in base.vendasVend[vid])) base.vendasVend[vid][dt] = dr;
+              });
             });
             // Merge campRealizados desta loja
             if(pedaco.campRealizados && pedaco.campRealizados.length){
@@ -303,15 +307,20 @@ try{
             const snap = await getDoc(doc(db,"avatim","loja_"+lid));
             if(snap.exists()){
               const pedaco = JSON.parse(snap.data().dados);
+              // [FIX DEFINITIVO] fsCarregar loja: apenas copia para base (base vem do principal, que e vazio de vendas)
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
                 if(!base.vendas[l]) base.vendas[l]={};
-                Object.assign(base.vendas[l], dias);
+                Object.entries(dias).forEach(([dt,dr])=>{
+                  if(!(dt in base.vendas[l])) base.vendas[l][dt] = dr;
+                });
               });
               if(!base.vendasVend) base.vendasVend={};
               Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-                Object.assign(base.vendasVend[vid], dias);
+                Object.entries(dias).forEach(([dt,dr])=>{
+                  if(!(dt in base.vendasVend[vid])) base.vendasVend[vid][dt] = dr;
+                });
               });
               // Merge campRealizados desta loja ao base (respeitando tombstones)
               if(pedaco.campRealizados && pedaco.campRealizados.length){
@@ -3308,16 +3317,17 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
-      // [FIX BUG RAIZ] loadFromFirestore: dado local tem prioridade se mais recente.
-      // Remoto so substitui se: (a) nao existe local OU (b) remoto.ts > local.ts
+      // [FIX DEFINITIVO] loadFromFirestore: localStorage É a fonte de verdade.
+      // Firebase APENAS adiciona dias que NAO existem localmente (historico de outras sessoes).
+      // Se o dia JA existe no local — NUNCA sobrescreve, independente de timestamp.
+      // Isso garante que lancamentos salvos localmente nunca somem apos reload.
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,dr])=>{
             if(excl.includes(dt)) return;
-            const dl = D.vendas[lid][dt];
-            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt]=dr;
+            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = dr; // so adiciona se NAO existe local
           });
         });
       }
@@ -3327,8 +3337,7 @@ async function loadFromFirestore(){
           const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,dr])=>{
             if(excl.includes(dt)) return;
-            const dl = D.vendasVend[vid][dt];
-            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt]=dr;
+            if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = dr; // so adiciona se NAO existe local
           });
         });
       }
@@ -5264,39 +5273,46 @@ async function salvarLanc(){
       D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV, ts:tsLanc};
     });
 
-    // [FIX BUG4] Salvar localmente de forma síncrona e imediata
+    // [FIX DEFINITIVO] Passo 1: gravar no localStorage AGORA — síncrono, imediato, infalível
     localStorage.setItem("avatim_v5", JSON.stringify(D));
-    // Feedback imediato ao usuário — dado está seguro no localStorage
-    showToast("💾 Lançamento salvo! Total: "+fmt(fat)+" — sincronizando...");
+    showToast("💾 Salvando lançamento...");
+    if(btnSalvar){ btnSalvar.textContent="⏳ Enviando para nuvem..."; }
+
+    // [FIX DEFINITIVO] Passo 2: gravar no Firebase de forma BLOQUEANTE com timeout de 8s
+    // O usuário aguarda a confirmação — evita que o reload antes do Firebase resulte em perda
+    let firebaseOk = false;
+    try {
+      const fbOk = await waitForFirebase(5000);
+      if(fbOk && window.fsGravar){
+        await window.fsGravar(JSON.stringify(D));
+        firebaseOk = true;
+        console.log("[Avatim] ✅ salvarLanc: Firebase gravou com sucesso");
+      }
+    } catch(eFb) {
+      console.error("[Avatim] salvarLanc: Firebase erro:", eFb.code||eFb.message);
+    }
+
+    // Feedback claro ao usuário
+    if(firebaseOk){
+      showToast("✅ Lançamento salvo! Total: "+fmt(fat), "ok");
+      const syncEl = document.getElementById("sync-badge");
+      if(syncEl){
+        syncEl.style.display = "block";
+        syncEl.textContent = "✅ Sync: " + new Date().toLocaleTimeString("pt-BR");
+        syncEl.style.color = "var(--verde)";
+      }
+    } else {
+      // Firebase falhou mas localStorage tem o dado — avisa e deixa o usuário decidir
+      showToast("⚠️ Salvo localmente. Sem conexão com nuvem — NÃO atualize a página!", "warn");
+      console.warn("[Avatim] salvarLanc: dado so no localStorage — Firebase nao confirmou");
+    }
+
+    // Passo 3: atualizar UI e navegar
     carregarDash();
     renderHistoricoLanc();
     renderConsolidadoLanc(lid);
     limparCamposLanc();
     nav("dash");
-
-    // [FIX BUG4] Sincronizar com Firebase de forma assíncrona APÓS navegar,
-    // com feedback correto de sucesso ou falha — sem bloquear a UI
-    (async () => {
-      try {
-        const fbOk = await waitForFirebase(5000);
-        if(fbOk && window.fsGravar){
-          await window.fsGravar(JSON.stringify(D));
-          showToast("✅ Sincronizado com Firebase!", "ok");
-          const syncEl = document.getElementById("sync-badge");
-          if(syncEl){
-            syncEl.style.display = "block";
-            syncEl.textContent = "✅ Sync: " + new Date().toLocaleTimeString("pt-BR");
-            syncEl.style.color = "var(--verde)";
-          }
-        } else {
-          console.warn("[Avatim] salvarLanc: Firebase indisponivel — dado salvo so localmente");
-          showToast("⚠️ Salvo localmente. Firebase indisponível — será sincronizado ao reconectar.", "warn");
-        }
-      } catch(eFb) {
-        console.error("[Avatim] salvarLanc: Firebase sync falhou:", eFb.message);
-        showToast("⚠️ Salvo localmente. Falha Firebase: " + (eFb.code || eFb.message), "warn");
-      }
-    })();
   } catch(e){
     showToast("Erro ao salvar: "+e.message,"err");
     console.error("[Avatim] salvarLanc erro:", e);
@@ -9577,16 +9593,14 @@ function iniciarAutoRefresh(){
         if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
         // Merge só vendas e vendasVend desta loja
         const lid = lojaId();
-        // [FIX BUG RAIZ] syncLoja: dado local tem prioridade se mais recente.
-        // Remoto so substitui se: (a) nao existe local OU (b) remoto.ts > local.ts
-        // Impede que auto-refresh sobrescreva lancamento recem feito com dado antigo do Firebase.
+        // [FIX DEFINITIVO] syncLoja: localStorage e fonte de verdade.
+        // Firebase so adiciona dias que NAO existem localmente.
         if(remoto.vendas?.[lid]){
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excDias = D._vendasExcluidas?.[lid] || [];
           Object.entries(remoto.vendas[lid]).forEach(([dt,dr])=>{
             if(excDias.includes(dt)) return;
-            const dl = D.vendas[lid][dt];
-            if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt] = dr;
+            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = dr;
           });
         }
         if(remoto.vendasVend){
@@ -9597,8 +9611,7 @@ function iniciarAutoRefresh(){
               const excDiasV = D._vendasVendExcluidas?.[vid] || [];
               Object.entries(dias).forEach(([dt,dr])=>{
                 if(excDiasV.includes(dt)) return;
-                const dl = D.vendasVend[vid][dt];
-                if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt] = dr;
+                if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = dr;
               });
             }
           });
@@ -9666,15 +9679,15 @@ function iniciarAutoRefresh(){
           const dadosJSON = await window.fsCarregar();
           if(dadosJSON){
             const remoto = JSON.parse(dadosJSON);
-            // [FIX BUG RAIZ] syncAdmin: dado local tem prioridade se mais recente.
+            // [FIX DEFINITIVO] syncAdmin: localStorage e fonte de verdade.
+            // Firebase so adiciona dias que NAO existem localmente.
             if(remoto.vendas){
               Object.entries(remoto.vendas).forEach(([lid,dias])=>{
                 if(!D.vendas[lid]) D.vendas[lid]={};
                 const excl = D._vendasExcluidas?.[lid] || [];
                 Object.entries(dias).forEach(([dt,dr])=>{
                   if(excl.includes(dt)) return;
-                  const dl = D.vendas[lid][dt];
-                  if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendas[lid][dt]=dr;
+                  if(!(dt in D.vendas[lid])) D.vendas[lid][dt]=dr;
                 });
               });
             }
@@ -9684,8 +9697,7 @@ function iniciarAutoRefresh(){
                 const excl = D._vendasVendExcluidas?.[vid] || [];
                 Object.entries(dias).forEach(([dt,dr])=>{
                   if(excl.includes(dt)) return;
-                  const dl = D.vendasVend[vid][dt];
-                  if(!dl || (dr.ts && dl.ts && dr.ts > dl.ts)) D.vendasVend[vid][dt]=dr;
+                  if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=dr;
                 });
               });
             }
