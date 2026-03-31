@@ -4836,9 +4836,11 @@ function tabPainel(per, el){
 }
 
 function renderPainelDia(){
-  // Admin usa a loja selecionada no dropdown; loja usa a sua própria
+  // Admin usa a loja selecionada no dropdown; loja usa a sua própria — nunca "admin"
   const selLoja = document.getElementById("lanc-loja-sel");
-  const lid = isAdmin() && selLoja ? (selLoja.value || LOJAS[0].id) : lojaId();
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId();
   const per = _painelPer;
 
   // Metas — usa a loja selecionada (progressiva para o dia)
@@ -4899,7 +4901,19 @@ function renderPainelDia(){
 }
 
 function carregarVendsForm(lidOverride){
-  const lid = lidOverride || lojaId();
+  // Admin sem override: usar a primeira loja real (nunca "admin")
+  let lid;
+  if(lidOverride && lidOverride !== 'admin') {
+    lid = lidOverride;
+  } else if(isAdmin()) {
+    // Checar se já há uma loja selecionada no dropdown
+    const selAtual = document.getElementById("lanc-loja-sel");
+    lid = (selAtual && selAtual.value && selAtual.value !== 'admin')
+      ? selAtual.value
+      : LOJAS[0].id;  // padrão: primeira loja
+  } else {
+    lid = lojaId();
+  }
   const hj=hoje();
   const vends=D.vendedoras.filter(v=>v.loja===lid);
   const grid=document.getElementById("vend-lanc-grid");
@@ -5035,7 +5049,9 @@ function atualizarCardVend(id, val, meta_dia){
 
 function atualizarSomaDia(){
   const selLoja=document.getElementById("lanc-loja-sel");
-  const lid=(isAdmin()&&selLoja)?selLoja.value:lojaId();
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId();
   const vends=D.vendedoras.filter(v=>v.loja===lid);
   let soma=0;
   vends.forEach(v=>{
@@ -5077,7 +5093,9 @@ function limparVend(vendId){
 
 function limparCamposLanc(){
   const selLoja = document.getElementById("lanc-loja-sel");
-  const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId();
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
     const el = document.getElementById("vlanc_"+v.id);
     const at = document.getElementById("vatend_"+v.id);
@@ -5096,7 +5114,10 @@ async function salvarLanc(){
   function _abortar(msg){ window._salvandoLanc=false; showToast(msg,"err"); }
 
   const selLoja = document.getElementById("lanc-loja-sel");
-  const lid = (isAdmin()&&selLoja) ? selLoja.value : lojaId();
+  // Nunca usar "admin" como lid — sempre resolver para uma loja real
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId();
   if(!lid){ _abortar("Selecione a loja!"); return; }
 
   const data = document.getElementById("l-data").value || hoje();
@@ -5245,7 +5266,9 @@ function renderHistoricoLanc(){
   const el=document.getElementById("hist-lanc-box");
   if(!el) return;
   const selLoja=document.getElementById("lanc-loja-sel");
-  const lid=(isAdmin()&&selLoja)?selLoja.value:lojaId();
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId();
   const mes=hoje().slice(0,7);
   // Pegar todos os dias do mês com lançamentos (via vendasVend)
   const diasComLanc={};
