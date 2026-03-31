@@ -5419,7 +5419,7 @@ function renderConsolidadoLanc(lid){
   }).join("");
 }
 
-function deletarLanc(lid, data){
+async function deletarLanc(lid, data){
   if(!confirm("Excluir lançamento de "+data+"? Isso remove os dados de todas as vendedoras neste dia.")) return;
   // Tombstone para impedir que o Firebase reinsira
   if(!D._vendasExcluidas) D._vendasExcluidas = {};
