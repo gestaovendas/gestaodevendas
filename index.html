@@ -3960,11 +3960,31 @@ function showApp(){
   }
 
   // Renderizar IMEDIATAMENTE com dados do localStorage
-  // Firebase carrega em background e atualiza automaticamente
   carregarVendsForm();
   preencherSelectVends();
   carregarDash();
-  // Tentar carregar do Firestore em background (não bloqueia a tela)
+
+  // Se há um lançamento pendente não sincronizado (ex: Firebase falhou antes),
+  // gravar ANTES de carregar do Firebase para não perder o dado
+  const _pendingStr = localStorage.getItem("avatim_pending");
+  if(_pendingStr){
+    console.log("[Avatim] showApp: lançamento pendente encontrado — sincronizando...");
+    showToast("🔄 Sincronizando lançamento pendente...","warn");
+    (async()=>{
+      const _ok = await waitForFirebase(5000);
+      if(_ok && window.fsGravar){
+        try{
+          await window.fsGravar(_pendingStr);
+          localStorage.removeItem("avatim_pending");
+          window._pendingLocalData = null;
+          showToast("✅ Lançamento pendente sincronizado!","ok");
+          console.log("[Avatim] showApp: pending sincronizado com sucesso");
+        }catch(e){ console.warn("[Avatim] showApp: falha ao sincronizar pending:", e.message); }
+      }
+    })();
+  }
+
+  // Carregar dados do Firestore em background
   loadFromFirestore().then(sincronizado=>{
     if(sincronizado){
       // Dados atualizados — re-renderizar silenciosamente
@@ -5383,6 +5403,8 @@ async function salvarLanc(){
     // [FIX Race Condition] Gravar no Firebase ANTES de recarregar a tela
     // para evitar que loadFromFirestore apague o dado recém-lançado
     localStorage.setItem("avatim_v5", JSON.stringify(D));
+    // Salvar snapshot TAMBÉM no localStorage para sobreviver a recargas
+    localStorage.setItem("avatim_pending", JSON.stringify(D));
     window._pendingLocalData = JSON.parse(JSON.stringify(D));
 
     showToast("✅ Lançamento salvo! Total: "+fmt(fat));
@@ -5392,33 +5414,29 @@ async function salvarLanc(){
     limparCamposLanc();
     nav("dash");
 
-    // Gravar no Firebase em background (snapshot já protege contra race condition)
-    const _okFB = await waitForFirebase(5000);
-    if(_okFB && window.fsGravar){
+    // Gravar no Firebase — tentar até 3x com snapshot imutável
+    const _snapshotParaGravar = JSON.stringify(window._pendingLocalData);
+    const _gravarComRetry = async (tentativa) => {
+      const _ok = await waitForFirebase(5000);
+      if(!_ok || !window.fsGravar){
+        if(tentativa < 3) setTimeout(()=>_gravarComRetry(tentativa+1), 10000);
+        else showToast('⚠️ Firebase indisponível. Dado salvo localmente — será sincronizado ao reconectar.','warn');
+        return;
+      }
       try{
-        await window.fsGravar(JSON.stringify(D));
+        await window.fsGravar(_snapshotParaGravar);
         window._pendingLocalData = null;
-        // Atualizar badge
+        localStorage.removeItem("avatim_pending");
         const syncEl = document.getElementById('sync-badge');
         if(syncEl){ syncEl.textContent = '✅ Salvo: '+new Date().toLocaleTimeString('pt-BR'); syncEl.style.color='var(--verde)'; }
-        console.log("[Avatim] salvarLanc: Firebase sincronizado OK");
+        console.log("[Avatim] salvarLanc: Firebase OK (tentativa "+tentativa+")");
       }catch(eFB){
-        console.warn("[Avatim] salvarLanc: Firebase erro:", eFB.code||eFB.message);
-        showToast('⚠️ Salvo localmente. Sincronizando...','warn');
-        // Retry em 15s
-        setTimeout(async()=>{
-          if(window.fsGravar){
-            try{
-              await window.fsGravar(JSON.stringify(D));
-              window._pendingLocalData = null;
-              showToast('✅ Sincronizado!','ok');
-            }catch(e2){ showToast('❌ Falha ao sincronizar. Relance ao reconectar.','err'); }
-          }
-        }, 15000);
+        console.warn("[Avatim] salvarLanc tentativa "+tentativa+" falhou:", eFB.code||eFB.message);
+        if(tentativa < 3) setTimeout(()=>_gravarComRetry(tentativa+1), 10000);
+        else showToast('❌ Não foi possível sincronizar. Tente novamente.','err');
       }
-    } else {
-      showToast('⚠️ Firebase indisponivel. Dado salvo localmente.','warn');
-    }
+    };
+    _gravarComRetry(1);
   } catch(e){
     showToast("Erro ao salvar: "+e.message,"err");
     console.error("[Avatim] salvarLanc erro:", e);
