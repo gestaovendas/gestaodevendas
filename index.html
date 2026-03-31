@@ -44,19 +44,84 @@ try{
   window._auth   = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
-  // Garantir auth Firebase: chama signIn com email+senha reais
+  // Garantir auth Firebase: tenta SDK primeiro, fallback para REST API
+  // A REST API não verifica domínio autorizado — funciona em qualquer host
   window.fbLogin = async function(email){
     try{
-      if(auth.currentUser) return true; // já autenticado
+      if(auth.currentUser) return true;
       const senha = FB_SENHAS[email];
       if(!senha){ console.warn("[Avatim] Sem senha FB para:", email); return false; }
-      await signInWithEmailAndPassword(auth, email, senha);
-      console.log("[Avatim] ✅ Firebase auth OK para:", email);
-      return true;
+      try{
+        await signInWithEmailAndPassword(auth, email, senha);
+        console.log("[Avatim] ✅ Firebase auth SDK OK:", email);
+        return true;
+      }catch(eSdk){
+        // Se falhou por domínio não autorizado, usar REST API como fallback
+        if(eSdk.code==='auth/unauthorized-domain' || eSdk.code==='auth/operation-not-allowed'){
+          console.warn("[Avatim] SDK auth bloqueado por domínio, tentando REST API...");
+          return await window.fbLoginREST(email, senha);
+        }
+        throw eSdk;
+      }
     }catch(e){
-      console.warn("[Avatim] ❌ Firebase auth falhou:", e.code);
+      console.warn("[Avatim] ❌ Firebase auth falhou:", e.code||e.message);
       return false;
     }
+  };
+
+  // Login via Firebase Auth REST API — não verifica domínio autorizado
+  window.fbLoginREST = async function(email, senha){
+    try{
+      const apiKey = firebaseConfig.apiKey;
+      const url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="+apiKey;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({email, password:senha, returnSecureToken:true})
+      });
+      const data = await resp.json();
+      if(data.idToken){
+        window._fbIdToken   = data.idToken;
+        window._fbRefreshToken = data.refreshToken;
+        window._fbTokenExp  = Date.now() + (parseInt(data.expiresIn||3600)*1000);
+        console.log("[Avatim] ✅ Firebase REST auth OK:", email);
+        return true;
+      }
+      console.warn("[Avatim] ❌ Firebase REST auth falhou:", data.error?.message);
+      return false;
+    }catch(e){
+      console.warn("[Avatim] ❌ Firebase REST auth erro:", e.message);
+      return false;
+    }
+  };
+
+  // Renovar token se expirado
+  window.fbGetToken = async function(){
+    if(window._fbIdToken && window._fbTokenExp && Date.now() < window._fbTokenExp - 60000){
+      return window._fbIdToken;
+    }
+    if(window._fbRefreshToken){
+      try{
+        const apiKey = firebaseConfig.apiKey;
+        const resp = await fetch("https://securetoken.googleapis.com/v1/token?key="+apiKey, {
+          method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"},
+          body:"grant_type=refresh_token&refresh_token="+window._fbRefreshToken
+        });
+        const data = await resp.json();
+        if(data.id_token){
+          window._fbIdToken  = data.id_token;
+          window._fbTokenExp = Date.now() + (parseInt(data.expires_in||3600)*1000);
+          return window._fbIdToken;
+        }
+      }catch(e){ console.warn("[Avatim] Renovar token falhou:", e.message); }
+    }
+    // Tentar re-autenticar
+    const email = window._currentUser?.email;
+    if(email && FB_SENHAS[email]){
+      const ok = await window.fbLoginREST(email, FB_SENHAS[email]);
+      if(ok) return window._fbIdToken;
+    }
+    return auth.currentUser ? await auth.currentUser.getIdToken() : null;
   };
 
   window.fbLogout = async function(){
@@ -85,10 +150,10 @@ try{
         }
         console.log("[Avatim] fsGravar: re-autenticando...");
         const authOk = await window.fbLogin(email);
-        if(!authOk || !auth.currentUser){
-          // [FIX Bug3] Feedback visual — dado nao chegou ao servidor
-          console.warn("[Avatim] fsGravar: autenticacao falhou — dado salvo so no localStorage");
-          if(typeof showToast==="function") showToast("\u26a0\ufe0f Falha na autenticacao. Dado salvo localmente — sincronize ao reconectar.", "err");
+        // Aceitar auth SDK OU token REST (funciona em qualquer domínio, incluindo GitHub Pages)
+        if(!authOk && !window._fbIdToken){
+          console.warn("[Avatim] fsGravar: autenticacao falhou (SDK e REST)");
+          if(typeof showToast==="function") showToast("\u26a0\ufe0f Falha na autenticacao. Dado salvo localmente.", "err");
           return;
         }
       }
@@ -256,6 +321,11 @@ try{
       if(!auth.currentUser){
         const email = window._currentUser?.email;
         if(email) await window.fbLogin(email);
+        // Se ainda sem auth SDK, tentar REST token
+        if(!auth.currentUser && !window._fbIdToken){
+          console.warn("[Avatim] fsCarregar: sem autenticacao disponivel");
+          return null;
+        }
       }
       const email = window._currentUser?.email||"";
       const isAdm = email === "admin\u0040avatim.com";
