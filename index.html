@@ -73,17 +73,21 @@ try{
     try{
       // Garantir autenticação SEMPRE antes de gravar
       if(!auth.currentUser){
-        const email = window._currentUser?.email;
+        // [FIX BUG1/2] Recuperar email do localStorage quando _currentUser some após reload/nova aba
+        const email = window._currentUser?.email || localStorage.getItem("avatim_session_email");
         if(!email){
-          // [FIX Bug3] Feedback visual — usuario precisa saber que dado nao foi ao servidor
-          console.warn("[Avatim] fsGravar: sem email de usuario");
+          console.warn("[Avatim] fsGravar: sem email de usuario (nem em _currentUser nem em localStorage)");
           if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: sessao sem usuario. Faca login novamente.", "err");
           return;
+        }
+        // Restaurar _currentUser se estava nulo (ex: reload de aba)
+        if(!window._currentUser) {
+          window._currentUser = {email};
+          console.log("[Avatim] fsGravar: _currentUser restaurado do localStorage para:", email);
         }
         console.log("[Avatim] fsGravar: re-autenticando...");
         const authOk = await window.fbLogin(email);
         if(!authOk || !auth.currentUser){
-          // [FIX Bug3] Feedback visual — dado nao chegou ao servidor
           console.warn("[Avatim] fsGravar: autenticacao falhou — dado salvo so no localStorage");
           if(typeof showToast==="function") showToast("\u26a0\ufe0f Falha na autenticacao. Dado salvo localmente — sincronize ao reconectar.", "err");
           return;
@@ -91,7 +95,8 @@ try{
       }
 
       const D2 = JSON.parse(dadosJSON);
-      const email = window._currentUser?.email||"";
+      // [FIX BUG1/2] Fallback para localStorage se _currentUser ainda nulo
+      const email = window._currentUser?.email || localStorage.getItem("avatim_session_email") || "";
       const isAdm = email === "admin\u0040avatim.com";
 
       if(isAdm){
@@ -154,38 +159,44 @@ try{
 
         const docId = "loja_"+lid;
 
-        // Merge preventivo: preservar dados históricos do Firebase
+        // [FIX BUG3] Merge preventivo: SOMENTE adiciona dias históricos que NÃO existem no D2 local
+        // Regra: dados locais (D2) têm prioridade absoluta — são os mais recentes.
+        // Firebase só complementa com dias que o local não tem (histórico de outras sessões).
         try{
           const snapExist = await getDoc(doc(db,"avatim",docId));
           if(snapExist.exists()){
             const existing = JSON.parse(snapExist.data().dados||"{}");
-            // Merge vendas: só adiciona dias que não existem localmente
+            const excDias   = D2._vendasExcluidas?.[lid]       || [];
+            const excDiasV  = (vid) => D2._vendasVendExcluidas?.[vid] || [];
+            const excCamp   = D2._campExcluidos                || [];
+
+            // Merge vendas: Firebase complementa dias ausentes no D2 (sem sobrescrever D2)
             if(existing.vendas?.[lid]){
-              const excDias = (typeof D !== "undefined" && D._vendasExcluidas)?.[lid] || [];
               Object.entries(existing.vendas[lid]).forEach(([dt,dados])=>{
+                // [FIX BUG3] Só adiciona se DIA não existe em D2 E não está tombstoned
                 if(!(dt in pedaco.vendas[lid]) && !excDias.includes(dt)){
                   pedaco.vendas[lid][dt] = dados;
                 }
               });
             }
-            // Merge vendasVend
+            // Merge vendasVend: Firebase complementa dias ausentes no D2 (sem sobrescrever D2)
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias])=>{
               if(!pedaco.vendasVend[vid]) pedaco.vendasVend[vid]={};
-              const excDiasV = (typeof D !== "undefined" && D._vendasVendExcluidas)?.[vid] || [];
+              const excV = excDiasV(vid);
               Object.entries(dias).forEach(([dt,dados])=>{
-                if(!(dt in pedaco.vendasVend[vid]) && !excDiasV.includes(dt)){
+                // [FIX BUG3] Só adiciona se DIA não existe em D2 E não está tombstoned
+                if(!(dt in pedaco.vendasVend[vid]) && !excV.includes(dt)){
                   pedaco.vendasVend[vid][dt] = dados;
                 }
               });
             });
-            // Merge campRealizados (preservar se local está vazio)
+            // Merge campRealizados: Firebase complementa se D2 local está vazio
             if(existing.campRealizados?.length && pedaco.campRealizados.length === 0){
-              const excluidos = (typeof D !== "undefined" && D._campExcluidos) || [];
               existing.campRealizados.forEach(r=>{
-                if(!excluidos.includes(r.id)) pedaco.campRealizados.push(r);
+                if(!excCamp.includes(r.id)) pedaco.campRealizados.push(r);
               });
             }
-            // Merge fluxo
+            // Merge fluxo: Firebase complementa registros ausentes no D2
             if(existing.fluxo?.length){
               existing.fluxo.forEach(r=>{
                 if(!pedaco.fluxo.find(x=>x.id===r.id)) pedaco.fluxo.push(r);
@@ -193,7 +204,6 @@ try{
             }
           }
         }catch(e2){
-          // Merge preventivo falhou — continua e grava o que temos
           console.warn("[Avatim] merge preventivo loja ignorado:", e2.code||e2.message);
         }
 
@@ -215,10 +225,12 @@ try{
   window.fsCarregar = async function(){
     try{
       if(!auth.currentUser){
-        const email = window._currentUser?.email;
+        // [FIX BUG1/2] Fallback para localStorage quando _currentUser some após reload
+        const email = window._currentUser?.email || localStorage.getItem("avatim_session_email");
         if(email) await window.fbLogin(email);
       }
-      const email = window._currentUser?.email||"";
+      // [FIX BUG1/2] Fallback para localStorage
+      const email = window._currentUser?.email || localStorage.getItem("avatim_session_email") || "";
       const isAdm = email === "admin\u0040avatim.com";
 
       // Sempre lê o doc principal (tem metas, vendedoras, campanhas)
@@ -3922,6 +3934,8 @@ async function login(){
     window._localLogin  = true;
     window._currentUser = {email};
     window._userLoja    = u;
+    // [FIX BUG1/2] Persistir email no localStorage para recuperação após reload/nova aba
+    localStorage.setItem("avatim_session_email", email);
     // Aguardar autenticação Firebase ANTES de mostrar o app
     // Isso garante que auth.currentUser está pronto quando save() disparar
     if(window.fbLogin){
@@ -3941,6 +3955,8 @@ function logout(){
   window._localLogin = false;
   window._currentUser = null;
   window._userLoja = null;
+  // [FIX BUG1/2] Limpar email salvo na sessão ao fazer logout
+  localStorage.removeItem("avatim_session_email");
   // SignOut Firebase
   if(window.fbLogout) window.fbLogout();
   showLogin();
@@ -5241,16 +5257,39 @@ async function salvarLanc(){
       D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
     });
 
-    // Um único save() grava tudo no localStorage e Firebase de uma vez
-    save();
-
-    showToast("✅ Lançamento salvo! Total: "+fmt(fat));
+    // [FIX BUG4] Salvar localmente de forma síncrona e imediata
+    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    // Feedback imediato ao usuário — dado está seguro no localStorage
+    showToast("💾 Lançamento salvo! Total: "+fmt(fat)+" — sincronizando...");
     carregarDash();
     renderHistoricoLanc();
     renderConsolidadoLanc(lid);
-    // Limpar campos após salvar
     limparCamposLanc();
     nav("dash");
+
+    // [FIX BUG4] Sincronizar com Firebase de forma assíncrona APÓS navegar,
+    // com feedback correto de sucesso ou falha — sem bloquear a UI
+    (async () => {
+      try {
+        const fbOk = await waitForFirebase(5000);
+        if(fbOk && window.fsGravar){
+          await window.fsGravar(JSON.stringify(D));
+          showToast("✅ Sincronizado com Firebase!", "ok");
+          const syncEl = document.getElementById("sync-badge");
+          if(syncEl){
+            syncEl.style.display = "block";
+            syncEl.textContent = "✅ Sync: " + new Date().toLocaleTimeString("pt-BR");
+            syncEl.style.color = "var(--verde)";
+          }
+        } else {
+          console.warn("[Avatim] salvarLanc: Firebase indisponivel — dado salvo so localmente");
+          showToast("⚠️ Salvo localmente. Firebase indisponível — será sincronizado ao reconectar.", "warn");
+        }
+      } catch(eFb) {
+        console.error("[Avatim] salvarLanc: Firebase sync falhou:", eFb.message);
+        showToast("⚠️ Salvo localmente. Falha Firebase: " + (eFb.code || eFb.message), "warn");
+      }
+    })();
   } catch(e){
     showToast("Erro ao salvar: "+e.message,"err");
     console.error("[Avatim] salvarLanc erro:", e);
