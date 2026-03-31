@@ -27,7 +27,6 @@ const _d = s => atob(s).split("").map(c=>String.fromCharCode(c.charCodeAt(0)^_k)
 const FB_SENHAS = {
   "admin\u0040avatim.com":      _d("FxosMz47a2Jqaw=="),
   "mooca\u0040avatim.com":      _d("FxpoamtiPQ=="),
-  "lorena\u0040avatim.com":     _d("FhpoamtiPQ=="),
   "leopoldina\u0040avatim.com": _d("DRpoamtiPQ=="),
   "perdizes\u0040avatim.com":   _d("ChpoamtiPQ=="),
   "santana\u0040avatim.com":    _d("CRo0Lmhqa2I9"),
@@ -76,13 +75,17 @@ try{
       if(!auth.currentUser){
         const email = window._currentUser?.email;
         if(!email){
-          console.warn("[Avatim] fsGravar: sem email de usuário");
+          // [FIX Bug3] Feedback visual — usuario precisa saber que dado nao foi ao servidor
+          console.warn("[Avatim] fsGravar: sem email de usuario");
+          if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: sessao sem usuario. Faca login novamente.", "err");
           return;
         }
         console.log("[Avatim] fsGravar: re-autenticando...");
         const authOk = await window.fbLogin(email);
         if(!authOk || !auth.currentUser){
-          console.warn("[Avatim] fsGravar: autenticação falhou — dado salvo só no localStorage");
+          // [FIX Bug3] Feedback visual — dado nao chegou ao servidor
+          console.warn("[Avatim] fsGravar: autenticacao falhou — dado salvo so no localStorage");
+          if(typeof showToast==="function") showToast("\u26a0\ufe0f Falha na autenticacao. Dado salvo localmente — sincronize ao reconectar.", "err");
           return;
         }
       }
@@ -125,12 +128,13 @@ try{
           "santana\u0040avatim.com":    "santana",
           "jarpaul\u0040avatim.com":    "jarpaul",
           "pinheiros\u0040avatim.com":  "pinheiros",
-          "ibirapuera\u0040avatim.com": "ibirapuera",
-          "lorena\u0040avatim.com":     "jarpaul"
+          "ibirapuera\u0040avatim.com": "ibirapuera"
         };
         const lid = lojaMap[email];
         if(!lid){
-          console.warn("[Avatim] fsGravar: email não mapeado para loja:", email);
+          // [FIX Bug1a] Feedback visual quando email nao esta mapeado
+          console.warn("[Avatim] fsGravar: email nao mapeado para loja:", email);
+          if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: loja nao identificada para este usuario. Contate o administrador.", "err");
           return;
         }
 
@@ -279,8 +283,7 @@ try{
           "santana\u0040avatim.com":    "santana",
           "jarpaul\u0040avatim.com":    "jarpaul",
           "pinheiros\u0040avatim.com":  "pinheiros",
-          "ibirapuera\u0040avatim.com": "ibirapuera",
-          "lorena\u0040avatim.com":     "jarpaul"
+          "ibirapuera\u0040avatim.com": "ibirapuera"
         };
         const lid = lojaMap[email];
         if(lid){
@@ -335,13 +338,22 @@ try{
     window._currentUser = user;
     if(user){
       try {
-        window._userLoja = (window.USUARIOS||{})[user.email]||{id:"desconhecido",nome:user.email};
+        // [FIX Bug1b] Restaurar _userLoja ao re-autenticar via Firebase (ex: reload, sessao persistida)
+        const uData = (window.USUARIOS||{})[user.email];
+        if(uData){
+          window._userLoja = uData;
+          console.log("[Avatim] onAuthStateChanged: _userLoja restaurado para:", uData.id);
+        } else {
+          window._userLoja = {id:"desconhecido", nome:user.email};
+          console.warn("[Avatim] onAuthStateChanged: email nao encontrado em USUARIOS:", user.email);
+        }
       } catch(eU) {
         window._userLoja = {id:"desconhecido",nome:user.email};
         console.warn("[Avatim] Erro ao carregar USUARIOS:", eU.message);
       }
       if(typeof showApp==="function") showApp();
     } else {
+      window._userLoja = null;
       if(typeof showLogin==="function") showLogin();
     }
   });
@@ -2475,7 +2487,6 @@ const LOJAS=[
 window.USUARIOS={
   "admin\u0040avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
   "mooca\u0040avatim.com":      {id:"mooca",       nome:"Mooca Plaza",        hash:"cb18a0eb4a247f4881eeba8ff86c02c4144b1d8cb9e6ccfe9220147941984fc1"},
-  "lorena\u0040avatim.com":     {id:"lorena",      nome:"Lorena",             hash:"0cf4d03a8e79dc148fc3e7badfb6db84f1d12d48fcc6ec25e0a278383d713504"},
   "leopoldina\u0040avatim.com": {id:"leopoldina",  nome:"Vila Leopoldina",    hash:"f5fcf028d1dfbb7a2b6a77a46efc9c5367bf32e838a99b8c42b3d72b3b386be4"},
   "perdizes\u0040avatim.com":   {id:"perdizes",    nome:"Perdizes",           hash:"46eb3c9cec4b65a3ffe5f8f8680c3204f36277e1b1be96619ede54f14f77be04"},
   "santana\u0040avatim.com":    {id:"santana",     nome:"Santana",            hash:"d44083ea8c5950fd31c6b9f1a88389854f7526c11dee524f43da021e6c165398"},
@@ -3180,31 +3191,46 @@ function save(){
     if(ok && window.fsGravar){
       try{
         await window.fsGravar(JSON.stringify(D));
-        // Feedback visual de sync bem-sucedido (badge no topo)
+        // [FIX] Feedback de sync para TODOS os perfis (nao so admin)
         const syncEl = document.getElementById('sync-badge');
-        if(syncEl && isAdmin()){
+        if(syncEl){
           syncEl.textContent = '✅ Salvo: ' + new Date().toLocaleTimeString('pt-BR');
           syncEl.style.color = 'var(--verde)';
         }
+        console.log("[Avatim] save() sincronizado com Firebase OK");
       }catch(e){
         console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
-        // Mostrar erro para o usuário
-        showToast('⚠️ Salvo localmente. Firebase: ' + (e.code||e.message), 'warn');
-        // Tentar novamente em 10s
+        showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
+        // [FIX Bug3] Retry com feedback ao usuario
         setTimeout(async ()=>{
           if(window.fsGravar){
-            try{ await window.fsGravar(JSON.stringify(D)); }
-            catch(e2){ console.warn("[Avatim] Retry save falhou:", e2.message); }
+            try{
+              await window.fsGravar(JSON.stringify(D));
+              showToast('✅ Sincronizado com sucesso!', 'ok');
+            }
+            catch(e2){
+              console.warn("[Avatim] Retry save falhou:", e2.message);
+              showToast('❌ Dado salvo so localmente. Verifique conexao e faca login novamente.', 'err');
+            }
           }
         }, 10000);
       }
     } else {
-      console.warn("[Avatim] Firebase indisponível — dado salvo só no localStorage");
-      // Tentar gravar quando Firebase ficar disponível
+      console.warn("[Avatim] Firebase indisponivel - dado salvo so no localStorage");
+      // [FIX Bug3] Feedback imediato ao usuario
+      showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
       const retryOk = await waitForFirebase(30000);
       if(retryOk && window.fsGravar){
-        try{ await window.fsGravar(JSON.stringify(D)); }
-        catch(e){ console.warn("[Avatim] save() retry falhou:", e.message); }
+        try{
+          await window.fsGravar(JSON.stringify(D));
+          showToast('✅ Reconectado e sincronizado com sucesso!', 'ok');
+        }
+        catch(e){
+          console.warn("[Avatim] save() retry falhou:", e.message);
+          showToast('❌ Nao foi possivel sincronizar. Dado salvo localmente.', 'err');
+        }
+      } else {
+        showToast('❌ Sem conexao com Firebase. Dado salvo localmente.', 'err');
       }
     }
   }, 1500);
@@ -3367,7 +3393,14 @@ const parseMoeda = parseBR; // alias
 
 const hoje = ()=>new Date().toISOString().split("T")[0];
 const nomeDia=d=>new Date(d+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"numeric",month:"short"});
-const lojaId  =()=>window._userLoja?.id||"mooca";
+const lojaId  =()=>{
+  const id = window._userLoja?.id;
+  if(!id || id==="desconhecido"){
+    console.warn("[Avatim] lojaId(): _userLoja não definido ou inválido — bloqueando operação");
+    return null;
+  }
+  return id;
+};
 const isAdmin =()=>window._userLoja?.admin===true;
 const lojaNome=()=>window._userLoja?.nome||"--";
 function showToast(msg,tipo="ok"){const t=document.getElementById("toast");t.textContent=msg;t.className="toast show "+tipo;setTimeout(()=>t.className="toast",3000);}
@@ -5165,7 +5198,8 @@ async function salvarLanc(){
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
-  if(!lid){ _abortar("Selecione a loja!"); return; }
+  // [FIX Bug1a] lojaId() pode retornar null se _userLoja nao estiver definido
+  if(!lid){ _abortar("\u26a0\ufe0f Sessao de loja invalida. Saia e entre novamente."); return; }
 
   const data = document.getElementById("l-data").value || hoje();
 
@@ -8839,7 +8873,7 @@ function tabRankPerLoja(per, el){
     if(histBloco)  histBloco.style.display='';
     // preencher select de vendedoras
     const lid = isAdmin()
-      ? (document.getElementById('sel-loja-rank')?.value||'mooca')
+      ? (document.getElementById('sel-loja-rank')?.value||(LOJAS[0]?.id||''))
       : lojaId();
     const sel = document.getElementById('rh-sel-vend');
     if(sel){
@@ -8867,7 +8901,7 @@ function tabRankPerLoja(per, el){
 // ─── Buscar histórico da loja ─────────────────────────
 function buscarHistLoja(){
   const lid = isAdmin()
-    ? (document.getElementById('sel-loja-rank')?.value||'mooca')
+    ? (document.getElementById('sel-loja-rank')?.value||(LOJAS[0]?.id||''))
     : lojaId();
   const vendId = document.getElementById('rh-sel-vend')?.value||'';
   const de     = document.getElementById('rh-de')?.value;
@@ -8995,7 +9029,7 @@ function buscarHistLoja(){
 function renderRankingLoja() {
   const per = _rankPerLoja;
   const lid = isAdmin()
-    ? (document.getElementById('sel-loja-rank')?.value || 'mooca')
+    ? (document.getElementById('sel-loja-rank')?.value || (LOJAS[0]?.id||''))
     : lojaId();
 
   // Mostrar seletor só para admin
