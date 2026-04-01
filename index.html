@@ -971,6 +971,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
+    <button class="ni loja-only" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">🏷️</span>Campanhas</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -1584,6 +1585,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab active" onclick="tabRankPer('hoje',this,'rede')">Hoje</button>
       <button class="tab" onclick="tabRankPer('semana',this,'rede')">Semana</button>
       <button class="tab" onclick="tabRankPer('mes',this,'rede')">Mes</button>
+      <button class="tab" onclick="tabRankPer('ano',this,'rede')">🏆 Ano</button>
     </div>
     <!-- Podio: top 3 lojas mais proximas da meta -->
     <div id="rank-podio-lojas" style="margin-bottom:20px"></div>
@@ -1630,6 +1632,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab active" id="rtab-hoje" onclick="tabRankPerLoja('hoje',this)">Hoje</button>
       <button class="tab" id="rtab-semana" onclick="tabRankPerLoja('semana',this)">Semana</button>
       <button class="tab" id="rtab-mes" onclick="tabRankPerLoja('mes',this)">Mes</button>
+      <button class="tab" id="rtab-ano" onclick="tabRankPerLoja('ano',this)">🏆 Ano</button>
       <button class="tab" id="rtab-hist" onclick="tabRankPerLoja('hist',this)">📅 Histórico</button>
     </div>
     <!-- Seletor de loja (admin vê todas, vendedora vê só a sua) -->
@@ -1705,6 +1708,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab active" onclick="tabRankPer('hoje',this,'admin')">Hoje</button>
       <button class="tab" onclick="tabRankPer('semana',this,'admin')">Semana</button>
       <button class="tab" onclick="tabRankPer('mes',this,'admin')">Mes</button>
+      <button class="tab" onclick="tabRankPer('ano',this,'admin')">🏆 Ano</button>
     </div>
     <div id="rank-admin-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"></div>
   </div>
@@ -2616,6 +2620,105 @@ service cloud.firestore {
 </div>
 
 </main>
+
+<div class="page" id="page-historico">
+  <div class="ph">
+    <div><h1 class="pt">Histórico <span>de Lançamentos</span></h1>
+    <div class="ps" id="historico-sub">Consulte lançamentos por período</div></div>
+  </div>
+
+  <!-- Tabs: Por Loja / Por Vendedora -->
+  <div class="tabs" style="margin-bottom:16px">
+    <button class="tab active" id="htab-loja" onclick="tabHistorico('loja',this)">📋 Por Loja</button>
+    <button class="tab" id="htab-vend" onclick="tabHistorico('vend',this)">👤 Por Vendedora</button>
+  </div>
+
+  <!-- HISTÓRICO POR LOJA -->
+  <div id="hist-bloco-loja">
+    <div class="sc" style="margin-bottom:12px">
+      <!-- Seletor rápido de período -->
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        <span style="font-size:10px;color:var(--muted);align-self:center">Período rápido:</span>
+        <button onclick="selecionarMesHist(0)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-0">Este mês</button>
+        <button onclick="selecionarMesHist(1)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-1">Mês passado</button>
+        <button onclick="selecionarMesHist(2)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-2">2 meses atrás</button>
+        <button onclick="selecionarMesHist(3)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-3">3 meses atrás</button>
+        <button onclick="selecionarMesHist(6)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-6">Últimos 6 meses</button>
+        <button onclick="selecionarMesHist(12)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-12">Este ano</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;align-items:end">
+        <div class="admin-only" id="hist-loja-sel-wrap" style="display:none">
+          <label style="font-size:11px;color:var(--muted)">Loja</label>
+          <select id="hist-loja-sel" onchange="buscarHistoricoLoja()" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted)">De</label>
+          <input type="date" id="hist-loja-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted)">Até</label>
+          <input type="date" id="hist-loja-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        </div>
+        <div>
+          <button class="btn-p" style="width:100%" onclick="buscarHistoricoLoja()">🔍 Buscar</button>
+        </div>
+      </div>
+    </div>
+    <div id="hist-loja-resultado" style="display:none">
+      <div id="hist-loja-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px"></div>
+      <div class="sc" style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--ouro)">Dia a dia</div>
+        <div id="hist-loja-tabela"></div>
+      </div>
+      <div class="sc">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--azul)">Por vendedora</div>
+        <div id="hist-loja-por-vend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTÓRICO POR VENDEDORA -->
+  <div id="hist-bloco-vend" style="display:none">
+    <div class="sc" style="margin-bottom:12px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        <span style="font-size:10px;color:var(--muted);align-self:center">Período rápido:</span>
+        <button onclick="selecionarMesHistVend(0)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Este mês</button>
+        <button onclick="selecionarMesHistVend(1)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Mês passado</button>
+        <button onclick="selecionarMesHistVend(2)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">2 meses atrás</button>
+        <button onclick="selecionarMesHistVend(3)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">3 meses atrás</button>
+        <button onclick="selecionarMesHistVend(6)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Últimos 6 meses</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;align-items:end">
+        <div>
+          <label style="font-size:11px;color:var(--muted)">Vendedora</label>
+          <select id="hist-pg-sel-vend" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted)">De</label>
+          <input type="date" id="hist-pg-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted)">Até</label>
+          <input type="date" id="hist-pg-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        </div>
+        <div>
+          <button class="btn-p" style="width:100%" onclick="buscarHistoricoVend()">🔍 Buscar</button>
+        </div>
+      </div>
+    </div>
+    <div id="hist-pg-resultado" style="display:none">
+      <div id="hist-pg-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px"></div>
+      <div class="sc">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--ouro)">Dia a dia</div>
+        <div id="hist-pg-tabela"></div>
+      </div>
+    </div>
+  </div>
+</div>
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
@@ -3926,6 +4029,7 @@ function calcVendPer(id,per){
     }
     return t;
   }
+  if(per==='ano') return calcVendAno(id);
   const mes=hoje().slice(0,7);
   return Object.entries(vd).filter(([d])=>d.startsWith(mes)).reduce((s,[,v])=>s+Number(v.val||0),0);
 }
@@ -4004,13 +4108,17 @@ function showApp(){
   document.getElementById("vl-data").value=hoje();
   if(window._fbOk){const db=document.getElementById("demo-box");if(db)db.style.display="none";}
 
-  // Mostrar/esconder itens admin-only
+  // Mostrar/esconder itens admin-only e loja-only
   const adminMode = isAdmin();
   document.querySelectorAll(".admin-only").forEach(e=>{
     e.style.display = adminMode ? (e.tagName==="BUTTON"||e.tagName==="A" ? "flex" : "block") : "none";
   });
   document.querySelectorAll(".admin-item").forEach(e=>{
     e.style.display = adminMode ? "flex" : "none";
+  });
+  // loja-only: visível APENAS para lojas (oculto para admin)
+  document.querySelectorAll(".loja-only").forEach(e=>{
+    e.style.display = adminMode ? "none" : (e.tagName==="BUTTON"||e.tagName==="A" ? "flex" : "block");
   });
   if(adminMode){
     document.querySelectorAll(".cfg-admin-tab").forEach(e=>e.style.display="inline-flex");
@@ -4170,7 +4278,7 @@ function nav(pg){
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
   document.getElementById("nav-"+pg)?.classList.add("active");
-  ({rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
+  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
     estoque:()=>{
@@ -8950,29 +9058,131 @@ function tabRank(tab, el) {
   if(tab==='admin')  renderRankingAdmin();
 }
 
-function tabRankPer(per, el, ctx) {
+async function tabRankPer(per, el, ctx) {
   el.closest('.tabs').querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
   el.classList.add('active');
+
+  // Para 'ano': buscar dados do Firebase se necessário
+  if(per==='ano' && window.fsCarregar){
+    const ano = hoje().slice(0,4);
+    const temDadosAno = D.vendedoras.some(v =>
+      Object.keys(D.vendasVend[v.id]||{}).some(d=>d.startsWith(ano))
+    );
+    if(!temDadosAno){
+      showToast('🔄 Carregando dados anuais...','warn');
+      try{
+        const json = await window.fsCarregar();
+        if(json){
+          const remoto = JSON.parse(json);
+          if(remoto.vendasVend){
+            Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+              Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+            });
+          }
+          if(remoto.vendas){
+            Object.entries(remoto.vendas).forEach(([lid,dias])=>{
+              if(!D.vendas[lid]) D.vendas[lid]={};
+              Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendas[lid])) D.vendas[lid][dt]=val; });
+            });
+          }
+          localStorage.setItem('avatim_v5', JSON.stringify(D));
+        }
+      }catch(e){ console.warn('[Avatim] tabRankPer ano Firebase:', e.message); }
+    }
+  }
+
   if(ctx==='rede')  { _rankPer=per;      renderRankings('rede'); }
   if(ctx==='loja')  { _rankPerLoja=per;  renderRankingLoja(); }
   if(ctx==='admin') { _rankPerAdmin=per; renderRankingAdmin(); }
 }
 
+
+// ── Cálculo Anual ─────────────────────────────────────────────
+function calcAno(lid){
+  // Soma faturamento do ano corrente via vendasVend
+  const ano = hoje().slice(0,4);
+  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  let t = 0;
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+      if(d.startsWith(ano)) t += Number(vd.val||0);
+    });
+  });
+  if(t===0 && vends.length===0){
+    Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{
+      if(d.startsWith(ano)) t += Number(vd.fat||0);
+    });
+  }
+  return t;
+}
+
+function calcVendAno(vid){
+  const ano = hoje().slice(0,4);
+  const vd = D.vendasVend[vid]||{};
+  return Object.entries(vd)
+    .filter(([d])=>d.startsWith(ano))
+    .reduce((s,[,v])=>s+Number(v.val||0),0);
+}
+
+function calcNAtendAno(lid){
+  const ano = hoje().slice(0,4);
+  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  let n = 0;
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+      if(!d.startsWith(ano)) return;
+      n += vd.trans>0 ? vd.trans : ((vd.val||0)>0?1:0);
+    });
+  });
+  return n;
+}
+
+function calcTMAno(lid){
+  const fat = calcAno(lid);
+  const n   = calcNAtendAno(lid);
+  return n>0 ? fat/n : 0;
+}
+
+function metaAno(lid){
+  // Soma das metas mensais do ano (todos os meses com meta definida)
+  const ano = hoje().slice(0,4);
+  const lm  = D.metasLoja[lid]||{};
+  let total = 0;
+  for(let m=1; m<=12; m++){
+    const mesRef = ano+'-'+String(m).padStart(2,'0');
+    const meta   = lm[mesRef]?.mes;
+    if(meta) total += meta;
+  }
+  // Fallback: 12x meta atual
+  if(!total){
+    const m = getMetas(lid);
+    total = (m.mes||0) * 12;
+  }
+  return total;
+}
+
+function metaVendAno(vid){
+  const v = D.vendedoras.find(v2=>v2.id===vid);
+  if(!v) return 0;
+  return (Number(v.metaMes)||0) * 12;
+}
+
 function renderRankings(tab) {
   const per = _rankPer;
   const hj  = hoje();
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const cls  = ['r1','r2','r3','rx','rx','rx','rx'];
 
   // --- Dados de todas as lojas ---
   const ld = LOJAS.map(l => {
     const m    = getMetas(l.id);
-    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
-    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
-    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : calcMes(l.id);
+    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : m.mes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(l.id)*1.2 : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
-    const tm   = calcTMLoja(l.id, perV);
-    const nat  = calcNAtend(l.id, perV);
+    const tm   = per==='ano' ? calcTMAno(l.id) : calcTMLoja(l.id, perV);
+    const nat  = per==='ano' ? calcNAtendAno(l.id) : calcNAtend(l.id, perV);
     return {...l, v, meta, sm, pct, tm, nat};
   });
 
@@ -9061,9 +9271,11 @@ function renderRankings(tab) {
     const mMes  = Number(v.metaMes)||0;
     const mPer  = per==='hoje'
       ? metaDiaProgressiva(mMes, v.id, hj)
-      : per==='semana' ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((mMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2)); })() : mMes;
+      : per==='semana' ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((mMes*(sw===1?0.35:sw===2?0.25:sw===3?0.25:0.15)).toFixed(2)); })()
+      : per==='ano' ? metaVendAno(v.id)
+      : mMes;
     const pct   = mPer>0 ? val/mPer*100 : 0;
-    const tm    = calcTMVend(v.id, perV);
+    const tm    = per==='ano' ? (()=>{ const vd=D.vendasVend[v.id]||{}; const ano=hoje().slice(0,4); let f=0,t=0; Object.entries(vd).forEach(([d,r])=>{ if(d.startsWith(ano)){f+=Number(r.val||0);t+=Number(r.trans||0);} }); return t>0?f/t:0; })() : calcTMVend(v.id, perV);
     const trans = (() => {
       const vd=D.vendasVend[v.id]||{};
       let t=0;
@@ -9213,6 +9425,31 @@ function tabRankPerLoja(per, el){
     if(tmBloco)    tmBloco.style.display='';
     if(header)     header.style.display='';
     if(histBloco)  histBloco.style.display='none';
+    if(per==='ano' && window.fsCarregar){
+      const ano = hoje().slice(0,4);
+      const lid2 = isAdmin() ? (document.getElementById('sel-loja-rank')?.value||(LOJAS[0]?.id||'')) : lojaId();
+      const temAno = D.vendedoras.filter(v=>v.loja===lid2).some(v=>
+        Object.keys(D.vendasVend[v.id]||{}).some(d=>d.startsWith(ano))
+      );
+      if(!temAno){
+        showToast('🔄 Carregando dados anuais...','warn');
+        (async()=>{
+          try{
+            const json = await window.fsCarregar();
+            if(json){
+              const remoto = JSON.parse(json);
+              if(remoto.vendasVend) Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+                if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+                Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+              });
+              localStorage.setItem('avatim_v5', JSON.stringify(D));
+            }
+          }catch(e){}
+          renderRankingLoja();
+        })();
+        return;
+      }
+    }
     renderRankingLoja();
   }
 }
@@ -9358,8 +9595,8 @@ function renderRankingLoja() {
   const loja = LOJAS.find(l=>l.id===lid);
   const m    = getMetas(lid);
   const hj   = hoje();
-  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : calcMes(lid);
-  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
+  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : per==='ano' ? calcAno(lid) : calcMes(lid);
+  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : m.mes;
   const sm    = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
   const pct   = meta>0 ? vLoja/meta*100 : 0;
   const cor   = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
@@ -9393,7 +9630,9 @@ function renderRankingLoja() {
       const _mMes = Number(v.metaMes)||0;
       const _mPer = per==='hoje'
         ? metaDiaProgressiva(_mMes, v.id, hj)
-        : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})() : _mMes;
+        : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mMes*(_sw===1?0.35:_sw===2?0.25:_sw===3?0.25:0.15)).toFixed(2));})()
+        : per==='ano' ? metaVendAno(v.id)
+        : _mMes;
       const _pct  = _mPer>0 ? _val/_mPer*100 : 0;
       return {...v, val:_val, pct:_pct, mPer:_mPer};
     })
@@ -9473,14 +9712,14 @@ function renderRankingLoja() {
 
 function renderRankingAdmin() {
   const per  = _rankPerAdmin;
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const hj   = hoje();
 
   document.getElementById('rank-admin-grid').innerHTML = LOJAS.map(loja => {
     const m    = getMetas(loja.id);
-    const vL   = per==='hoje' ? calcDia(loja.id) : per==='semana' ? calcSem(loja.id) : calcMes(loja.id);
-    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : m.mes;
-    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    const vL   = per==='hoje' ? calcDia(loja.id) : per==='semana' ? calcSem(loja.id) : per==='ano' ? calcAno(loja.id) : calcMes(loja.id);
+    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(loja.id) : m.mes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(loja.id)*1.2 : m.superMes;
     const pct  = meta>0 ? vL/meta*100 : 0;
     const cor  = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':vL>0?'var(--verm)':'var(--muted)';
 
@@ -10304,7 +10543,7 @@ function exportarRelatorioRanking(){
   // Ranking Lojas
   csv += 'RANKING DE LOJAS\n';
   csv += 'Posição,Loja,Faturamento,Meta,% Meta,TM\n';
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const ldExp = LOJAS.map(l=>{
     const m=getMetas(l.id);
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
@@ -10341,7 +10580,7 @@ function compartilharWhatsApp(){
   const per = _gestaoPer || 'hoje';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
   const hj = hoje();
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjW = hoje();
 
   let txt = `📊 *RELATÓRIO AVATIM — ${perLabel.toUpperCase()}*\n`;
@@ -10448,7 +10687,7 @@ function exportarPDFRanking() {
   const per = document.getElementById('rank-periodo')?.value || 'mes';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
   const hj = hoje();
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjR = hoje();
 
   // Ranking de lojas
@@ -10595,7 +10834,7 @@ function exportarPDFRanking() {
 function exportarPDFGestao() {
   const per = _gestaoPer || 'hoje';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjG = hoje();
 
   const ldG = LOJAS.map(l=>{
@@ -10815,7 +11054,7 @@ function exportarRelatorioGestao(){
   // Status de lojas
   csv += 'STATUS DAS LOJAS\n';
   csv += 'Loja,Faturamento,Meta,% Meta,TM,Atendimentos,Projeção\n';
-  const perV = per==='hoje'?'dia':per;
+  const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   LOJAS.forEach(l=>{
     const m=getMetas(l.id);
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
@@ -11104,6 +11343,351 @@ function renderGestao() {
       ` : `<div style="font-size:11px;color:var(--muted)">Sem lancamentos no mes.</div>`}
     </div>`;
   }).join('');
+}
+
+// ============================================================
+// PÁGINA HISTÓRICO — Acessível para lojas e admin
+// ============================================================
+
+// Calcular primeiro e último dia de um mês N meses atrás (0 = atual)
+function _rangeParaMes(mesesAtras){
+  const hoje_d = new Date();
+  const d = new Date(hoje_d.getFullYear(), hoje_d.getMonth() - mesesAtras, 1);
+  const ultimo = new Date(d.getFullYear(), d.getMonth()+1, 0);
+  const fmt2 = n => String(n).padStart(2,'0');
+  const de  = d.getFullYear()+'-'+fmt2(d.getMonth()+1)+'-01';
+  const ate = d.getFullYear()+'-'+fmt2(d.getMonth()+1)+'-'+fmt2(ultimo.getDate());
+  return {de, ate};
+}
+
+function selecionarMesHist(mesesAtras){
+  const hoje_d = new Date();
+  let de, ate;
+  if(mesesAtras === 6){
+    // Últimos 6 meses
+    const inicio = new Date(hoje_d.getFullYear(), hoje_d.getMonth()-5, 1);
+    const fmt2 = n => String(n).padStart(2,'0');
+    de  = inicio.getFullYear()+'-'+fmt2(inicio.getMonth()+1)+'-01';
+    ate = hoje();
+  } else if(mesesAtras === 12){
+    // Este ano
+    de  = hoje_d.getFullYear()+'-01-01';
+    ate = hoje_d.getFullYear()+'-12-31';
+  } else {
+    const r = _rangeParaMes(mesesAtras);
+    de = r.de; ate = r.ate;
+    // Se for mês atual, até = hoje
+    if(mesesAtras === 0) ate = hoje();
+  }
+  const deEl  = document.getElementById('hist-loja-de');
+  const ateEl = document.getElementById('hist-loja-ate');
+  if(deEl)  deEl.value  = de;
+  if(ateEl) ateEl.value = ate;
+  buscarHistoricoLoja();
+}
+
+function selecionarMesHistVend(mesesAtras){
+  const hoje_d = new Date();
+  let de, ate;
+  if(mesesAtras === 6){
+    const inicio = new Date(hoje_d.getFullYear(), hoje_d.getMonth()-5, 1);
+    const fmt2 = n => String(n).padStart(2,'0');
+    de  = inicio.getFullYear()+'-'+fmt2(inicio.getMonth()+1)+'-01';
+    ate = hoje();
+  } else {
+    const r = _rangeParaMes(mesesAtras);
+    de = r.de; ate = r.ate;
+    if(mesesAtras === 0) ate = hoje();
+  }
+  const deEl  = document.getElementById('hist-pg-de');
+  const ateEl = document.getElementById('hist-pg-ate');
+  if(deEl)  deEl.value  = de;
+  if(ateEl) ateEl.value = ate;
+  if(document.getElementById('hist-pg-sel-vend')?.value) buscarHistoricoVend();
+}
+
+function tabHistorico(aba, el){
+  document.querySelectorAll('#page-historico .tab').forEach(e=>e.classList.remove('active'));
+  if(el) el.classList.add('active');
+  document.getElementById('hist-bloco-loja').style.display = aba==='loja' ? '' : 'none';
+  document.getElementById('hist-bloco-vend').style.display = aba==='vend' ? '' : 'none';
+  if(aba==='vend') _preencherSelHistPg();
+}
+
+function iniciarPaginaHistorico(){
+  // Preencher datas padrão (mês atual)
+  const hj = hoje();
+  const de  = document.getElementById('hist-loja-de');
+  const ate = document.getElementById('hist-loja-ate');
+  if(de  && !de.value)  de.value  = hj.slice(0,7)+'-01';
+  if(ate && !ate.value) ate.value = hj;
+
+  // Admin: mostrar seletor de loja
+  const selWrap = document.getElementById('hist-loja-sel-wrap');
+  if(selWrap) selWrap.style.display = isAdmin() ? 'block' : 'none';
+  if(isAdmin()){
+    const sel = document.getElementById('hist-loja-sel');
+    if(sel) sel.innerHTML = '<option value="">Todas</option>'
+      + LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
+  }
+
+  // Preencher sub
+  const sub = document.getElementById('historico-sub');
+  if(sub) sub.textContent = isAdmin()
+    ? 'Consulte lançamentos de qualquer loja por período'
+    : 'Consulte seus lançamentos por período — ' + lojaNome();
+
+  // Buscar automaticamente o mês atual
+  buscarHistoricoLoja();
+}
+
+function _preencherSelHistPg(){
+  const sel = document.getElementById('hist-pg-sel-vend');
+  if(!sel) return;
+  const lid = lojaId();
+  const vends = isAdmin() ? D.vendedoras : D.vendedoras.filter(v=>v.loja===lid);
+  sel.innerHTML = '<option value="">Selecione...</option>'
+    + vends.map(v=>`<option value="${v.id}">${v.nome}${isAdmin()?' ('+( LOJAS.find(l=>l.id===v.loja)?.nome||v.loja)+')':''}</option>`).join('');
+  const hj = hoje();
+  const de  = document.getElementById('hist-pg-de');
+  const ate = document.getElementById('hist-pg-ate');
+  if(de  && !de.value)  de.value  = hj.slice(0,7)+'-01';
+  if(ate && !ate.value) ate.value = hj;
+}
+
+async function buscarHistoricoLoja(){
+  const de  = document.getElementById('hist-loja-de')?.value;
+  const ate = document.getElementById('hist-loja-ate')?.value;
+  if(!de || !ate){ showToast('Selecione o período','err'); return; }
+
+  const lojaSelVal = document.getElementById('hist-loja-sel')?.value;
+  const lid = isAdmin() && lojaSelVal ? lojaSelVal : lojaId();
+  if(!lid){ showToast('Loja não identificada','err'); return; }
+
+  // Verificar se há dados no período em D — se não, buscar do Firebase
+  const vends = lid ? D.vendedoras.filter(v=>v.loja===lid) : D.vendedoras;
+  const temDadosPeriodo = vends.some(v =>
+    Object.keys(D.vendasVend[v.id]||{}).some(d => d>=de && d<=ate)
+  ) || Object.keys(D.vendas[lid]||{}).some(d => d>=de && d<=ate);
+
+  if(!temDadosPeriodo && window.fsCarregar){
+    showToast('🔄 Buscando dados do servidor...','warn');
+    try{
+      const json = await window.fsCarregar();
+      if(json){
+        const remoto = JSON.parse(json);
+        // Merge vendas remotas sem sobrescrever locais
+        if(remoto.vendas){
+          Object.entries(remoto.vendas).forEach(([l,dias])=>{
+            if(!D.vendas[l]) D.vendas[l]={};
+            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendas[l])) D.vendas[l][dt]=val; });
+          });
+        }
+        if(remoto.vendasVend){
+          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+            if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+          });
+        }
+        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        console.log('[Avatim] buscarHistoricoLoja: dados do Firebase carregados');
+      }
+    }catch(e){ console.warn('[Avatim] buscarHistoricoLoja Firebase:', e.message); }
+  }
+
+  // Coletar dias no período via vendasVend
+  const diasMap = {};
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,r])=>{
+      if(d<de || d>ate) return;
+      if(!diasMap[d]) diasMap[d]={fat:0,trans:0,aniv:0,inativ:0};
+      diasMap[d].fat    += Number(r.val   ||0);
+      diasMap[d].trans  += Number(r.trans ||0);
+      diasMap[d].aniv   += Number(r.aniv  ||0);
+      diasMap[d].inativ += Number(r.inativ||0);
+    });
+  });
+  // Fallback: dias que estão em D.vendas mas não em vendasVend
+  const lidRef = lid || '';
+  Object.entries(D.vendas[lidRef]||{}).forEach(([d,vd])=>{
+    if(d<de || d>ate) return;
+    if(!diasMap[d] && (vd.fat||0)>0){
+      diasMap[d]={fat:vd.fat||0,trans:vd.trans||0,aniv:0,inativ:0};
+    }
+  });
+
+  const dias = Object.keys(diasMap).sort();
+  let fatTotal=0, transTotal=0, anivTotal=0, inativTotal=0;
+  dias.forEach(d=>{
+    fatTotal   += diasMap[d].fat;
+    transTotal += diasMap[d].trans;
+    anivTotal  += diasMap[d].aniv;
+    inativTotal+= diasMap[d].inativ;
+  });
+  const tmMedio = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
+  const m = getMetas(lid)||{};
+  const metaRef = m.mes||0;
+  const nDias = dias.length||1;
+
+  // KPIs
+  const kpis = document.getElementById('hist-loja-kpis');
+  if(kpis) kpis.innerHTML = [
+    {l:'Faturamento Total', v:fmt(fatTotal),   c:'var(--ouro)'},
+    {l:'Dias lançados',     v:dias.length,      c:'var(--verde)'},
+    {l:'TM Médio',          v:fmt(tmMedio),     c:'var(--azul)'},
+    {l:'Total Atend.',      v:transTotal,        c:'var(--texto)'},
+    {l:'Aniversariantes',  v:anivTotal,         c:'var(--roxo)'},
+    {l:'Inativos recup.',  v:inativTotal,       c:'var(--laranja)'},
+  ].map(k=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
+    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${k.l}</div>
+    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>
+  </div>`).join('');
+
+  // Tabela dia a dia
+  const tab = document.getElementById('hist-loja-tabela');
+  if(tab) tab.innerHTML = dias.length
+    ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+        <thead><tr><th>Data</th><th>Faturamento</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:80px"></th></tr></thead>
+        <tbody>${dias.sort((a,b)=>b.localeCompare(a)).map(d=>{
+          const r=diasMap[d];
+          const tm2=r.trans>0?r.fat/r.trans:r.fat||0;
+          const dFmt=d.split('-').reverse().join('/');
+          const isHj=d===hoje();
+          return `<tr style="${isHj?'background:rgba(201,168,76,.05)':''}">
+            <td style="font-weight:${isHj?700:400};color:${isHj?'var(--ouro)':'var(--texto)'}">${dFmt}${isHj?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':''}</td>
+            <td style="color:var(--verde);font-weight:600">${fmt(r.fat)}</td>
+            <td style="color:var(--azul)">${fmt(tm2)}</td>
+            <td>${r.trans}</td>
+            <td>${r.aniv}</td>
+            <td>${r.inativ}</td>
+            <td style="white-space:nowrap">
+              <button onclick="editarLanc('${lid}','${d}')" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px">✏️</button>
+              <button onclick="excluirLancDia('${lid}','${d}',this)" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px">🗑️</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`
+    : `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+
+  // Por vendedora
+  const pv = document.getElementById('hist-loja-por-vend');
+  if(pv){
+    const vendsData = vends.map(v=>{
+      let fat2=0,trans2=0,aniv2=0,inativ2=0;
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([d,r])=>{
+        if(d<de||d>ate) return;
+        fat2+=Number(r.val||0); trans2+=Number(r.trans||0);
+        aniv2+=Number(r.aniv||0); inativ2+=Number(r.inativ||0);
+      });
+      const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
+      const metaV=valorIdealPeriodo(v.metaMes||0,de,ate);
+      return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,ideal:metaV};
+    }).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+
+    pv.innerHTML = vendsData.length
+      ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+          <thead><tr><th>#</th><th>Vendedora</th><th>Realizado</th><th>Ideal p/ período</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+          <tbody>${vendsData.map((v,i)=>{
+            const gap=v.fat-v.ideal; const cg=gap>=0?'var(--verde)':'var(--verm)';
+            return `<tr>
+              <td style="text-align:center">${['🥇','🥈','🥉'][i]||i+1}</td>
+              <td><strong>${v.nome}</strong></td>
+              <td style="color:var(--verde);font-weight:600">${fmt(v.fat)}</td>
+              <td style="color:${cg}">${fmt(v.ideal)} <span style="font-size:10px">(${gap>=0?'+':''}${fmt(gap)})</span></td>
+              <td style="color:var(--azul)">${fmt(v.tm)}</td>
+              <td>${v.trans}</td><td>${v.aniv}</td><td>${v.inativ}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`
+      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum lançamento por vendedora neste período.</div>`;
+  }
+
+  document.getElementById('hist-loja-resultado').style.display='';
+}
+
+async function buscarHistoricoVend(){
+  const vendId = document.getElementById('hist-pg-sel-vend')?.value;
+  const de     = document.getElementById('hist-pg-de')?.value;
+  const ate    = document.getElementById('hist-pg-ate')?.value;
+  if(!vendId || !de || !ate){ showToast('Selecione vendedora e período','err'); return; }
+
+  const v = D.vendedoras.find(v2=>v2.id===vendId);
+  if(!v){ showToast('Vendedora não encontrada','err'); return; }
+
+  // Se não há dados locais para o período, buscar do Firebase
+  const vdCheck = D.vendasVend[vendId]||{};
+  const temDados = Object.keys(vdCheck).some(d => d>=de && d<=ate);
+  if(!temDados && window.fsCarregar){
+    showToast('🔄 Buscando dados do servidor...','warn');
+    try{
+      const json = await window.fsCarregar();
+      if(json){
+        const remoto = JSON.parse(json);
+        if(remoto.vendasVend){
+          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+            if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+          });
+        }
+        localStorage.setItem('avatim_v5', JSON.stringify(D));
+      }
+    }catch(e){ console.warn('[Avatim] buscarHistoricoVend Firebase:', e.message); }
+  }
+
+  const vd = D.vendasVend[vendId]||{};
+
+  const dias = Object.keys(vd).filter(d=>d>=de && d<=ate).sort();
+  let fatTotal=0, transTotal=0, anivTotal=0, inativTotal=0;
+  dias.forEach(d=>{
+    fatTotal    += Number(vd[d].val   ||0);
+    transTotal  += Number(vd[d].trans ||0);
+    anivTotal   += Number(vd[d].aniv  ||0);
+    inativTotal += Number(vd[d].inativ||0);
+  });
+  const tmMedio = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
+
+  // KPIs
+  const kpis = document.getElementById('hist-pg-kpis');
+  if(kpis) kpis.innerHTML = [
+    {l:'Faturamento',      v:fmt(fatTotal),  c:'var(--ouro)'},
+    {l:'TM Médio',         v:fmt(tmMedio),   c:'var(--azul)'},
+    {l:'Atend. total',     v:transTotal,      c:'var(--verde)'},
+    {l:'Dias trabalhados', v:dias.length,     c:'var(--muted)'},
+    {l:'Aniversariantes',  v:anivTotal,       c:'var(--roxo)'},
+    {l:'Inativos recup.',  v:inativTotal,     c:'var(--laranja)'},
+  ].map(k=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
+    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${k.l}</div>
+    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>
+  </div>`).join('');
+
+  // Tabela
+  const tab = document.getElementById('hist-pg-tabela');
+  if(tab) tab.innerHTML = dias.length
+    ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+        <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:80px"></th></tr></thead>
+        <tbody>${dias.slice().reverse().map(d=>{
+          const r=vd[d];
+          const fat2=Number(r.val||0);
+          const trans2=Number(r.trans||0);
+          const tm2=trans2>0?fat2/trans2:fat2||0;
+          const dFmt=d.split('-').reverse().join('/');
+          return `<tr>
+            <td>${dFmt}</td>
+            <td style="color:var(--verde);font-weight:600">${fmt(fat2)}</td>
+            <td style="color:var(--azul)">${fmt(tm2)}</td>
+            <td>${trans2}</td>
+            <td>${r.aniv||0}</td>
+            <td>${r.inativ||0}</td>
+            <td style="white-space:nowrap">
+              <button onclick="editarLancVend('${vendId}','${d}')" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px">✏️</button>
+              <button onclick="excluirLancVend('${vendId}','${d}',this)" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px">🗑️</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`
+    : `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+
+  document.getElementById('hist-pg-resultado').style.display='';
 }
 
 // Formatar data dd/mm
