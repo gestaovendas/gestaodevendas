@@ -849,6 +849,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 /* SECTION */
 .sc{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:20px;margin-bottom:12px}
+
+/* BOTÃO PERÍODO (histórico) */
+.btn-periodo{background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 12px;color:var(--muted);font-size:11px;cursor:pointer;transition:all .15s;font-family:"DM Sans",sans-serif}
+.btn-periodo:hover{border-color:var(--ouro);color:var(--ouro)}
+.btn-periodo.ativo{background:rgba(201,168,76,.12);border-color:var(--ouro);color:var(--ouro);font-weight:600}
 .st{font-size:12px;font-weight:600;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--borda);display:flex;align-items:center;gap:6px}
 
 /* FORM */
@@ -971,7 +976,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
-    <button class="ni loja-only" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
+    <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">🏷️</span>Campanhas</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -2622,103 +2627,127 @@ service cloud.firestore {
 </main>
 
 <div class="page" id="page-historico">
-  <div class="ph">
-    <div><h1 class="pt">Histórico <span>de Lançamentos</span></h1>
-    <div class="ps" id="historico-sub">Consulte lançamentos por período</div></div>
+
+  <!-- CABEÇALHO -->
+  <div class="ph" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div>
+      <h1 class="pt">Histórico <span>de Lançamentos</span></h1>
+      <div class="ps" id="historico-sub">Consulte lançamentos por período</div>
+    </div>
+    <!-- Seletor de loja (admin) -->
+    <div id="hist-admin-loja-wrap" style="display:none;min-width:200px">
+      <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Loja</label>
+      <select id="hist-loja-sel" onchange="buscarHistoricoLoja()" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:13px">
+        <option value="">Todas as lojas</option>
+      </select>
+    </div>
   </div>
 
-  <!-- Tabs: Por Loja / Por Vendedora -->
-  <div class="tabs" style="margin-bottom:16px">
+  <!-- TABS -->
+  <div class="tabs" style="margin-bottom:0">
     <button class="tab active" id="htab-loja" onclick="tabHistorico('loja',this)">📋 Por Loja</button>
     <button class="tab" id="htab-vend" onclick="tabHistorico('vend',this)">👤 Por Vendedora</button>
   </div>
 
-  <!-- HISTÓRICO POR LOJA -->
+  <!-- ─── BLOCO: POR LOJA ─────────────────────────────────── -->
   <div id="hist-bloco-loja">
-    <div class="sc" style="margin-bottom:12px">
-      <!-- Seletor rápido de período -->
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-        <span style="font-size:10px;color:var(--muted);align-self:center">Período rápido:</span>
-        <button onclick="selecionarMesHist(0)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-0">Este mês</button>
-        <button onclick="selecionarMesHist(1)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-1">Mês passado</button>
-        <button onclick="selecionarMesHist(2)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-2">2 meses atrás</button>
-        <button onclick="selecionarMesHist(3)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-3">3 meses atrás</button>
-        <button onclick="selecionarMesHist(6)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-6">Últimos 6 meses</button>
-        <button onclick="selecionarMesHist(12)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer" id="hist-mes-btn-12">Este ano</button>
+
+    <!-- Filtro -->
+    <div class="sc" style="margin-bottom:12px;border-radius:0 12px 12px 12px">
+      <!-- Atalhos de período -->
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;align-items:center">
+        <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-right:4px">Período</span>
+        <button onclick="selecionarMesHist(0)"  class="btn-periodo" id="hist-mes-btn-0">Este mês</button>
+        <button onclick="selecionarMesHist(1)"  class="btn-periodo" id="hist-mes-btn-1">Mês passado</button>
+        <button onclick="selecionarMesHist(2)"  class="btn-periodo" id="hist-mes-btn-2">2 meses atrás</button>
+        <button onclick="selecionarMesHist(3)"  class="btn-periodo" id="hist-mes-btn-3">3 meses atrás</button>
+        <button onclick="selecionarMesHist(6)"  class="btn-periodo" id="hist-mes-btn-6">Últimos 6 meses</button>
+        <button onclick="selecionarMesHist(12)" class="btn-periodo" id="hist-mes-btn-12">Este ano</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;align-items:end">
-        <div class="admin-only" id="hist-loja-sel-wrap" style="display:none">
-          <label style="font-size:11px;color:var(--muted)">Loja</label>
-          <select id="hist-loja-sel" onchange="buscarHistoricoLoja()" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
-            <option value="">Todas</option>
-          </select>
+      <!-- Datas manuais -->
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;max-width:500px">
+        <div>
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">De</label>
+          <input type="date" id="hist-loja-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted)">De</label>
-          <input type="date" id="hist-loja-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Até</label>
+          <input type="date" id="hist-loja-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
         </div>
-        <div>
-          <label style="font-size:11px;color:var(--muted)">Até</label>
-          <input type="date" id="hist-loja-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
-        </div>
-        <div>
-          <button class="btn-p" style="width:100%" onclick="buscarHistoricoLoja()">🔍 Buscar</button>
-        </div>
+        <button class="btn-p" onclick="buscarHistoricoLoja()" style="padding:9px 20px;white-space:nowrap">🔍 Buscar</button>
       </div>
     </div>
+
+    <!-- Resultado -->
     <div id="hist-loja-resultado" style="display:none">
-      <div id="hist-loja-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px"></div>
-      <div class="sc" style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--ouro)">Dia a dia</div>
-        <div id="hist-loja-tabela"></div>
+
+      <!-- KPIs -->
+      <div id="hist-loja-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+
+      <!-- Tabela dia a dia -->
+      <div class="sc" style="margin-bottom:12px;padding:16px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px">Dia a dia</div>
+          <div id="hist-loja-periodo-label" style="font-size:11px;color:var(--muted)"></div>
+        </div>
+        <div id="hist-loja-tabela" style="overflow-x:auto"></div>
       </div>
-      <div class="sc">
-        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--azul)">Por vendedora</div>
-        <div id="hist-loja-por-vend"></div>
+
+      <!-- Ranking por vendedora -->
+      <div class="sc" style="padding:16px 14px">
+        <div style="font-size:12px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Por Vendedora</div>
+        <div id="hist-loja-por-vend" style="overflow-x:auto"></div>
       </div>
+
     </div>
   </div>
 
-  <!-- HISTÓRICO POR VENDEDORA -->
+  <!-- ─── BLOCO: POR VENDEDORA ─────────────────────────────── -->
   <div id="hist-bloco-vend" style="display:none">
-    <div class="sc" style="margin-bottom:12px">
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-        <span style="font-size:10px;color:var(--muted);align-self:center">Período rápido:</span>
-        <button onclick="selecionarMesHistVend(0)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Este mês</button>
-        <button onclick="selecionarMesHistVend(1)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Mês passado</button>
-        <button onclick="selecionarMesHistVend(2)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">2 meses atrás</button>
-        <button onclick="selecionarMesHistVend(3)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">3 meses atrás</button>
-        <button onclick="selecionarMesHistVend(6)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;cursor:pointer">Últimos 6 meses</button>
+
+    <!-- Filtro -->
+    <div class="sc" style="margin-bottom:12px;border-radius:0 12px 12px 12px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;align-items:center">
+        <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-right:4px">Período</span>
+        <button onclick="selecionarMesHistVend(0)" class="btn-periodo">Este mês</button>
+        <button onclick="selecionarMesHistVend(1)" class="btn-periodo">Mês passado</button>
+        <button onclick="selecionarMesHistVend(2)" class="btn-periodo">2 meses atrás</button>
+        <button onclick="selecionarMesHistVend(3)" class="btn-periodo">3 meses atrás</button>
+        <button onclick="selecionarMesHistVend(6)" class="btn-periodo">Últimos 6 meses</button>
+        <button onclick="selecionarMesHistVend(12)" class="btn-periodo">Este ano</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;align-items:end">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;max-width:680px">
         <div>
-          <label style="font-size:11px;color:var(--muted)">Vendedora</label>
-          <select id="hist-pg-sel-vend" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Vendedora</label>
+          <select id="hist-pg-sel-vend" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
             <option value="">Selecione...</option>
           </select>
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted)">De</label>
-          <input type="date" id="hist-pg-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">De</label>
+          <input type="date" id="hist-pg-de" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted)">Até</label>
-          <input type="date" id="hist-pg-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Até</label>
+          <input type="date" id="hist-pg-ate" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
         </div>
-        <div>
-          <button class="btn-p" style="width:100%" onclick="buscarHistoricoVend()">🔍 Buscar</button>
-        </div>
+        <button class="btn-p" onclick="buscarHistoricoVend()" style="padding:9px 20px;white-space:nowrap">🔍 Buscar</button>
       </div>
     </div>
+
+    <!-- Resultado -->
     <div id="hist-pg-resultado" style="display:none">
-      <div id="hist-pg-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px"></div>
-      <div class="sc">
-        <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--ouro)">Dia a dia</div>
-        <div id="hist-pg-tabela"></div>
+      <div id="hist-pg-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+      <div class="sc" style="padding:16px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px">Dia a dia</div>
+          <div id="hist-pg-periodo-label" style="font-size:11px;color:var(--muted)"></div>
+        </div>
+        <div id="hist-pg-tabela" style="overflow-x:auto"></div>
       </div>
     </div>
   </div>
-</div>
+
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
@@ -11364,25 +11393,26 @@ function selecionarMesHist(mesesAtras){
   const hoje_d = new Date();
   let de, ate;
   if(mesesAtras === 6){
-    // Últimos 6 meses
     const inicio = new Date(hoje_d.getFullYear(), hoje_d.getMonth()-5, 1);
     const fmt2 = n => String(n).padStart(2,'0');
     de  = inicio.getFullYear()+'-'+fmt2(inicio.getMonth()+1)+'-01';
     ate = hoje();
   } else if(mesesAtras === 12){
-    // Este ano
     de  = hoje_d.getFullYear()+'-01-01';
     ate = hoje_d.getFullYear()+'-12-31';
   } else {
     const r = _rangeParaMes(mesesAtras);
     de = r.de; ate = r.ate;
-    // Se for mês atual, até = hoje
     if(mesesAtras === 0) ate = hoje();
   }
   const deEl  = document.getElementById('hist-loja-de');
   const ateEl = document.getElementById('hist-loja-ate');
   if(deEl)  deEl.value  = de;
   if(ateEl) ateEl.value = ate;
+  // Marcar botão ativo
+  document.querySelectorAll('#hist-bloco-loja .btn-periodo').forEach(b=>b.classList.remove('ativo'));
+  const btnId = mesesAtras===6?'hist-mes-btn-6':mesesAtras===12?'hist-mes-btn-12':'hist-mes-btn-'+mesesAtras;
+  document.getElementById(btnId)?.classList.add('ativo');
   buscarHistoricoLoja();
 }
 
@@ -11415,19 +11445,24 @@ function tabHistorico(aba, el){
 }
 
 function iniciarPaginaHistorico(){
-  // Preencher datas padrão (mês atual)
   const hj = hoje();
+
+  // Datas padrão — mês atual
   const de  = document.getElementById('hist-loja-de');
   const ate = document.getElementById('hist-loja-ate');
-  if(de  && !de.value)  de.value  = hj.slice(0,7)+'-01';
-  if(ate && !ate.value) ate.value = hj;
+  if(de)  de.value  = hj.slice(0,7)+'-01';
+  if(ate) ate.value = hj;
 
-  // Admin: mostrar seletor de loja
-  const selWrap = document.getElementById('hist-loja-sel-wrap');
-  if(selWrap) selWrap.style.display = isAdmin() ? 'block' : 'none';
+  // Marcar btn ativo "Este mês"
+  document.querySelectorAll('#page-historico .btn-periodo').forEach(b=>b.classList.remove('ativo'));
+  document.getElementById('hist-mes-btn-0')?.classList.add('ativo');
+
+  // Admin: mostrar seletor de loja no cabeçalho
+  const adminWrap = document.getElementById('hist-admin-loja-wrap');
+  if(adminWrap) adminWrap.style.display = isAdmin() ? 'block' : 'none';
   if(isAdmin()){
     const sel = document.getElementById('hist-loja-sel');
-    if(sel) sel.innerHTML = '<option value="">Todas</option>'
+    if(sel) sel.innerHTML = '<option value="">Todas as lojas</option>'
       + LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
   }
 
@@ -11435,9 +11470,12 @@ function iniciarPaginaHistorico(){
   const sub = document.getElementById('historico-sub');
   if(sub) sub.textContent = isAdmin()
     ? 'Consulte lançamentos de qualquer loja por período'
-    : 'Consulte seus lançamentos por período — ' + lojaNome();
+    : 'Consulte seus lançamentos — ' + lojaNome();
 
-  // Buscar automaticamente o mês atual
+  // Preencher select de vendedoras
+  _preencherSelHistPg();
+
+  // Buscar mês atual automaticamente
   buscarHistoricoLoja();
 }
 
@@ -11461,11 +11499,12 @@ async function buscarHistoricoLoja(){
   if(!de || !ate){ showToast('Selecione o período','err'); return; }
 
   const lojaSelVal = document.getElementById('hist-loja-sel')?.value;
-  const lid = isAdmin() && lojaSelVal ? lojaSelVal : lojaId();
-  if(!lid){ showToast('Loja não identificada','err'); return; }
+  const lid = isAdmin() ? (lojaSelVal || null) : lojaId();
+  // Loja: lid obrigatório. Admin: pode ser null (todas as lojas)
+  if(!isAdmin() && !lid){ showToast('Loja não identificada','err'); return; }
 
   // Verificar se há dados no período em D — se não, buscar do Firebase
-  const vends = lid ? D.vendedoras.filter(v=>v.loja===lid) : D.vendedoras;
+  const vends = lid ? D.vendedoras.filter(v=>v.loja===lid) : D.vendedoras.filter(()=>true);
   const temDadosPeriodo = vends.some(v =>
     Object.keys(D.vendasVend[v.id]||{}).some(d => d>=de && d<=ate)
   ) || Object.keys(D.vendas[lid]||{}).some(d => d>=de && d<=ate);
@@ -11508,12 +11547,14 @@ async function buscarHistoricoLoja(){
     });
   });
   // Fallback: dias que estão em D.vendas mas não em vendasVend
-  const lidRef = lid || '';
-  Object.entries(D.vendas[lidRef]||{}).forEach(([d,vd])=>{
+  const lojasFallback = lid ? [lid] : LOJAS.map(l=>l.id);
+  lojasFallback.forEach(lidRef=>{
+   Object.entries(D.vendas[lidRef]||{}).forEach(([d,vd])=>{
     if(d<de || d>ate) return;
     if(!diasMap[d] && (vd.fat||0)>0){
       diasMap[d]={fat:vd.fat||0,trans:vd.trans||0,aniv:0,inativ:0};
     }
+   });
   });
 
   const dias = Object.keys(diasMap).sort();
@@ -11547,7 +11588,7 @@ async function buscarHistoricoLoja(){
   const tab = document.getElementById('hist-loja-tabela');
   if(tab) tab.innerHTML = dias.length
     ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
-        <thead><tr><th>Data</th><th>Faturamento</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:80px"></th></tr></thead>
+        <thead><tr><th>Data</th><th>Faturamento</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
         <tbody>${dias.sort((a,b)=>b.localeCompare(a)).map(d=>{
           const r=diasMap[d];
           const tm2=r.trans>0?r.fat/r.trans:r.fat||0;
@@ -11586,7 +11627,7 @@ async function buscarHistoricoLoja(){
 
     pv.innerHTML = vendsData.length
       ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
-          <thead><tr><th>#</th><th>Vendedora</th><th>Realizado</th><th>Ideal p/ período</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+          <thead><tr><th>#</th><th>Vendedora</th><th>Faturamento</th><th>Meta do Período</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
           <tbody>${vendsData.map((v,i)=>{
             const gap=v.fat-v.ideal; const cg=gap>=0?'var(--verde)':'var(--verm)';
             return `<tr>
@@ -11602,6 +11643,14 @@ async function buscarHistoricoLoja(){
       : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum lançamento por vendedora neste período.</div>`;
   }
 
+  // Label do período
+  const lbl = document.getElementById('hist-loja-periodo-label');
+  if(lbl){
+    const deFmt = de.split('-').reverse().join('/');
+    const ateFmt = ate.split('-').reverse().join('/');
+    const nomeLoja = isAdmin() && lojaSelVal ? (LOJAS.find(l=>l.id===lojaSelVal)?.nome||'Todas') : lojaNome();
+    lbl.textContent = nomeLoja + ' • ' + deFmt + ' → ' + ateFmt;
+  }
   document.getElementById('hist-loja-resultado').style.display='';
 }
 
