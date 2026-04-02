@@ -2624,22 +2624,25 @@ service cloud.firestore {
   </div>
 </div>
 
-</main>
-
 <div class="page" id="page-historico">
 
   <!-- CABEÇALHO -->
-  <div class="ph" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-    <div>
-      <h1 class="pt">Histórico <span>de Lançamentos</span></h1>
-      <div class="ps" id="historico-sub">Consulte lançamentos por período</div>
-    </div>
-    <!-- Seletor de loja (admin) -->
-    <div id="hist-admin-loja-wrap" style="display:none;min-width:200px">
-      <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Loja</label>
-      <select id="hist-loja-sel" onchange="buscarHistoricoLoja()" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:13px">
-        <option value="">Todas as lojas</option>
-      </select>
+  <div class="ph">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+      <div>
+        <h1 class="pt">Histórico <span>de Lançamentos</span></h1>
+        <div class="ps" id="historico-sub">Consulte lançamentos por período</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <!-- Seletor de loja (admin) -->
+        <div id="hist-admin-loja-wrap" style="display:none">
+          <select id="hist-loja-sel" onchange="buscarHistoricoLoja()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:13px;min-width:160px">
+            <option value="">Todas as lojas</option>
+          </select>
+        </div>
+        <!-- Exportar PDF -->
+        <button onclick="exportarHistoricoPDF()" class="btn-s" style="font-size:11px;padding:8px 14px;white-space:nowrap">📄 Exportar PDF</button>
+      </div>
     </div>
   </div>
 
@@ -2748,6 +2751,7 @@ service cloud.firestore {
     </div>
   </div>
 
+</main>
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
@@ -11742,6 +11746,84 @@ async function buscarHistoricoVend(){
 // Formatar data dd/mm
 
 
+
+// ============================================================
+// EXPORTAR HISTÓRICO COMO PDF
+// ============================================================
+function exportarHistoricoPDF(){
+  const blocoLoja = document.getElementById('hist-bloco-loja');
+  const blocoVend = document.getElementById('hist-bloco-vend');
+  const lojaAtivo = blocoLoja && blocoLoja.style.display !== 'none';
+
+  const resultado   = document.getElementById(lojaAtivo ? 'hist-loja-resultado' : 'hist-pg-resultado');
+  if(!resultado || resultado.style.display === 'none'){
+    showToast('Faça uma busca antes de exportar.', 'err'); return;
+  }
+
+  const sub   = document.getElementById('historico-sub')?.textContent || '';
+  const lbl   = document.getElementById(lojaAtivo ? 'hist-loja-periodo-label' : 'hist-pg-periodo-label')?.textContent || '';
+  const kpis  = document.getElementById(lojaAtivo ? 'hist-loja-kpis' : 'hist-pg-kpis')?.innerHTML || '';
+  const tab   = document.getElementById(lojaAtivo ? 'hist-loja-tabela' : 'hist-pg-tabela')?.innerHTML || '';
+  const pvend = lojaAtivo ? (document.getElementById('hist-loja-por-vend')?.innerHTML || '') : '';
+
+  const win = window.open('', '_blank', 'width=960,height=700');
+  win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8">
+<title>Avatim — Histórico</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:28px;font-size:11px;line-height:1.4}
+.logo{font-size:20px;font-weight:900;color:#0a0a0a;letter-spacing:1px;margin-bottom:2px}
+.logo span{color:#C9A84C}
+.sub{font-size:11px;color:#666;margin-bottom:2px}
+.periodo{font-size:11px;color:#555;border-bottom:2px solid #C9A84C;padding-bottom:8px;margin-bottom:16px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:20px}
+.kcard{background:#f9f7ef;border:1px solid #e8ddb8;border-radius:6px;padding:10px;text-align:center}
+.kcard .kl{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
+.kcard .kv{font-size:15px;font-weight:700;color:#333}
+h2{font-size:11px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px;padding-bottom:4px;border-bottom:1px solid #eee}
+table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}
+th{background:#f5f3ea;color:#444;font-weight:700;padding:7px 8px;text-align:left;border-bottom:2px solid #ddd;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:6px 8px;border-bottom:1px solid #f0f0f0;color:#333}
+tr:nth-child(even) td{background:#fafaf7}
+.footer{margin-top:24px;font-size:9px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:8px}
+@media print{button{display:none!important}body{padding:12px}}
+</style></head><body>
+<div class="logo">AVATIM <span>|</span> Gestão Comercial</div>
+<div class="sub">${sub}</div>
+<div class="periodo">${lbl || 'Período não especificado'}</div>
+<div class="kpis">${_kpisParaPDF(kpis)}</div>
+${tab ? '<h2>Lançamentos dia a dia</h2><div>' + _tabelaParaPDF(tab) + '</div>' : ''}
+${pvend ? '<h2>Desempenho por vendedora</h2><div>' + _tabelaParaPDF(pvend) + '</div>' : ''}
+<div class="footer">Avatim Franquias · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+</body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(), 600);
+}
+
+function _kpisParaPDF(html){
+  // Converter cards de KPI para formato limpo
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  let result = '';
+  div.querySelectorAll('div[style*="border"]').forEach(card=>{
+    const labels = card.querySelectorAll('div');
+    if(labels.length >= 2){
+      const lbl = labels[0].textContent.trim();
+      const val = labels[1].textContent.trim();
+      result += '<div class="kcard"><div class="kl">'+lbl+'</div><div class="kv">'+val+'</div></div>';
+    }
+  });
+  return result || html.replace(/style="[^"]*color:[^;]*;?/g,'style="').replace(/background[^;]*;/g,'');
+}
+
+function _tabelaParaPDF(html){
+  // Limpar estilos de cor mantendo estrutura da tabela
+  return html
+    .replace(/style="[^"]*"/g, '')
+    .replace(/onclick="[^"]*"/g, '')
+    .replace(/<button[^>]*>.*?<\/button>/g, '');
+}
 </script>
 </body>
 </html>
