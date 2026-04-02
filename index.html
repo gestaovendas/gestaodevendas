@@ -3939,6 +3939,71 @@ function metaSemanaProgressiva(lid, semana){
 }
 
 // Retorna meta semanal para uso no carregarDash (loja ou rede)
+
+// Meta semanal progressiva POR VENDEDORA (recalcula com base no realizado)
+function metaSemanaProgressivaVend(vendId, semana){
+  const v = D.vendedoras.find(vv=>vv.id===vendId);
+  if(!v) return 0;
+  const metaMes = Number(v.metaMes)||0;
+  if(!metaMes) return 0;
+  semana = semana || semanaDoMes(hoje());
+
+  // Semana 1: sem histórico — usa percentual direto
+  if(semana === 1) return parseFloat((metaMes * PERC_SEM[1]).toFixed(2));
+
+  // Semanas 2-4: recalcular com base no realizado até fim da semana anterior
+  const mes = hoje().slice(0,7);
+  const fimSemAnt = mes + '-' + String((semana-1)*7).padStart(2,'0');
+  let acum = 0;
+  Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
+    if(dt.startsWith(mes) && dt <= fimSemAnt) acum += Number(vd.val||0);
+  });
+  const restante = Math.max(0, metaMes - acum);
+  let percRest = 0;
+  for(let s=semana; s<=4; s++) percRest += PERC_SEM[s];
+  return percRest > 0 ? parseFloat((restante * PERC_SEM[semana] / percRest).toFixed(2)) : 0;
+}
+
+// Super meta diária progressiva por vendedora
+function superMetaDiaProgressivaVend(vendId, dataRef){
+  const v = D.vendedoras.find(vv=>vv.id===vendId);
+  if(!v) return 0;
+  const superMes = Number(v.superMetaMes)||0;
+  if(!superMes) return 0;
+  dataRef = dataRef || hoje();
+  const lid = v.loja || '';
+  const diasRest = lid ? diasAbertosRestantes(lid) : (()=>{
+    const [y,m,d] = dataRef.split('-').map(Number);
+    return new Date(y,m,0).getDate() - d + 1;
+  })();
+  let acum = 0;
+  Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
+    if(dt < dataRef) acum += Number(vd.val||0);
+  });
+  const restante = Math.max(0, superMes - acum);
+  return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : 0;
+}
+
+// Super meta semanal progressiva por vendedora
+function superMetaSemProgressivaVend(vendId, semana){
+  const v = D.vendedoras.find(vv=>vv.id===vendId);
+  if(!v) return 0;
+  const superMes = Number(v.superMetaMes)||0;
+  if(!superMes) return 0;
+  semana = semana || semanaDoMes(hoje());
+  if(semana === 1) return parseFloat((superMes * PERC_SEM[1]).toFixed(2));
+  const mes = hoje().slice(0,7);
+  const fimSemAnt = mes + '-' + String((semana-1)*7).padStart(2,'0');
+  let acum = 0;
+  Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
+    if(dt.startsWith(mes) && dt <= fimSemAnt) acum += Number(vd.val||0);
+  });
+  const restante = Math.max(0, superMes - acum);
+  let percRest = 0;
+  for(let s=semana; s<=4; s++) percRest += PERC_SEM[s];
+  return percRest > 0 ? parseFloat((restante * PERC_SEM[semana] / percRest).toFixed(2)) : 0;
+}
+
 function getMetaSemLoja(lid){
   return metaSemanaProgressiva(lid, semanaDoMes(hoje()));
 }
@@ -5300,34 +5365,49 @@ function renderPainelDia(){
       grid.innerHTML = "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px'>" +
         vends.map(v=>{
           const val = per==='hoje' ? calcVendPer(v.id,'dia') : per==='semana' ? calcVendPer(v.id,'semana') : calcVendPer(v.id,'mes');
-          const meta = per==='hoje' ? (getMetas(lid).dia/Math.max(1,vends.length)) : per==='semana' ? (getMetas(lid).sem/Math.max(1,vends.length)) : (v.metaMes||0);
+          // Meta correta por período — individual de cada vendedora (progressiva)
+          const _sw = semanaDoMes(hoje());
+          const meta = per==='hoje'
+            ? metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje())
+            : per==='semana'
+              ? metaSemanaProgressivaVend(v.id, _sw)
+              : (Number(v.metaMes)||0);
+          const superMeta = per==='hoje'
+            ? superMetaDiaProgressivaVend(v.id, hoje())
+            : per==='semana'
+              ? superMetaSemProgressivaVend(v.id, _sw)
+              : (Number(v.superMetaMes)||0);
           const pct = meta>0 ? val/meta*100 : 0;
+          const pctSuper = superMeta>0 ? val/superMeta*100 : 0;
           const cor = pct>=125?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
           const tm = calcTMVend(v.id, per==='hoje'?'dia':per==='semana'?'semana':'mes');
-          const metaVPer = per==='hoje' ? (meta/Math.max(1,vends.length))
-            : per==='semana' ? (getMetas(lid).sem/Math.max(1,vends.length))
-            : (v.metaMes||0);
-          const du_=diasUteisNoMes()||1;
-          const idealVHj = per==='hoje'
-            ? (v.metaMes||0)/du_
-            : per==='semana'
-              ? (() => { const hd=new Date();hd.setHours(0,0,0,0);const dif=hd.getDay()===0?6:hd.getDay()-1;let c=0;for(let i=0;i<=dif;i++){const dd=new Date(hd);dd.setDate(hd.getDate()-i);if(dd.getDay()!==0&&dd.getDay()!==6)c++;}return(v.metaMes||0)/du_*c; })()
-              : (v.metaMes||0);
-          const gapV=val-idealVHj;
-          const corGapV=gapV>=0?"var(--verde)":"var(--verm)";
-          return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:14px'>"
-            +"<div style='font-size:12px;font-weight:700;color:var(--texto);margin-bottom:2px'>"+v.nome+"</div>"
-            +"<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>"+v.cargo+" · "+lojaNome()+"</div>"
-            +"<div style='font-size:22px;font-weight:700;color:"+cor+";margin-bottom:2px'>"+fmt(val)+"</div>"
-            +"<div style='font-size:10px;color:var(--muted);margin-bottom:4px'>"+pct.toFixed(0)+"% da meta · TM "+fmt(tm)+"</div>"
-            +"<div style='display:flex;justify-content:space-between;font-size:9px;margin-bottom:6px'>"
-              +"<span style='color:var(--ouro)'>Ideal: "+fmt(idealVHj)+"</span>"
-              +"<span style='color:"+corGapV+";font-weight:700'>Gap: "+(gapV>=0?"+":"")+fmt(gapV)+"</span>"
-            +"</div>"
-            +"<div style='height:4px;background:var(--borda);border-radius:2px'>"
-              +"<div style='height:4px;background:"+cor+";border-radius:2px;width:"+Math.min(100,pct)+"%;transition:width .4s'></div>"
-            +"</div>"
-          +"</div>";
+          const gapV = val - meta;
+          const corGapV = gapV>=0?"var(--verde)":"var(--verm)";
+          const _lblPer = per==='hoje'?'Dia':per==='semana'?'Semana':'Mês';
+          return `<div style="background:var(--card2);border:1px solid ${pct>=125?'rgba(139,92,246,.4)':pct>=100?'rgba(46,204,135,.3)':pct>=70?'rgba(201,168,76,.2)':'var(--borda)'};border-radius:12px;padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--texto)">${v.nome}</div>
+                <div style="font-size:9px;color:var(--muted);margin-top:1px">${v.cargo||'ESP'}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Meta ${_lblPer}</div>
+                <div style="font-size:14px;font-weight:800;color:var(--ouro)">${meta>0?fmt(meta):'—'}</div>
+                ${superMeta>0?`<div style="font-size:9px;color:var(--roxo);font-weight:600">Super: ${fmt(superMeta)}</div>`:''}
+              </div>
+            </div>
+            <div style="font-size:24px;font-weight:800;color:${cor};margin-bottom:2px;font-family:'Playfair Display',serif">${fmt(val)}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-bottom:6px">
+              <span style="color:${cor};font-weight:700">${pct.toFixed(0)}% da meta</span>
+              <span style="color:var(--muted)">TM ${fmt(tm)}</span>
+              <span style="color:${corGapV};font-weight:600">${gapV>=0?'+':''}${fmt(gapV)}</span>
+            </div>
+            <div style="position:relative;height:5px;background:var(--borda);border-radius:3px;overflow:hidden">
+              <div style="position:absolute;left:0;top:0;height:100%;background:${cor};border-radius:3px;width:${Math.min(100,pct)}%;transition:width .4s"></div>
+              ${superMeta>0&&meta>0?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99,meta/superMeta*100)}%;width:2px;background:var(--roxo);opacity:.8"></div>`:''}
+            </div>
+            ${superMeta>0?`<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-top:3px"><span>Meta: ${fmt(meta)}</span><span style="color:var(--roxo)">${pctSuper.toFixed(0)}% super (${fmt(superMeta)})</span></div>`:''}
+          </div>`;
         }).join('') + "</div>";
     }
   }
@@ -5435,8 +5515,18 @@ function carregarVendsForm(lidOverride){
           <div><div style="font-size:13px;font-weight:700">${v.nome}</div><div style="margin-top:3px">${badge}</div></div>
           <div style="text-align:right">
             ${metaDia>0
-              ?`<div style="font-size:8px;color:var(--muted)">META DIA</div><div style="font-size:13px;font-weight:700;color:var(--ouro)">${fmt(metaDia)}</div>`
-              :`<div style="font-size:9px;color:var(--muted)">sem meta</div>`}
+              ? (() => {
+                  const _sw = semanaDoMes(hoje());
+                  const _metaSem = metaSemanaProgressivaVend(v.id, _sw);
+                  const _superDia = superMetaDiaProgressivaVend(v.id, hj);
+                  return `<div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end">
+                    <div style="font-size:7px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Meta Dia</div>
+                    <div style="font-size:14px;font-weight:800;color:var(--ouro)">${fmt(metaDia)}</div>
+                    ${_metaSem>0?`<div style="font-size:9px;color:var(--azul);font-weight:600">Sem: ${fmt(_metaSem)}</div>`:''}
+                    ${_superDia>0?`<div style="font-size:9px;color:var(--roxo);font-weight:600">Super: ${fmt(_superDia)}</div>`:''}
+                  </div>`;
+                })()
+              : `<div style="font-size:9px;color:var(--muted)">sem meta</div>`}
           </div>
         </div>
         ${metaMes>0?`<div style="margin-bottom:10px">
@@ -6002,7 +6092,8 @@ function renderMetas(){
         <div style="padding:8px 14px">
         ${vls.map(v=>{
           const vm=calcVendPer(v.id,_tabMeta);
-          const mv=_tabMeta==="dia"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje()):_tabMeta==="semana"?(()=>{const _sw=semanaDoMes(hoje());return parseFloat(((Number(v.metaMes)||0)*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():Number(v.metaMes)||0;
+          const _swRM=semanaDoMes(hoje());
+          const mv=_tabMeta==="dia"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje()):_tabMeta==="semana"?metaSemanaProgressivaVend(v.id,_swRM):Number(v.metaMes)||0;
           const pv=mv>0?vm/mv*100:0;
           const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)">
@@ -6022,7 +6113,7 @@ function renderMetas(){
       const metaVend=_tabMeta==="dia"
         ? metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje())
         : _tabMeta==="semana"
-          ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat(((Number(v.metaMes)||0)*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})()
+          ? metaSemanaProgressivaVend(v.id, semanaDoMes(hoje()))
           : Number(v.metaMes)||0;
       const pv=metaVend>0?vm/metaVend*100:0;
       const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
@@ -6568,11 +6659,21 @@ function buscarHistVend(){
 
 function renderVendRanking(per){
   const lid=lojaId();let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  vends=vends.map(v=>({...v,val:calcVendPer(v.id,per),pct:Number(v.metaMes)>0?calcVendPer(v.id,per)/Number(v.metaMes)*100:0})).sort((a,b)=>b.pct-a.pct||b.val-a.val);
+  const _swRVR = semanaDoMes(hoje());
+  vends=vends.map(v=>{
+    const _val = calcVendPer(v.id,per);
+    const _metaV = per==='dia' ? metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje())
+      : per==='semana' ? metaSemanaProgressivaVend(v.id, _swRVR)
+      : Number(v.metaMes)||0;
+    const _superV = per==='dia' ? superMetaDiaProgressivaVend(v.id, hoje())
+      : per==='semana' ? superMetaSemProgressivaVend(v.id, _swRVR)
+      : Number(v.superMetaMes)||0;
+    return {...v, val:_val, metaPerV:_metaV, superPerV:_superV, pct:_metaV>0?_val/_metaV*100:0};
+  }).sort((a,b)=>b.pct-a.pct||b.val-a.val);
   const max=vends[0]?.val||1;
   document.getElementById("vend-ranking").innerHTML=vends.length?vends.map((v,i)=>{
-    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.metaMes>0?v.val/v.metaMes*100:0;
-    const spct=v.superMetaMes>0?v.val/v.superMetaMes*100:0;
+    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0;
+    const spct=v.superPerV>0?v.val/v.superPerV*100:0;
     const c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
     const medal=["🥇","🥈","🥉"][i]||(i+1);
     const badge=pct>=120?'<span class="sbadge roxo">Super!</span>':pct>=100?'<span class="sbadge ok">Meta!</span>':"";
@@ -6587,7 +6688,7 @@ function renderVendRanking(per){
         ${v.superMetaMes>0&&v.metaMes>0?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99,v.metaMes/v.superMetaMes*100)}%;width:2px;background:var(--roxo)"></div>`:""}
       </div>
       <div style="font-size:9px;color:${c}">${pct.toFixed(0)}% meta | ${spct.toFixed(0)}% super</div>
-      <div style="font-size:9px;color:var(--muted);margin-top:2px">Meta: ${fmt(v.metaMes)} | Super: ${fmt(v.superMetaMes||0)}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px">Meta: ${fmt(v.metaPerV)} | Super: ${fmt(v.superPerV||0)}</div>
     </div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px'>Sem vendedoras.</div>";
 }
