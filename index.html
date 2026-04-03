@@ -958,7 +958,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <!-- APP -->
 <div id="appScreen">
 <nav class="sidebar">
-  <div class="sb-brand"><div class="bn">AVATIM</div><div class="lnome" id="sb-lnome">...</div></div>
+  <div class="sb-brand"><div class="bn">AVATIM</div><div class="lnome" id="sb-lnome">...</div><div style="font-size:8px;color:rgba(201,168,76,.4);margin-top:2px">v2.4.1 · 02/04/26</div></div>
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
     <button class="ni active" onclick="nav('dash')" id="nav-dash"><span class="ic">&#9672;</span>Dashboard</button>
@@ -3720,7 +3720,7 @@ const parseBR = s => {
 };
 const parseMoeda = parseBR; // alias
 
-const hoje = ()=>new Date().toISOString().split("T")[0];
+const hoje = ()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const nomeDia=d=>new Date(d+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"numeric",month:"short"});
 const lojaId  =()=>{
   const id = window._userLoja?.id;
@@ -3865,14 +3865,16 @@ function diasPassadosNoMes(){
   return Math.max(1, new Date().getDate());
 }
 
-function calcMetasAuto(mes, ticket, superMes){
+function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*1.255);
-  const DU = diasDoMes(mesAtual()), SW = 4.33;  // dias reais do mês atual
-  // Manter 2 casas decimais para que a soma das metas diárias/semanais bata com a mensal
-  const dia      = parseFloat((mes/DU).toFixed(2));
+  // Usar dias ÚTEIS do mês (não dias corridos) para meta dia de referência
+  // diasAbertosNoMes conta seg-sab (ou seg-dom para lojas 7 dias)
+  const DU = lid ? diasAbertosNoMes(lid) : (diasAbertosNoMes ? diasAbertosNoMes('') || 26 : 26);
+  const SW = 4; // 4 semanas por mês
+  const dia      = DU>0 ? parseFloat((mes/DU).toFixed(2)) : 0;
   const sem      = parseFloat((mes/SW).toFixed(2));
-  const superDia = parseFloat((superMes/DU).toFixed(2));
+  const superDia = DU>0 ? parseFloat((superMes/DU).toFixed(2)) : 0;
   const superSem = parseFloat((superMes/SW).toFixed(2));
   return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:DU, sw:SW};
 }
@@ -8937,7 +8939,7 @@ function salvarMetaLoja(lid){
   const ticket= parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   if(!D.metasLoja[lid]) D.metasLoja[lid]={};
   const _mr = _mesMeta||mesAtual();
-  const autoMetas = calcMetasAuto(mes,ticket,smes);
+  const autoMetas = calcMetasAuto(mes,ticket,smes,lid);
   autoMetas.metaCli = metaCli;
   D.metasLoja[lid][_mr]=autoMetas;
   // Distribuir APENAS entre vendedoras realmente cadastradas nesta loja
