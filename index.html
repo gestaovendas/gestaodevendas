@@ -5328,7 +5328,7 @@ function renderRankVendHoje(){
     const _val = calcVendP(v);
     const _metaMes = Number(v.metaMes)||0;
     const _metaPer = per==="hoje"
-      ? metaDiaProgressiva(_metaMes, v.id, hj)
+      ? metaDiaProgressivaVend(v.id, hj)
       : per==="semana"
         ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((_metaMes*(sw===1?PERC_SEM[1]:sw===2?PERC_SEM[2]:sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2)); })()
         : _metaMes;
@@ -5391,7 +5391,7 @@ function renderPainelDia(){
           // Meta correta por período — individual de cada vendedora (progressiva)
           const _sw = semanaDoMes(hoje());
           const meta = per==='hoje'
-            ? metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje())
+            ? metaDiaProgressivaVend(v.id, hoje())
             : per==='semana'
               ? metaSemanaProgressivaVend(v.id, _sw)
               : (Number(v.metaMes)||0);
@@ -6164,7 +6164,7 @@ function renderMetas(){
         ${vls.map(v=>{
           const vm=calcVendPer(v.id,_tabMeta);
           const _swRM=semanaDoMes(hoje());
-          const mv=_tabMeta==="dia"?metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje()):_tabMeta==="semana"?metaSemanaProgressivaVend(v.id,_swRM):Number(v.metaMes)||0;
+          const mv=_tabMeta==="dia"?metaDiaProgressivaVend(v.id,hoje()):_tabMeta==="semana"?metaSemanaProgressivaVend(v.id,_swRM):Number(v.metaMes)||0;
           const pv=mv>0?vm/mv*100:0;
           const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)">
@@ -6182,7 +6182,7 @@ function renderMetas(){
     metaVendEl.innerHTML=vendsDash.map(v=>{
       const vm=calcVendPer(v.id,_tabMeta);
       const metaVend=_tabMeta==="dia"
-        ? metaDiaProgressiva(Number(v.metaMes)||0,v.id,hoje())
+        ? metaDiaProgressivaVend(v.id, hoje())
         : _tabMeta==="semana"
           ? metaSemanaProgressivaVend(v.id, semanaDoMes(hoje()))
           : Number(v.metaMes)||0;
@@ -6733,7 +6733,7 @@ function renderVendRanking(per){
   const _swRVR = semanaDoMes(hoje());
   vends=vends.map(v=>{
     const _val = calcVendPer(v.id,per);
-    const _metaV = per==='dia' ? metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje())
+    const _metaV = per==='dia' ? metaDiaProgressivaVend(v.id, hoje())
       : per==='semana' ? metaSemanaProgressivaVend(v.id, _swRVR)
       : Number(v.metaMes)||0;
     const _superV = per==='dia' ? superMetaDiaProgressivaVend(v.id, hoje())
@@ -6784,7 +6784,7 @@ function renderTabelaVend(){
     const projPct=proj&&v.metaMes>0?proj/v.metaMes*100:0;
     const projC=projPct>=100?"var(--verde)":projPct>=70?"var(--ouro)":"var(--verm)";
     const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
-    const metaDia = metaDiaProgressiva(Number(v.metaMes)||0, v.id, hoje());
+    const metaDia = metaDiaProgressivaVend(v.id, hoje());
     const vHj = D.vendasVend[v.id]?.[hoje()]?.val||0;
     const pctDia = metaDia>0 ? vHj/metaDia*100 : 0;
     const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':'var(--verm)';
@@ -7167,7 +7167,7 @@ function renderLojas(per="hoje"){
     // Meta correta por período
     const _lid = v.loja;
     const _metaPer = per==="hoje"
-      ? metaDiaProgressiva(_metaMes, v.id, hoje())
+      ? metaDiaProgressivaVend(v.id, hoje())
       : per==="semana"
         ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((_metaMes*(sw===1?PERC_SEM[1]:sw===2?PERC_SEM[2]:sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2)); })()
         : _metaMes;
@@ -9479,7 +9479,7 @@ function renderRankings(tab) {
     const val   = calcVendPer(v.id, perV);
     const mMes  = Number(v.metaMes)||0;
     const mPer  = per==='hoje'
-      ? metaDiaProgressiva(mMes, v.id, hj)
+      ? metaDiaProgressivaVend(v.id, hj)
       : per==='semana' ? (()=>{ const sw=semanaDoMes(hoje()); return parseFloat((mMes*(sw===1?PERC_SEM[1]:sw===2?PERC_SEM[2]:sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2)); })()
       : per==='ano' ? metaVendAno(v.id)
       : mMes;
@@ -9838,7 +9838,7 @@ function renderRankingLoja() {
       const _val  = calcVendPer(v.id, perV);
       const _mMes = Number(v.metaMes)||0;
       const _mPer = per==='hoje'
-        ? metaDiaProgressiva(_mMes, v.id, hj)
+        ? metaDiaProgressivaVend(v.id, hj)
         : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})()
         : per==='ano' ? metaVendAno(v.id)
         : _mMes;
@@ -9955,7 +9955,7 @@ function renderRankingAdmin() {
       ${vends.slice(0,5).map((v,i) => {
         const _mvMes = Number(v.metaMes)||0;
         const _mvPer = per==='hoje'
-          ? metaDiaProgressiva(_mvMes, v.id, hj)
+          ? metaDiaProgressivaVend(v.id, hj)
           : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mvMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})() : _mvMes;
         const pv = _mvPer>0?v.val/_mvPer*100:0;
         const cv = pv>=120?'var(--roxo)':pv>=100?'var(--verde)':pv>=70?'var(--ouro)':'var(--muted)';
@@ -10773,7 +10773,7 @@ function exportarRelatorioRanking(){
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj2):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
+    const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, hj2):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,mPer,pct};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct||b.val-a.val);
@@ -10815,7 +10815,7 @@ function compartilharWhatsApp(){
   const vendsW = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjW):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
+    const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjW):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
@@ -10923,7 +10923,7 @@ function exportarPDFRanking() {
   const vendsR = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjR):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
+    const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjR):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,mPer};
@@ -11071,7 +11071,7 @@ function exportarPDFGestao() {
   const vendsG = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,_hjG):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
+    const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjG):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
@@ -11282,7 +11282,7 @@ function exportarRelatorioGestao(){
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
-    const mPer=per==='hoje'?metaDiaProgressiva(mMes,v.id,hj):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
+    const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, hj):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).forEach((v,i)=>{
@@ -11458,7 +11458,7 @@ function renderGestao() {
     const mMes  = Number(v.metaMes)||0;
     const sw    = semanaDoMes(hj);
     const mPer  = per==='hoje'
-      ? metaDiaProgressiva(mMes, v.id, hj)
+      ? metaDiaProgressivaVend(v.id, hj)
       : per==='semana'
         ? parseFloat((mMes*(sw===1?PERC_SEM[1]:sw===2?PERC_SEM[2]:sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2))
         : mMes;
