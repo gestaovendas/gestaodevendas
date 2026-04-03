@@ -3761,10 +3761,12 @@ function metaDiaProgressiva(metaMes, vendId, dataRef){
     return new Date(y,m,0).getDate() - d + 1;
   })();
   // Acumulado até ONTEM (exclusive)
+  // Acumulado APENAS do mês atual (antes de hoje)
+  const _mesMDF = dataRef.slice(0,7);
   let acumulado = 0;
   if(D.vendasVend[vendId]){
     Object.entries(D.vendasVend[vendId]).forEach(([dt, vd])=>{
-      if(dt < dataRef) acumulado += Number(vd.val)||0;
+      if(dt.startsWith(_mesMDF) && dt < dataRef) acumulado += Number(vd.val)||0;
     });
   }
   const restante = Math.max(0, metaMes - acumulado);
@@ -3982,9 +3984,11 @@ function metaDiaProgressivaVend(vendId, dataRef){
     const [y,m,d] = dataRef.split('-').map(Number);
     return new Date(y,m,0).getDate() - d + 1;
   })();
+  // Acumulado APENAS do mês atual (antes de hoje) — não incluir meses anteriores!
+  const _mes = dataRef.slice(0,7);
   let acumulado = 0;
   Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
-    if(dt < dataRef) acumulado += Number(vd.val||0);
+    if(dt.startsWith(_mes) && dt < dataRef) acumulado += Number(vd.val||0);
   });
   const restante = Math.max(0, metaMes - acumulado);
   return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : 0;
@@ -4001,9 +4005,11 @@ function superMetaDiaProgressivaVend(vendId, dataRef){
     const [y,m,d] = dataRef.split('-').map(Number);
     return new Date(y,m,0).getDate() - d + 1;
   })();
+  // Acumulado APENAS do mês atual (antes de hoje)
+  const _mesSup = dataRef.slice(0,7);
   let acum = 0;
   Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
-    if(dt < dataRef) acum += Number(vd.val||0);
+    if(dt.startsWith(_mesSup) && dt < dataRef) acum += Number(vd.val||0);
   });
   const restante = Math.max(0, superMes - acum);
   return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : 0;
