@@ -10457,22 +10457,43 @@ function exportarPDFGestao() {
 }
 
 function exportarPDFRelatorio() {
-  const lid  = lojaId();
   const hj   = hoje();
   const mes2 = hj.slice(0,7);
-  const m    = getMetas(lid);
   const sw   = semanaDoMes(hj);
-  const realMes = calcMes(lid);
-  const realSem = calcSem(lid);
-  const pctMes  = m.mes>0?realMes/m.mes*100:0;
-  const pctSem  = m.sem>0?realSem/m.sem*100:0;
-  const tm      = calcTMLoja(lid, 'mes');
-  const proj    = isAdmin()?calcProjecaoRede():calcProjecao(lid);
-  const loja    = isAdmin()?'Rede Completa':lojaNome();
-  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-
-  // Vendedoras com meta semanal
   const percSw = [0,0.30,0.25,0.25,0.20];
+
+  // ── Totais corretos: admin soma a rede, loja usa só a sua ──────────
+  const lid = lojaId();
+  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  let metaMes=0, metaSem=0, realMes=0, realSem=0, tmVal=0, projVal=null;
+
+  if(isAdmin()){
+    LOJAS.forEach(l=>{
+      const m=getMetas(l.id);
+      metaMes += m.mes||0;
+      metaSem += m.sem||0;
+      realMes += calcMes(l.id);
+      realSem += calcSem(l.id);
+    });
+    const nAtend = LOJAS.reduce((s,l)=>s+calcNAtend(l.id,'mes'),0);
+    tmVal = nAtend>0 ? realMes/nAtend : 0;
+    projVal = calcProjecaoRede();
+  } else {
+    const m = getMetas(lid);
+    metaMes = m.mes||0;
+    metaSem = m.sem||0;
+    realMes = calcMes(lid);
+    realSem = calcSem(lid);
+    const nAtend = calcNAtend(lid,'mes');
+    tmVal = nAtend>0 ? realMes/nAtend : 0;
+    projVal = calcProjecao(lid);
+  }
+
+  const pctMes = metaMes>0?realMes/metaMes*100:0;
+  const pctSem = metaSem>0?realSem/metaSem*100:0;
+  const loja   = isAdmin()?'Rede Completa':lojaNome();
+
+  // ── Vendedoras ──────────────────────────────────────────────────────
   const vends = vendsLoja.map(v=>{
     const vm    = calcVendPer(v.id,'mes');
     const vmSem = calcVendPer(v.id,'semana');
@@ -10485,15 +10506,15 @@ function exportarPDFRelatorio() {
     return {nome:v.nome,loja:lj?.nome||v.loja,vm,vmSem,mMes,mSem,pctM,pctS,badge};
   }).sort((a,b)=>b.pctM-a.pctM);
 
-  // Grafico de barras horizontal (HTML)
+  // ── Gráfico de barras por vendedora ─────────────────────────────────
   const maxVM = Math.max.apply(null,vends.map(v=>v.vm).concat([1]));
-  const chartHtml = vends.map(function(v,i){
+  const chartHtml = vends.map(function(v){
     const barW = (v.vm/maxVM*100).toFixed(0);
     const cor  = v.pctM>=120?'#8B5CF6':v.pctM>=100?'#28a745':v.pctM>=70?'#e6a817':'#dc3545';
     return '<div style="margin-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
         +'<span><strong>'+v.nome+'</strong>'+(isAdmin()?'<span style="color:#999;font-size:9px"> '+v.loja+'</span>':'')
-          +' <span style="background:'+(v.badge==='ok'?'#28a745':v.badge==='roxo'?'#8B5CF6':v.badge==='warn'?'#e6a817':'#dc3545')+';color:#fff;padding:1px 6px;border-radius:6px;font-size:9px">'+v.pctM.toFixed(0)+'%</span></span>'
+          +' <span style="background:'+cor+';color:#fff;padding:1px 6px;border-radius:6px;font-size:9px">'+v.pctM.toFixed(0)+'%</span></span>'
         +'<span style="font-weight:700;color:'+cor+'">'+fmt(v.vm)+'</span>'
       +'</div>'
       +'<div style="background:#eee;border-radius:4px;height:10px;overflow:hidden">'
@@ -10506,39 +10527,40 @@ function exportarPDFRelatorio() {
     +'</div>';
   }).join('');
 
-  // Metas por semana
+  // ── Meta por semana (calcular real corretamente) ─────────────────────
   const semNomes = ['','1a sem (dias 01-07)','2a sem (dias 08-14)','3a sem (dias 15-21)','4a sem (dias 22-31)'];
   const semRows = [1,2,3,4].map(function(s){
-    const metaS = m.mes*percSw[s];
+    const metaS = metaMes * percSw[s]; // usa total correto da rede ou loja
     const iniS  = mes2+'-'+(s===1?'01':String((s-1)*7+1).padStart(2,'0'));
     const fimS  = mes2+'-'+(s<4?String(s*7).padStart(2,'0'):'31');
     var realS=0;
     vendsLoja.forEach(function(v){
-      Object.entries(D.vendasVend[v.id]||{}).forEach(function([dt,vd]){
+      Object.entries(D.vendasVend[v.id]||{}).forEach(function(entry){
+        var dt=entry[0],vd=entry[1];
         if(dt>=iniS&&dt<=fimS&&dt.startsWith(mes2)) realS+=Number(vd.val||0);
       });
     });
     const pS = metaS>0?realS/metaS*100:0;
     const cor = pS>=100?'#28a745':pS>=70?'#e6a817':'#dc3545';
-    const badge= pS>=100?'ok':pS>=70?'warn':'bad';
     return '<tr><td>'+semNomes[s]+'</td><td>'+fmt(metaS)+'</td>'
       +'<td style="font-weight:700;color:'+cor+'">'+fmt(realS)+'</td>'
-      +'<td><span class="badge-'+badge+'">'+pS.toFixed(0)+'%</span></td></tr>';
+      +'<td><span class="badge-'+(pS>=100?'ok':pS>=70?'warn':'bad')+'">'+pS.toFixed(0)+'%</span></td></tr>';
   }).join('');
 
-  // Lancamentos diarios
+  // ── Lançamentos diários ──────────────────────────────────────────────
   const diasMap = {};
   vendsLoja.forEach(function(v){
-    Object.entries(D.vendasVend[v.id]||{}).forEach(function([dt,vd]){
+    Object.entries(D.vendasVend[v.id]||{}).forEach(function(entry){
+      var dt=entry[0],vd=entry[1];
       if(!dt.startsWith(mes2)) return;
       if(!diasMap[dt]) diasMap[dt]={fat:0,trans:0};
       diasMap[dt].fat+=Number(vd.val||0); diasMap[dt].trans+=Number(vd.trans||0);
     });
   });
   const diasList = Object.entries(diasMap).sort(function(a,b){return a[0].localeCompare(b[0]);});
-  const maxFat   = Math.max.apply(null, diasList.map(function(d){return d[1].fat;}).concat([1]));
-  const rowsDias = diasList.map(function(item){
-    var dt=item[0], d=item[1];
+  const maxFat   = Math.max.apply(null,diasList.map(function(e){return e[1].fat;}).concat([1]));
+  const rowsDias = diasList.map(function(entry){
+    var dt=entry[0],d=entry[1];
     const tm2 = d.trans>0?d.fat/d.trans:0;
     const bw  = (d.fat/maxFat*100).toFixed(0);
     return '<tr><td>'+dt.split('-').reverse().join('/')+'</td>'
@@ -10549,7 +10571,50 @@ function exportarPDFRelatorio() {
       +'<td>'+(d.trans||'&mdash;')+'</td><td>'+(tm2>0?fmt(tm2):'&mdash;')+'</td></tr>';
   }).join('');
 
-  // Tabela resumida de vendedoras
+  // ── Histórico de Metas e Realizados (últimos 6 meses) ────────────────
+  const mesesSet = new Set();
+  LOJAS.forEach(l=>{
+    const lm = D.metasLoja[l.id]||{};
+    Object.keys(lm).forEach(mr=>{ if(lm[mr]?.mes>0) mesesSet.add(mr); });
+  });
+  const mesesHist = [...mesesSet].sort().reverse().slice(0,6);
+  const histRows = mesesHist.map(function(mr){
+    var mMetaH=0, mRealH=0, nAtH=0;
+    if(isAdmin()){
+      LOJAS.forEach(function(l){
+        const ml=D.metasLoja[l.id]?.[mr]||{};
+        mMetaH += ml.mes||0;
+        // Somar realizados do mes mr via vendasVend
+        const vendsL = D.vendedoras.filter(v=>v.loja===l.id);
+        vendsL.forEach(function(v){
+          Object.entries(D.vendasVend[v.id]||{}).forEach(function(e2){
+            if(e2[0].startsWith(mr)) { mRealH+=Number(e2[1].val||0); nAtH+=Number(e2[1].trans||0); }
+          });
+        });
+      });
+    } else {
+      const ml=D.metasLoja[lid]?.[mr]||{};
+      mMetaH = ml.mes||0;
+      vendsLoja.forEach(function(v){
+        Object.entries(D.vendasVend[v.id]||{}).forEach(function(e2){
+          if(e2[0].startsWith(mr)) { mRealH+=Number(e2[1].val||0); nAtH+=Number(e2[1].trans||0); }
+        });
+      });
+    }
+    const pH = mMetaH>0?mRealH/mMetaH*100:0;
+    const tmH = nAtH>0?mRealH/nAtH:0;
+    const cor = pH>=100?'#28a745':pH>=70?'#e6a817':'#dc3545';
+    const isAtual = mr===mes2;
+    return '<tr style="'+(isAtual?'background:#fffbe6;font-weight:600':'')+'">'
+      +'<td>'+(isAtual?'<strong>':'')+(function(){const[y,m]=mr.split('-').map(Number);return['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m]+'/'+y;}())+(isAtual?' ★</strong>':'')+'</td>'
+      +'<td>'+fmt(mMetaH)+'</td>'
+      +'<td style="font-weight:700;color:'+cor+'">'+fmt(mRealH)+'</td>'
+      +'<td><span class="badge-'+(pH>=100?'ok':pH>=70?'warn':'bad')+'">'+pH.toFixed(0)+'%</span></td>'
+      +'<td style="color:#666">'+fmt(tmH)+'</td>'
+      +'</tr>';
+  }).join('');
+
+  // ── Tabela resumida de vendedoras ────────────────────────────────────
   const vendsRows = vends.map(function(v,i){
     return '<tr><td>'+(i+1)+'</td><td><strong>'+v.nome+'</strong></td>'
       +(isAdmin()?'<td>'+v.loja+'</td>':'')
@@ -10560,15 +10625,18 @@ function exportarPDFRelatorio() {
   const html = '<div class="kgrid-pdf">'
     +'<div class="kcard-pdf"><div class="label">Realizado Mes</div>'
       +'<div class="valor" style="color:'+(pctMes>=100?'#28a745':pctMes>=70?'#e6a817':'#dc3545')+'">'+pctMes.toFixed(0)+'%</div>'
-      +'<div class="sub">'+fmt(realMes)+' de '+fmt(m.mes)+'</div></div>'
+      +'<div class="sub">'+fmt(realMes)+' de '+fmt(metaMes)+'</div></div>'
     +'<div class="kcard-pdf"><div class="label">Semana Atual</div>'
       +'<div class="valor" style="color:'+(pctSem>=100?'#28a745':pctSem>=70?'#e6a817':'#dc3545')+'">'+pctSem.toFixed(0)+'%</div>'
-      +'<div class="sub">'+fmt(realSem)+' de '+fmt(m.sem)+'</div></div>'
-    +'<div class="kcard-pdf"><div class="label">Ticket Medio Mes</div><div class="valor">'+fmt(tm)+'</div></div>'
+      +'<div class="sub">'+fmt(realSem)+' de '+fmt(metaSem)+'</div></div>'
+    +'<div class="kcard-pdf"><div class="label">Ticket Medio Mes</div><div class="valor">'+fmt(tmVal)+'</div></div>'
     +'<div class="kcard-pdf"><div class="label">Projecao do Mes</div>'
-      +'<div class="valor" style="color:'+(proj&&proj.projecao>=m.mes?'#28a745':'#dc3545')+'">'+(proj?fmt(proj.projecao):'&mdash;')+'</div>'
-      +'<div class="sub">'+(proj&&m.mes>0?Math.round(proj.projecao/m.mes*100)+'% da meta':'')+'</div></div>'
+      +'<div class="valor" style="color:'+(projVal&&projVal.projecao>=metaMes?'#28a745':'#dc3545')+'">'+(projVal?fmt(projVal.projecao):'&mdash;')+'</div>'
+      +'<div class="sub">'+(projVal&&metaMes>0?Math.round(projVal.projecao/metaMes*100)+'% da meta':'')+'</div></div>'
     +'</div>'
+    +(histRows?'<h2>Historico de Metas e Realizados</h2>'
+      +'<table><thead><tr><th>Mes</th><th>Meta</th><th>Realizado</th><th>%</th><th>TM</th></tr></thead>'
+      +'<tbody>'+histRows+'</tbody></table>':'')
     +'<h2>Meta por Semana &mdash; '+mes2.split('-').reverse().join('/')+'</h2>'
     +'<table><thead><tr><th>Semana</th><th>Meta</th><th>Realizado</th><th>%</th></tr></thead>'
     +'<tbody>'+semRows+'</tbody></table>'
