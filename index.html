@@ -8637,6 +8637,60 @@ function gerarRel(){
       <button class="btn-s" onclick="exportarCSV()">Exportar CSV</button>
     </div>
 
+    <!-- ═══ HISTÓRICO DE METAS E REALIZADOS ═══ -->
+    ${(()=>{
+      const mesesSetH = new Set();
+      LOJAS.forEach(l=>{
+        const lm=D.metasLoja[l.id]||{};
+        Object.keys(lm).forEach(mr=>{ if(lm[mr]?.mes>0) mesesSetH.add(mr); });
+      });
+      const mesesH = [...mesesSetH].sort().reverse().slice(0,12);
+      if(!mesesH.length) return '';
+      const hj2 = hoje().slice(0,7);
+      const rows = mesesH.map(mr=>{
+        let mMH=0,mRH=0,nAH=0,mSH=0;
+        LOJAS.forEach(l=>{
+          const ml=D.metasLoja[l.id]?.[mr]||{};
+          mMH+=(ml.mes||0); mSH+=(ml.superMes||0);
+          const vendsL=D.vendedoras.filter(v=>v.loja===l.id);
+          vendsL.forEach(v=>{
+            Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
+              if(dt.startsWith(mr)){mRH+=Number(vd.val||0);nAH+=Number(vd.trans||0);}
+            });
+          });
+        });
+        const pH=mMH>0?mRH/mMH*100:0;
+        const tmH=nAH>0?mRH/nAH:0;
+        const isCur=mr===hj2;
+        const [y,m]=mr.split('-').map(Number);
+        const nomM=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m]+'/'+y;
+        const corP=pH>=120?'var(--roxo)':pH>=100?'var(--verde)':pH>=70?'var(--ouro)':'var(--verm)';
+        const corBg=isCur?'rgba(201,168,76,.07)':'transparent';
+        return '<tr style="background:'+corBg+';border-left:3px solid '+(isCur?'var(--ouro)':'transparent')+'">'
+          +'<td style="font-weight:'+(isCur?700:400)+';color:'+(isCur?'var(--ouro)':'var(--texto)')+'">'+nomM+(isCur?' ★':'')+'</td>'
+          +'<td>'+fmt(mMH)+'</td>'
+          +(mSH>0?'<td style="color:var(--muted);font-size:10px">'+fmt(mSH)+'</td>':'<td style="color:var(--muted)">—</td>')
+          +'<td style="font-weight:700;color:'+corP+'">'+fmt(mRH)+'</td>'
+          +'<td><span style="background:'+(pH>=100?'rgba(46,204,135,.15)':pH>=70?'rgba(201,168,76,.15)':'rgba(239,68,68,.15)')+';color:'+corP+';padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">'+pH.toFixed(0)+'%</span></td>'
+          +'<td style="color:var(--azul)">'+fmt(tmH)+'</td>'
+          +'</tr>';
+      }).join('');
+      return '<div style="margin-top:20px;background:var(--card2);border:1px solid var(--borda);border-radius:14px;padding:20px">'
+        +'<div style="font-size:13px;font-weight:700;color:var(--texto);margin-bottom:16px">📅 Histórico de Metas e Realizados — últimos '+mesesH.length+' meses</div>'
+        +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+          +'<thead><tr style="border-bottom:2px solid var(--borda)">'
+            +'<th style="text-align:left;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">Mês</th>'
+            +'<th style="text-align:right;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">Meta</th>'
+            +'<th style="text-align:right;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">Super Meta</th>'
+            +'<th style="text-align:right;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">Realizado</th>'
+            +'<th style="text-align:center;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">%</th>'
+            +'<th style="text-align:right;padding:8px 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px">TM</th>'
+          +'</tr></thead>'
+          +'<tbody>'+rows+'</tbody>'
+        +'</table></div>'
+      +'</div>';
+    })()}
+
   </div>`;
 }
 function exportarCSV(){
