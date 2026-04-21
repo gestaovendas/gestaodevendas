@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Avatim | Gestao Comercial</title>
+<title>MonAris Sales Control</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <script type="module">
@@ -938,7 +938,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <!-- LOGIN -->
 <div id="loginScreen">
 <div class="lcard">
-  <div class="lbrand"><div class="bn">AVATIM</div><div class="sub">Gestao Comercial &middot; 7 Lojas</div></div>
+  <div class="lbrand"><div class="bn" style="font-size:13px;letter-spacing:2px;line-height:1.2">MonAris<br><span style="font-size:8px;font-weight:400;letter-spacing:3px;color:var(--ouro);opacity:.8">SALES CONTROL</span></div><div class="sub">Gestao Comercial &middot; 7 Lojas</div></div>
   <div class="ldiv"></div>
   <div class="fg"><label>E-mail</label><input type="email" id="lemail" placeholder="mooca\u0040avatim.com" autocomplete="username"></div>
   <div class="fg"><label>Senha</label><input type="password" id="lsenha" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()"></div>
@@ -951,14 +951,34 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </button>
   </div>
   
-  <div style="text-align:center;margin-top:12px;font-size:10px;color:var(--muted)">Avatim Franquias &mdash; Sao Paulo</div>
+  <div style="text-align:center;margin-top:12px;font-size:10px;color:var(--muted)">MonAris Sales Control &mdash; Sao Paulo</div>
 </div>
 </div>
 
 <!-- APP -->
 <div id="appScreen">
 <nav class="sidebar">
-  <div class="sb-brand"><div class="bn">AVATIM</div><div class="lnome" id="sb-lnome">...</div><div style="font-size:8px;color:rgba(201,168,76,.4);margin-top:2px">v2.4.1 · 02/04/26</div></div>
+  <div class="sb-brand" style="padding:12px 16px 10px;border-bottom:1px solid rgba(201,168,76,.15)">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 56" style="width:100%;max-width:180px;display:block;margin:0 auto">
+    <defs>
+      <linearGradient id="lgold" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#D4A017"/>
+        <stop offset="50%" style="stop-color:#F0C040"/>
+        <stop offset="100%" style="stop-color:#8B6914"/>
+      </linearGradient>
+    </defs>
+    <g transform="translate(4,4)">
+      <circle cx="24" cy="24" r="22" fill="none" stroke="url(#lgold)" stroke-width="1.2" opacity="0.6"/>
+      <path d="M14,15 Q14,8 20,10 Q24,11 24,16 Q24,11 28,10 Q34,8 34,15 L34,28 L24,38 L14,28 Z" fill="none" stroke="url(#lgold)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      <text x="24" y="23" font-size="6" fill="#8B0000" font-weight="bold" text-anchor="middle" font-family="serif">$</text>
+    </g>
+    <text x="56" y="26" font-family="Georgia,serif" font-size="18" font-weight="bold" fill="url(#lgold)" letter-spacing="0.5">MonAris</text>
+    <line x1="56" y1="30" x2="196" y2="30" stroke="url(#lgold)" stroke-width="0.8" opacity="0.7"/>
+    <text x="72" y="42" font-family="Arial,sans-serif" font-size="7" fill="#C9A84C" letter-spacing="2.2" opacity="0.9">SALES CONTROL</text>
+  </svg>
+  <div class="lnome" id="sb-lnome" style="font-size:10px;color:rgba(201,168,76,.6);text-align:center;margin-top:4px">...</div>
+  <div style="font-size:8px;color:rgba(201,168,76,.4);text-align:center;margin-top:1px">v2.5.0 · MonAris</div>
+</div><div class="lnome" id="sb-lnome">...</div><div style="font-size:8px;color:rgba(201,168,76,.4);margin-top:2px">v2.4.1 · 02/04/26</div></div>
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
     <button class="ni active" onclick="nav('dash')" id="nav-dash"><span class="ic">&#9672;</span>Dashboard</button>
@@ -985,7 +1005,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
     <button class="ni admin-only" onclick="nav('gestao')" id="nav-gestao" style="display:none"><span class="ic">&#128200;</span>Painel Gestao</button>
     <button class="ni admin-only" onclick="nav('relatorio')" id="nav-relatorio" style="display:none"><span class="ic">&#8803;</span>Relatorio Semanal</button>
-    <button class="ni admin-only" onclick="nav('arquivos')" id="nav-arquivos" style="display:none"><span class="ic">&#8857;</span>Arquivos</button>
     <button class="ni admin-only" onclick="nav('config')" id="nav-config" style="display:none"><span class="ic">&#9881;</span>Configuracoes</button>
   </div>
   <div class="sb-foot">
@@ -1109,7 +1128,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="ph">
     <div>
       <h1 class="pt">Painel <span>do Dia</span></h1>
-      <div class="ps" id="lanc-sub">Acompanhamento em tempo real — vendas alimentadas pelas vendedoras</div>
+      <div class="ps" id="lanc-sub">MonAris Sales Control — Gestão de Vendas</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div class="tabs" style="margin:0">
@@ -1436,7 +1455,16 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-fluxo">
   <div class="ph">
     <div><h1 class="pt">Origem do <span>Fluxo</span></h1><div class="ps">De onde vêm seus clientes</div></div>
-    <button class="btn-p" onclick="toggleFormFluxo()">+ Registrar Cliente</button>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:10px;color:var(--muted)">De</label>
+        <input type="date" id="fluxo-per-de" onchange="renderFluxo()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <label style="font-size:10px;color:var(--muted)">Até</label>
+        <input type="date" id="fluxo-per-ate" onchange="renderFluxo()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+      </div>
+      <button class="btn-s" onclick="exportarPDFFluxo()" style="font-size:11px;padding:7px 14px">📄 PDF</button>
+      <button class="btn-p" onclick="toggleFormFluxo()" style="font-size:11px">+ Registrar</button>
+    </div>
   </div>
 
   <!-- Formulário de registro -->
@@ -2193,31 +2221,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <!-- ARQUIVOS (ADMIN) -->
-<div class="page" id="page-arquivos">
-  <div class="ph"><div><h1 class="pt">Central de <span>Arquivos</span></h1><div class="ps">Compartilhe com todas as lojas</div></div></div>
-  <div class="sc">
-    <div class="st">Enviar Arquivo</div>
-    <div class="upload-zone" onclick="document.getElementById('file-inp').click()" id="drop-zone"
-      ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
-      <input type="file" id="file-inp" multiple onchange="handleFiles(this.files)">
-      <div style="font-size:32px;margin-bottom:10px">&#8593;</div>
-      <div style="font-size:13px;font-weight:500;margin-bottom:5px">Clique ou arraste aqui</div>
-      <div style="font-size:11px;color:var(--muted)">PDF, Excel, Word, Imagens</div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
-      <div class="ig"><label>Descricao</label><input type="text" id="arq-desc" placeholder="Ex: Tabela de metas Janeiro..."></div>
-      <div class="ig"><label>Categoria</label><select id="arq-cat"><option>Metas e Resultados</option><option>Estoque</option><option>Campanhas</option><option>Treinamento</option><option>Financeiro</option><option>Comunicados</option><option>Outros</option></select></div>
-    </div>
-    <div class="btn-r"><button class="btn-p" onclick="enviarArquivo()">Compartilhar com Todas as Lojas</button></div>
-  </div>
-  <div class="tabs" style="margin-top:12px">
-    <button class="tab active" onclick="tabArq('todos',this)">Todos</button>
-    <button class="tab" onclick="tabArq('Metas e Resultados',this)">Metas</button>
-    <button class="tab" onclick="tabArq('Estoque',this)">Estoque</button>
-    <button class="tab" onclick="tabArq('Treinamento',this)">Treinamento</button>
-  </div>
-  <div id="arq-lista" style="margin-top:6px"><div style="color:var(--muted);font-size:12px;text-align:center;padding:28px">Nenhum arquivo.</div></div>
-</div>
+
 
 <!-- CONFIG (ADMIN) -->
 <div class="page" id="page-config">
@@ -3892,7 +3896,7 @@ function semanaDoMes(data){
 }
 
 // Percentual de cada semana sobre a meta mensal
-const PERC_SEM = [0, 0.30, 0.35, 0.25, 0.20]; // S1=30% S2=35% S3=25% S4=20%
+const PERC_SEM = [0, 0.30, 0.25, 0.25, 0.20]; // S1=30% S2=25% S3=25% S4=20%
 
 // Retorna a meta semanal PROGRESSIVA da loja para a semana atual
 // Leva em conta o realizado acumulado e redistribui o restante
@@ -8850,7 +8854,7 @@ function calcPrevLoja(lid){
 }
 function salvarMetasVendedoras(lid){
   const vends=D.vendedoras.filter(v=>v.loja===lid);
-  let n=0;
+  let n=0, somaMes=0, somaSmes=0;
   vends.forEach(v=>{
     const mesEl=document.getElementById("mv-mes-"+v.id);
     const smesEl=document.getElementById("mv-smes-"+v.id);
@@ -8870,13 +8874,21 @@ function salvarMetasVendedoras(lid){
       D.vendedoras[i].ticketAlvo=ticket;
       D.vendedoras[i].metaAniv=aniv;
       D.vendedoras[i].metaInativ=inativ;
-      n++;
+      somaMes+=mes; somaSmes+=smes; n++;
     }
   });
-  save();
-  showToast(n+" vendedoras salvas!");
-  renderMetasLojas();
-  carregarVendsForm();
+  // Atualizar D.metasLoja[lid] com a soma das metas individuais
+  // para que getMetas(lid) retorne valores corretos no dashboard admin
+  if(somaMes>0){
+    if(!D.metasLoja[lid]) D.metasLoja[lid]={};
+    const _mr=_mesMeta||mesAtual();
+    const ticket=parseBR(document.getElementById("ml-ticket-"+lid)?.value)||350;
+    const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
+    D.metasLoja[lid][_mr]=autoMetas;
+  }
+  saveWithSync({meta:{lid,dados:D.metasLoja[lid]}});
+  showToast(n+" vendedoras salvas! Meta loja → "+fmt(somaMes));
+  renderMetasLojas(); carregarDash(); carregarVendsForm();
 }
 function renderMetasVendSection(lid){
   const vends=D.vendedoras.filter(v=>v.loja===lid);
@@ -9057,7 +9069,11 @@ function gerarRel(){
   }).sort((a,b)=>b.val-a.val);
 
   const tot=ld.reduce((s,l)=>s+l.fat,0);
-  const fatTot=tot; const perLabel=isMes?"Mensal":"Semanal";
+  const fatTot=tot;
+  const metaTot=ld.reduce((s,l)=>s+l.meta,0);
+  const smTot  =ld.reduce((s,l)=>s+(l.sm||0),0);
+  const pctRede=metaTot>0?fatTot/metaTot*100:0;
+  const corRede=pctRede>=125?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)'; const perLabel=isMes?"Mensal":"Semanal";
   const nTot=LOJAS.reduce((s,l)=>s+calcNVendas(l.id,isMes?"mes":"semana"),0);
   const tmRede=nTot>0?fatTot/nTot:0;
   const metaTMRede=LOJAS.reduce((s,l)=>s+(getMetas(l.id).ticket||150),0)/LOJAS.length;
@@ -9088,16 +9104,17 @@ function gerarRel(){
 
     <!-- HEADER -->
     <div style="text-align:center;padding:12px 0 18px;border-bottom:1px solid var(--borda);margin-bottom:20px">
-      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING ${perLabel.toUpperCase()} AVATIM</div>
+      <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">RANKING ${perLabel.toUpperCase()} — MonAris Sales Control</div>
       <div style="color:var(--muted);font-size:11px;margin-top:4px">${isMes?"Mês de "+new Date().toLocaleDateString("pt-BR",{month:"long",year:"numeric"}):"Semana · "+new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</div>
     </div>
 
     <!-- KPIs topo -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">
       <div style="background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:10px;padding:12px;text-align:center">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Atendimentos</div>
-        <div style="font-size:22px;font-weight:800;color:var(--ouro)">${nTot}</div>
-        <div style="font-size:9px;color:var(--muted)">total da rede</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Faturamento Rede</div>
+        <div style="font-size:18px;font-weight:800;color:${corRede}">${fmt(fatTot)}</div>
+        <div style="font-size:9px;color:${corRede};font-weight:600">${pctRede.toFixed(0)}% de ${fmt(metaTot)}</div>
+        <div style="height:3px;background:var(--cinza);border-radius:2px;margin-top:5px;overflow:hidden"><div style="width:${Math.min(100,pctRede)}%;height:100%;background:${corRede};border-radius:2px"></div></div>
       </div>
       <div style="background:rgba(91,141,239,.07);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">🎯 TM Rede</div>
@@ -10764,7 +10781,8 @@ function exportarRelatorioRanking(){
   const ldExp = LOJAS.map(l=>{
     const m=getMetas(l.id);
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const _progG = per==='hoje' ? metaDiaLojaProgressiva(l.id, _hjG) : null;
+    const meta=per==='hoje'?(_progG?.dia||m.dia):per==='semana'?getMetaSemLoja(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
     const tm=calcTMLoja(l.id,perV);
     return {nome:l.nome,fat,meta,pct,tm};
@@ -10893,7 +10911,7 @@ function gerarPDF(titulo, htmlContent) {
     '<div class="subtitulo">' + loja + '</div>' +
     '<div class="data-rel">Gerado em ' + agora + '</div>' +
     htmlContent +
-    '<div class="rodape">Avatim Gestão Comercial — ' + agora + '</div>' +
+    '<div class="rodape">MonAris Sales Control — ' + agora + '</div>' +
     '</body></html>');
   janela.document.close();
   // Não dispara print automático — usuário clica no botão ou usa Ctrl+P
@@ -11069,6 +11087,8 @@ function exportarPDFGestao() {
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${l.nome}</strong></td>
+      <td>${fmt(l.meta)}</td>
+      <td>${fmt(l.fat)}</td>
       <td>${l.pct.toFixed(0)}%</td>
       <td>${fmt(l.tm)}</td>
       <td>${l.proj>0?fmt(l.proj):'—'}</td>
@@ -11137,7 +11157,7 @@ function exportarPDFGestao() {
 
     <h2>🎯 Ranking — Mais Próximo da Meta</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja</th><th>% Meta</th><th>TM</th><th>Projeção</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Projeção</th><th>Status</th></tr></thead>
       <tbody>${rowsG}</tbody>
     </table>
 
@@ -11979,34 +11999,39 @@ tr:nth-child(even) td{background:#fafaf7}
 <div class="kpis">${_kpisParaPDF(kpis)}</div>
 ${tab ? '<h2>Lançamentos dia a dia</h2><div>' + _tabelaParaPDF(tab) + '</div>' : ''}
 ${pvend ? '<h2>Desempenho por vendedora</h2><div>' + _tabelaParaPDF(pvend) + '</div>' : ''}
-<div class="footer">Avatim Franquias · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+<div class="footer">MonAris Sales Control · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
 </body></html>`);
   win.document.close();
   setTimeout(()=>win.print(), 600);
 }
 
 function _kpisParaPDF(html){
-  // Converter cards de KPI para formato limpo
+  // Capturar todos os cards de KPI preservando label e valor
   const div = document.createElement('div');
   div.innerHTML = html;
   let result = '';
-  div.querySelectorAll('div[style*="border"]').forEach(card=>{
-    const labels = card.querySelectorAll('div');
-    if(labels.length >= 2){
-      const lbl = labels[0].textContent.trim();
-      const val = labels[1].textContent.trim();
-      result += '<div class="kcard"><div class="kl">'+lbl+'</div><div class="kv">'+val+'</div></div>';
+  // Tentar capturar por estrutura de card (label + valor)
+  div.querySelectorAll('div').forEach(card=>{
+    const children = Array.from(card.children);
+    if(children.length >= 2){
+      const lbl = children[0].textContent.trim();
+      const val = children[1].textContent.trim();
+      if(lbl && val && lbl.length < 40 && val.length < 30 && !result.includes(lbl)){
+        result += '<div class="kcard"><div class="kl">'+lbl+'</div><div class="kv">'+val+'</div></div>';
+      }
     }
   });
-  return result || html.replace(/style="[^"]*color:[^;]*;?/g,'style="').replace(/background[^;]*;/g,'');
+  return result || html.replace(/style="[^"]*"/g,'').replace(/onclick="[^"]*"/g,'');
 }
 
 function _tabelaParaPDF(html){
-  // Limpar estilos de cor mantendo estrutura da tabela
+  // Preservar estrutura da tabela, remover estilos e botões
   return html
     .replace(/style="[^"]*"/g, '')
     .replace(/onclick="[^"]*"/g, '')
-    .replace(/<button[^>]*>.*?<\/button>/g, '');
+    .replace(/oninput="[^"]*"/g, '')
+    .replace(/<button[^>]*>[\s\S]*?<\/button>/g, '')
+    .replace(/<input[^>]*>/g, '');
 }
 </script>
 </body>
