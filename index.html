@@ -717,7 +717,7 @@ const CosmosDB = {
     await this.upsert("vendas_vend",{id:vendId+"_"+data,vendedora_id:vendId,loja_id:lojaId,data_venda:data,mes_ref:data.slice(0,7),valor_vendido:val,num_transacoes:trans,lancado_por:lancadoPor,ts:Date.now()});
   },
   async getLancamentosHoje(){
-    const h=new Date().toISOString().split("T")[0];
+    const d_=new Date();const h=d_.getFullYear()+"-"+String(d_.getMonth()+1).padStart(2,"0")+"-"+String(d_.getDate()).padStart(2,"0");
     return await this.query("lancamentos","SELECT * FROM c WHERE c.data_venda = \""+h+"\" ORDER BY c.faturamento DESC");
   },
   async getLancamentosMes(lid,mes){
@@ -1428,11 +1428,20 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 <!-- SEMANA -->
 <div class="page" id="page-semana">
-  <div class="ph"><div><h1 class="pt">Visao da <span>Semana</span></h1><div class="ps">Ultimos 7 dias</div></div></div>
+  <div class="ph">
+    <div><h1 class="pt">Visão da <span>Semana</span></h1><div class="ps">Semana comercial atual</div></div>
+    <button onclick="exportarPDFSemana()" style="background:var(--ouro);color:#000;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer">📄 PDF por Loja</button>
+  </div>
   <div class="sdias" id="sdias">--</div>
   <div class="g2">
-    <div class="sc"><div class="st">Evolucao Diaria</div><div id="evol-diaria">--</div></div>
-    <div class="dicas"><div class="dh"><span>&#9672;</span><h3>Analise da Semana</h3><span class="dbadge2">IA</span></div><div id="dicas-sem">--</div></div>
+    <div class="sc"><div class="st">Evolução Diária</div><div id="evol-diaria">--</div></div>
+    <div class="dicas"><div class="dh"><span>&#9672;</span><h3>Análise da Semana</h3></div><div id="dicas-sem">--</div></div>
+  </div>
+  <div class="sc" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="st">Todas as Lojas — Esta Semana</div>
+    </div>
+    <div id="sem-todas-lojas">--</div>
   </div>
 </div>
 
@@ -4511,7 +4520,7 @@ function gerarDiagnostico(){
     for(let i=0;i<4;i++){
       const d = new Date(mes+'-01');
       d.setMonth(d.getMonth()-i);
-      const mStr = d.toISOString().slice(0,7);
+      const mStr = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
       let fat2=0, nat2=0;
       D.vendedoras.forEach(v=>{
         Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
@@ -4808,7 +4817,7 @@ function gerarDiagnostico(){
   for(let i=0;i<4;i++){
     const d = new Date(mes+'-01');
     d.setMonth(d.getMonth()-i);
-    const mStr = d.toISOString().slice(0,7);
+    const mStr = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
     let fat=0, nat=0;
     vends.forEach(v=>{
       Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
@@ -7159,35 +7168,200 @@ function renderRankComissao(){
 // ============================================================
 // SEMANA
 // ============================================================
-function renderSemana(){
-  const lid=lojaId(),dias=["Dom","Seg","Ter","Qua","Qui","Sex","Sab"],m=getMetas(lid);
-  // Semana comercial: segunda a hoje
-  const hoje_d=new Date(); hoje_d.setHours(0,0,0,0);
-  const diaSemana=hoje_d.getDay();
-  const diffSeg=diaSemana===0?6:diaSemana-1;
-  const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diffSeg);
-  let sdias="",evol="",total=0;
+function exportarPDFSemana(){
+  const _adm  = isAdmin();
+  const hj    = hoje();
+  const hoje_d = new Date(hj+'T12:00:00');
+  const diaSemana = hoje_d.getDay();
+  const diffSeg   = diaSemana===0?6:diaSemana-1;
+  const seg = new Date(hoje_d); seg.setDate(hoje_d.getDate()-diffSeg);
+  const dtStr = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const dias_nome = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  // Dias da semana até hoje
+  const datas = [];
   for(let i=0;i<7;i++){
     const d=new Date(seg); d.setDate(seg.getDate()+i);
     if(d>hoje_d) break;
-    const ds=d.toISOString().split("T")[0],v=calcDia(lid,ds);
-    total+=v;
-    const pct=m.dia>0?v/m.dia*100:0,c=v===0?"var(--muted)":pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
-    const isHj=ds===hoje();
-    sdias+=`<div class="diac ${isHj?"hoje":""}"><div class="dnome">${dias[d.getDay()]}</div><div class="dnum">${d.getDate()}</div><div class="dval" style="color:${c}">${v>0?fmt(v):"--"}</div></div>`;
-    evol+=`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">${nomeDia(ds)}</span><span style="color:${c};font-weight:600">${v>0?fmt(v):"--"} (${pct.toFixed(0)}%)</span></div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden"><div style="width:${Math.min(100,pct)}%;height:100%;background:${c};border-radius:4px;transition:width .5s"></div></div></div>`;
+    datas.push({d, ds:dtStr(d), nome:dias_nome[d.getDay()]});
   }
-  document.getElementById("sdias").innerHTML=sdias;
-  document.getElementById("evol-diaria").innerHTML=evol||"<div style='color:var(--muted);font-size:12px'>Sem dados.</div>";
-  const pctS=m.sem>0?total/m.sem*100:0;
-  const ds2=[];
-  if(pctS>=120) ds2.push({c:"var(--roxo)",t:`<strong>Super Meta da semana em andamento! ${pctS.toFixed(0)}%</strong>`});
-  else if(pctS>=100) ds2.push({c:"var(--verde)",t:`<strong>Semana batendo meta! ${pctS.toFixed(0)}%</strong>`});
-  else if(pctS>=60) ds2.push({c:"var(--ouro)",t:`<strong>Semana em andamento (${pctS.toFixed(0)}%).</strong> Foca nos proximos dias!`});
-  else ds2.push({c:"var(--verm)",t:`<strong>Semana critica (${pctS.toFixed(0)}%).</strong> Esforco extra necessario!`});
-  ds2.push({c:"var(--azul)",t:`<strong>Acumulado:</strong> ${fmt(total)} de ${fmt(m.sem)} da meta semanal.`});
-  document.getElementById("dicas-sem").innerHTML=ds2.map(d=>`<div class="di"><div class="dot" style="background:${d.c}"></div><div class="dtxt" style="color:var(--texto)">${d.t}</div></div>`).join("");
+
+  const lojas = _adm ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
+
+  // Tabela por loja
+  const rowsLojas = lojas.map(l=>{
+    const mL = getMetas(l.id);
+    const vals = datas.map(({ds})=>calcDia(l.id,ds));
+    const total = vals.reduce((s,v)=>s+v,0);
+    const pct   = mL.sem>0?total/mL.sem*100:0;
+    const falta = mL.sem>0&&total<mL.sem?mL.sem-total:0;
+    const cor   = pct>=100?'#2ecc87':pct>=70?'#C9A84C':'#e74c3c';
+    const celulas = vals.map(v=>`<td style="text-align:right">${v>0?fmt(v):'—'}</td>`).join('');
+    return `<tr>
+      <td><strong>${l.nome}</strong></td>
+      ${celulas}
+      <td style="text-align:right;font-weight:700;color:${cor}">${fmt(total)}</td>
+      <td style="text-align:right">${fmt(mL.sem)}</td>
+      <td style="text-align:right;color:${cor}">${pct.toFixed(0)}%</td>
+      <td style="text-align:right;color:#e74c3c">${falta>0?fmt(falta):'—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Total rede
+  const totaisDia = datas.map(({ds})=>lojas.reduce((s,l)=>s+calcDia(l.id,ds),0));
+  const totalRede = totaisDia.reduce((s,v)=>s+v,0);
+  const metaRede  = lojas.reduce((s,l)=>s+(getMetas(l.id).sem||0),0);
+  const pctRede   = metaRede>0?totalRede/metaRede*100:0;
+  const faltaRede = metaRede>0&&totalRede<metaRede?metaRede-totalRede:0;
+  const totCelulas = totaisDia.map(v=>`<td style="text-align:right;font-weight:700">${v>0?fmt(v):'—'}</td>`).join('');
+  const rowTotal = `<tr style="background:#f5f0e0;font-weight:700">
+    <td>TOTAL REDE</td>${totCelulas}
+    <td style="text-align:right">${fmt(totalRede)}</td>
+    <td style="text-align:right">${fmt(metaRede)}</td>
+    <td style="text-align:right;color:${pctRede>=100?'#2ecc87':'#e74c3c'}">${pctRede.toFixed(0)}%</td>
+    <td style="text-align:right;color:#e74c3c">${faltaRede>0?fmt(faltaRede):'—'}</td>
+  </tr>`;
+
+  const thDias = datas.map(({d,nome})=>`<th style="text-align:right">${nome}<br>${d.getDate()}</th>`).join('');
+
+  const win = window.open('','_blank','width=1100,height=700');
+  win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8"><title>Semana — Relatório por Loja</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;font-size:11px}
+.logo{font-size:18px;font-weight:900;color:#0a0a0a;letter-spacing:1px}
+.logo span{color:#C9A84C}
+.sub{font-size:10px;color:#666;margin-bottom:12px;border-bottom:2px solid #C9A84C;padding-bottom:6px}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th{background:#1a1a2e;color:#C9A84C;padding:7px 8px;text-align:left;font-size:10px;font-weight:700}
+td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}
+tr:nth-child(even){background:#fafaf5}
+.foot{margin-top:14px;font-size:9px;color:#999;text-align:center}
+@media print{body{padding:10px}}
+</style></head><body>
+<div class="logo">Mon<span>Aris</span> <span style="font-size:12px;font-weight:400">SALES CONTROL</span></div>
+<div class="sub">Relatório Semanal por Loja — Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+<table>
+  <thead><tr><th>Loja</th>${thDias}<th style="text-align:right">Total</th><th style="text-align:right">Meta Sem.</th><th style="text-align:right">%</th><th style="text-align:right">Falta</th></tr></thead>
+  <tbody>${rowsLojas}${rowTotal}</tbody>
+</table>
+<div class="foot">MonAris Sales Control — Exportado em ${new Date().toLocaleString('pt-BR')}</div>
+</body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(),600);
 }
+
+function renderSemana(){
+  const _adm = isAdmin();
+  const hj   = hoje();
+  const hoje_d = new Date(hj + 'T12:00:00');
+  const diaSemana = hoje_d.getDay();
+  const diffSeg   = diaSemana===0 ? 6 : diaSemana-1;
+  const seg = new Date(hoje_d); seg.setDate(hoje_d.getDate()-diffSeg);
+
+  // Loja(s) a considerar
+  const lojas = _adm ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
+  const lid   = _adm ? null : lojaId();
+
+  // Meta semanal: soma das lojas visíveis
+  const metaSem = lojas.reduce((s,l)=>s+(getMetas(l.id).sem||0),0);
+  const metaDia = lojas.reduce((s,l)=>s+(getMetas(l.id).dia||0),0);
+
+  // Helper: data local de um objeto Date
+  const dtStr = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+
+  // Helper: faturamento de um dia para as lojas visíveis
+  const fatDia = ds => lojas.reduce((s,l)=>s+calcDia(l.id,ds),0);
+
+  const dias_semana = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  let sdias='', evol='', total=0, diasCount=0;
+
+  for(let i=0;i<7;i++){
+    const d = new Date(seg); d.setDate(seg.getDate()+i);
+    if(d > hoje_d) break;
+    const ds = dtStr(d);
+    const v  = fatDia(ds);
+    total += v; diasCount++;
+
+    const pct = metaDia>0 ? v/metaDia*100 : 0;
+    const cor = v===0 ? 'var(--muted)' : pct>=120 ? 'var(--roxo)' : pct>=100 ? 'var(--verde)' : pct>=70 ? 'var(--ouro)' : 'var(--verm)';
+    const isHj = ds===hj;
+    const falta = metaDia>0 && v<metaDia ? metaDia-v : 0;
+
+    sdias += `<div class="diac ${isHj?'hoje':''}">
+      <div class="dnome">${dias_semana[d.getDay()]}</div>
+      <div class="dnum">${d.getDate()}</div>
+      <div class="dval" style="color:${cor}">${v>0?fmt(v):'--'}</div>
+      ${falta>0&&v>0?`<div style="font-size:8px;color:var(--verm);margin-top:1px">-${fmt(falta)}</div>`:''}
+    </div>`;
+
+    const faltaStr = falta>0 ? ` <span style="font-size:9px;color:var(--verm)">falta ${fmt(falta)}</span>` : '';
+    evol += `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-bottom:3px">
+        <span style="color:var(--muted)">${nomeDia(ds)}${isHj?' <span style="font-size:8px;background:rgba(201,168,76,.2);color:var(--ouro);padding:1px 5px;border-radius:8px">HOJE</span>':''}</span>
+        <span style="color:${cor};font-weight:600">${v>0?fmt(v):'--'} <span style="font-size:9px;opacity:.8">(${pct.toFixed(0)}%)</span>${faltaStr}</span>
+      </div>
+      <div style="height:5px;background:var(--cinza);border-radius:4px;overflow:hidden">
+        <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};border-radius:4px;transition:width .5s"></div>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('sdias').innerHTML = sdias;
+  document.getElementById('evol-diaria').innerHTML = evol || "<div style='color:var(--muted);font-size:12px'>Sem dados nesta semana.</div>";
+
+  // Análise
+  const pctS = metaSem>0 ? total/metaSem*100 : 0;
+  const faltaSem = metaSem>0 && total<metaSem ? metaSem-total : 0;
+  const diasRestSem = 7 - diasCount;
+  const necessarioPorDia = faltaSem>0 && diasRestSem>0 ? faltaSem/diasRestSem : 0;
+
+  const ds2 = [];
+  if(pctS>=120) ds2.push({c:'var(--roxo)',t:`<strong>Super meta da semana! ${pctS.toFixed(0)}%</strong> — Excelente desempenho!`});
+  else if(pctS>=100) ds2.push({c:'var(--verde)',t:`<strong>Meta semanal atingida! ${pctS.toFixed(0)}%</strong> 🎉`});
+  else if(pctS>=60) ds2.push({c:'var(--ouro)',t:`<strong>Semana em andamento (${pctS.toFixed(0)}%).</strong> Foca nos próximos dias!`});
+  else ds2.push({c:'var(--verm)',t:`<strong>Semana crítica (${pctS.toFixed(0)}%).</strong> Esforço extra necessário!`});
+  ds2.push({c:'var(--azul)',t:`<strong>Acumulado:</strong> ${fmt(total)} de ${fmt(metaSem)} da meta semanal.`});
+  if(faltaSem>0) ds2.push({c:'var(--verm)',t:`<strong>Falta:</strong> ${fmt(faltaSem)}${necessarioPorDia>0?' — necessário '+fmt(necessarioPorDia)+'/dia nos próximos '+diasRestSem+' dia(s)':''}.`});
+
+  document.getElementById('dicas-sem').innerHTML = ds2.map(d=>`<div class="di"><div class="dot" style="background:${d.c}"></div><div class="dtxt" style="color:var(--texto)">${d.t}</div></div>`).join('');
+
+  // Seção de todas as lojas (admin e loja individual)
+  const semLojas = document.getElementById('sem-todas-lojas');
+  if(semLojas){
+    semLojas.innerHTML = lojas.map(l=>{
+      const mL = getMetas(l.id);
+      let fatL=0;
+      for(let i=0;i<7;i++){
+        const d=new Date(seg);d.setDate(seg.getDate()+i);
+        if(d>hoje_d) break;
+        const ds=dtStr(d);
+        fatL+=calcDia(l.id,ds);
+      }
+      const pL = mL.sem>0 ? fatL/mL.sem*100 : 0;
+      const cL = pL>=100?'var(--verde)':pL>=70?'var(--ouro)':fatL>0?'var(--verm)':'var(--muted)';
+      const fL = mL.sem>0 && fatL<mL.sem ? mL.sem-fatL : 0;
+      return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700">${l.nome}</div>
+          <div style="text-align:right">
+            <div style="font-size:14px;font-weight:800;color:${cL}">${fmt(fatL)}</div>
+            <div style="font-size:9px;color:${cL}">${pL.toFixed(0)}% da meta</div>
+          </div>
+        </div>
+        <div style="height:4px;background:var(--cinza);border-radius:3px;overflow:hidden;margin-bottom:5px">
+          <div style="width:${Math.min(100,pL)}%;height:100%;background:${cL};border-radius:3px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted)">
+          <span>Meta: ${fmt(mL.sem)}</span>
+          ${fL>0?`<span style="color:var(--verm);font-weight:600">falta ${fmt(fL)}</span>`:`<span style="color:var(--verde)">✅ Meta batida</span>`}
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
 
 // ============================================================
 // TODAS AS LOJAS
@@ -10380,7 +10554,7 @@ async function saveWithSync(opts={}){
   }
   if(opts.meta){
     const {lid,dados}=opts.meta;
-    const mesRef=new Date().toISOString().slice(0,7);
+    const mesRef=mesAtual();
     const docSB={loja_id:lid,mes_ref:mesRef,meta_mensal:dados.mes||0,super_meta_mensal:dados.superMes||0,meta_semanal:dados.sem||0,meta_diaria:dados.dia||0,super_semanal:dados.superSem||0,super_diaria:dados.superDia||0,dias_mes:dados.du||31,ticket_alvo:dados.ticket||150,atualizado_em:hoje_ts};
     if(SB_OK()) await sbUpsert('metas_loja',docSB);
     if(FB_OK()) await fbSet('metas',`meta_${lid}`,docSB);
