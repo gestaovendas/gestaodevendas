@@ -3598,17 +3598,19 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
-      // ── VENDAS: LOCAL SEMPRE TEM PRIORIDADE ────────────────────────────
-      // Remoto só preenche dias que ainda NÃO existem localmente.
-      // Isso garante que um lançamento recém-feito nunca seja apagado
-      // por um sync do Firebase que ainda não recebeu o dado.
+      // ── VENDAS: estratégia diferente para admin e loja ───────────────
+      // Admin: remoto sempre tem prioridade (admin não faz lançamentos de vendas,
+      //         então D.vendas local pode estar desatualizado ou zerado)
+      // Loja: LOCAL tem prioridade (evita que sync apague lançamento recente)
+      const _admBoot = (window._currentUser?.email === 'admin@avatim.com');
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
+            // Admin: sobrescreve sempre | Loja: só preenche dias ausentes
+            if(_admBoot || !(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
           });
         });
       }
@@ -3618,7 +3620,7 @@ async function loadFromFirestore(){
           const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
+            if(_admBoot || !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
           });
         });
       }
@@ -10635,80 +10637,55 @@ function iniciarAutoRefresh(){
     return;
   }
   async function syncAdmin(){
-    const hj=hoje();
-    if(SB_OK()){
-      // Supabase
-      const lancs=await sbSelect('lancamentos',`data_venda=eq.${hj}&select=*`);
-      if(lancs?.length) lancs.forEach(l=>{
-        if(!D.vendas[l.loja_id])D.vendas[l.loja_id]={};
-        D.vendas[l.loja_id][l.data_venda]={fat:l.faturamento||0,trans:l.num_transacoes||0,cli:l.clientes_total||0,clinov:l.clientes_novos||0,visit:l.visitantes||0,tm:l.tm_itens_venda||0,obs:l.observacao||'',ts:Date.now()};
-      });
-      const vv=await sbSelect('vendas_vendedora',`data_venda=eq.${hj}&select=*`);
-      if(vv?.length) vv.forEach(v=>{
-        if(!D.vendasVend[v.vendedora_id])D.vendasVend[v.vendedora_id]={};
-        D.vendasVend[v.vendedora_id][v.data_venda]={val:v.valor_vendido||0,trans:v.num_transacoes||0};
-      });
-    } else if(FB_OK()){
-      // Firebase Firestore
-      const lancs=await fbGet('lancamentos','data_venda',hj);
-      if(lancs?.length) lancs.forEach(l=>{
-        if(!D.vendas[l.loja_id])D.vendas[l.loja_id]={};
-        D.vendas[l.loja_id][l.data_venda||hj]={fat:l.faturamento||0,trans:l.num_transacoes||0,cli:l.clientes_total||0,clinov:l.clientes_novos||0,visit:l.visitantes||0,tm:l.tm_itens_venda||0,obs:l.observacao||'',ts:Date.now()};
-      });
-      const vv=await fbGet('vendas_vendedora','data_venda',hj);
-      if(vv?.length) vv.forEach(v=>{
-        if(!D.vendasVend[v.vendedora_id])D.vendasVend[v.vendedora_id]={};
-        D.vendasVend[v.vendedora_id][v.data_venda||hj]={val:v.valor_vendido||0,trans:v.num_transacoes||0};
-      });
-    } else {
-      // Firebase Firestore — busca dados frescos em PARALELO (não sequencial)
-      try{
-        const ok = await waitForFirebase(3000);
-        if(ok && window.fsCarregar){
-          const dadosJSON = await window.fsCarregar();
-          if(dadosJSON){
-            const remoto = JSON.parse(dadosJSON);
-            if(remoto.vendas){
-              // [FIX Duplicacao] Usar merge com tombstone em vez de Object.assign cego
-              Object.entries(remoto.vendas).forEach(([lid,dias])=>{
-                if(!D.vendas[lid]) D.vendas[lid]={};
-                const excl = D._vendasExcluidas?.[lid] || [];
-                Object.entries(dias).forEach(([dt,val])=>{
-                  if(!excl.includes(dt)) D.vendas[lid][dt] = val;
-                });
+    // [FIX CRÍTICO] Sempre usar fsCarregar (docs loja_*) como fonte de dados.
+    // Os caminhos SB_OK/FB_OK buscavam em coleções 'lancamentos' separadas que
+    // só têm dados se saveWithSync gravou — o sistema principal usa docs loja_*.
+    try{
+      const ok = await waitForFirebase(3000);
+      if(ok && window.fsCarregar){
+        const dadosJSON = await window.fsCarregar();
+        if(dadosJSON){
+          const remoto = JSON.parse(dadosJSON);
+          // Admin: remoto SEMPRE tem prioridade sobre D local
+          // (D local do admin não tem dados de vendas das lojas — só das lojas)
+          if(remoto.vendas){
+            Object.entries(remoto.vendas).forEach(([lid,dias])=>{
+              if(!D.vendas[lid]) D.vendas[lid]={};
+              const excl = D._vendasExcluidas?.[lid] || [];
+              Object.entries(dias).forEach(([dt,val])=>{
+                if(!excl.includes(dt)) D.vendas[lid][dt] = val; // sempre sobrescreve
               });
-            }
-            if(remoto.vendasVend){
-              // [FIX Duplicacao] Usar merge com tombstone em vez de Object.assign cego
-              Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-                if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-                const excl = D._vendasVendExcluidas?.[vid] || [];
-                Object.entries(dias).forEach(([dt,val])=>{
-                  if(!excl.includes(dt)) D.vendasVend[vid][dt] = val;
-                });
-              });
-            }
-            if(remoto.campRealizados && remoto.campRealizados.length){
-              if(!D.campRealizados) D.campRealizados=[];
-              remoto.campRealizados.forEach(r=>{
-                const idx = D.campRealizados.findIndex(x=>x.id===r.id);
-                if(idx>=0) D.campRealizados[idx]=r;
-                else D.campRealizados.push(r);
-              });
-            }
-            // Merge fluxo
-            if(remoto.fluxo && remoto.fluxo.length){
-              if(!D.fluxo) D.fluxo=[];
-              remoto.fluxo.forEach(r=>{
-                if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
-              });
-            }
-            localStorage.setItem('avatim_v5', JSON.stringify(D));
-            console.log('[Avatim] 🔄 syncAdmin: dados atualizados do Firestore');
+            });
           }
+          if(remoto.vendasVend){
+            Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
+              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
+              const excl = D._vendasVendExcluidas?.[vid] || [];
+              Object.entries(dias).forEach(([dt,val])=>{
+                if(!excl.includes(dt)) D.vendasVend[vid][dt] = val; // sempre sobrescreve
+              });
+            });
+          }
+          if(remoto.campRealizados && remoto.campRealizados.length){
+            if(!D.campRealizados) D.campRealizados=[];
+            remoto.campRealizados.forEach(r=>{
+              const idx = D.campRealizados.findIndex(x=>x.id===r.id);
+              if(idx>=0) D.campRealizados[idx]=r; else D.campRealizados.push(r);
+            });
+          }
+          if(remoto.fluxo && remoto.fluxo.length){
+            if(!D.fluxo) D.fluxo=[];
+            remoto.fluxo.forEach(r=>{
+              if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
+            });
+          }
+          if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+          if(remoto.vendedoras && remoto.vendedoras.length) D.vendedoras = remoto.vendedoras;
+          localStorage.setItem('avatim_v5', JSON.stringify(D));
+          console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
         }
-      }catch(e){ console.warn('[Avatim] syncAdmin erro Firebase:', e.message); }
-    }
+      }
+    }catch(e){ console.warn('[Avatim] syncAdmin erro:', e.message); }
     const ts=new Date();
     const el=document.getElementById('sync-badge');
     if(el) el.textContent='🔄 Sync: '+ts.toLocaleTimeString('pt-BR');
