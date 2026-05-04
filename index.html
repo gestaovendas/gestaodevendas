@@ -4040,11 +4040,13 @@ function getMetaSemLoja(lid){
   return metaSemanaProgressiva(lid, semanaDoMes(hoje()));
 }
 
-function getMetas(lid, mesRef){
+function getMetas(lid, mesRef, strictMode){
   mesRef = mesRef||mesAtual();
   const lm = D.metasLoja[lid]||{};
-  // Tenta mês atual → anterior → padrão
+  // Modo strict: usado na tela de Metas — não herda do mês anterior
+  // Isso evita mostrar meta de Abril quando o mês atual é Maio
   if(lm[mesRef]) return lm[mesRef];
+  if(strictMode) return calcMetasAuto(0,150,0); // retorna zerado — sem herança
   const ant = mesAnterior();
   if(lm[ant])   return {...lm[ant], _herdado:true, _de:ant};
   // último mês com meta definida
@@ -4467,7 +4469,7 @@ function nav(pg){
         renderEstqCritico();
       }
     },
-    fluxo:renderFluxo,metaslojas:renderMetasLojas,
+    fluxo:renderFluxo,metaslojas:()=>{_metaNavAtiva=false;renderMetasLojas();},
     gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
       const lDataEl=document.getElementById('l-data');
@@ -5290,6 +5292,8 @@ function renderRankHoje(){
 }
 
 let _rankVendOrdem = 'fat'; // 'fat' = faturamento | 'meta' = % da meta
+let _mesMeta = null; // sempre null ao iniciar → renderMetasLojas vai usar mesAtual()
+let _metaNavAtiva = false; // true quando usuário navega para outro mês propositalmente
 
 function setRankVendOrdem(ordem){
   _rankVendOrdem = ordem;
@@ -9112,7 +9116,8 @@ function renderEstqCritico(){
 // METAS POR LOJA (ADMIN)
 // ============================================================
 function renderMetasLojas(){
-  if(!_mesMeta) _mesMeta = mesAtual();
+  // Sempre usar mês atual se não há navegação ativa ou se _mesMeta está null
+  if(!_mesMeta || !_metaNavAtiva) _mesMeta = mesAtual();
   sincSelects();
   // Atualizar label do mês no header
   const lblEl = document.getElementById("metas-mes-label");
@@ -9123,7 +9128,7 @@ function renderMetasLojas(){
 
   const lojasVisiveis = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
   document.getElementById("metas-lojas-cards").innerHTML=lojasVisiveis.map(loja=>{
-    const m=getMetas(loja.id, _mesMeta);
+    const m=getMetas(loja.id, _mesMeta, true); // strictMode: não herda mês anterior nos campos
     const rM = ehMesAtual ? calcMes(loja.id) : 0;
     const rS = ehMesAtual ? calcSem(loja.id) : 0;
     const rD = ehMesAtual ? (D.vendas[loja.id]?.[hoje()]?.fat||0) : 0;
@@ -10964,10 +10969,12 @@ function limparSBConfig(){
 function navMesMeta(delta){
   if(delta===0){
     _mesMeta = mesAtual();
+    _metaNavAtiva = false; // voltou para o mês atual — não é navegação
   } else {
     const [y,m] = (_mesMeta||mesAtual()).split("-").map(Number);
     const d = new Date(y, m-1+delta, 1);
     _mesMeta = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+    _metaNavAtiva = true; // usuário navegou propositalmente
   }
   sincSelects();
   renderMetasLojas();
@@ -10976,6 +10983,7 @@ function irParaMes(){
   const mes = document.getElementById("sel-mes-meta")?.value||"01";
   const ano = document.getElementById("sel-ano-meta")?.value||new Date().getFullYear();
   _mesMeta = ano+"-"+mes;
+  _metaNavAtiva = (_mesMeta !== mesAtual()); // só é "navAtiva" se não for o mês atual
   renderMetasLojas();
 }
 function sincSelects(){
