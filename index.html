@@ -4078,7 +4078,7 @@ function calcSem(lid){
   const dias=[];
   for(let i=0;i<7;i++){
     const d=new Date(seg); d.setDate(seg.getDate()+i);
-    if(d<=hoje_d) dias.push(d.toISOString().slice(0,10));
+    if(d<=hoje_d) dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
   const vends=D.vendedoras.filter(v=>v.loja===lid);
   let t=0;
@@ -4119,7 +4119,7 @@ function calcNAtend(lid, periodo){
     const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
     const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diff);
     const dias=[];
-    for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d)dias.push(d.toISOString().slice(0,10));}
+    for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d)dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
     vends.forEach(v=>{ dias.forEach(d=>{
       const trans=D.vendasVend[v.id]?.[d]?.trans||0;
       n += trans>0 ? trans : ((D.vendasVend[v.id]?.[d]?.val||0)>0 ? 1 : 0);
@@ -4159,7 +4159,7 @@ function calcVendPer(id,per){
     let t=0;
     for(let i=0;i<7;i++){
       const d=new Date(seg); d.setDate(seg.getDate()+i);
-      if(d<=hoje_d) t+=Number(vd[d.toISOString().slice(0,10)]?.val||0);
+      if(d<=hoje_d) t+=Number(vd[d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')]?.val||0);
     }
     return t;
   }
@@ -4183,7 +4183,7 @@ function calcTMVend(id, per){
     for(let i=0;i<7;i++){
       const d=new Date(seg); d.setDate(seg.getDate()+i);
       if(d<=hoje_d){
-        const ds=d.toISOString().slice(0,10);
+        const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
         fat   += Number(vd[ds]?.val||0);
         trans += Number(vd[ds]?.trans||0);
       }
@@ -6328,7 +6328,7 @@ function filtrarFluxoData(registros){
     const diaSemana=hoje_d.getDay();
     const diffSeg=diaSemana===0?6:diaSemana-1;
     const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diffSeg);
-    const segStr=seg.toISOString().slice(0,10);
+    const segStr=seg.getFullYear()+'-'+String(seg.getMonth()+1).padStart(2,'0')+'-'+String(seg.getDate()).padStart(2,'0');
     return registros.filter(r=>r.data&&r.data>=segStr&&r.data<=hoje());
   }
   return registros;
@@ -7943,11 +7943,36 @@ function exportarPDFCamp(){
   const agora = new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
 
   // ── Tabela: Ranking de Lojas ──────────────────────────────────
+  // Tabela ranking lojas + detalhe por vendedora
   const rowsLojas = rankLojas.length
     ? rankLojas.map((l,i)=>{
         const pct=l.meta>0?l.fat/l.meta*100:null;
         const badge=pct===null?'':pct>=100?'ok':pct>=70?'warn':'bad';
         const tm=l.atend>0?l.fat/l.atend:0;
+        // Detalhe por vendedora desta loja
+        const reaisLoja = reaisAll.filter(r=>r.lojaId===l.id);
+        const vendDetalhe = {};
+        reaisLoja.forEach(r=>{
+          if(!r.vendedoras) return;
+          Object.entries(r.vendedoras).forEach(([vId,val])=>{
+            if(!vendDetalhe[vId]) vendDetalhe[vId]={nome:'',fat:0,qtd:0,nrs:[],obss:[]};
+            const vObj = D.vendedoras.find(v=>v.id===vId);
+            if(vObj) vendDetalhe[vId].nome = vObj.nome;
+            vendDetalhe[vId].fat += Number(val)||0;
+            if(r.vendQtds?.[vId]) vendDetalhe[vId].qtd += r.vendQtds[vId];
+            if(r.vendNrs?.[vId] && !vendDetalhe[vId].nrs.includes(r.vendNrs[vId])) vendDetalhe[vId].nrs.push(r.vendNrs[vId]);
+            if(r.vendObss?.[vId] && !vendDetalhe[vId].obss.includes(r.vendObss[vId])) vendDetalhe[vId].obss.push(r.vendObss[vId]);
+          });
+        });
+        const vendRows2 = Object.values(vendDetalhe).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat).map(v=>`
+          <tr style="background:#fafaf0">
+            <td style="padding-left:20px;color:#888;font-size:10px">↳ ${v.nome||'?'}</td>
+            <td style="color:#888;font-size:10px">${fmt(v.fat)}</td>
+            <td></td><td></td>
+            <td style="color:#5b8def;font-size:10px">${v.qtd>0?v.qtd+' un.':'—'}</td>
+            <td style="color:#2ecc87;font-size:10px">${v.nrs.length?v.nrs.join(', '):'—'}</td>
+            <td style="color:#888;font-size:10px;font-style:italic">${v.obss.join('; ')||'—'}</td>
+          </tr>`).join('');
         return `<tr>
           <td>${medals[i]||(i+1)+'º'}</td>
           <td><strong>${l.nome}</strong></td>
@@ -7955,10 +7980,10 @@ function exportarPDFCamp(){
           <td>${l.meta>0?fmt(l.meta):'<span style="color:#aaa">—</span>'}</td>
           <td>${pct!==null?`<span class="badge-${badge}">${pct.toFixed(0)}%</span>`:'<span style="color:#aaa">—</span>'}</td>
           <td>${l.atend||'<span style="color:#aaa">—</span>'}</td>
-          <td>${tm>0?fmt(tm):'<span style="color:#aaa">—</span>'}</td>
-        </tr>`;
+          <td colspan="2">${tm>0?fmt(tm):'<span style="color:#aaa">—</span>'}</td>
+        </tr>${vendRows2}`;
       }).join('')
-    : '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:16px">Nenhum lançamento registrado.</td></tr>';
+    : '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:16px">Nenhum lançamento registrado.</td></tr>';
 
   // ── Tabela: Ranking de Vendedoras ─────────────────────────────
   const rowsVends = rankVends.length
@@ -8021,9 +8046,9 @@ function exportarPDFCamp(){
       </div>
     </div>
 
-    <h2>🏪 Ranking de Lojas — Atingimento</h2>
+    <h2>🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>TM</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja / Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>Qtd</th><th>Nº Venda / Obs</th></tr></thead>
       <tbody>${rowsLojas}</tbody>
     </table>
 
@@ -8324,7 +8349,12 @@ function renderVendCampForm(campId){
   const el = document.getElementById('camp-vend-campos');
   if(!el) return;
   const lid   = lojaId();
-  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
+  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
+  const vends = D.vendedoras.filter(v=>
+    v.loja===lid &&
+    v.cargo!=='VRLL' &&
+    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
+  );
   if(!vends.length){
     el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhuma vendedora cadastrada</div>';
     return;
@@ -8332,17 +8362,50 @@ function renderVendCampForm(campId){
   // Buscar lançamentos anteriores desta campanha nesta data para pré-preencher
   const data   = document.getElementById('camp-real-data')?.value || hoje();
   const lanc   = (D.campRealizados||[]).find(r=>r.campId===campId && r.lojaId===lid && r.data===data);
-  const vendVals = lanc?.vendedoras || {};
+  const vendVals   = lanc?.vendedoras   || {};
+  const vendQtds   = lanc?.vendQtds     || {};
+  const vendNrs    = lanc?.vendNrs      || {};
+  const vendObss   = lanc?.vendObss     || {};
   el.innerHTML = vends.map(v=>`
-    <div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:10px">
-      <div style="font-size:11px;font-weight:600;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.nome}</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${v.cargo||''}</div>
-      <input type="text" id="camp-vend-${v.id}"
-        placeholder="R$ 0,00"
-        value="${vendVals[v.id]?vendVals[v.id].toFixed(2).replace('.',','):''}"
-        oninput="maskBR(this);calcTotalVendsCamp()"
-        style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700">
-      <div id="camp-vend-pct-${v.id}" style="font-size:9px;color:var(--muted);margin-top:4px;text-align:right"></div>
+    <div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--texto)">${v.nome}</div>
+          <div style="font-size:9px;color:var(--muted)">${v.cargo||''}</div>
+        </div>
+        <div id="camp-vend-pct-${v.id}" style="font-size:10px;color:var(--ouro);font-weight:700"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:6px;margin-bottom:6px">
+        <div>
+          <div style="font-size:8px;color:var(--ouro);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">💰 Valor (R$)</div>
+          <input type="text" id="camp-vend-${v.id}"
+            placeholder="0,00"
+            value="${vendVals[v.id]?vendVals[v.id].toFixed(2).replace('.',','):''}"
+            oninput="maskBR(this);calcTotalVendsCamp()"
+            style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:6px;padding:7px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none">
+        </div>
+        <div>
+          <div style="font-size:8px;color:var(--azul);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">📦 Qtd</div>
+          <input type="number" id="camp-vend-qtd-${v.id}"
+            placeholder="0" min="0"
+            value="${vendQtds[v.id]||''}"
+            style="width:100%;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:6px;padding:7px 6px;color:var(--azul);font-size:13px;font-weight:700;text-align:center;outline:none">
+        </div>
+        <div>
+          <div style="font-size:8px;color:var(--verde);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">🧾 Nº Venda</div>
+          <input type="text" id="camp-vend-nr-${v.id}"
+            placeholder="ex: 1042"
+            value="${vendNrs[v.id]||''}"
+            style="width:100%;background:var(--cinza);border:1px solid rgba(46,204,135,.3);border-radius:6px;padding:7px 8px;color:var(--verde);font-size:12px;font-weight:600;outline:none">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:8px;color:var(--muted);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">💬 Obs (opcional)</div>
+        <input type="text" id="camp-vend-obs-${v.id}"
+          placeholder="Ex: cliente preferencial, produto X..."
+          value="${vendObss[v.id]||''}"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:11px;outline:none">
+      </div>
     </div>`).join('');
   calcTotalVendsCamp();
 }
@@ -8350,7 +8413,11 @@ function renderVendCampForm(campId){
 function calcTotalVendsCamp(){
   // Somar campos de vendedoras e atualizar fat total automaticamente
   const lid   = lojaId();
-  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
+  const _lojaNames2 = LOJAS.map(l=>l.nome.toLowerCase());
+  const vends = D.vendedoras.filter(v=>
+    v.loja===lid && v.cargo!=='VRLL' &&
+    !_lojaNames2.includes((v.nome||'').toLowerCase().trim())
+  );
   let soma = 0;
   vends.forEach(v=>{
     const el = document.getElementById('camp-vend-'+v.id);
@@ -8367,16 +8434,29 @@ function calcTotalVendsCamp(){
 }
 
 function getVendCampVals(){
-  // Retorna objeto {vendId: valor} com os valores preenchidos
+  // Retorna objetos com valor, qtd, nr_venda e obs por vendedora
   const lid   = lojaId();
-  const vends = D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
-  const result = {};
+  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
+  const vends = D.vendedoras.filter(v=>
+    v.loja===lid && v.cargo!=='VRLL' &&
+    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
+  );
+  const vals={}, qtds={}, nrs={}, obss={};
   vends.forEach(v=>{
-    const el  = document.getElementById('camp-vend-'+v.id);
-    const val = el ? (parseBR(el.value)||0) : 0;
-    if(val>0) result[v.id] = val;
+    const elVal = document.getElementById('camp-vend-'+v.id);
+    const elQtd = document.getElementById('camp-vend-qtd-'+v.id);
+    const elNr  = document.getElementById('camp-vend-nr-'+v.id);
+    const elObs = document.getElementById('camp-vend-obs-'+v.id);
+    const val = elVal ? (parseBR(elVal.value)||0) : 0;
+    const qtd = elQtd ? (parseInt(elQtd.value)||0) : 0;
+    const nr  = elNr  ? (elNr.value.trim()) : '';
+    const obs = elObs ? (elObs.value.trim()) : '';
+    if(val>0){ vals[v.id]=val; }
+    if(qtd>0){ qtds[v.id]=qtd; }
+    if(nr)   { nrs[v.id]=nr;  }
+    if(obs)  { obss[v.id]=obs; }
   });
-  return result;
+  return {vendedoras:vals, vendQtds:qtds, vendNrs:nrs, vendObss:obss};
 }
 
 function atualizarProgrCamp(){
@@ -8419,9 +8499,12 @@ function renderHistoricoCamp(campId, lid){
   lista.innerHTML = lancs.map(l=>{
     // Vendedoras deste lançamento
     const vendRows = l.vendedoras && Object.keys(l.vendedoras).length
-      ? D.vendedoras.filter(v=>l.vendedoras[v.id]>0).map(v=>
-          `<span style="font-size:9px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.15);border-radius:6px;padding:2px 8px;color:var(--ouro2)">${v.nome}: ${fmt(l.vendedoras[v.id])}</span>`
-        ).join('')
+      ? D.vendedoras.filter(v=>l.vendedoras[v.id]>0).map(v=>{
+          const qtd = l.vendQtds?.[v.id] ? ` · <span style="color:var(--azul)">${l.vendQtds[v.id]} un.</span>` : '';
+          const nr  = l.vendNrs?.[v.id]  ? ` · <span style="color:var(--verde)">Nº ${l.vendNrs[v.id]}</span>` : '';
+          const obs2= l.vendObss?.[v.id] ? ` · <span style="color:var(--muted);font-style:italic">${l.vendObss[v.id]}</span>` : '';
+          return `<div style="font-size:9px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.15);border-radius:6px;padding:3px 8px;color:var(--ouro2);margin-bottom:3px">${v.nome}: ${fmt(l.vendedoras[v.id])}${qtd}${nr}${obs2}</div>`;
+        }).join('')
       : '';
     return `
     <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
@@ -8508,12 +8591,24 @@ function editarLancCamp(id){
     if(obsEl) obsEl.value = lanc.obs||'';
     calcTMCampReal();
     atualizarProgrCamp();
-    // Preencher campos de vendedoras
+    // Preencher campos de vendedoras (valor, qtd, nr, obs)
     if(lanc.vendedoras){
       setTimeout(()=>{
         Object.entries(lanc.vendedoras).forEach(([vId,val])=>{
           const el = document.getElementById('camp-vend-'+vId);
           if(el) el.value = (val||0).toFixed(2).replace('.',',');
+        });
+        if(lanc.vendQtds) Object.entries(lanc.vendQtds).forEach(([vId,qtd])=>{
+          const el = document.getElementById('camp-vend-qtd-'+vId);
+          if(el) el.value = qtd||'';
+        });
+        if(lanc.vendNrs) Object.entries(lanc.vendNrs).forEach(([vId,nr])=>{
+          const el = document.getElementById('camp-vend-nr-'+vId);
+          if(el) el.value = nr||'';
+        });
+        if(lanc.vendObss) Object.entries(lanc.vendObss).forEach(([vId,obs])=>{
+          const el = document.getElementById('camp-vend-obs-'+vId);
+          if(el) el.value = obs||'';
         });
       }, 200);
     }
@@ -8557,12 +8652,17 @@ async function salvarCampReal(){
     ? D.campRealizados.findIndex(r=>r.id===editId)
     : D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid && r.data===data);
   window._editandoLancCampId = null; // limpar após usar
-  const vendsVals = getVendCampVals();
+  const _vendData = getVendCampVals();
   const lancamento = {
     id: existIdx>=0 ? D.campRealizados[existIdx].id : 'real_'+Date.now(),
     campId, lojaId: lid, lojaNome, data,
     fat, atend, tm: atend>0?fat/atend:0,
-    obs, vendedoras: vendsVals, lancadoEm: hoje()
+    obs,
+    vendedoras: _vendData.vendedoras,
+    vendQtds:   _vendData.vendQtds,
+    vendNrs:    _vendData.vendNrs,
+    vendObss:   _vendData.vendObss,
+    lancadoEm: hoje()
   };
   if(existIdx>=0){
     D.campRealizados[existIdx] = lancamento;
@@ -8594,10 +8694,13 @@ async function salvarCampReal(){
   document.getElementById('camp-real-tm').value='';
   document.getElementById('camp-real-obs').value='';
   document.getElementById('camp-real-data').value = hoje();
-  // Limpar campos de vendedoras
+  // Limpar campos de vendedoras (valor + qtd + nr + obs)
   const lidL = lojaId();
   D.vendedoras.filter(v=>v.loja===lidL).forEach(v=>{
-    const el=document.getElementById('camp-vend-'+v.id); if(el) el.value='';
+    const elV  = document.getElementById('camp-vend-'+v.id);     if(elV)  elV.value='';
+    const elQ  = document.getElementById('camp-vend-qtd-'+v.id); if(elQ)  elQ.value='';
+    const elNr = document.getElementById('camp-vend-nr-'+v.id);  if(elNr) elNr.value='';
+    const elOb = document.getElementById('camp-vend-obs-'+v.id); if(elOb) elOb.value='';
   });
   atualizarObjetivoCamp();
   renderHistoricoCamp(campId, lid);
@@ -8744,8 +8847,11 @@ function renderCampLista(){
     reaisParaRank.forEach(r=>{
       if(!r.vendedoras) return;
       Object.entries(r.vendedoras).forEach(([vId,val])=>{
-        if(!rankVend[vId]) rankVend[vId] = {val:0, nome:''};
-        rankVend[vId].val += val;
+        if(!rankVend[vId]) rankVend[vId] = {val:0, qtd:0, nrs:[], obss:[], nome:'', loja:''};
+        rankVend[vId].val += Number(val)||0;
+        if(r.vendQtds?.[vId]) rankVend[vId].qtd += r.vendQtds[vId];
+        if(r.vendNrs?.[vId]  && !rankVend[vId].nrs.includes(r.vendNrs[vId])) rankVend[vId].nrs.push(r.vendNrs[vId]);
+        if(r.vendObss?.[vId] && !rankVend[vId].obss.includes(r.vendObss[vId])) rankVend[vId].obss.push(r.vendObss[vId]);
         const vObj = D.vendedoras.find(v=>v.id===vId);
         if(vObj){ rankVend[vId].nome = vObj.nome; rankVend[vId].loja = vObj.loja; }
       });
@@ -8767,17 +8873,24 @@ function renderCampLista(){
             const maxVal = rankVendArr[0].val;
             const pct = maxVal>0?(v.val/maxVal*100).toFixed(0):0;
             const lojaN = LOJAS.find(l=>l.id===v.loja)?.nome||v.loja||'';
-            return `<div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:14px;min-width:24px;text-align:center">${medal}</span>
-              <div style="flex:1;min-width:0">
-                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-                  <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.nome}<span style="font-weight:400;color:var(--muted);margin-left:6px">${lojaN}</span></span>
-                  <span style="font-weight:700;color:var(--ouro);flex-shrink:0;margin-left:8px">${fmt(v.val)}</span>
-                </div>
-                <div style="height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
-                  <div style="height:100%;width:${pct}%;background:${i===0?'var(--ouro)':i===1?'rgba(180,180,180,.7)':'rgba(160,120,60,.7)'};border-radius:99px"></div>
+            return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:14px;min-width:24px;text-align:center">${medal}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+                    <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.nome}<span style="font-weight:400;color:var(--muted);margin-left:6px">${lojaN}</span></span>
+                    <span style="font-weight:700;color:var(--ouro);flex-shrink:0;margin-left:8px">${fmt(v.val)}</span>
+                  </div>
+                  <div style="height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${i===0?'var(--ouro)':i===1?'rgba(180,180,180,.7)':'rgba(160,120,60,.7)'};border-radius:99px"></div>
+                  </div>
                 </div>
               </div>
+              ${(v.qtd||v.nrs?.length||v.obss?.length)?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;padding-left:28px">
+                ${v.qtd>0?`<span style="font-size:9px;background:rgba(91,141,239,.12);color:var(--azul);padding:1px 7px;border-radius:10px">📦 ${v.qtd} un.</span>`:''}
+                ${v.nrs?.length?`<span style="font-size:9px;background:rgba(46,204,135,.12);color:var(--verde);padding:1px 7px;border-radius:10px">🧾 Nº ${v.nrs.join(', ')}</span>`:''}
+                ${v.obss?.length?`<span style="font-size:9px;background:rgba(255,255,255,.06);color:var(--muted);padding:1px 7px;border-radius:10px;font-style:italic">${v.obss.join('; ')}</span>`:''}
+              </div>`:''}
             </div>`;
           }).join('')}
         </div>
@@ -9085,10 +9198,14 @@ function renderMetasLojas(){
 
 function calcPrevLoja(lid){
   const mes    = parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
-  // Auto preencher super meta se estiver vazio
+  // Auto preencher super meta no campo HTML ao digitar meta
   const smesEl = document.getElementById("ml-smes-"+lid);
-  if(smesEl && smesEl.value==="" && mes>0){
+  if(smesEl && mes>0){
     const autoSM = parseFloat((mes*1.25).toFixed(2));
+    if(!smesEl.value || smesEl.value==="0" || smesEl.value===""){
+      // Preencher o campo com o valor calculado (não só o placeholder)
+      smesEl.value = autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+    }
     smesEl.placeholder = "Auto: "+autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2});
   }
   const smes   = parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
@@ -9148,7 +9265,11 @@ function salvarMetasVendedoras(lid){
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 }
 function renderMetasVendSection(lid){
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const _lnMVS = LOJAS.map(l=>l.nome.toLowerCase());
+  const vends=D.vendedoras.filter(v=>
+    v.loja===lid &&
+    !_lnMVS.includes((v.nome||'').toLowerCase().trim())
+  );
   if(!vends.length) return "";
   // Layout: 2 linhas por vendedora — linha 1: nome+acum | meta | super; linha 2: ticket | aniv | inativ
   const rows=vends.map(v=>`
@@ -9217,8 +9338,12 @@ function salvarMetaLoja(lid){
   const autoMetas = calcMetasAuto(mes,ticket,smes,lid);
   autoMetas.metaCli = metaCli;
   D.metasLoja[lid][_mr]=autoMetas;
-  // Distribuir APENAS entre vendedoras realmente cadastradas nesta loja
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  // Distribuir APENAS entre vendedoras REAIS (excluir placeholders com nome de loja)
+  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
+  const vends=D.vendedoras.filter(v=>
+    v.loja===lid &&
+    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
+  );
   if(vends.length>0){
     const mv=parseFloat((mes/vends.length).toFixed(2));
     const smv=parseFloat((smes/vends.length).toFixed(2));
@@ -9317,7 +9442,7 @@ function gerarRel(){
       const hoje_d=new Date();hoje_d.setHours(0,0,0,0);
       const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
       const seg=new Date(hoje_d);seg.setDate(hoje_d.getDate()-diff);
-      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d){const dt=d.toISOString().slice(0,10);const r=vd[dt];if(r&&Number(r.val||0)>0){fatV+=Number(r.val||0);transV+=Number(r.trans||0);nVV++;}}}
+      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d){const dt=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');const r=vd[dt];if(r&&Number(r.val||0)>0){fatV+=Number(r.val||0);transV+=Number(r.trans||0);nVV++;}}}
     }
     const tmV=transV>0?fatV/transV:nVV>0?fatV/nVV:0;
     const metaTMV=Number(v.ticketAlvo||getMetas(v.loja).ticket||150);
@@ -9775,7 +9900,7 @@ function renderRankings(tab) {
         const hd=new Date();hd.setHours(0,0,0,0);
         const diff=hd.getDay()===0?6:hd.getDay()-1;
         const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
-        for(let k=0;k<7;k++){const dd=new Date(seg);dd.setDate(seg.getDate()+k);if(dd<=hd){t+=Number(vd[dd.toISOString().slice(0,10)]?.trans||0);}}
+        for(let k=0;k<7;k++){const dd=new Date(seg);dd.setDate(seg.getDate()+k);if(dd<=hd){t+=Number(vd[dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0')+'-'+String(dd.getDate()).padStart(2,'0')]?.trans||0);}}
       } else {
         const mes2=hj.slice(0,7);
         Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes2))t+=Number(vd2.trans||0);});
@@ -10150,7 +10275,7 @@ function renderRankingLoja() {
       const hd=new Date();hd.setHours(0,0,0,0);
       const diff=hd.getDay()===0?6:hd.getDay()-1;
       const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
-      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){trans+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);}}
+      for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){trans+=Number(vd[d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')]?.trans||0);}}
     } else {
       const mes=hj.slice(0,7);
       Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes))trans+=Number(vd2.trans||0);});
@@ -11220,7 +11345,7 @@ function exportarPDFRanking() {
     const trans = (() => {
       const vd=D.vendasVend[v.id]||{};let t=0;
       if(perV==='dia') t=Number(vd[hj]?.trans||0);
-      else if(perV==='semana'){ const hd=new Date();hd.setHours(0,0,0,0);const diff=hd.getDay()===0?6:hd.getDay()-1;const seg=new Date(hd);seg.setDate(hd.getDate()-diff);for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd)t+=Number(vd[d.toISOString().slice(0,10)]?.trans||0);} }
+      else if(perV==='semana'){ const hd=new Date();hd.setHours(0,0,0,0);const diff=hd.getDay()===0?6:hd.getDay()-1;const seg=new Date(hd);seg.setDate(hd.getDate()-diff);for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd)t+=Number(vd[d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')]?.trans||0);} }
       else { const mes2=hj.slice(0,7);Object.entries(vd).forEach(([d,r])=>{if(d.startsWith(mes2))t+=Number(r.trans||0);}); }
       return t;
     })();
