@@ -299,12 +299,17 @@ try{
           console.warn("[Avatim] merge preventivo ignorado:", e2.code||e2.message);
         }
 
+        // [FIX CRÍTICO] Incluir vendedoras e metasLoja no doc da loja
+        // Antes só salvava vendas — metas editadas pela loja nunca chegavam ao Firebase
+        // e eram perdidas na próxima carga (loadFromFirestore restaurava do principal)
         const payload = {
           dados: JSON.stringify({
             vendas:         { [lid]: vendasLoja },
             vendasVend:     vendasVendLoja,
             campRealizados: campLoja,
-            fluxo:          fluxoLoja
+            fluxo:          fluxoLoja,
+            vendedoras:     (D2.vendedoras||[]).filter(v=>v.loja===lid),
+            metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} }
           }),
           lojaId: lid,
           ts:     Date.now(),
@@ -418,7 +423,23 @@ try{
                 if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
               });
             }
-            console.log("[Avatim] ✅ Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
+            // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
+            if(pedaco.vendedoras && pedaco.vendedoras.length){
+              if(!base.vendedoras) base.vendedoras=[];
+              pedaco.vendedoras.forEach(rv=>{
+                const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
+                if(vi>=0) base.vendedoras[vi]=rv;
+                else base.vendedoras.push(rv);
+              });
+            }
+            if(pedaco.metasLoja){
+              if(!base.metasLoja) base.metasLoja={};
+              Object.entries(pedaco.metasLoja).forEach(([lid2,meses])=>{
+                if(!base.metasLoja[lid2]) base.metasLoja[lid2]={};
+                Object.entries(meses||{}).forEach(([mr,m])=>{ base.metasLoja[lid2][mr]=m; });
+              });
+            }
+            console.log("[Avatim] Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
           }catch(e3){ console.warn("[Avatim] Parse erro loja "+lid+":", e3.message); }
         });
         console.log("[Avatim] ✅ Admin: todos os dados carregados em paralelo");
@@ -468,7 +489,24 @@ try{
                   if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
                 });
               }
-              console.log("[Avatim] ✅ Loja "+lid+" carregada (incl. campRealizados + fluxo)");
+              // [FIX CRITICO] vendedoras e metasLoja do loja_* sobrepõem o principal
+              // A loja edita metas localmente → salva no loja_* → ao recarregar deve LER do loja_*
+              if(pedaco.vendedoras && pedaco.vendedoras.length){
+                if(!base.vendedoras) base.vendedoras=[];
+                pedaco.vendedoras.forEach(rv=>{
+                  const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
+                  if(vi>=0) base.vendedoras[vi]=rv;
+                  else base.vendedoras.push(rv);
+                });
+              }
+              if(pedaco.metasLoja && pedaco.metasLoja[lid]){
+                if(!base.metasLoja) base.metasLoja={};
+                if(!base.metasLoja[lid]) base.metasLoja[lid]={};
+                Object.entries(pedaco.metasLoja[lid]).forEach(([mr,m])=>{
+                  base.metasLoja[lid][mr]=m;
+                });
+              }
+              console.log("[Avatim] Loja "+lid+" carregada (vendas+metas+vendedoras)");
             }
           }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
         }
