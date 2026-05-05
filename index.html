@@ -3942,6 +3942,15 @@ function diasPassadosNoMes(){
   return Math.max(1, new Date().getDate());
 }
 
+// ── Helper: vendedoras REAIS (exclui placeholders com nome de loja e cargo VRLL)
+function vendsReais(lid){
+  const _lojaNames=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
+  return D.vendedoras.filter(v=>
+    v.loja===lid &&
+    v.cargo!=='VRLL' &&
+    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
+  );
+}
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*1.255);
@@ -4128,10 +4137,10 @@ function getMetas(lid, mesRef, strictMode){
   const ultMes = Object.keys(lm).sort().reverse()[0];
   if(ultMes)    return {...lm[ultMes], _herdado:true, _de:ultMes};
   // Fallback: calcular com base na soma das metas das vendedoras
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vends = vendsReais(lid);
   const somaMetas = vends.reduce((s,v)=>s+(Number(v.metaMes)||0),0);
   if(somaMetas>0){
-    const avgTicket = vends.reduce((s,v)=>s+(Number(v.ticketAlvo||v.ticket||350)),0)/Math.max(1,vends.length);
+    const avgTicket = vends.length ? vends.reduce((s,v)=>s+(Number(v.ticketAlvo||v.ticket||350)),0)/vends.length : 350;
     return calcMetasAuto(somaMetas, avgTicket, somaMetas*1.25);
   }
   return calcMetasAuto(50000,150,60000);
@@ -9209,7 +9218,7 @@ function renderMetasLojas(){
     const rD = ehMesAtual ? (D.vendas[loja.id]?.[hoje()]?.fat||0) : 0;
     const pM=m.mes>0?Math.min(100,rM/m.mes*100):0;
     const cor=pM>=100?"var(--verde)":pM>=70?"var(--ouro)":"var(--verm)";
-    const nv=D.vendedoras.filter(v=>v.loja===loja.id).length;
+    const nv=vendsReais(loja.id).length;
     const miniB=(lbl,r,mt,sm)=>{const p=mt>0?Math.min(120,r/mt*100):0,c=p>=120?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":r>0?"var(--verm)":"var(--muted)";return`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px"><span style="color:var(--muted)">${lbl}</span><span style="color:${c};font-weight:600">${fmt(r)} / ${fmtK(mt)} (${p.toFixed(0)}%)</span></div><div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden"><div style="width:${Math.min(100,p)}%;height:100%;background:${c};border-radius:3px"></div></div></div>`;};
     return`<div style="background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -9294,7 +9303,7 @@ function calcPrevLoja(lid){
   if(mes<=0){if(prev)prev.style.display="none";return;}
   const auto = calcMetasAuto(mes, ticket, smes);
   if(prev) prev.style.display="block";
-  const nv = D.vendedoras.filter(v=>v.loja===lid).length;
+  const nv = vendsReais(lid).length;
   const el = id => document.getElementById(id);
   const _mr2 = mesAtual();
   const _dd  = diasDoMes(_mr2);
@@ -9307,7 +9316,7 @@ function calcPrevLoja(lid){
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const vends=vendsReais(lid);
   let n=0, somaMes=0, somaSmes=0;
   vends.forEach(v=>{
     const mesEl=document.getElementById("mv-mes-"+v.id);
@@ -9345,11 +9354,7 @@ function salvarMetasVendedoras(lid){
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 }
 function renderMetasVendSection(lid){
-  const _lnMVS = LOJAS.map(l=>l.nome.toLowerCase());
-  const vends=D.vendedoras.filter(v=>
-    v.loja===lid &&
-    !_lnMVS.includes((v.nome||'').toLowerCase().trim())
-  );
+  const vends=vendsReais(lid);
   if(!vends.length) return "";
   // Layout: 2 linhas por vendedora — linha 1: nome+acum | meta | super; linha 2: ticket | aniv | inativ
   const rows=vends.map(v=>`
@@ -9423,11 +9428,7 @@ function salvarMetaLoja(lid){
   // CRÍTICO: ler os valores dos campos AGORA (antes do renderMetasLojas)
   // para que D.vendedoras reflita o que o usuário digitou,
   // evitando que a re-renderização reverta os campos para os valores antigos.
-  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
-  const vends=D.vendedoras.filter(v=>
-    v.loja===lid &&
-    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
-  );
+  const vends=vendsReais(lid);
   let somaMes=0, somaSmes=0, nVend=0;
   const temCamposVend = vends.some(v=>document.getElementById("mv-mes-"+v.id));
   if(temCamposVend){
@@ -9456,11 +9457,12 @@ function salvarMetaLoja(lid){
     });
   } else {
     // Campos não visíveis — distribuir apenas no primeiro setup
-    const temMetas = vends.some(v=>v.metaMes && Number(v.metaMes)>0);
-    if(!temMetas && vends.length>0){
-      const mv=parseFloat((mes/vends.length).toFixed(2));
-      const smv=parseFloat((smes/vends.length).toFixed(2));
-      vends.forEach(v=>{
+    const temMetas = vendsReais(lid).some(v=>v.metaMes && Number(v.metaMes)>0);
+    if(!temMetas && vendsReais(lid).length>0){
+      const _vr=vendsReais(lid);
+      const mv=parseFloat((mes/_vr.length).toFixed(2));
+      const smv=parseFloat((smes/_vr.length).toFixed(2));
+      _vr.forEach(v=>{
         const i=D.vendedoras.findIndex(x=>x.id===v.id);
         if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;somaMes+=mv;somaSmes+=smv;nVend++;}
       });
@@ -9499,7 +9501,7 @@ function salvarTodasMetas(){
       const smes=parseBR(document.getElementById("ml-smes-"+loja.id)?.value)||Math.round(mes*1.255);
       const ticket=parseBR(document.getElementById("ml-ticket-"+loja.id)?.value)||150;
       D.metasLoja[loja.id]=calcMetasAuto(mes,ticket,smes);
-      const vends=D.vendedoras.filter(v=>v.loja===loja.id);
+      const vends=vendsReais(loja.id);
       if(vends.length){const mv=Math.round(mes/vends.length);const smv=Math.round(smes/vends.length);vends.forEach(v=>{const i=D.vendedoras.findIndex(x=>x.id===v.id);if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;}});}
       n++;
     }
