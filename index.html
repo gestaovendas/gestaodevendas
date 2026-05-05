@@ -7141,21 +7141,46 @@ function calcProjecao_vend(id){
 
 function renderTabelaVend(){
   const lid=lojaId();
-  // Mostrar todas (incluindo arquivadas) com badge visual
-  const _lojaNames=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
+  // Admin: mostrar todas; loja: só as suas
   const vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  document.getElementById("tbody-vend").innerHTML=vends.length?vends.map(v=>{
+  
+  // Admin: seletor de loja para filtrar
+  const filtroLoja = isAdmin() ? (document.getElementById('vend-tab-filtro-loja')?.value||'') : lid;
+  const vendsFiltradas = filtroLoja ? vends.filter(v=>v.loja===filtroLoja) : vends;
+  
+  // Injetar seletor de loja no topo da tabela (admin)
+  if(isAdmin()){
+    const wrapId = 'vend-tab-loja-wrap';
+    let wrap = document.getElementById(wrapId);
+    if(!wrap){
+      const tbl = document.getElementById('tbody-vend')?.closest('table') || document.getElementById('tbody-vend')?.parentElement;
+      if(tbl && tbl.parentElement){
+        wrap = document.createElement('div');
+        wrap.id = wrapId;
+        wrap.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap';
+        wrap.innerHTML = '<label style="font-size:11px;color:var(--muted)">Filtrar loja:</label>'
+          +'<select id="vend-tab-filtro-loja" onchange="renderTabelaVend()" style="background:var(--card2);border:1px solid var(--borda);border-radius:6px;padding:5px 10px;color:var(--texto);font-size:12px">'
+          +'<option value="">Todas as lojas</option>'
+          +LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('')
+          +'</select>'
+          +'<span style="font-size:11px;color:var(--muted);margin-left:8px">📦 = arquivar · ✕ = excluir permanente</span>';
+        tbl.parentElement.insertBefore(wrap, tbl);
+      }
+    }
+  }
+
+  document.getElementById("tbody-vend").innerHTML=vendsFiltradas.length?vendsFiltradas.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const isArquivada = v.ativa === false;
-    // Arquivadas: mostrar com visual esmaecido, sem calcular KPIs
+    const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
+    
     if(isArquivada){
-      const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
       return `<tr style="opacity:.4;font-style:italic">
         <td><strong>${v.nome}</strong> <span style="font-size:9px;background:rgba(255,255,255,.1);padding:1px 6px;border-radius:8px;color:var(--muted)">📦 arquivada</span></td>
         <td>${cargoBadge}</td>
         <td style="font-size:11px">${loja?.nome||v.loja}</td>
         <td colspan="5" style="font-size:11px;color:var(--muted)">— dados históricos preservados —</td>
-        <td>${isAdmin()||!isArquivada?`<button onclick="arquivarVendedora('${v.id}',false)" title="Reativar vendedora" style="background:rgba(46,204,135,.15);border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer">Reativar</button>`:''}</td>
+        <td><button onclick="arquivarVendedora('${v.id}',false)" title="Reativar vendedora" style="background:rgba(46,204,135,.15);border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer">✅ Reativar</button></td>
       </tr>`;
     }
     const vm=calcVendPer(v.id,"mes");
@@ -7164,13 +7189,12 @@ function renderTabelaVend(){
     const proj=calcProjecao_vend(v.id);
     const projPct=proj&&v.metaMes>0?proj/v.metaMes*100:0;
     const projC=projPct>=100?"var(--verde)":projPct>=70?"var(--ouro)":"var(--verm)";
-    const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
     const metaDia = metaDiaProgressivaVend(v.id, hoje());
     const vHj = D.vendasVend[v.id]?.[hoje()]?.val||0;
     const pctDia = metaDia>0 ? vHj/metaDia*100 : 0;
     const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':'var(--verm)';
-    const btnArquivar = `<button onclick="arquivarVendedora('${v.id}',true)" title="Arquivar vendedora (preserva histórico)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;margin-left:4px" onmouseover="this.style.color='var(--ouro)'" onmouseout="this.style.color='var(--muted)'">📦</button>`;
-    const btnExcluir = isAdmin() ? `<button onclick="excluirVend('${v.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">✕</button>` : '';
+    const btnArquivar = `<button onclick="arquivarVendedora('${v.id}',true)" title="Arquivar (preserva histórico)" style="background:none;border:1px solid rgba(201,168,76,.3);color:var(--ouro);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;margin-right:4px">📦</button>`;
+    const btnExcluir = isAdmin() ? `<button onclick="excluirVend('${v.id}')" title="Excluir permanente" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer">✕</button>` : '';
     return `<tr>
       <td><strong>${v.nome}</strong></td>
       <td>${cargoBadge}</td>
@@ -7181,9 +7205,9 @@ function renderTabelaVend(){
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
-      <td>${btnArquivar}${btnExcluir}</td>
+      <td style="white-space:nowrap">${btnArquivar}${btnExcluir}</td>
     </tr>`;
-  }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Sem vendedoras.</td></tr>";
+  }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Nenhuma vendedora encontrada.</td></tr>";
 }
 
 // ============================================================
