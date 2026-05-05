@@ -6,10 +6,18 @@
 <title>MonAris Sales Control</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+<script>
+// Firebase carregado via dynamic import — funciona em GitHub Pages, file://, etc.
+(async function initFirebase(){
+  try{
+    const [appMod, authMod, storeMod] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"),
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js")
+    ]);
+    const { initializeApp } = appMod;
+    const { getAuth, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged } = authMod;
+    const { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } = storeMod;
 
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
@@ -555,6 +563,15 @@ try{
   window._fbOk = false;
   document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
 }
+
+  }catch(e){
+    console.error("[Avatim] Erro ao carregar Firebase:", e);
+    window._fbOk = false;
+    // Mesmo sem Firebase, mostrar a tela de login (funciona offline)
+    if(typeof showLogin === "function") showLogin();
+    else document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
+  }
+})();
 </script>
 
 <script>
@@ -11394,14 +11411,14 @@ function tabGestao(per, el) {
     if(anualWrap) anualWrap.style.display='block';
     normalSecs.forEach(id=>{
       const el2=document.getElementById(id);
-      if(el2) el2.closest?.('.sc, [style]')?.style && (el2.closest('.sc')||el2).style.display='none';
+      if(el2){ const p=el2.closest('.sc'); if(p) p.style.display='none'; else el2.style.display='none'; }
     });
     renderGestaoAnual();
   } else {
     if(anualWrap) anualWrap.style.display='none';
     normalSecs.forEach(id=>{
       const el2=document.getElementById(id);
-      if(el2){const p=el2.closest('.sc'); if(p) p.style.display=''; el2.style.display='';}
+      if(el2){ const p=el2.closest('.sc'); if(p) p.style.display=''; el2.style.display=''; }
     });
     renderGestao();
   }
@@ -11879,20 +11896,27 @@ function renderGestaoAnual(){
       const cor       = pctGr>=100?'var(--verde)':pctGr>=70?'var(--ouro)':pctGr>0?'var(--verm)':'var(--borda)';
       const isFut     = mi+1 > mesAtualNum;
       const isAtual   = mi+1 === mesAtualNum;
-      return `<div style="background:var(--card2);border:1px solid ${isAtual?'var(--ouro)':cor};border-radius:10px;padding:12px;${isAtual?'box-shadow:0 0 0 2px rgba(201,168,76,.2)':''}">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:12px;font-weight:700;color:${isAtual?'var(--ouro)':'var(--texto)'}">${nm}${isAtual?' ◀':''}</div>
-          ${!isFut && metaGr>0?`<div style="font-size:11px;font-weight:700;color:${cor}">${pctGr.toFixed(0)}%</div>`:'<div style="font-size:9px;color:var(--muted)">${isFut?'futuro':'—'}</div>'}
-        </div>
-        <div style="font-size:9px;color:var(--muted);margin-bottom:4px">META DO GRUPO</div>
-        <input type="text" inputmode="decimal" id="mg-${mr}"
-          value="${metaGr>0?metaGr.toLocaleString('pt-BR',{minimumFractionDigits:0}):'0'}"
-          oninput="maskBR(this)"
-          placeholder="Ex: 1.575.000"
-          style="width:100%;background:var(--cinza);border:1px solid ${isAtual?'rgba(201,168,76,.4)':'var(--borda)'};border-radius:6px;padding:6px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none">
-        ${!isFut?`<div style="font-size:9px;color:var(--muted);margin-top:4px;text-align:right">realizado: ${fmt(realizado)}</div>`:''}
-        ${!isFut && metaLojas>0?`<div style="font-size:8px;color:var(--muted);margin-top:2px;text-align:right">soma lojas: ${fmt(metaLojas)}</div>`:''}
-      </div>`;
+      const _pctBlock = (!isFut && metaGr>0) ? '<div style="font-size:11px;font-weight:700;color:'+cor+'">'+pctGr.toFixed(0)+'%</div>' : '<div style="font-size:9px;color:var(--muted)">'+(isFut?'futuro':'—')+'</div>';
+      const _realBlock = !isFut ? '<div style="font-size:9px;color:var(--muted);margin-top:4px;text-align:right">realizado: '+fmt(realizado)+'</div>' : '';
+      const _somaBlock = (!isFut && metaLojas>0) ? '<div style="font-size:8px;color:var(--muted);margin-top:2px;text-align:right">soma lojas: '+fmt(metaLojas)+'</div>' : '';
+      const _bord = isAtual ? 'var(--ouro)' : cor;
+      const _shadow = isAtual ? 'box-shadow:0 0 0 2px rgba(201,168,76,.2)' : '';
+      const _titleColor = isAtual ? 'var(--ouro)' : 'var(--texto)';
+      const _bdColor = isAtual ? 'rgba(201,168,76,.4)' : 'var(--borda)';
+      const _metaVal = metaGr>0 ? metaGr.toLocaleString('pt-BR',{minimumFractionDigits:0}) : '0';
+      return '<div style="background:var(--card2);border:1px solid '+_bord+';border-radius:10px;padding:12px;'+_shadow+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+        +'<div style="font-size:12px;font-weight:700;color:'+_titleColor+'">'+nm+(isAtual?' ◀':'')+'</div>'
+        +_pctBlock
+        +'</div>'
+        +'<div style="font-size:9px;color:var(--muted);margin-bottom:4px">META DO GRUPO</div>'
+        +'<input type="text" inputmode="decimal" id="mg-'+mr+'"'
+        +' value="'+_metaVal+'"'
+        +' oninput="maskBR(this)"'
+        +' placeholder="Ex: 1.575.000"'
+        +' style="width:100%;background:var(--cinza);border:1px solid '+_bdColor+';border-radius:6px;padding:6px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none">'
+        +_realBlock+_somaBlock
+        +'</div>';
     }).join('');
   }
 
