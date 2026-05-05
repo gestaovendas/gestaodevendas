@@ -3577,17 +3577,35 @@ async function loadFromFirestore(){
       if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
       if(remoto.metasProd)     D.metasProd     = remoto.metasProd;
       if(remoto.realProd)      D.realProd      = remoto.realProd;
-      // [FIX] vendedoras: merge por id para nao apagar vendedoras locais
-      // (evita que versao antiga do Firebase apague vendedoras recentes)
+      // [FIX] vendedoras: merge por id preservando metas editadas localmente
+      // Se há um save pendente (_pendingLocalData), significa que o usuário acabou
+      // de salvar metas — não sobrescrever metaMes/superMetaMes com valores antigos do Firebase
       if(remoto.vendedoras && remoto.vendedoras.length){
         if(!D.vendedoras || !D.vendedoras.length){
           D.vendedoras = remoto.vendedoras;
         } else {
-          // Atualizar/adicionar vendedoras do remoto, preservar locais
+          const _hasPending = !!window._pendingLocalData;
           remoto.vendedoras.forEach(rv => {
             const idx = D.vendedoras.findIndex(lv => lv.id === rv.id);
-            if(idx >= 0) D.vendedoras[idx] = rv;
-            else D.vendedoras.push(rv);
+            if(idx >= 0){
+              // Se save pendente OU meta local difere da remota: preservar local
+              // (local é mais recente — o Firebase ainda não foi atualizado)
+              if(_hasPending){
+                // Manter metas locais, só atualizar dados de cadastro (nome, cargo, loja)
+                D.vendedoras[idx] = {
+                  ...rv,
+                  metaMes:      D.vendedoras[idx].metaMes,
+                  superMetaMes: D.vendedoras[idx].superMetaMes,
+                  ticketAlvo:   D.vendedoras[idx].ticketAlvo,
+                  metaAniv:     D.vendedoras[idx].metaAniv,
+                  metaInativ:   D.vendedoras[idx].metaInativ,
+                };
+              } else {
+                D.vendedoras[idx] = rv;
+              }
+            } else {
+              D.vendedoras.push(rv);
+            }
           });
         }
       }
@@ -10891,7 +10909,25 @@ function iniciarAutoRefresh(){
               });
             });
           }
-          if(remoto.vendedoras && remoto.vendedoras.length) D.vendedoras = remoto.vendedoras;
+          if(remoto.vendedoras && remoto.vendedoras.length){
+            // [FIX] merge preservando metas locais se save pendente
+            const _hpSA = !!window._pendingLocalData;
+            if(!D.vendedoras||!D.vendedoras.length){ D.vendedoras=remoto.vendedoras; }
+            else {
+              remoto.vendedoras.forEach(rv=>{
+                const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
+                if(_i>=0){
+                  D.vendedoras[_i]=_hpSA?{...rv,
+                    metaMes:D.vendedoras[_i].metaMes,
+                    superMetaMes:D.vendedoras[_i].superMetaMes,
+                    ticketAlvo:D.vendedoras[_i].ticketAlvo,
+                    metaAniv:D.vendedoras[_i].metaAniv,
+                    metaInativ:D.vendedoras[_i].metaInativ
+                  }:rv;
+                } else D.vendedoras.push(rv);
+              });
+            }
+          }
           localStorage.setItem('avatim_v5', JSON.stringify(D));
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
         }
@@ -10943,7 +10979,23 @@ async function forceSyncAdmin(){
         });
       });
     }
-    if(remoto.vendedoras)    D.vendedoras    = remoto.vendedoras;
+    // [FIX] merge vendedoras preservando metas locais
+    if(remoto.vendedoras){
+      if(!D.vendedoras||!D.vendedoras.length){ D.vendedoras=remoto.vendedoras; }
+      else {
+        remoto.vendedoras.forEach(rv=>{
+          const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
+          if(_im>=0) D.vendedoras[_im]={...rv,
+            metaMes:D.vendedoras[_im].metaMes||rv.metaMes,
+            superMetaMes:D.vendedoras[_im].superMetaMes||rv.superMetaMes,
+            ticketAlvo:D.vendedoras[_im].ticketAlvo||rv.ticketAlvo,
+            metaAniv:D.vendedoras[_im].metaAniv||rv.metaAniv,
+            metaInativ:D.vendedoras[_im].metaInativ||rv.metaInativ
+          };
+          else D.vendedoras.push(rv);
+        });
+      }
+    }
     if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
     if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
     if(remoto.vendas){
