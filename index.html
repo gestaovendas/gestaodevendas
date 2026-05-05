@@ -5376,6 +5376,7 @@ function renderRankHoje(){
 }
 
 let _rankVendOrdem = 'fat'; // 'fat' = faturamento | 'meta' = % da meta
+let _autoRefreshTimer = null; // timer de auto-refresh (syncAdmin / syncLoja)
 let _mesMeta = null; // sempre null ao iniciar → renderMetasLojas vai usar mesAtual()
 let _metaNavAtiva = false; // true quando usuário navega para outro mês propositalmente
 
@@ -9241,7 +9242,7 @@ function renderMetasLojas(){
             <input type="text" inputmode="decimal" id="ml-mes-${loja.id}" value="${m.mes||""}" placeholder="Ex: 50000" oninput="calcPrevLoja('${loja.id}')" class="ml-inp">
           </div>
           <div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">SUPER META MENSAL</div>
-            <input type="text" inputmode="decimal" id="ml-smes-${loja.id}" value="${m.superMes||""}" placeholder="Auto: +25%" oninput="calcPrevLoja('${loja.id}')" class="ml-inp" style="border-color:rgba(139,92,246,.3)">
+            <input type="text" inputmode="decimal" id="ml-smes-${loja.id}" value="${m.superMes||""}" placeholder="Auto: +25%" oninput="this.dataset.manual='1';calcPrevLoja('${loja.id}')" class="ml-inp" style="border-color:rgba(139,92,246,.3)">
           </div>
         </div>
         <div style="margin-bottom:8px">
@@ -9288,11 +9289,13 @@ function renderMetasLojas(){
 function calcPrevLoja(lid){
   const mes    = parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
   // Auto preencher super meta no campo HTML ao digitar meta
+  // BUG 3 FIX: só preencher se campo estiver vazio E não foi editado manualmente
   const smesEl = document.getElementById("ml-smes-"+lid);
   if(smesEl && mes>0){
     const autoSM = parseFloat((mes*1.25).toFixed(2));
-    if(!smesEl.value || smesEl.value==="0" || smesEl.value===""){
-      // Preencher o campo com o valor calculado (não só o placeholder)
+    const campoVazio = !smesEl.value || smesEl.value==="0" || smesEl.value==="";
+    const editadoManualmente = smesEl.dataset.manual === '1';
+    if(campoVazio && !editadoManualmente){
       smesEl.value = autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
     }
     smesEl.placeholder = "Auto: "+autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2});
@@ -9349,7 +9352,11 @@ function salvarMetasVendedoras(lid){
     const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
     D.metasLoja[lid][_mr]=autoMetas;
   }
-  saveWithSync({meta:{lid,dados:D.metasLoja[lid]}});
+  // BUG 6 FIX: salvar D completo via save() (inclui vendedoras) não só meta
+  // Isso garante que metaMes individual chega ao Firebase antes do próximo sync
+  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  window._pendingLocalData = JSON.parse(JSON.stringify(D));
+  save(); // grava D completo incluindo vendedoras atualizadas
   showToast(n+" vendedoras salvas! Meta loja → "+fmt(somaMes));
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 }
@@ -9421,7 +9428,9 @@ function salvarMetaLoja(lid){
   if(!D.metasLoja[lid]) D.metasLoja[lid]={};
   const _mr = _mesMeta||mesAtual();
   const autoMetas = calcMetasAuto(mes,ticket,smes,lid);
-  autoMetas.metaCli = metaCli;
+  // BUG 7 FIX: preservar metaCli existente se o campo estiver vazio
+  const _metaCliExist = D.metasLoja[lid]?.[_mr]?.metaCli || 0;
+  autoMetas.metaCli = metaCli || _metaCliExist;
   D.metasLoja[lid][_mr]=autoMetas;
 
   // ── Salvar metas individuais das vendedoras ─────────────────
@@ -10321,8 +10330,16 @@ function buscarHistLoja(){
 function renderRankingLoja() {
   const per = _rankPerLoja;
   const lid = isAdmin()
-    ? (document.getElementById('sel-loja-rank')?.value || (LOJAS[0]?.id||''))
+    ? (document.getElementById('sel-loja-rank')?.value || LOJAS[0]?.id || '')
     : lojaId();
+  // BUG 5 FIX: sem loja selecionada, mostrar mensagem e sair
+  if(!lid){ 
+    const t=document.getElementById('rank-loja-titulo');
+    const h=document.getElementById('rank-loja-header');
+    if(t) t.textContent='Selecione uma loja';
+    if(h) h.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px">Selecione uma loja no filtro acima.</div>';
+    return;
+  }
 
   // Mostrar seletor só para admin
   const selDiv = document.getElementById('rank-loja-sel');
@@ -12243,8 +12260,12 @@ function iniciarPaginaHistorico(){
 function _preencherSelHistPg(){
   const sel = document.getElementById('hist-pg-sel-vend');
   if(!sel) return;
+  // BUG 4 FIX: admin vê todas as vendedoras reais (sem placeholders)
+  // Loja vê só as suas vendedoras reais
   const lid = lojaId();
-  const vends = isAdmin() ? D.vendedoras : D.vendedoras.filter(v=>v.loja===lid);
+  const vends = isAdmin()
+    ? LOJAS.flatMap(l=>vendsReais(l.id))
+    : vendsReais(lid);
   sel.innerHTML = '<option value="">Selecione...</option>'
     + vends.map(v=>`<option value="${v.id}">${v.nome}${isAdmin()?' ('+( LOJAS.find(l=>l.id===v.loja)?.nome||v.loja)+')':''}</option>`).join('');
   const hj = hoje();
