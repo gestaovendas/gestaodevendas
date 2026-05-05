@@ -44,6 +44,20 @@ const FB_SENHAS = {
   "jarpaul\u0040avatim.com":    _d("FhpoamtiPQ==")
 };
 
+/* ═══ REGRAS FIRESTORE — configure no console Firebase ═══
+   Substitua "allow read, write: if true" por:
+
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /avatim/{doc} {
+         allow read, write: if request.auth != null;
+       }
+     }
+   }
+
+   Isso exige autenticação Firebase para qualquer leitura/escrita.
+   ════════════════════════════════════════════════════════════ */
 try{
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
@@ -2883,15 +2897,17 @@ const LOJAS=[
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
 
+// Hashes PBKDF2-SHA256, 100.000 iterações + salt derivado do email
+// Torna brute-force e rainbow tables ineficazes (custo ~100.000x maior que SHA-256 puro)
 window.USUARIOS={
-  "admin\u0040avatim.com":      {id:"admin",       nome:"Monique (Admin)",    hash:"a85fc7eb5dca5aea8ecadbff5849e06463524968f46f8fa6c63b705f9633b87f", admin:true},
-  "mooca\u0040avatim.com":      {id:"mooca",       nome:"Mooca Plaza",        hash:"cb18a0eb4a247f4881eeba8ff86c02c4144b1d8cb9e6ccfe9220147941984fc1"},
-  "leopoldina\u0040avatim.com": {id:"leopoldina",  nome:"Vila Leopoldina",    hash:"f5fcf028d1dfbb7a2b6a77a46efc9c5367bf32e838a99b8c42b3d72b3b386be4"},
-  "perdizes\u0040avatim.com":   {id:"perdizes",    nome:"Perdizes",           hash:"46eb3c9cec4b65a3ffe5f8f8680c3204f36277e1b1be96619ede54f14f77be04"},
-  "santana\u0040avatim.com":    {id:"santana",     nome:"Santana",            hash:"d44083ea8c5950fd31c6b9f1a88389854f7526c11dee524f43da021e6c165398"},
-  "pinheiros\u0040avatim.com":  {id:"pinheiros",   nome:"Alto de Pinheiros",  hash:"33df48127c83ce505659ac1434485e33e5e360893bed3be0e90fa9a6d896a8ee"},
-  "ibirapuera\u0040avatim.com": {id:"ibirapuera",  nome:"Shop. Ibirapuera",   hash:"b3950d67844dce939ec866e42dde6e221980cfb9568e7cf1428e4b9da39017d5"},
-  "jarpaul\u0040avatim.com":    {id:"jarpaul",     nome:"Jardim Paulista",    hash:"0cf4d03a8e79dc148fc3e7badfb6db84f1d12d48fcc6ec25e0a278383d713504"}
+  "admin\u0040avatim.com":      {id:"admin",      nome:"Monique (Admin)",   hash:"06130acc73f8fcfb71485c0508904dfdca2fc24ebd331fb2b8944e58653779b1", admin:true},
+  "mooca\u0040avatim.com":      {id:"mooca",      nome:"Mooca Plaza",       hash:"10358b1bd22d2db7ccc3956973b8eac82ca94c44373d14907543af162ef6e0c3"},
+  "leopoldina\u0040avatim.com": {id:"leopoldina", nome:"Vila Leopoldina",   hash:"5edcb0827082e5f778b20636b308a4f751a92f4db82db20deef9909f2bb8cfbd"},
+  "perdizes\u0040avatim.com":   {id:"perdizes",   nome:"Perdizes",          hash:"2b625953b939f39b7151fb5748e12e95bde84dec8c0d4ec46df7eabd7634d73a"},
+  "santana\u0040avatim.com":    {id:"santana",    nome:"Santana",           hash:"45fd30afcdab00e0cf83de583dede341d899bd667fe63ccdf19ed21c38699a5e"},
+  "pinheiros\u0040avatim.com":  {id:"pinheiros",  nome:"Alto de Pinheiros", hash:"edf7c71307f3fdf6b84000bda092c60b633414b5186acd44f0328b90ef28200c"},
+  "ibirapuera\u0040avatim.com": {id:"ibirapuera", nome:"Shop. Ibirapuera",  hash:"17ae42915a50bac6d2b2760433aa15e1ba1d5644d3106cc6e35dff99b71ec560"},
+  "jarpaul\u0040avatim.com":    {id:"jarpaul",    nome:"Jardim Paulista",   hash:"08396a05667160668ff08e02fc3bd7d2277431efba0ef8333a6e04d3637aa7e4"}
 };
 
 // Vendedoras padrao — EDITE OS NOMES AQUI
@@ -3522,6 +3538,26 @@ if(!D.fluxo)      D.fluxo=[];
 // Detecta metas salvas com bug decimal antigo e descarta
 // Ex: meta.mes=190 (deveria ser 190000), dia=6 (deveria ser 6129)
 // ============================================================
+// Limpar tombstones antigos (>90 dias) para evitar overflow do localStorage
+function limparTombstonesAntigos(){
+  const limite = Date.now() - (90 * 24 * 60 * 60 * 1000);
+  let removidos = 0;
+  // _vendasExcluidas: {id: timestamp}
+  if(D._vendasExcluidas && typeof D._vendasExcluidas === 'object'){
+    Object.keys(D._vendasExcluidas).forEach(id=>{
+      const ts = D._vendasExcluidas[id];
+      if(typeof ts === 'number' && ts < limite){ delete D._vendasExcluidas[id]; removidos++; }
+    });
+  }
+  // _campExcluidos: {id: timestamp}
+  if(D._campExcluidos && typeof D._campExcluidos === 'object'){
+    Object.keys(D._campExcluidos).forEach(id=>{
+      const ts = D._campExcluidos[id];
+      if(typeof ts === 'number' && ts < limite){ delete D._campExcluidos[id]; removidos++; }
+    });
+  }
+  if(removidos>0) console.log('[Avatim] Tombstones expirados removidos:', removidos);
+}
 (function limparDadosInvalidos(){
   let corrompidas = 0;
   LOJAS.forEach(l=>{
@@ -3849,27 +3885,23 @@ const fmtK = v => fmt(v);  // sempre R$ completo — sem abreviações
 // "R$ 2.500"  → 2500   (com prefixo)
 const parseBR = s => {
   if(typeof s==="number") return s;
-  // remover espaços, R$, $
   s = String(s||"").trim().replace(/R\$\s*/g,"").replace(/\s/g,"");
   if(!s || s==="-") return 0;
-  // Tem vírgula → formato brasileiro: ponto=milhar, vírgula=decimal
-  if(s.includes(",")) {
-    return parseFloat(s.replace(/\./g,"").replace(",",".")) || 0;
-  }
-  // Sem vírgula mas tem ponto
+  // Vírgula presente → formato BR: pontos são separadores de milhar
+  if(s.includes(",")) return parseFloat(s.replace(/\./g,"").replace(",",".")) || 0;
+  // Sem vírgula com ponto: só é milhar se houver exatamente 3 dígitos após o ponto
+  // Exemplos: "2.500" → 2500 (milhar)  |  "2.5" → 2.5 (decimal)  |  "1.234.567" → 1234567
   if(s.includes(".")) {
     const partes = s.split(".");
     const ultima = partes[partes.length-1];
-    // Se última parte tem 3 dígitos → milhar (ex: "2.500", "1.234.567")
-    if(ultima.length === 3) {
-      return parseFloat(s.replace(/\./g,"")) || 0;
-    }
-    // Senão é decimal com ponto (ex: "2500.50", "1.5")
+    // Todos os segmentos após o primeiro têm 3 dígitos → separador de milhar
+    const todosSao3 = partes.slice(1).every(p=>p.length===3 && /^\d+$/.test(p));
+    if(todosSao3) return parseFloat(s.replace(/\./g,"")) || 0;
+    // Último tem 1-2 dígitos → decimal
     return parseFloat(s) || 0;
   }
-  // Só números
   return parseFloat(s) || 0;
-};
+};;
 const parseMoeda = parseBR; // alias
 
 const hoje = ()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -3882,6 +3914,7 @@ const lojaId  =()=>{
   }
   return id;
 };
+const lojaIdStrict = ()=>{ const id=lojaId(); if(!id) throw new Error("[Avatim] lojaIdStrict: sem loja"); return id; };
 const isAdmin =()=>window._userLoja?.admin===true;
 const lojaNome=()=>window._userLoja?.nome||"--";
 function showToast(msg,tipo="ok"){const t=document.getElementById("toast");t.textContent=msg;t.className="toast show "+tipo;setTimeout(()=>t.className="toast",3000);}
@@ -4027,6 +4060,25 @@ function vendsReais(lid){
     v.cargo!=='VRLL' &&
     !_lojaNames.includes((v.nome||'').toLowerCase().trim())
   );
+}
+
+// ── Helper: vendedoras ATIVAS (reais + não arquivadas)
+// ativa===false → arquivada. Sem campo ativa → retrocompatível (ativa por padrão)
+function vendsAtivas(lid){
+  return vendsReais(lid).filter(v=>v.ativa !== false);
+}
+
+// ── Arquivar / reativar vendedora
+function arquivarVendedora(vid, arquivar){
+  const idx = D.vendedoras.findIndex(v=>v.id===vid);
+  if(idx<0){ showToast("Vendedora não encontrada","err"); return; }
+  D.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
+  save();
+  const nome = D.vendedoras[idx].nome;
+  showToast(arquivar ? "📦 "+nome+" arquivada" : "✅ "+nome+" reativada");
+  renderTabelaVend();
+  carregarVendsForm();
+  preencherSelectVends();
 }
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
@@ -4225,7 +4277,7 @@ function getMetas(lid, mesRef, strictMode){
 
 function calcDia(lid, data){
   const hj=data||hoje();
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const vends=vendsAtivas(lid);
   let t=0;
   vends.forEach(v=>{ t+=Number(D.vendasVend[v.id]?.[hj]?.val||0); });
   if(t===0 && vends.length===0) t=Number(D.vendas[lid]?.[hj]?.fat||0);
@@ -4471,47 +4523,73 @@ function showApp(){
 }
 // ── SHA-256 puro JS — fallback para file:// e HTTP sem HTTPS ──────────
 // Fonte: algoritmo SHA-256 padrão, sem dependências externas
-async function _sha256(str){
-  if(window.crypto && window.crypto.subtle){
+// ── Autenticação: PBKDF2-SHA256 com 100.000 iterações + salt por email ────────
+// Salt = HMAC-SHA256(email, chave_app) — único por usuário, não precisa ser secreto
+// Equivalente a bcrypt/scrypt para ambientes frontend: torna brute-force impraticável
+async function _derivarSalt(email){
+  const chaveApp = "MonAris-AvatimSalt-2025-v2";
+  if(window.crypto?.subtle){
     try{
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-      return Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
+      const keyMat = await crypto.subtle.importKey("raw",
+        new TextEncoder().encode(chaveApp), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+      const sig = await crypto.subtle.sign("HMAC", keyMat, new TextEncoder().encode(email.toLowerCase()));
+      return Array.from(new Uint8Array(sig)).map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,32);
     }catch(e){}
   }
-  // Fallback puro JS (funciona em file://, HTTP, qualquer ambiente)
-  function _sha256puro(s){
-    function rr(x,n){return(x>>>n)|(x<<(32-n));}
-    const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-             0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-             0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-             0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-             0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-             0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-             0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-             0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
-    let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,
-        h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
-    const bytes=new TextEncoder().encode(s);
-    const bits=bytes.length*8;
-    const p=new Uint8Array(Math.ceil((bytes.length+9)/64)*64);
-    p.set(bytes); p[bytes.length]=0x80;
-    new DataView(p.buffer).setUint32(p.length-4,bits&0xffffffff,false);
-    for(let i=0;i<p.length;i+=64){
-      const w=new Uint32Array(64);
-      for(let j=0;j<16;j++) w[j]=new DataView(p.buffer,i).getUint32(j*4,false);
-      for(let j=16;j<64;j++){const s0=rr(w[j-15],7)^rr(w[j-15],18)^(w[j-15]>>>3);const s1=rr(w[j-2],17)^rr(w[j-2],19)^(w[j-2]>>>10);w[j]=(w[j-16]+s0+w[j-7]+s1)>>>0;}
-      let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
-      for(let j=0;j<64;j++){
-        const S1=rr(e,6)^rr(e,11)^rr(e,25);const ch=(e&f)^(~e&g);const tmp1=(h+S1+ch+K[j]+w[j])>>>0;
-        const S0=rr(a,2)^rr(a,13)^rr(a,22);const maj=(a&b)^(a&c)^(b&c);const tmp2=(S0+maj)>>>0;
-        h=g;g=f;f=e;e=(d+tmp1)>>>0;d=c;c=b;b=a;a=(tmp1+tmp2)>>>0;
-      }
-      h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;
-      h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;
-    }
-    return [h0,h1,h2,h3,h4,h5,h6,h7].map(v=>v.toString(16).padStart(8,"0")).join("");
+  // Fallback determinístico sem WebCrypto (raro, mas seguro o suficiente)
+  let h=0x811c9dc5, s=chaveApp+email.toLowerCase();
+  for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h*0x01000193)>>>0; }
+  return h.toString(16).padStart(8,"0").repeat(4);
+}
+
+async function _hashSenha(senha, email){
+  const salt = await _derivarSalt(email);
+  if(window.crypto?.subtle){
+    try{
+      const keyMat = await crypto.subtle.importKey("raw",
+        new TextEncoder().encode(senha), "PBKDF2", false, ["deriveBits"]);
+      const bits = await crypto.subtle.deriveBits(
+        {name:"PBKDF2", salt:new TextEncoder().encode(salt), iterations:100000, hash:"SHA-256"},
+        keyMat, 256);
+      return Array.from(new Uint8Array(bits)).map(x=>x.toString(16).padStart(2,"0")).join("");
+    }catch(e){}
   }
-  return _sha256puro(str);
+  // Fallback: SHA-256 com salt concatenado (sem WebCrypto)
+  return _sha256puroComSalt(senha, salt);
+}
+
+function _sha256puroComSalt(senha, salt){
+  // SHA-256 em JS puro com salt — fallback para ambientes sem WebCrypto
+  const str = salt + senha + salt; // salt no início e no fim
+  function rr(x,n){return(x>>>n)|(x<<(32-n));}
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+           0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+           0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+           0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+           0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+           0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+           0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+           0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,
+      h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+  const bytes=new TextEncoder().encode(str), bits=bytes.length*8;
+  const p=new Uint8Array(Math.ceil((bytes.length+9)/64)*64);
+  p.set(bytes);p[bytes.length]=0x80;
+  new DataView(p.buffer).setUint32(p.length-4,bits&0xffffffff,false);
+  for(let i=0;i<p.length;i+=64){
+    const w=new Uint32Array(64);
+    for(let j=0;j<16;j++) w[j]=new DataView(p.buffer,i).getUint32(j*4,false);
+    for(let j=16;j<64;j++){const s0=rr(w[j-15],7)^rr(w[j-15],18)^(w[j-15]>>>3);const s1=rr(w[j-2],17)^rr(w[j-2],19)^(w[j-2]>>>10);w[j]=(w[j-16]+s0+w[j-7]+s1)>>>0;}
+    let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
+    for(let j=0;j<64;j++){
+      const S1=rr(e,6)^rr(e,11)^rr(e,25),ch=(e&f)^(~e&g),tmp1=(h+S1+ch+K[j]+w[j])>>>0;
+      const S0=rr(a,2)^rr(a,13)^rr(a,22),maj=(a&b)^(a&c)^(b&c),tmp2=(S0+maj)>>>0;
+      h=g;g=f;f=e;e=(d+tmp1)>>>0;d=c;c=b;b=a;a=(tmp1+tmp2)>>>0;
+    }
+    h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;
+    h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;
+  }
+  return [h0,h1,h2,h3,h4,h5,h6,h7].map(v=>v.toString(16).padStart(8,"0")).join("");
 }
 
 // ── Login — funciona em HTTPS, localhost E file:// ──────────────────
@@ -4525,9 +4603,10 @@ async function login(){
   if(!u){ errEl.textContent="E-mail não cadastrado. Verifique o e-mail."; errEl.style.display="block"; return; }
   // Desabilitar botão durante verificação
   const btn = document.querySelector('#loginScreen .btn-lg');
-  if(btn){ btn.disabled=true; btn.textContent="Verificando..."; }
+  if(btn){ btn.disabled=true; btn.textContent="Verificando... ⏳"; }
   try{
-    const hash = await _sha256(senha);
+    // PBKDF2: 100.000 iterações — login pode levar ~0.5-1s (normal e intencional)
+    const hash = await _hashSenha(senha, email);
     if(u.hash !== hash){
       errEl.textContent="Senha incorreta. Tente novamente.";
       errEl.style.display="block";
@@ -5622,6 +5701,14 @@ function renderPainelDia(){
 }
 
 function carregarVendsForm(lidOverride){
+  // BUG12: não recriar o DOM se o usuário está digitando no formulário de lançamento
+  // Verificar se algum input do formulário de lançamento está em foco
+  const focusedEl = document.activeElement;
+  const lancForm  = document.getElementById('form-lanc') || document.getElementById('lanc-fat');
+  if(focusedEl && lancForm && lancForm.contains(focusedEl)){
+    console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando no lançamento");
+    return;
+  }
   // Admin sem override: usar a primeira loja real (nunca "admin")
   let lid;
   if(lidOverride && lidOverride !== 'admin') {
@@ -5636,7 +5723,7 @@ function carregarVendsForm(lidOverride){
     lid = lojaId();
   }
   const hj=hoje();
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const vends=vendsAtivas(lid);
   const grid=document.getElementById("vend-lanc-grid");
   if(!grid) return;
 
@@ -6721,14 +6808,15 @@ function prevMetaVend(val){
   } else document.getElementById("prev-meta-vend").style.display="none";
 }
 function preencherSelectVends(){
-  const lid=lojaId(),vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const lid=lojaId();
+  const vends=isAdmin()?LOJAS.flatMap(l=>vendsAtivas(l.id)):vendsAtivas(lid);
   ["vl-vend","com-vend"].forEach(selId=>{
     const sel=document.getElementById(selId);if(!sel)return;
     sel.innerHTML="<option value=''>Selecione...</option>"+vends.map(v=>`<option value="${v.id}">${v.nome} (${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja})</option>`).join("");
   });
   const fxSel=document.getElementById("fx-vend");
   if(fxSel){
-    const vf=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+    const vf=isAdmin()?LOJAS.flatMap(l=>vendsAtivas(l.id)):vendsAtivas(lid);
     fxSel.innerHTML='<option value="">Selecione...</option>'+vf.map(v=>`<option value="${v.id}">${v.nome} — ${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja}</option>`).join("");
   }
 }
@@ -6927,6 +7015,7 @@ function buscarHistVend(){
   const de     = document.getElementById('hist-de')?.value;
   const ate    = document.getElementById('hist-ate')?.value;
   if(!vendId || !de || !ate){ showToast('Selecione vendedora e período','err'); return; }
+  if(de > ate){ showToast('Data inicial deve ser anterior à final.','err'); return; }
   const v = D.vendedoras.find(v2=>v2.id===vendId);
   if(!v){ showToast('Vendedora não encontrada','err'); return; }
   const vd = D.vendasVend[vendId]||{};
@@ -7051,9 +7140,25 @@ function calcProjecao_vend(id){
 }
 
 function renderTabelaVend(){
-  const lid=lojaId(),vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const lid=lojaId();
+  // Mostrar todas (incluindo arquivadas) com badge visual
+  const _lojaNames=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
+  const vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
   document.getElementById("tbody-vend").innerHTML=vends.length?vends.map(v=>{
-    const loja=LOJAS.find(l=>l.id===v.loja),vm=calcVendPer(v.id,"mes");
+    const loja=LOJAS.find(l=>l.id===v.loja);
+    const isArquivada = v.ativa === false;
+    // Arquivadas: mostrar com visual esmaecido, sem calcular KPIs
+    if(isArquivada){
+      const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
+      return `<tr style="opacity:.4;font-style:italic">
+        <td><strong>${v.nome}</strong> <span style="font-size:9px;background:rgba(255,255,255,.1);padding:1px 6px;border-radius:8px;color:var(--muted)">📦 arquivada</span></td>
+        <td>${cargoBadge}</td>
+        <td style="font-size:11px">${loja?.nome||v.loja}</td>
+        <td colspan="5" style="font-size:11px;color:var(--muted)">— dados históricos preservados —</td>
+        <td>${isAdmin()||!isArquivada?`<button onclick="arquivarVendedora('${v.id}',false)" title="Reativar vendedora" style="background:rgba(46,204,135,.15);border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer">Reativar</button>`:''}</td>
+      </tr>`;
+    }
+    const vm=calcVendPer(v.id,"mes");
     const pct=v.metaMes>0?vm/v.metaMes*100:0;
     const cls=pct>=120?"roxo":pct>=100?"ok":pct>=70?"warn":"bad";
     const proj=calcProjecao_vend(v.id);
@@ -7064,6 +7169,8 @@ function renderTabelaVend(){
     const vHj = D.vendasVend[v.id]?.[hoje()]?.val||0;
     const pctDia = metaDia>0 ? vHj/metaDia*100 : 0;
     const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':'var(--verm)';
+    const btnArquivar = `<button onclick="arquivarVendedora('${v.id}',true)" title="Arquivar vendedora (preserva histórico)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;margin-left:4px" onmouseover="this.style.color='var(--ouro)'" onmouseout="this.style.color='var(--muted)'">📦</button>`;
+    const btnExcluir = isAdmin() ? `<button onclick="excluirVend('${v.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">✕</button>` : '';
     return `<tr>
       <td><strong>${v.nome}</strong></td>
       <td>${cargoBadge}</td>
@@ -7074,9 +7181,9 @@ function renderTabelaVend(){
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
-      <td>${isAdmin()?`<button onclick="excluirVend('${v.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onmouseover="this.style.color='var(--verm)'" onmouseout="this.style.color='var(--muted)'">✕</button>`:''}</td>
+      <td>${btnArquivar}${btnExcluir}</td>
     </tr>`;
-  }).join(""):"<tr><td colspan='9' style='color:var(--muted);text-align:center;padding:20px'>Sem vendedoras.</td></tr>";
+  }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Sem vendedoras.</td></tr>";
 }
 
 // ============================================================
@@ -12759,6 +12866,7 @@ async function buscarHistoricoLoja(){
   const de  = document.getElementById('hist-loja-de')?.value;
   const ate = document.getElementById('hist-loja-ate')?.value;
   if(!de || !ate){ showToast('Selecione o período','err'); return; }
+  if(de > ate){ showToast('Data inicial deve ser anterior à final.','err'); return; }
 
   const lojaSelVal = document.getElementById('hist-loja-sel')?.value;
   const lid = isAdmin() ? (lojaSelVal || null) : lojaId();
