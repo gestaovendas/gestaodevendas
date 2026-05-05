@@ -3553,7 +3553,25 @@ async function loadFromFirestore(){
       const remoto = JSON.parse(dadosJSON);
       // [FIX] Merge seguro: campos de configuracao sobrescrevem (vem do admin)
       // Campos de vendas fazem MERGE para nao perder dados locais
-      if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+      // [FIX CRÍTICO] metasLoja: MERGE por loja+mês — nunca sobrescrever
+      // Bug anterior: D.metasLoja = remoto.metasLoja apagava metas salvas localmente
+      // antes do fsGravar terminar (race condition)
+      if(remoto.metasLoja){
+        if(!D.metasLoja) D.metasLoja = {};
+        const _admBootMeta = (window._currentUser?.email === 'admin@avatim.com') ||
+                             (window._currentUser?.email === 'monique@avatim.com');
+        Object.entries(remoto.metasLoja).forEach(([lid, meses])=>{
+          if(!D.metasLoja[lid]) D.metasLoja[lid] = {};
+          Object.entries(meses||{}).forEach(([mr, metaObj])=>{
+            // Admin: remoto sempre tem prioridade (admin define as metas canônicas)
+            // Loja: só aceita remoto se não há dado local para aquele mês
+            // Isso evita que o Firebase antigo apague a meta que a loja acabou de salvar
+            if(_admBootMeta || !D.metasLoja[lid][mr]){
+              D.metasLoja[lid][mr] = metaObj;
+            }
+          });
+        });
+      }
       if(remoto.campanhas)     D.campanhas     = remoto.campanhas;
       if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
       if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
@@ -10737,6 +10755,21 @@ function iniciarAutoRefresh(){
             }
           });
         }
+        // Sync metas do admin → loja (admin define metas, loja precisa receber)
+        if(remoto.metasLoja){
+          if(!D.metasLoja) D.metasLoja={};
+          Object.entries(remoto.metasLoja).forEach(([lid_m,meses])=>{
+            if(!D.metasLoja[lid_m]) D.metasLoja[lid_m]={};
+            Object.entries(meses||{}).forEach(([mr,metaObj])=>{
+              // Só aceitar remoto se a loja não salvou meta para este mês
+              // (se a loja salvou, D.metasLoja[lid_m][mr] já existe com valor > 0)
+              const localMeta = D.metasLoja[lid_m]?.[mr];
+              if(!localMeta || !localMeta.mes || localMeta.mes <= 0){
+                D.metasLoja[lid_m][mr] = metaObj;
+              }
+            });
+          });
+        }
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
           const excluidos = D._campExcluidos || [];
@@ -10809,7 +10842,16 @@ function iniciarAutoRefresh(){
               if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
             });
           }
-          if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+          // [FIX] metasLoja: merge por loja+mês — admin sobrescreve cada mês individualmente
+          if(remoto.metasLoja){
+            if(!D.metasLoja) D.metasLoja={};
+            Object.entries(remoto.metasLoja).forEach(([lid,meses])=>{
+              if(!D.metasLoja[lid]) D.metasLoja[lid]={};
+              Object.entries(meses||{}).forEach(([mr,metaObj])=>{
+                D.metasLoja[lid][mr] = metaObj; // admin: sobrescreve sempre
+              });
+            });
+          }
           if(remoto.vendedoras && remoto.vendedoras.length) D.vendedoras = remoto.vendedoras;
           localStorage.setItem('avatim_v5', JSON.stringify(D));
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
@@ -10852,7 +10894,16 @@ async function forceSyncAdmin(){
     }
     const remoto = JSON.parse(dadosJSON);
     // Merge completo — igual ao loadFromFirestore mas sem sobrescrever tombstones locais
-    if(remoto.metasLoja)     D.metasLoja     = remoto.metasLoja;
+    // [FIX] metasLoja: merge por mês para não apagar metas recentes
+    if(remoto.metasLoja){
+      if(!D.metasLoja) D.metasLoja={};
+      Object.entries(remoto.metasLoja).forEach(([lid_r,meses_r])=>{
+        if(!D.metasLoja[lid_r]) D.metasLoja[lid_r]={};
+        Object.entries(meses_r||{}).forEach(([mr_r,obj_r])=>{
+          D.metasLoja[lid_r][mr_r] = obj_r; // sync manual: sobrescreve (admin iniciou)
+        });
+      });
+    }
     if(remoto.vendedoras)    D.vendedoras    = remoto.vendedoras;
     if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
     if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
