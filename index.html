@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;">
 <title>MonAris Sales Control</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
@@ -565,9 +566,11 @@ try{
 }
 
   }catch(e){
-    console.error("[Avatim] Erro ao carregar Firebase:", e);
-    window._fbOk = false;
-    // Mesmo sem Firebase, mostrar a tela de login (funciona offline)
+    console.warn("[Avatim] Firebase não disponível (", e.message, ") — modo offline ativo");
+    window._fbOk   = false;
+    window.fbLogin = async ()=>false; // noop — login local funciona sem Firebase
+    window.fsGravar  = async ()=>false;
+    window.fsCarregar= async ()=>null;
     if(typeof showLogin === "function") showLogin();
     else document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
   }
@@ -4536,11 +4539,17 @@ async function login(){
     window._localLogin  = true;
     window._currentUser = {email};
     window._userLoja    = u;
-    // Aguardar autenticação Firebase ANTES de mostrar o app
-    // Isso garante que auth.currentUser está pronto quando save() disparar
-    if(window.fbLogin){
-      try{ await window.fbLogin(email); }
-      catch(eFb){ console.warn("[Avatim] Firebase auth falhou, usando local:", eFb.code||eFb.message); }
+    // Firebase auth com timeout de 4s — nunca trava o login
+    // Se Firebase não carregou (_fbOk===false), pula direto para o app
+    if(window.fbLogin && window._fbOk !== false){
+      try{
+        await Promise.race([
+          window.fbLogin(email),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),4000))
+        ]);
+      }catch(eFb){
+        console.warn("[Avatim] Firebase auth falhou, entrando offline:", eFb.message);
+      }
     }
     if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
     showApp();
