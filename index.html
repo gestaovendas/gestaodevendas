@@ -9362,28 +9362,62 @@ function salvarMetaLoja(lid){
   const autoMetas = calcMetasAuto(mes,ticket,smes,lid);
   autoMetas.metaCli = metaCli;
   D.metasLoja[lid][_mr]=autoMetas;
-  // Distribuir por vendedoras SOMENTE se nenhuma delas tem meta individual definida
-  // (primeiro uso / setup inicial). Se já existem metas individuais, NÃO sobrescrever.
+
+  // ── Salvar metas individuais das vendedoras ─────────────────
+  // CRÍTICO: ler os valores dos campos AGORA (antes do renderMetasLojas)
+  // para que D.vendedoras reflita o que o usuário digitou,
+  // evitando que a re-renderização reverta os campos para os valores antigos.
   const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
   const vends=D.vendedoras.filter(v=>
     v.loja===lid &&
     !_lojaNames.includes((v.nome||'').toLowerCase().trim())
   );
-  const temMetasIndividuais = vends.some(v=>v.metaMes && Number(v.metaMes)>0);
-  if(vends.length>0 && !temMetasIndividuais){
-    // Primeiro setup: distribuir igualmente
-    const mv=parseFloat((mes/vends.length).toFixed(2));
-    const smv=parseFloat((smes/vends.length).toFixed(2));
+  let somaMes=0, somaSmes=0, nVend=0;
+  const temCamposVend = vends.some(v=>document.getElementById("mv-mes-"+v.id));
+  if(temCamposVend){
+    // Campos de vendedoras visíveis — ler e salvar os valores digitados
     vends.forEach(v=>{
-      const i=D.vendedoras.findIndex(x=>x.id===v.id);
-      if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;}
+      const mesEl   = document.getElementById("mv-mes-"+v.id);
+      const smesEl  = document.getElementById("mv-smes-"+v.id);
+      const tickEl  = document.getElementById("mv-ticket-"+v.id);
+      const anivEl  = document.getElementById("mv-aniv-"+v.id);
+      const inativEl= document.getElementById("mv-inativ-"+v.id);
+      if(!mesEl) return;
+      const mv   = parseBR(mesEl.value)||0;
+      const smv  = parseBR(smesEl?.value)||Math.round(mv*1.255);
+      const tick = parseBR(tickEl?.value)||350;
+      const aniv = parseInt(anivEl?.value)||0;
+      const inat = parseInt(inativEl?.value)||0;
+      const idx  = D.vendedoras.findIndex(x=>x.id===v.id);
+      if(idx!==-1 && mv>0){
+        D.vendedoras[idx].metaMes       = mv;
+        D.vendedoras[idx].superMetaMes  = smv;
+        D.vendedoras[idx].ticketAlvo    = tick;
+        D.vendedoras[idx].metaAniv      = aniv;
+        D.vendedoras[idx].metaInativ    = inat;
+        somaMes+=mv; somaSmes+=smv; nVend++;
+      }
     });
-    showToast("✅ Meta da loja salva! Distribuído para "+vends.length+" vendedoras → "+fmt(mv)+"/cada");
   } else {
-    // Metas individuais existem — preservar
-    showToast("✅ Meta da loja salva!");
+    // Campos não visíveis — distribuir apenas no primeiro setup
+    const temMetas = vends.some(v=>v.metaMes && Number(v.metaMes)>0);
+    if(!temMetas && vends.length>0){
+      const mv=parseFloat((mes/vends.length).toFixed(2));
+      const smv=parseFloat((smes/vends.length).toFixed(2));
+      vends.forEach(v=>{
+        const i=D.vendedoras.findIndex(x=>x.id===v.id);
+        if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;somaMes+=mv;somaSmes+=smv;nVend++;}
+      });
+    }
+  }
+  // Atualizar metasLoja com a soma individual se houver
+  if(somaMes>0 && somaMes!==mes){
+    // Soma individual difere da meta da loja — usar a meta da loja como canônica
+    // mas manter as individuais como digitadas
   }
   saveWithSync({meta:{lid,dados:D.metasLoja[lid]}});
+  showToast("✅ Meta salva!");
+  // renderMetasLojas após salvar — D.vendedoras já foi atualizado
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 }
 function resetEmergencia(){
