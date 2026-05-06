@@ -4745,7 +4745,7 @@ function gerarDiagnostico(){
       const pct  = meta>0 ? fat/meta*100 : 0;
       const tm   = calcTMLoja(l.id,'mes');
       const nat  = calcNAtend(l.id,'mes');
-      const vends = D.vendedoras.filter(v=>v.loja===l.id).map(v=>{
+      const vends = vendsAtivas(l.id).map(v=>{ // exclui arquivadas do diagnóstico da rede
         const vm  = calcVendPer(v.id,'mes');
         const mV  = Number(v.metaMes)||0;
         const pV  = mV>0?vm/mV*100:0;
@@ -5050,7 +5050,7 @@ function gerarDiagnostico(){
   const restante = Math.max(0, m.mes - realMes);
   const necDia   = diasFalt>0 ? restante/diasFalt : 0;
 
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vends = vendsAtivas(lid); // exclui arquivadas do diagnóstico
   const vendsData = vends.map(v=>{
     const vm  = calcVendPer(v.id,'mes');
     const mV  = Number(v.metaMes)||0;
@@ -5583,7 +5583,7 @@ function renderRankVendHoje(){
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d>=ini&&d<=fim) t+=Number(vd.val||0);});
     return t;
   }
-  let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  let vends=(isAdmin()?LOJAS.flatMap(l=>vendsAtivas(l.id)):vendsAtivas(lid));
   vends=vends.map(v=>{
     const _val = calcVendP(v);
     const _metaMes = Number(v.metaMes)||0;
@@ -5990,7 +5990,7 @@ async function salvarLanc(){
   const data = document.getElementById("l-data").value || hoje();
 
   // Faturamento = soma dos campos de cada vendedora
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vends = vendsAtivas(lid);
   if(!vends.length){ _abortar("Nenhuma vendedora cadastrada nesta loja!"); return; }
 
   let fat = 0;
@@ -6408,7 +6408,7 @@ function renderMetas(){
   // Loja: só as suas
   const vendsDash = isAdmin()
     ? D.vendedoras  // todas
-    : D.vendedoras.filter(v=>v.loja===lid);
+    : vendsAtivas(lid);
 
   const metaVendEl = document.getElementById("metas-vend-dash");
   if(vendsDash.length===0){
@@ -7094,7 +7094,7 @@ function buscarHistVend(){
 }
 
 function renderVendRanking(per){
-  const lid=lojaId();let vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const lid=lojaId();let vends=isAdmin()?LOJAS.flatMap(l=>vendsAtivas(l.id)):vendsAtivas(lid);
   const _swRVR = semanaDoMes(hoje());
   vends=vends.map(v=>{
     const _val = calcVendPer(v.id,per);
@@ -12377,7 +12377,7 @@ function exportarPDFRelatorio() {
   const loja    = _adm ? 'Rede Completa' : lojaNome();
 
   // Tabela de vendedoras do mês
-  const vends = D.vendedoras.filter(v=>isAdmin()||v.loja===lid)
+  const vends = (isAdmin()?LOJAS.flatMap(l=>vendsAtivas(l.id)):vendsAtivas(lid))
     .map(v=>{
       const vm=calcVendPer(v.id,'mes');
       const pct=v.metaMes>0?vm/v.metaMes*100:0;
