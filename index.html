@@ -1241,7 +1241,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc" id="lanc-diagnostico" style="margin-top:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <div class="st" style="margin:0">🧠 Diagnóstico do Mês</div>
-      <button class="btn-s" onclick="gerarDiagnostico()" style="font-size:11px">🔄 Atualizar</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-s" onclick="gerarDiagnostico()" style="font-size:11px">🔄 Atualizar</button>
+        <button class="btn-s" onclick="exportarPDFDiagnostico()" style="font-size:11px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF Diagnóstico</button>
+        <button class="btn-s" onclick="exportarPDFGeral()" style="font-size:11px;background:rgba(201,168,76,.15);border-color:rgba(201,168,76,.4);color:var(--ouro)">📊 Relatório Geral</button>
+      </div>
     </div>
     <div id="lanc-diag-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
       <div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Clique em Atualizar para gerar o diagnóstico</div>
@@ -1426,6 +1430,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="hist-vend-resultado" style="display:none">
       <!-- KPIs resumo -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px" id="hist-vend-kpis"></div>
+      <!-- Comparação de crescimento TM -->
+      <div class="sc" style="margin-top:0">
+        <div class="st" style="margin-bottom:10px">📈 Crescimento — TM, Faturamento e Atendimentos</div>
+        <div id="hist-vend-crescimento"></div>
+      </div>
       <!-- Histórico dia a dia -->
       <div class="sc" style="margin-top:0">
         <div class="st" style="margin-bottom:10px">📅 Vendas por Dia</div>
@@ -2814,6 +2823,12 @@ service cloud.firestore {
       <!-- KPIs -->
       <div id="hist-loja-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
 
+      <!-- Crescimento TM mês a mês / ano a ano -->
+      <div class="sc" style="margin-bottom:12px;padding:16px 14px">
+        <div style="font-size:12px;font-weight:700;color:var(--verde);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">📈 Crescimento — TM, Faturamento e Atendimentos</div>
+        <div id="hist-loja-crescimento"></div>
+      </div>
+
       <!-- Tabela dia a dia -->
       <div class="sc" style="margin-bottom:12px;padding:16px 14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -2868,6 +2883,11 @@ service cloud.firestore {
     <!-- Resultado -->
     <div id="hist-pg-resultado" style="display:none">
       <div id="hist-pg-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+      <!-- Crescimento TM -->
+      <div class="sc" style="margin-bottom:12px;padding:16px 14px">
+        <div style="font-size:12px;font-weight:700;color:var(--verde);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">📈 Crescimento — TM, Faturamento e Atendimentos</div>
+        <div id="hist-pg-crescimento"></div>
+      </div>
       <div class="sc" style="padding:16px 14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div style="font-size:12px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px">Dia a dia</div>
@@ -7088,6 +7108,102 @@ function buscarHistVend(){
           <div style="font-size:11px;color:var(--muted)">${c.inicio||''} a ${c.fim||''}</div>
         </div>`).join('')
       : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma campanha registrada para esta vendedora.</div>`;
+  }
+
+  // ── Comparação de crescimento TM mês a mês e ano a ano ────────
+  const compEl = document.getElementById('hist-vend-crescimento');
+  if(compEl){
+    // Determinar os meses únicos dentro do período
+    const mesesSet = new Set(dias.map(d=>d.slice(0,7)));
+    const mesesOrdenados = [...mesesSet].sort();
+
+    // Calcular TM, Fat e Atend por mês
+    const porMes = mesesOrdenados.map(mes=>{
+      let fat=0, trans=0;
+      Object.entries(vd).forEach(([d,r])=>{
+        if(d.startsWith(mes)){ fat+=Number(r.val||0); trans+=Number(r.trans||0); }
+      });
+      const tm = trans>0 ? fat/trans : fat>0 ? fat : 0;
+      const [ano, m] = mes.split('-');
+      const nomeM = new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+      return {mes, ano, m, fat, trans, tm, nome:nomeM};
+    });
+
+    // Calcular TM por ano (agrupando meses do mesmo ano)
+    const porAno = {};
+    Object.entries(vd).forEach(([d,r])=>{
+      const ano=d.slice(0,4);
+      if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
+      porAno[ano].fat   += Number(r.val||0);
+      porAno[ano].trans += Number(r.trans||0);
+    });
+    const anosOrdenados = Object.keys(porAno).sort();
+    const anoRows = anosOrdenados.map(ano=>{
+      const {fat,trans} = porAno[ano];
+      const tm = trans>0 ? fat/trans : fat>0 ? fat : 0;
+      return {ano, fat, trans, tm};
+    });
+
+    // Variação mês a mês
+    const mesRows = porMes.map((m2,i)=>{
+      const prev = i>0 ? porMes[i-1] : null;
+      const varFat  = prev&&prev.fat>0  ? (m2.fat-prev.fat)/prev.fat*100   : null;
+      const varTM   = prev&&prev.tm>0   ? (m2.tm-prev.tm)/prev.tm*100      : null;
+      const varTrans= prev&&prev.trans>0 ? (m2.trans-prev.trans)/prev.trans*100 : null;
+      const cor = v2 => v2===null ? '#888' : v2>=0 ? 'var(--verde)' : 'var(--verm)';
+      const fmt2= v2 => v2===null ? '—' : (v2>=0?'+':'')+v2.toFixed(1)+'%';
+      return `<tr>
+        <td><strong>${m2.nome}</strong></td>
+        <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
+        <td style="color:${cor(varFat)};font-size:11px">${fmt2(varFat)}</td>
+        <td style="color:var(--azul)">${fmt(m2.tm)}</td>
+        <td style="color:${cor(varTM)};font-size:11px;font-weight:${varTM!==null&&Math.abs(varTM)>10?700:400}">${fmt2(varTM)}</td>
+        <td>${m2.trans}</td>
+        <td style="color:${cor(varTrans)};font-size:11px">${fmt2(varTrans)}</td>
+      </tr>`;
+    }).join('');
+
+    // Variação ano a ano
+    const anoRowsHtml = anoRows.map((a,i)=>{
+      const prev = i>0 ? anoRows[i-1] : null;
+      const varFat = prev&&prev.fat>0 ? (a.fat-prev.fat)/prev.fat*100 : null;
+      const varTM  = prev&&prev.tm>0  ? (a.tm-prev.tm)/prev.tm*100   : null;
+      const cor = v2 => v2===null ? '#888' : v2>=0 ? 'var(--verde)' : 'var(--verm)';
+      const fmt2= v2 => v2===null ? '—' : (v2>=0?'+':'')+v2.toFixed(1)+'%';
+      return `<tr>
+        <td><strong>${a.ano}</strong></td>
+        <td style="color:var(--ouro);font-weight:600">${fmt(a.fat)}</td>
+        <td style="color:${cor(varFat)};font-size:11px">${fmt2(varFat)}</td>
+        <td style="color:var(--azul)">${fmt(a.tm)}</td>
+        <td style="color:${cor(varTM)};font-size:11px;font-weight:${varTM!==null&&Math.abs(varTM)>10?700:400}">${fmt2(varTM)}</td>
+        <td>${a.trans}</td>
+      </tr>`;
+    }).join('');
+
+    compEl.innerHTML = porMes.length>=2 ? `
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">📅 Evolução Mês a Mês</div>
+        <div style="overflow-x:auto">
+          <table class="dtable">
+            <thead><tr>
+              <th>Mês</th><th>Faturamento</th><th>Var.Fat.</th>
+              <th>TM</th><th>Var.TM ⬆️</th><th>Atend.</th><th>Var.Atend.</th>
+            </tr></thead>
+            <tbody>${mesRows}</tbody>
+          </table>
+        </div>
+      </div>
+      ${anoRows.length>=2?`
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--azul);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">📆 Comparação Ano a Ano</div>
+        <div style="overflow-x:auto">
+          <table class="dtable">
+            <thead><tr><th>Ano</th><th>Faturamento</th><th>Var.Fat.</th><th>TM</th><th>Var.TM ⬆️</th><th>Atend.</th></tr></thead>
+            <tbody>${anoRowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`:''}
+    ` : `<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Selecione um período com ao menos 2 meses para ver a comparação.</div>`;
   }
 
   document.getElementById('hist-vend-resultado').style.display='';
@@ -12241,6 +12357,473 @@ function exportarPDFAnual(){
   setTimeout(()=>{w.focus();w.print();},800);
 }
 
+// ════════════════════════════════════════════════════════════════
+// PDF DIAGNÓSTICO DO MÊS
+// ════════════════════════════════════════════════════════════════
+function exportarPDFDiagnostico(){
+  const hj  = hoje();
+  const mes = hj.slice(0,7);
+  const mesNome = new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const _adm = isAdmin();
+
+  // ── Coletar dados ────────────────────────────────────────────
+  let secoes = '';
+
+  if(_adm){
+    // ADMIN: dados da rede
+    const redeData = LOJAS.map(l=>{
+      const m=getMetas(l.id), fat=calcMes(l.id), meta=m.mes||0;
+      const pct=meta>0?fat/meta*100:0, tm=calcTMLoja(l.id,'mes'), nat=calcNAtend(l.id,'mes');
+      const vends=vendsAtivas(l.id).map(v=>{
+        const vm=calcVendPer(v.id,'mes'), mV=Number(v.metaMes)||0, pV=mV>0?vm/mV*100:0;
+        let nat2=0; Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,d])=>{if(dt.startsWith(mes))nat2+=Number(d.trans||d.cli||0);});
+        return {...v,vm,mV,pct:pV,nat:nat2,tm:nat2>0?vm/nat2:0};
+      }).sort((a,b)=>b.pct-a.pct);
+      return {...l,fat,meta,pct,tm,nat,vends};
+    });
+    const totFat=redeData.reduce((s,l)=>s+l.fat,0);
+    const totMeta=redeData.reduce((s,l)=>s+l.meta,0);
+    const pctRede=totMeta>0?totFat/totMeta*100:0;
+    const totAtend=redeData.reduce((s,l)=>s+l.nat,0);
+    const tmRede=totAtend>0?totFat/totAtend:0;
+    const nasMeta=redeData.filter(l=>l.pct>=100).length;
+    const sorted=[...redeData].filter(l=>l.meta>0).sort((a,b)=>b.pct-a.pct);
+    const melhorLoja=sorted[0], piorLoja=sorted[sorted.length-1];
+    const todasVends=redeData.flatMap(l=>l.vends.map(v=>({...v,lojaNome:l.nome})));
+    const melhorVend=[...todasVends].sort((a,b)=>b.pct-a.pct)[0];
+    const piorVend=[...todasVends].filter(v=>v.mV>0).sort((a,b)=>a.pct-b.pct)[0];
+    const corRede=pctRede>=100?'#2ecc87':pctRede>=70?'#c9a84c':'#e74c3c';
+
+    // Comparação meses anteriores
+    const meses=[];
+    for(let i=0;i<4;i++){
+      const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
+      const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      let fat2=0,nat2=0;
+      D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
+      }));
+      meses.push({label:i===0?'Este mês':i===1?'Mês ant.':mStr,fat:fat2,nat:nat2});
+    }
+    const cresc=meses.length>=2&&meses[1].fat>0?(meses[0].fat-meses[1].fat)/meses[1].fat*100:0;
+
+    secoes = `
+    <div class="section">
+      <h2>📊 Status da Rede — ${mesNome}</h2>
+      <div class="kpi-grid">
+        <div class="kpi" style="border-color:${corRede}">
+          <div class="kv" style="color:${corRede}">${pctRede.toFixed(0)}%</div>
+          <div class="kl">% da Meta</div>
+        </div>
+        <div class="kpi">
+          <div class="kv">${fmt(totFat)}</div>
+          <div class="kl">Faturado no Mês</div>
+        </div>
+        <div class="kpi">
+          <div class="kv">${fmt(totMeta)}</div>
+          <div class="kl">Meta do Mês</div>
+        </div>
+        <div class="kpi">
+          <div class="kv">${nasMeta}/${LOJAS.length}</div>
+          <div class="kl">Lojas na Meta</div>
+        </div>
+        <div class="kpi">
+          <div class="kv">${fmt(tmRede)}</div>
+          <div class="kl">Ticket Médio Rede</div>
+        </div>
+        <div class="kpi">
+          <div class="kv">${totAtend}</div>
+          <div class="kl">Total Atendimentos</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>🏪 Ranking de Lojas — ${mesNome}</h2>
+      <table>
+        <thead><tr><th>#</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th><th>Atend.</th></tr></thead>
+        <tbody>${[...redeData].sort((a,b)=>b.pct-a.pct).map((l,i)=>{
+          const cor=l.pct>=100?'#2ecc87':l.pct>=70?'#c9a84c':'#e74c3c';
+          const bd=i===0?'badge-ok':l.pct>=70?'badge-warn':'badge-bad';
+          return `<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'º'}</td><td><strong>${l.nome}</strong></td>
+            <td>${fmt(l.fat)}</td><td>${l.meta>0?fmt(l.meta):'—'}</td>
+            <td><span class="${bd}">${l.pct.toFixed(0)}%</span></td>
+            <td>${fmt(l.tm)}</td><td>${l.nat}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+
+    <div class="section diag-2col">
+      <div>
+        <h2>🏆 Melhor Loja</h2>
+        ${melhorLoja?`<div class="diag-box ok">
+          <div class="dn">${melhorLoja.nome}</div>
+          <div class="ds">${melhorLoja.pct.toFixed(0)}% da meta · ${fmt(melhorLoja.fat)}</div>
+          <div class="ds">TM: ${fmt(melhorLoja.tm)} · ${melhorLoja.nat} atend.</div>
+          ${melhorLoja.pct>=100?'<div class="ds ok-t">✅ Meta atingida!</div>':''}
+        </div>`:'<div class="ds">Sem dados</div>'}
+      </div>
+      <div>
+        <h2>🔴 Loja que Mais Precisa de Atenção</h2>
+        ${piorLoja&&piorLoja.id!==melhorLoja?.id?`<div class="diag-box bad">
+          <div class="dn">${piorLoja.nome}</div>
+          <div class="ds">${piorLoja.pct.toFixed(0)}% da meta · ${fmt(piorLoja.fat)}</div>
+          <div class="ds">Falta ${fmt(Math.max(0,piorLoja.meta-piorLoja.fat))} para a meta</div>
+        </div>`:'<div class="ds">—</div>'}
+      </div>
+    </div>
+
+    <div class="section diag-2col">
+      <div>
+        <h2>🚀 Maior Potencializador</h2>
+        ${melhorVend?`<div class="diag-box ok">
+          <div class="dn">${melhorVend.nome}</div>
+          <div class="ds">${melhorVend.lojaNome} · ${fmt(melhorVend.vm)} · ${melhorVend.pct.toFixed(0)}% da meta</div>
+          <div class="ds">TM: ${fmt(melhorVend.tm)} · ${melhorVend.nat} atend.</div>
+        </div>`:'<div class="ds">Sem dados</div>'}
+      </div>
+      <div>
+        <h2>⚓ Maior Ofensor</h2>
+        ${piorVend?`<div class="diag-box bad">
+          <div class="dn">${piorVend.nome}</div>
+          <div class="ds">${piorVend.lojaNome} · ${fmt(piorVend.vm)} · ${piorVend.pct.toFixed(0)}% da meta</div>
+          <div class="ds">Necessita ${fmt(Math.max(0,piorVend.mV-piorVend.vm))} para bater a meta</div>
+        </div>`:'<div class="ds">—</div>'}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>📈 Tendência de Faturamento — Últimos 4 Meses</h2>
+      <table>
+        <thead><tr><th>Período</th><th>Faturamento</th><th>Atend.</th><th>TM</th><th>Variação</th></tr></thead>
+        <tbody>${meses.map((m2,i)=>{
+          const var2=i<meses.length-1&&meses[i+1].fat>0?(m2.fat-meses[i+1].fat)/meses[i+1].fat*100:null;
+          const cor2=var2===null?'#999':var2>=0?'#2ecc87':'#e74c3c';
+          return `<tr><td><strong>${m2.label}</strong></td><td>${m2.fat>0?fmt(m2.fat):'—'}</td>
+            <td>${m2.nat||'—'}</td><td>${m2.nat>0?fmt(m2.fat/m2.nat):'—'}</td>
+            <td style="color:${cor2}">${var2!==null?(var2>=0?'+':'')+var2.toFixed(1)+'%':'—'}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>👩 Ranking de Vendedoras — Toda a Rede</h2>
+      <table>
+        <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th></tr></thead>
+        <tbody>${[...redeData.flatMap(l=>l.vends.map(v=>({...v,lojaNome:l.nome})))].sort((a,b)=>b.pct-a.pct).map((v,i)=>{
+          const bd=v.pct>=100?'badge-ok':v.pct>=70?'badge-warn':'badge-bad';
+          return `<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
+            <td>${v.lojaNome}</td><td>${fmt(v.vm)}</td><td>${v.mV>0?fmt(v.mV):'—'}</td>
+            <td><span class="${bd}">${v.pct.toFixed(0)}%</span></td><td>${fmt(v.tm)}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+  } else {
+    // LOJA: diagnóstico local
+    const lid = lojaId();
+    const m   = getMetas(lid);
+    const realMes=calcMes(lid), meta=m.mes||0, pctMes=meta>0?realMes/meta*100:0;
+    const diasFalt=diasAbertosRestantes(lid), tmMes=calcTMLoja(lid,'mes'), natMes=calcNAtend(lid,'mes');
+    const restante=Math.max(0,meta-realMes), necDia=diasFalt>0?restante/diasFalt:0;
+    const corPct=pctMes>=100?'#2ecc87':pctMes>=70?'#c9a84c':'#e74c3c';
+    const vends=vendsAtivas(lid).map(v=>{
+      const vm=calcVendPer(v.id,'mes'), mV=Number(v.metaMes)||0, pct=mV>0?vm/mV*100:0;
+      let nat=0; Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,d])=>{if(dt.startsWith(mes))nat+=Number(d.trans||d.cli||0);});
+      return {...v,vm,mV,pct,nat,tm:nat>0?vm/nat:0};
+    }).sort((a,b)=>b.pct-a.pct);
+    const melhor=vends[0], pior=vends[vends.length-1];
+    const acima=vends.filter(v=>v.pct>=100).length, abaixo=vends.filter(v=>v.pct<70).length;
+    const meses=[];
+    for(let i=0;i<4;i++){
+      const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
+      const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      let fat2=0,nat2=0;
+      vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
+      }));
+      meses.push({label:i===0?'Este mês':i===1?'Mês ant.':mStr,fat:fat2,nat:nat2});
+    }
+    const cresc=meses.length>=2&&meses[1].fat>0?(meses[0].fat-meses[1].fat)/meses[1].fat*100:0;
+
+    secoes = `
+    <div class="section">
+      <h2>📊 Status do Mês — ${lojaNome()}</h2>
+      <div class="kpi-grid">
+        <div class="kpi" style="border-color:${corPct}">
+          <div class="kv" style="color:${corPct}">${pctMes.toFixed(0)}%</div>
+          <div class="kl">% da Meta</div>
+        </div>
+        <div class="kpi"><div class="kv">${fmt(realMes)}</div><div class="kl">Faturado</div></div>
+        <div class="kpi"><div class="kv">${fmt(meta)}</div><div class="kl">Meta do Mês</div></div>
+        <div class="kpi"><div class="kv">${fmt(restante)}</div><div class="kl">Faltando</div></div>
+        <div class="kpi"><div class="kv">${fmt(necDia)}</div><div class="kl">Necessário/Dia</div></div>
+        <div class="kpi"><div class="kv">${diasFalt}</div><div class="kl">Dias Úteis Restantes</div></div>
+        <div class="kpi"><div class="kv">${fmt(tmMes)}</div><div class="kl">Ticket Médio</div></div>
+        <div class="kpi"><div class="kv">${natMes}</div><div class="kl">Atendimentos</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>👩 Performance da Equipe</h2>
+      <div style="display:flex;gap:16px;margin-bottom:12px">
+        <div class="diag-box ok" style="flex:1;text-align:center"><div style="font-size:28px;font-weight:900">${acima}</div><div class="kl">✅ Na meta</div></div>
+        <div class="diag-box bad" style="flex:1;text-align:center"><div style="font-size:28px;font-weight:900">${abaixo}</div><div class="kl">🔴 Abaixo de 70%</div></div>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th><th>Atend.</th></tr></thead>
+        <tbody>${vends.map((v,i)=>{
+          const bd=v.pct>=100?'badge-ok':v.pct>=70?'badge-warn':'badge-bad';
+          return `<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
+            <td>${fmt(v.vm)}</td><td>${v.mV>0?fmt(v.mV):'—'}</td>
+            <td><span class="${bd}">${v.pct.toFixed(0)}%</span></td>
+            <td>${fmt(v.tm)}</td><td>${v.nat}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+
+    <div class="section diag-2col">
+      <div>
+        <h2>🏆 Maior Potencializadora</h2>
+        ${melhor?`<div class="diag-box ok">
+          <div class="dn">${melhor.nome}</div>
+          <div class="ds">${fmt(melhor.vm)} · ${melhor.pct.toFixed(0)}% da meta</div>
+          <div class="ds">TM: ${fmt(melhor.tm)} · ${melhor.nat} atend.</div>
+        </div>`:'—'}
+      </div>
+      <div>
+        <h2>⚓ Maior Ofensora</h2>
+        ${pior&&vends.length>1?`<div class="diag-box bad">
+          <div class="dn">${pior.nome}</div>
+          <div class="ds">${fmt(pior.vm)} · ${pior.pct.toFixed(0)}% da meta</div>
+          <div class="ds">Necessita ${fmt(Math.max(0,pior.mV-pior.vm))} para bater a meta</div>
+        </div>`:'—'}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>📈 Tendência — Últimos 4 Meses</h2>
+      <table>
+        <thead><tr><th>Período</th><th>Faturamento</th><th>Atend.</th><th>TM</th><th>Variação</th></tr></thead>
+        <tbody>${meses.map((m2,i)=>{
+          const var2=i<meses.length-1&&meses[i+1].fat>0?(m2.fat-meses[i+1].fat)/meses[i+1].fat*100:null;
+          const cor2=var2===null?'#999':var2>=0?'#2ecc87':'#e74c3c';
+          return `<tr><td><strong>${m2.label}</strong></td><td>${m2.fat>0?fmt(m2.fat):'—'}</td>
+            <td>${m2.nat||'—'}</td><td>${m2.nat>0?fmt(m2.fat/m2.nat):'—'}</td>
+            <td style="color:${cor2}">${var2!==null?(var2>=0?'+':'')+var2.toFixed(1)+'%':'—'}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+
+  const titulo = _adm ? 'Diagnóstico da Rede' : 'Diagnóstico — '+lojaNome();
+  const css = `
+    body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff;color:#222;font-size:12px}
+    .cover{background:linear-gradient(135deg,#0a0a1a,#1a1a3a);color:#fff;padding:40px;text-align:center;page-break-after:always}
+    .cover h1{font-size:30px;font-weight:900;margin:0 0 6px}
+    .cover h2{font-size:15px;font-weight:400;color:#c9a84c;margin:0 0 6px}
+    .cover p{font-size:11px;color:#aaa;margin:0}
+    .section{padding:20px 32px;border-bottom:1px solid #eee;page-break-inside:avoid}
+    .section h2{font-size:14px;font-weight:700;color:#1a1a3a;margin:0 0 12px;padding-bottom:6px;border-bottom:2px solid #c9a84c}
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:4px}
+    .kpi{background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:10px;text-align:center;border-top:3px solid #c9a84c}
+    .kv{font-size:18px;font-weight:900;color:#1a1a3a}
+    .kl{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px}
+    th{background:#1a1a3a;color:#c9a84c;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+    td{padding:7px 10px;border-bottom:1px solid #f0f0f0;font-size:11px}
+    tr:nth-child(even) td{background:#fafafa}
+    .diag-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .diag-box{border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:6px}
+    .diag-box.ok{border-color:#2ecc87;background:#f0fff8}
+    .diag-box.bad{border-color:#e74c3c;background:#fff5f5}
+    .dn{font-size:14px;font-weight:700;margin-bottom:4px}
+    .ds{font-size:11px;color:#555;margin-bottom:2px}
+    .ok-t{color:#2ecc87;font-weight:700}
+    .badge-ok{background:#d4edda;color:#155724;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700}
+    .badge-warn{background:#fff3cd;color:#856404;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700}
+    .badge-bad{background:#f8d7da;color:#721c24;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700}
+    @media print{.cover{page-break-after:always}.section{page-break-inside:avoid}}`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${titulo}</title><style>${css}</style></head><body>
+  <div class="cover">
+    <div style="font-size:10px;color:#c9a84c;letter-spacing:3px;margin-bottom:10px">MONARIS · CONFIDENCIAL</div>
+    <h1>${titulo}</h1>
+    <h2>${mesNome}</h2>
+    <p>Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+  </div>
+  ${secoes}
+  </body></html>`;
+
+  const w=window.open('','_blank','width=950,height=750');
+  if(!w){showToast('Habilite pop-ups para exportar PDF','err');return;}
+  w.document.write(html); w.document.close();
+  setTimeout(()=>{w.focus();w.print();},900);
+}
+
+// ════════════════════════════════════════════════════════════════
+// PDF RELATÓRIO GERAL — todas as seções do sistema
+// ════════════════════════════════════════════════════════════════
+function exportarPDFGeral(){
+  const hj=hoje(), mes=hj.slice(0,7);
+  const mesNome=new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const _adm=isAdmin(), lid=lojaId();
+  const nomeEntidade=_adm?'Rede MonAris — Todas as Lojas':lojaNome();
+
+  // ── 1. METAS ─────────────────────────────────────────────────
+  let secMetas='';
+  if(_adm){
+    const rows=LOJAS.map(l=>{
+      const m=getMetas(l.id);
+      return `<tr><td><strong>${l.nome}</strong></td><td>${m.mes>0?fmt(m.mes):'—'}</td>
+        <td>${m.superMes>0?fmt(m.superMes):'—'}</td><td>${m.dia>0?fmt(m.dia):'—'}</td>
+        <td>${m.sem>0?fmt(m.sem):'—'}</td><td>${m.ticket>0?fmt(m.ticket):'—'}</td></tr>`;
+    }).join('');
+    secMetas=`<div class="section"><h2>🎯 Metas do Mês — ${mesNome}</h2>
+      <table><thead><tr><th>Loja</th><th>Meta Mês</th><th>Super Meta</th><th>Meta Dia</th><th>Meta Sem.</th><th>Ticket Alvo</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } else {
+    const m=getMetas(lid);
+    secMetas=`<div class="section"><h2>🎯 Metas do Mês — ${mesNome}</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="kv">${fmt(m.mes)}</div><div class="kl">Meta Mês</div></div>
+        <div class="kpi"><div class="kv">${fmt(m.superMes)}</div><div class="kl">Super Meta</div></div>
+        <div class="kpi"><div class="kv">${fmt(m.dia)}</div><div class="kl">Meta Dia</div></div>
+        <div class="kpi"><div class="kv">${fmt(m.sem)}</div><div class="kl">Meta Semana</div></div>
+        <div class="kpi"><div class="kv">${fmt(m.ticket)}</div><div class="kl">Ticket Alvo</div></div>
+      </div></div>`;
+  }
+
+  // ── 2. FATURAMENTO MÊS A MÊS (últimos 6 meses) ───────────────
+  const historicoMeses=[];
+  for(let i=0;i<6;i++){
+    const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
+    const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    const mLabel=new Date(mStr+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+    if(_adm){
+      let fat2=0,nat2=0;
+      D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
+      }));
+      const totM=LOJAS.reduce((s,l)=>{const mm=getMetas(l.id,mStr);return s+(mm.mes||0);},0);
+      const pct2=totM>0?fat2/totM*100:0;
+      historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:totM,pct:pct2});
+    } else {
+      let fat2=0,nat2=0;
+      vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
+      }));
+      const mm=getMetas(lid,mStr);
+      historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:mm.mes||0,pct:mm.mes>0?fat2/(mm.mes||1)*100:0});
+    }
+  }
+  const secHist=`<div class="section"><h2>📅 Histórico de Faturamento — Últimos 6 Meses</h2>
+    <table><thead><tr><th>Mês</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>TM Médio</th></tr></thead>
+    <tbody>${historicoMeses.map(m2=>{
+      const bd=m2.pct>=100?'badge-ok':m2.pct>=70?'badge-warn':m2.pct>0?'badge-bad':'';
+      return `<tr><td><strong>${m2.label}</strong></td><td>${m2.fat>0?fmt(m2.fat):'—'}</td>
+        <td>${m2.meta>0?fmt(m2.meta):'—'}</td>
+        <td>${m2.pct>0?'<span class="'+bd+'">'+m2.pct.toFixed(0)+'%</span>':'—'}</td>
+        <td>${m2.nat||'—'}</td><td>${m2.nat>0?fmt(m2.fat/m2.nat):'—'}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+
+  // ── 3. VENDEDORAS ─────────────────────────────────────────────
+  const lojas4Vend = _adm ? LOJAS : LOJAS.filter(l=>l.id===lid);
+  let secVends='<div class="section"><h2>👩 Vendedoras — Metas e Performance no Mês</h2>';
+  lojas4Vend.forEach(l=>{
+    const vv=vendsAtivas(l.id);
+    if(!vv.length) return;
+    if(_adm) secVends+=`<div style="font-size:12px;font-weight:700;color:#1a1a3a;margin:10px 0 6px;border-bottom:1px solid #c9a84c;padding-bottom:4px">${l.nome}</div>`;
+    secVends+=`<table style="margin-bottom:12px"><thead><tr><th>Vendedora</th><th>Cargo</th><th>Meta Mês</th><th>Realizado</th><th>%</th><th>TM</th></tr></thead><tbody>`;
+    vv.forEach(v=>{
+      const vm=calcVendPer(v.id,'mes'), mV=Number(v.metaMes)||0;
+      const pct=mV>0?vm/mV*100:0;
+      const bd=pct>=100?'badge-ok':pct>=70?'badge-warn':'badge-bad';
+      secVends+=`<tr><td><strong>${v.nome}</strong></td><td>${v.cargo||'—'}</td>
+        <td>${mV>0?fmt(mV):'—'}</td><td>${fmt(vm)}</td>
+        <td><span class="${bd}">${pct.toFixed(0)}%</span></td>
+        <td>${(()=>{let nat=0;Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{if(dt.startsWith(mes))nat+=Number(dd.trans||0);});return nat>0?fmt(vm/nat):'—';})()}</td></tr>`;
+    });
+    secVends+='</tbody></table>';
+  });
+  secVends+='</div>';
+
+  // ── 4. CAMPANHAS ATIVAS ───────────────────────────────────────
+  const camps=(D.campanhas||[]).filter(c=>c.ativa!==false);
+  let secCamp='';
+  if(camps.length){
+    secCamp=`<div class="section"><h2>🏆 Campanhas Ativas</h2>
+      <table><thead><tr><th>Campanha</th><th>Tipo</th><th>Início</th><th>Fim</th><th>Meta</th></tr></thead>
+      <tbody>${camps.map(c=>`<tr><td><strong>${c.nome}</strong></td><td>${c.tipo||'—'}</td>
+        <td>${c.inicio||'—'}</td><td>${c.fim||'—'}</td><td>${c.meta>0?fmt(c.meta):'—'}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  // ── 5. DIAGNÓSTICO RESUMIDO ───────────────────────────────────
+  let secDiag='';
+  if(_adm){
+    const rd=LOJAS.map(l=>{const m=getMetas(l.id),fat=calcMes(l.id),meta=m.mes||0;return {...l,fat,meta,pct:meta>0?fat/meta*100:0};});
+    const totF=rd.reduce((s,l)=>s+l.fat,0),totM=rd.reduce((s,l)=>s+l.meta,0);
+    const pctR=totM>0?totF/totM*100:0,corR=pctR>=100?'#2ecc87':pctR>=70?'#c9a84c':'#e74c3c';
+    const nasMeta=rd.filter(l=>l.pct>=100).length;
+    secDiag=`<div class="section"><h2>🧠 Diagnóstico Resumido — ${mesNome}</h2>
+      <div class="kpi-grid">
+        <div class="kpi" style="border-color:${corR}"><div class="kv" style="color:${corR}">${pctR.toFixed(0)}%</div><div class="kl">Rede vs Meta</div></div>
+        <div class="kpi"><div class="kv">${fmt(totF)}</div><div class="kl">Faturamento Rede</div></div>
+        <div class="kpi"><div class="kv">${nasMeta}/${LOJAS.length}</div><div class="kl">Lojas na Meta</div></div>
+      </div>
+      <table style="margin-top:10px"><thead><tr><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>Status</th></tr></thead>
+      <tbody>${[...rd].sort((a,b)=>b.pct-a.pct).map(l=>{
+        const bd=l.pct>=100?'badge-ok':l.pct>=70?'badge-warn':'badge-bad';
+        const st=l.pct>=100?'✅ Na meta':l.pct>=70?'⚡ Em andamento':'🔴 Atenção';
+        return `<tr><td><strong>${l.nome}</strong></td><td>${fmt(l.fat)}</td><td>${l.meta>0?fmt(l.meta):'—'}</td>
+          <td><span class="${bd}">${l.pct.toFixed(0)}%</span></td><td>${st}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+  } else {
+    const m=getMetas(lid),fat=calcMes(lid),meta=m.mes||0,pct=meta>0?fat/meta*100:0;
+    const cor=pct>=100?'#2ecc87':pct>=70?'#c9a84c':'#e74c3c';
+    const restante=Math.max(0,meta-fat),diasF=diasAbertosRestantes(lid);
+    secDiag=`<div class="section"><h2>🧠 Diagnóstico — ${lojaNome()} — ${mesNome}</h2>
+      <div class="kpi-grid">
+        <div class="kpi" style="border-color:${cor}"><div class="kv" style="color:${cor}">${pct.toFixed(0)}%</div><div class="kl">da Meta</div></div>
+        <div class="kpi"><div class="kv">${fmt(fat)}</div><div class="kl">Realizado</div></div>
+        <div class="kpi"><div class="kv">${fmt(meta)}</div><div class="kl">Meta</div></div>
+        <div class="kpi"><div class="kv">${fmt(restante)}</div><div class="kl">Faltando</div></div>
+        <div class="kpi"><div class="kv">${diasF>0?fmt(restante/diasF):'—'}</div><div class="kl">Necessário/Dia</div></div>
+      </div></div>`;
+  }
+
+  const css=`body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff;color:#222;font-size:12px}
+    .cover{background:linear-gradient(135deg,#0a0a1a,#1a1a3a);color:#fff;padding:40px;text-align:center;page-break-after:always}
+    .cover h1{font-size:28px;font-weight:900;margin:0 0 6px}.cover h2{font-size:14px;color:#c9a84c;margin:0 0 4px}.cover p{font-size:10px;color:#aaa;margin:0}
+    .section{padding:18px 28px;border-bottom:1px solid #eee;page-break-inside:avoid}
+    .section h2{font-size:13px;font-weight:700;color:#1a1a3a;margin:0 0 10px;padding-bottom:5px;border-bottom:2px solid #c9a84c}
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:4px}
+    .kpi{background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:8px;text-align:center;border-top:3px solid #c9a84c}
+    .kv{font-size:16px;font-weight:900;color:#1a1a3a}.kl{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px}
+    th{background:#1a1a3a;color:#c9a84c;padding:7px 9px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+    td{padding:6px 9px;border-bottom:1px solid #f0f0f0;font-size:10px}tr:nth-child(even) td{background:#fafafa}
+    .badge-ok{background:#d4edda;color:#155724;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700}
+    .badge-warn{background:#fff3cd;color:#856404;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700}
+    .badge-bad{background:#f8d7da;color:#721c24;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700}
+    @media print{.cover{page-break-after:always}.section{page-break-inside:avoid}}`;
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relatório Geral — ${nomeEntidade}</title><style>${css}</style></head><body>
+  <div class="cover">
+    <div style="font-size:10px;color:#c9a84c;letter-spacing:3px;margin-bottom:10px">MONARIS · GESTÃO COMERCIAL</div>
+    <h1>Relatório Geral Completo</h1>
+    <h2>${nomeEntidade}</h2>
+    <p>${mesNome} · Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+  </div>
+  ${secDiag}${secMetas}${secHist}${secVends}${secCamp}
+  </body></html>`;
+
+  const w=window.open('','_blank','width=950,height=750');
+  if(!w){showToast('Habilite pop-ups para exportar PDF','err');return;}
+  w.document.write(html); w.document.close();
+  setTimeout(()=>{w.focus();w.print();},900);
+}
+
 function exportarPDFGestao() {
   const per = _gestaoPer || 'hoje';
   const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
@@ -13045,6 +13628,88 @@ async function buscarHistoricoLoja(){
     const nomeLoja = isAdmin() && lojaSelVal ? (LOJAS.find(l=>l.id===lojaSelVal)?.nome||'Todas') : lojaNome();
     lbl.textContent = nomeLoja + ' • ' + deFmt + ' → ' + ateFmt;
   }
+
+  // Comparação TM/Fat/Atend mês a mês e ano a ano
+  function calcCrescimento(diasMapInput, getFatTransFn){
+    const mesesSet = new Set(Object.keys(diasMapInput).map(d=>d.slice(0,7)));
+    const mesesOrd = [...mesesSet].sort();
+    const porMes = mesesOrd.map(mes=>{
+      let fat=0,trans=0;
+      Object.entries(diasMapInput).forEach(([d,r])=>{
+        if(d.startsWith(mes)){
+          const vals = getFatTransFn ? getFatTransFn(d,r) : {fat:r.fat||0,trans:r.trans||0};
+          fat+=vals.fat; trans+=vals.trans;
+        }
+      });
+      const tm=trans>0?fat/trans:fat>0?fat:0;
+      const nome=new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+      return {mes,fat,trans,tm,nome};
+    });
+    const porAno={};
+    Object.entries(diasMapInput).forEach(([d,r])=>{
+      const ano=d.slice(0,4);
+      if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
+      const vals=getFatTransFn?getFatTransFn(d,r):{fat:r.fat||0,trans:r.trans||0};
+      porAno[ano].fat+=vals.fat; porAno[ano].trans+=vals.trans;
+    });
+    const anosOrd=Object.keys(porAno).sort().map(ano=>({ano,...porAno[ano],tm:porAno[ano].trans>0?porAno[ano].fat/porAno[ano].trans:porAno[ano].fat}));
+    const corV=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
+    const fmtV=v=>v===null?'—':(v>=0?'+':'')+v.toFixed(1)+'%';
+    const mesRows=porMes.map((m2,i)=>{
+      const pv=i>0?porMes[i-1]:null;
+      const vF=pv&&pv.fat>0?(m2.fat-pv.fat)/pv.fat*100:null;
+      const vT=pv&&pv.tm>0?(m2.tm-pv.tm)/pv.tm*100:null;
+      const vA=pv&&pv.trans>0?(m2.trans-pv.trans)/pv.trans*100:null;
+      return `<tr>
+        <td><strong>${m2.nome}</strong></td>
+        <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
+        <td style="color:${corV(vF)};font-size:10px">${fmtV(vF)}</td>
+        <td style="color:var(--azul)">${fmt(m2.tm)}</td>
+        <td style="color:${corV(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
+        <td>${m2.trans}</td>
+        <td style="color:${corV(vA)};font-size:10px">${fmtV(vA)}</td>
+      </tr>`;
+    }).join('');
+    const anoRows=anosOrd.map((a,i)=>{
+      const pa=i>0?anosOrd[i-1]:null;
+      const vF=pa&&pa.fat>0?(a.fat-pa.fat)/pa.fat*100:null;
+      const vT=pa&&pa.tm>0?(a.tm-pa.tm)/pa.tm*100:null;
+      const vA=pa&&pa.trans>0?(a.trans-pa.trans)/pa.trans*100:null;
+      const corV2=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
+      return `<tr>
+        <td><strong>${a.ano}</strong></td>
+        <td style="color:var(--ouro);font-weight:600">${fmt(a.fat)}</td>
+        <td style="color:${corV2(vF)};font-size:10px">${fmtV(vF)}</td>
+        <td style="color:var(--azul)">${fmt(a.tm)}</td>
+        <td style="color:${corV2(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
+        <td>${a.trans}</td>
+        <td style="color:${corV2(vA)};font-size:10px">${fmtV(vA)}</td>
+      </tr>`;
+    }).join('');
+    if(porMes.length<2) return '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Selecione ao menos 2 meses para ver a comparação.</div>';
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:8px">📅 Evolução Mês a Mês</div>
+        <div style="overflow-x:auto"><table class="dtable">
+          <thead><tr><th>Mês</th><th>Fat.</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th></tr></thead>
+          <tbody>${mesRows}</tbody>
+        </table></div>
+      </div>
+      ${anosOrd.length>=2?`<div>
+        <div style="font-size:11px;font-weight:700;color:var(--azul);margin-bottom:8px">📆 Comparação Ano a Ano</div>
+        <div style="overflow-x:auto"><table class="dtable">
+          <thead><tr><th>Ano</th><th>Fat.</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th></tr></thead>
+          <tbody>${anoRows}</tbody>
+        </table></div>
+      </div>`:''}`;
+  }
+
+  // Seção crescimento TM loja
+  const crescEl = document.getElementById('hist-loja-crescimento');
+  if(crescEl){
+    crescEl.innerHTML = calcCrescimento(diasMap);
+  }
+
   document.getElementById('hist-loja-resultado').style.display='';
 }
 
@@ -13129,6 +13794,14 @@ async function buscarHistoricoVend(){
         }).join('')}</tbody>
       </table></div>`
     : `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+
+  // Seção crescimento TM vendedora
+  const crescEl2 = document.getElementById('hist-pg-crescimento');
+  if(crescEl2){
+    const mapVend={};
+    dias.forEach(d=>{ mapVend[d]={fat:Number(vd[d].val||0),trans:Number(vd[d].trans||0)}; });
+    crescEl2.innerHTML = calcCrescimento(mapVend);
+  }
 
   document.getElementById('hist-pg-resultado').style.display='';
 }
