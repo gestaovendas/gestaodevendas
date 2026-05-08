@@ -7057,10 +7057,17 @@ function buscarHistVend(){
 
   // KPIs
   const kpis = document.getElementById('hist-vend-kpis');
+  // KPI % da meta mensal no período
+  const _nMeses = new Set(dias.map(d=>d.slice(0,7))).size;
+  const _metaPerMes = Number(v.metaMes)||0;
+  const _metaPeriodo = _metaPerMes * _nMeses;
+  const _pctMeta = _metaPeriodo>0 ? fatTotal/_metaPeriodo*100 : 0;
+  const _corPct = _pctMeta>=100?'var(--verde)':_pctMeta>=70?'var(--ouro)':_pctMeta>0?'var(--verm)':'var(--muted)';
   if(kpis) kpis.innerHTML = [
     {l:'Faturamento',v:fmt(fatTotal),c:'var(--ouro)'},
     {l:'TM Médio',v:fmt(tmMedio),c:'var(--azul)'},
     {l:'Atend.',v:transTotal,c:'var(--verde)'},
+    {l:'% da Meta',v:_metaPeriodo>0?_pctMeta.toFixed(0)+'%':'—',c:_corPct},
     {l:'Aniversariantes',v:anivTotal,c:'var(--roxo)'},
     {l:'Inativos',v:inativTotal,c:'var(--laranja)'},
     {l:'Dias trabalhados',v:dias.length,c:'var(--muted)'},
@@ -7073,16 +7080,21 @@ function buscarHistVend(){
   const tabela = document.getElementById('hist-vend-tabela');
   if(tabela) tabela.innerHTML = dias.length
     ? `<div style="overflow-x:auto"><table class="dtable">
-        <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
+        <thead><tr><th>Data</th><th>Valor</th><th>% Meta Dia</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
         <tbody>${dias.map(d=>{
           const r=vd[d];
           const fat2=Number(r.val||0);
           const trans2=Number(r.trans||0);
           const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
           const dFmt=d.split('-').reverse().join('/');
+          // Meta progressiva do dia para a vendedora
+          const mDiaV = metaDiaProgressivaVend(v.id, d);
+          const pctDiaV = mDiaV>0 ? fat2/mDiaV*100 : 0;
+          const corPctV = pctDiaV>=100?'var(--verde)':pctDiaV>=70?'var(--ouro)':pctDiaV>0?'var(--verm)':'var(--muted)';
           return `<tr>
             <td>${dFmt}</td>
             <td style="color:var(--verde);font-weight:600">${fmt(fat2)}</td>
+            <td style="color:${corPctV};font-weight:700">${mDiaV>0?pctDiaV.toFixed(0)+'%':'—'}</td>
             <td style="color:var(--azul)">${fmt(tm2)}</td>
             <td>${trans2}</td>
             <td>${r.aniv||0}</td>
@@ -8768,12 +8780,8 @@ function renderVendCampForm(campId){
   const el = document.getElementById('camp-vend-campos');
   if(!el) return;
   const lid   = lojaId();
-  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
-  const vends = D.vendedoras.filter(v=>
-    v.loja===lid &&
-    v.cargo!=='VRLL' &&
-    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
-  );
+  // vendsAtivas já filtra: nome=loja, cargo VRLL, ativa===false
+  const vends = vendsAtivas(lid);
   if(!vends.length){
     el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhuma vendedora cadastrada</div>';
     return;
@@ -8830,13 +8838,8 @@ function renderVendCampForm(campId){
 }
 
 function calcTotalVendsCamp(){
-  // Somar campos de vendedoras e atualizar fat total automaticamente
   const lid   = lojaId();
-  const _lojaNames2 = LOJAS.map(l=>l.nome.toLowerCase());
-  const vends = D.vendedoras.filter(v=>
-    v.loja===lid && v.cargo!=='VRLL' &&
-    !_lojaNames2.includes((v.nome||'').toLowerCase().trim())
-  );
+  const vends = vendsAtivas(lid);
   let soma = 0;
   vends.forEach(v=>{
     const el = document.getElementById('camp-vend-'+v.id);
@@ -8853,13 +8856,8 @@ function calcTotalVendsCamp(){
 }
 
 function getVendCampVals(){
-  // Retorna objetos com valor, qtd, nr_venda e obs por vendedora
   const lid   = lojaId();
-  const _lojaNames = LOJAS.map(l=>l.nome.toLowerCase());
-  const vends = D.vendedoras.filter(v=>
-    v.loja===lid && v.cargo!=='VRLL' &&
-    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
-  );
+  const vends = vendsAtivas(lid);
   const vals={}, qtds={}, nrs={}, obss={};
   vends.forEach(v=>{
     const elVal = document.getElementById('camp-vend-'+v.id);
@@ -9083,6 +9081,23 @@ async function salvarCampReal(){
     vendObss:   _vendData.vendObss,
     lancadoEm: hoje()
   };
+  // ── Somar vendas da campanha em D.vendasVend ─────────────────
+  // Se o lançamento já existia, remover o valor antigo antes de somar o novo
+  // para evitar dupla contagem na edição
+  const lancamentoAnterior = existIdx>=0 ? D.campRealizados[existIdx] : null;
+  if(lancamentoAnterior?.vendedoras){
+    // Remover contribuição anterior para não duplicar
+    Object.entries(lancamentoAnterior.vendedoras).forEach(([vId, valAnterior])=>{
+      if(!D.vendasVend[vId]) return;
+      const registro = D.vendasVend[vId][lancamentoAnterior.data];
+      if(registro){
+        registro.val = Math.max(0, (Number(registro.val)||0) - Number(valAnterior));
+        // Limpar campo de campanha que originou
+        if(registro._campIds) registro._campIds = registro._campIds.filter(id=>id!==lancamentoAnterior.id);
+      }
+    });
+  }
+
   if(existIdx>=0){
     D.campRealizados[existIdx] = lancamento;
     showToast('Lançamento atualizado!');
@@ -9091,6 +9106,40 @@ async function salvarCampReal(){
     showToast('Dia lançado! ✅');
   }
 
+  // ── Projetar vendas da campanha em D.vendasVend ───────────────
+  // Cada vendedora com valor preenchido tem sua venda somada no dia
+  // Isso garante que calcMes/calcDia/calcSem incluam as vendas de campanha
+  if(lancamento.vendedoras && Object.keys(lancamento.vendedoras).length > 0){
+    Object.entries(lancamento.vendedoras).forEach(([vId, valor])=>{
+      if(!valor || Number(valor)<=0) return;
+      if(!D.vendasVend[vId]) D.vendasVend[vId] = {};
+      const reg = D.vendasVend[vId][data] || {val:0, trans:0, aniv:0, inativ:0, _campIds:[]};
+      reg.val = (Number(reg.val)||0) + Number(valor);
+      // Marcar origem: lista de IDs de campanha que contribuíram (evita dupla contagem futura)
+      if(!Array.isArray(reg._campIds)) reg._campIds = [];
+      if(!reg._campIds.includes(lancamento.id)) reg._campIds.push(lancamento.id);
+      // Atendimentos: somar do lançamento global (atend distribuído proporcional ou 1 por vendedora)
+      if(atend > 0 && !reg.trans){
+        const nVends = Object.keys(lancamento.vendedoras).filter(k=>Number(lancamento.vendedoras[k])>0).length;
+        reg.trans = (reg.trans||0) + Math.round(atend / Math.max(1, nVends));
+      }
+      D.vendasVend[vId][data] = reg;
+    });
+    // Atualizar D.vendas[lid][data].fat para refletir no Painel do Dia
+    // Somar o valor total desta campanha ao lançamento do dia (sem sobrescrever vendas normais)
+    if(!D.vendas[lid]) D.vendas[lid] = {};
+    const _regDia = D.vendas[lid][data] || {fat:0, trans:0, cli:0, clinov:0, visit:0, tm:0, obs:'', ts:Date.now()};
+    const _totalCamp = Object.values(lancamento.vendedoras).reduce((s,v)=>s+Number(v),0);
+    // Se já havia um registro DESTE lançamento de campanha, remover o anterior
+    if(lancamentoAnterior?.vendedoras){
+      const _totalAnt = Object.values(lancamentoAnterior.vendedoras).reduce((s,v)=>s+Number(v),0);
+      _regDia.fat = Math.max(0, _regDia.fat - _totalAnt);
+    }
+    _regDia.fat += _totalCamp;
+    if(atend>0) _regDia.trans = (_regDia.trans||0) + atend;
+    D.vendas[lid][data] = _regDia;
+    console.log('[Avatim] campReal → vendasVend atualizado para', Object.keys(lancamento.vendedoras).length, 'vendedoras | D.vendas[lid][data].fat=', _regDia.fat);
+  }
 
   // [FIX Race Condition] Snapshot antes de gravar campanha
   localStorage.setItem("avatim_v5", JSON.stringify(D));
@@ -13519,8 +13568,8 @@ async function buscarHistoricoLoja(){
       if(!diasMap[d]) diasMap[d]={fat:0,trans:0,aniv:0,inativ:0};
       diasMap[d].fat    += Number(r.val   ||0);
       diasMap[d].trans  += Number(r.trans ||0);
-      diasMap[d].aniv   += Number(r.aniv  ||0);
-      diasMap[d].inativ += Number(r.inativ||0);
+      // aniv/inativ vêm do fluxo — zerar aqui, cruzar abaixo
+      // diasMap[d].aniv/inativ preenchido pelo D.fluxo abaixo
     });
   });
   // Fallback: dias que estão em D.vendas mas não em vendasVend
@@ -13532,6 +13581,19 @@ async function buscarHistoricoLoja(){
       diasMap[d]={fat:vd.fat||0,trans:vd.trans||0,aniv:0,inativ:0};
     }
    });
+  });
+  // [FIX] Cruzar D.fluxo para obter aniversariantes e inativos reativados
+  // O fluxo é onde esses clientes são lançados (não em vendasVend)
+  const fluxosLoja = (D.fluxo||[]).filter(f=>{
+    const fLoja = f.loja || f.lojaId || '';
+    const pertenceLoja = lid ? (fLoja===lid) : true;
+    return pertenceLoja && f.data>=de && f.data<=ate;
+  });
+  fluxosLoja.forEach(f=>{
+    const d = f.data;
+    if(!diasMap[d]) diasMap[d]={fat:0,trans:0,aniv:0,inativ:0};
+    if(f.origem==='aniversario' || f.tipoCliente==='aniversario') diasMap[d].aniv++;
+    if(f.origem==='inativo'     || f.tipoCliente==='inativo')     diasMap[d].inativ++;
   });
 
   const dias = Object.keys(diasMap).sort();
@@ -13549,8 +13611,14 @@ async function buscarHistoricoLoja(){
 
   // KPIs
   const kpis = document.getElementById('hist-loja-kpis');
+  // % da meta: usar meta do mês × nº de meses únicos no período
+  const _nMesesL = new Set(dias.map(d=>d.slice(0,7))).size;
+  const _metaL = _nMesesL>0 ? metaRef * _nMesesL : metaRef;
+  const _pctL  = _metaL>0 ? fatTotal/_metaL*100 : 0;
+  const _corL  = _pctL>=100?'var(--verde)':_pctL>=70?'var(--ouro)':_pctL>0?'var(--verm)':'var(--muted)';
   if(kpis) kpis.innerHTML = [
     {l:'Faturamento Total', v:fmt(fatTotal),   c:'var(--ouro)'},
+    {l:'% da Meta',         v:_metaL>0?_pctL.toFixed(0)+'%':'—', c:_corL},
     {l:'Dias lançados',     v:dias.length,      c:'var(--verde)'},
     {l:'TM Médio',          v:fmt(tmMedio),     c:'var(--azul)'},
     {l:'Total Atend.',      v:transTotal,        c:'var(--texto)'},
@@ -13565,15 +13633,20 @@ async function buscarHistoricoLoja(){
   const tab = document.getElementById('hist-loja-tabela');
   if(tab) tab.innerHTML = dias.length
     ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
-        <thead><tr><th>Data</th><th>Faturamento</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
+        <thead><tr><th>Data</th><th>Faturamento</th><th>% Meta Dia</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th></tr></thead>
         <tbody>${dias.sort((a,b)=>b.localeCompare(a)).map(d=>{
           const r=diasMap[d];
           const tm2=r.trans>0?r.fat/r.trans:r.fat||0;
           const dFmt=d.split('-').reverse().join('/');
           const isHj=d===hoje();
+          // Meta dia para este loja e data
+          const mDia = (getMetas(lid||LOJAS[0].id)||{}).dia || 0;
+          const pctDia = mDia>0 ? r.fat/mDia*100 : 0;
+          const corPct = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':pctDia>0?'var(--verm)':'var(--muted)';
           return `<tr style="${isHj?'background:rgba(201,168,76,.05)':''}">
             <td style="font-weight:${isHj?700:400};color:${isHj?'var(--ouro)':'var(--texto)'}">${dFmt}${isHj?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':''}</td>
             <td style="color:var(--verde);font-weight:600">${fmt(r.fat)}</td>
+            <td style="color:${corPct};font-weight:700">${mDia>0?pctDia.toFixed(0)+'%':'—'}</td>
             <td style="color:var(--azul)">${fmt(tm2)}</td>
             <td>${r.trans}</td>
             <td>${r.aniv}</td>
@@ -13630,20 +13703,24 @@ async function buscarHistoricoLoja(){
   }
 
   // Comparação TM/Fat/Atend mês a mês e ano a ano
-  function calcCrescimento(diasMapInput, getFatTransFn){
+  function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
     const mesesSet = new Set(Object.keys(diasMapInput).map(d=>d.slice(0,7)));
     const mesesOrd = [...mesesSet].sort();
     const porMes = mesesOrd.map(mes=>{
-      let fat=0,trans=0;
+      let fat=0,trans=0,aniv=0,inativ=0;
       Object.entries(diasMapInput).forEach(([d,r])=>{
         if(d.startsWith(mes)){
           const vals = getFatTransFn ? getFatTransFn(d,r) : {fat:r.fat||0,trans:r.trans||0};
           fat+=vals.fat; trans+=vals.trans;
+          aniv  +=(r.aniv  ||0);
+          inativ+=(r.inativ||0);
         }
       });
       const tm=trans>0?fat/trans:fat>0?fat:0;
       const nome=new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
-      return {mes,fat,trans,tm,nome};
+      const meta = metasPorMes?.[mes] || 0;
+      const pctMeta = meta>0 ? fat/meta*100 : null;
+      return {mes,fat,trans,aniv,inativ,tm,nome,meta,pctMeta};
     });
     const porAno={};
     Object.entries(diasMapInput).forEach(([d,r])=>{
@@ -13660,14 +13737,19 @@ async function buscarHistoricoLoja(){
       const vF=pv&&pv.fat>0?(m2.fat-pv.fat)/pv.fat*100:null;
       const vT=pv&&pv.tm>0?(m2.tm-pv.tm)/pv.tm*100:null;
       const vA=pv&&pv.trans>0?(m2.trans-pv.trans)/pv.trans*100:null;
+      const corMeta=m2.pctMeta===null?'#888':m2.pctMeta>=100?'var(--verde)':m2.pctMeta>=70?'var(--ouro)':'var(--verm)';
+      const metaStr=m2.pctMeta!==null?`<span style="color:${corMeta};font-weight:700">${m2.pctMeta.toFixed(0)}%</span>${m2.meta>0?'<br><span style="font-size:9px;color:#888">meta: '+fmt(m2.meta)+'</span>':''}`:'—';
       return `<tr>
         <td><strong>${m2.nome}</strong></td>
         <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
+        <td>${metaStr}</td>
         <td style="color:${corV(vF)};font-size:10px">${fmtV(vF)}</td>
         <td style="color:var(--azul)">${fmt(m2.tm)}</td>
         <td style="color:${corV(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
         <td>${m2.trans}</td>
         <td style="color:${corV(vA)};font-size:10px">${fmtV(vA)}</td>
+        <td style="color:var(--roxo)">${m2.aniv||'—'}</td>
+        <td style="color:var(--laranja)">${m2.inativ||'—'}</td>
       </tr>`;
     }).join('');
     const anoRows=anosOrd.map((a,i)=>{
@@ -13691,7 +13773,7 @@ async function buscarHistoricoLoja(){
       <div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:8px">📅 Evolução Mês a Mês</div>
         <div style="overflow-x:auto"><table class="dtable">
-          <thead><tr><th>Mês</th><th>Fat.</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th></tr></thead>
+          <thead><tr><th>Mês</th><th>Fat.</th><th>% Meta</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
           <tbody>${mesRows}</tbody>
         </table></div>
       </div>
@@ -13704,10 +13786,53 @@ async function buscarHistoricoLoja(){
       </div>`:''}`;
   }
 
-  // Seção crescimento TM loja
+  // Seção crescimento TM loja — incluir mês anterior se só 1 mês no período
   const crescEl = document.getElementById('hist-loja-crescimento');
   if(crescEl){
-    crescEl.innerHTML = calcCrescimento(diasMap);
+    // Enriquecer diasMap com dados do mês anterior para comparação
+    // Quando o período é de 1 mês, buscar o mês anterior automaticamente
+    const _mesesUnicos = new Set(Object.keys(diasMap).map(d=>d.slice(0,7)));
+    if(_mesesUnicos.size === 1){
+      const _mesAtual = [..._mesesUnicos][0];
+      const _d = new Date(_mesAtual+'-01'); _d.setMonth(_d.getMonth()-1);
+      const _mesAnt = _d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0');
+      // Adicionar dados do mês anterior para comparação
+      const _verifica = new Set();
+      (lid ? [lid] : LOJAS.map(l=>l.id)).forEach(lidRef2=>{
+        Object.entries(D.vendas[lidRef2]||{}).forEach(([d2,vd2])=>{
+          if(d2.startsWith(_mesAnt) && !_verifica.has(d2)){
+            _verifica.add(d2);
+            if(!diasMap[d2]) diasMap[d2]={fat:0,trans:0,aniv:0,inativ:0};
+            diasMap[d2].fat   += Number(vd2.fat||0);
+            diasMap[d2].trans += Number(vd2.trans||0);
+          }
+        });
+        (lid ? vendsAtivas(lid) : LOJAS.flatMap(l=>vendsAtivas(l.id))).forEach(v2=>{
+          Object.entries(D.vendasVend[v2.id]||{}).forEach(([d2,vd2])=>{
+            if(d2.startsWith(_mesAnt)){
+              if(!diasMap[d2]) diasMap[d2]={fat:0,trans:0,aniv:0,inativ:0};
+              diasMap[d2].fat   += Number(vd2.val||0);
+              diasMap[d2].trans += Number(vd2.trans||0);
+            }
+          });
+        });
+      });
+      // Fluxo do mês anterior
+      (D.fluxo||[]).filter(f=>(f.loja||f.lojaId||'')===(lid||'')||!lid).forEach(f=>{
+        if(!f.data?.startsWith(_mesAnt)) return;
+        if(!diasMap[f.data]) diasMap[f.data]={fat:0,trans:0,aniv:0,inativ:0};
+        if(f.origem==='aniversario'||f.tipoCliente==='aniversario') diasMap[f.data].aniv++;
+        if(f.origem==='inativo'||f.tipoCliente==='inativo') diasMap[f.data].inativ++;
+      });
+    }
+    // Passar metas por mês para exibir % atingido
+    const _metasPorMes = {};
+    (lid ? [lid] : LOJAS.map(l=>l.id)).forEach(lidRef3=>{
+      Object.entries(D.metasLoja[lidRef3]||{}).forEach(([mr,m])=>{
+        _metasPorMes[mr] = (_metasPorMes[mr]||0) + (m.mes||0);
+      });
+    });
+    crescEl.innerHTML = calcCrescimento(diasMap, null, _metasPorMes);
   }
 
   document.getElementById('hist-loja-resultado').style.display='';
