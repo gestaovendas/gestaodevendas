@@ -225,7 +225,8 @@ try{
           produtosExtras:D2.produtosExtras|| [],
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
-          _campExcluidos:      D2._campExcluidos       || []
+          _campExcluidos:      D2._campExcluidos       || [],
+          _vendsExcluidas:     D2._vendsExcluidas      || []
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -449,7 +450,10 @@ try{
             // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
             if(pedaco.vendedoras && pedaco.vendedoras.length){
               if(!base.vendedoras) base.vendedoras=[];
+              // Respeitar tombstone _vendsExcluidas do principal
+              const _excBase = base._vendsExcluidas||[];
               pedaco.vendedoras.forEach(rv=>{
+                if(_excBase.includes(rv.id)) return; // excluída — não restaurar
                 const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(vi>=0) base.vendedoras[vi]=rv;
                 else base.vendedoras.push(rv);
@@ -516,7 +520,9 @@ try{
               // A loja edita metas localmente → salva no loja_* → ao recarregar deve LER do loja_*
               if(pedaco.vendedoras && pedaco.vendedoras.length){
                 if(!base.vendedoras) base.vendedoras=[];
+                const _excLj = base._vendsExcluidas||[];
                 pedaco.vendedoras.forEach(rv=>{
+                  if(_excLj.includes(rv.id)) return; // excluída — não restaurar
                   const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                   if(vi>=0) base.vendedoras[vi]=rv;
                   else base.vendedoras.push(rv);
@@ -3748,21 +3754,30 @@ async function loadFromFirestore(){
       if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
       if(remoto.metasProd)     D.metasProd     = remoto.metasProd;
       if(remoto.realProd)      D.realProd      = remoto.realProd;
-      // [FIX] vendedoras: merge por id preservando metas editadas localmente
-      // Se há um save pendente (_pendingLocalData), significa que o usuário acabou
-      // de salvar metas — não sobrescrever metaMes/superMetaMes com valores antigos do Firebase
+      // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
+        // Atualizar tombstone local com o do remoto
+        if(remoto._vendsExcluidas?.length){
+          if(!D._vendsExcluidas) D._vendsExcluidas=[];
+          remoto._vendsExcluidas.forEach(vid=>{
+            if(!D._vendsExcluidas.includes(vid)) D._vendsExcluidas.push(vid);
+          });
+        }
+        const _excVends = D._vendsExcluidas || [];
         if(!D.vendedoras || !D.vendedoras.length){
-          D.vendedoras = remoto.vendedoras;
+          D.vendedoras = remoto.vendedoras.filter(rv=>!_excVends.includes(rv.id));
         } else {
           const _hasPending = !!window._pendingLocalData;
           remoto.vendedoras.forEach(rv => {
+            // Não restaurar vendedoras que foram explicitamente excluídas
+            if(_excVends.includes(rv.id)){
+              // Garantir que não está na lista local
+              D.vendedoras = D.vendedoras.filter(lv=>lv.id!==rv.id);
+              return;
+            }
             const idx = D.vendedoras.findIndex(lv => lv.id === rv.id);
             if(idx >= 0){
-              // Se save pendente OU meta local difere da remota: preservar local
-              // (local é mais recente — o Firebase ainda não foi atualizado)
               if(_hasPending){
-                // Manter metas locais, só atualizar dados de cadastro (nome, cargo, loja)
                 D.vendedoras[idx] = {
                   ...rv,
                   metaMes:      D.vendedoras[idx].metaMes,
@@ -6914,10 +6929,20 @@ function salvarVend(){
 }
 function excluirVend(id){
   if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedoras.','err');return;}
-  if(!confirm('Excluir esta vendedora? Os dados de vendas serão removidos.')) return;
-  D.vendedoras=D.vendedoras.filter(v=>v.id!==id);
-  delete D.vendasVend[id];
-  save();renderTabelaVend();renderVendRanking(_tabVend);
+  const vObj = D.vendedoras.find(v=>v.id===id);
+  if(!confirm('Excluir '+( vObj?.nome||'esta vendedora')+'? Os dados históricos serão mantidos mas ela não aparecerá mais no sistema.')) return;
+  // Remover da lista
+  D.vendedoras = D.vendedoras.filter(v=>v.id!==id);
+  // Guardar tombstone — impede que syncs futuros restaurem a vendedora
+  if(!D._vendsExcluidas) D._vendsExcluidas = [];
+  if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
+  // Não deletar vendasVend — dados históricos preservados
+  save();
+  showToast('✅ '+(vObj?.nome||'Vendedora')+' excluída.');
+  renderTabelaVend();
+  renderVendRanking(_tabVend);
+  carregarVendsForm();
+  preencherSelectVends();
 }
 
 async function lancarVendaVend(){
@@ -11341,11 +11366,22 @@ function iniciarAutoRefresh(){
             });
           }
           if(remoto.vendedoras && remoto.vendedoras.length){
-            // [FIX] merge preservando metas locais se save pendente
+            // Sync tombstone de vendedoras excluídas
+            if(remoto._vendsExcluidas?.length){
+              if(!D._vendsExcluidas) D._vendsExcluidas=[];
+              remoto._vendsExcluidas.forEach(vid=>{
+                if(!D._vendsExcluidas.includes(vid)) D._vendsExcluidas.push(vid);
+              });
+            }
+            const _excSA = D._vendsExcluidas||[];
             const _hpSA = !!window._pendingLocalData;
-            if(!D.vendedoras||!D.vendedoras.length){ D.vendedoras=remoto.vendedoras; }
-            else {
+            if(!D.vendedoras||!D.vendedoras.length){
+              D.vendedoras=remoto.vendedoras.filter(rv=>!_excSA.includes(rv.id));
+            } else {
               remoto.vendedoras.forEach(rv=>{
+                if(_excSA.includes(rv.id)){
+                  D.vendedoras=D.vendedoras.filter(lv=>lv.id!==rv.id); return;
+                }
                 const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(_i>=0){
                   D.vendedoras[_i]=_hpSA?{...rv,
