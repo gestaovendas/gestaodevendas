@@ -3816,8 +3816,10 @@ async function loadFromFirestore(){
           const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            // Admin: sobrescreve sempre | Loja: só preenche dias ausentes
-            if(_admBoot || !(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
+            // NUNCA sobrescrever dados locais de vendas — sempre merge
+            // Bug ibirapuera: _admBoot sobrescrevia dados locais recentes com Firebase antigo
+            // Regra: Firebase só preenche dias que NÃO existem localmente
+            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
           });
         });
       }
@@ -3827,7 +3829,8 @@ async function loadFromFirestore(){
           const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            if(_admBoot || !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
+            // Mesmo para vendasVend: merge, nunca sobrescrever
+            if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
           });
         });
       }
@@ -5831,7 +5834,9 @@ function carregarVendsForm(lidOverride){
       const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':valAtual>0?'var(--verm)':'var(--muted)';
       const corSem = pctSem>=100?'var(--verde)':pctSem>=70?'var(--ouro)':acumSem>0?'var(--verm)':'var(--muted)';
       const corMes = pctMes>=100?'var(--verde)':pctMes>=70?'var(--ouro)':acumMes>0?'var(--verm)':'var(--cinza)';
-      const valFmt = valAtual>0?valAtual.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+      // Campo começa VAZIO a cada visita — o usuário digita o NOVO ticket/venda
+      // O acumulado do dia aparece no topo do card e nas barras de progresso
+      const valFmt = ''; // sempre vazio: novo lançamento = novo ticket
       const badge  = '<span class="sbadge '+(tblMap[v.cargo||'ESP']||'ok')+'" style="font-size:9px">'+(v.cargo||'ESP')+'</span>';
       const semNome= ['','1ª','2ª','3ª','4ª'][_sw]||_sw+'ª';
 
@@ -5896,7 +5901,10 @@ function carregarVendsForm(lidOverride){
 
         <!-- Lançamento -->
         <div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:1px;margin-bottom:6px">💰 Lançar hoje</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:1px">➕ Adicionar venda</div>
+            ${valAtual>0?`<div style="font-size:11px;font-weight:700;color:var(--ouro)">Acumulado: ${fmt(valAtual)}</div>`:''}
+          </div>
           <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
             <input type="text" inputmode="decimal" id="vlanc_${v.id}"
               value="${valFmt}" placeholder="0,00"
@@ -5938,11 +5946,14 @@ function atualizarSomaDia(){
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const vends=vendsAtivas(lid);
+  const hj2=hoje();
   let soma=0;
   vends.forEach(v=>{
     const el=document.getElementById("vlanc_"+v.id);
-    if(el) soma+=parseBR(el.value)||0;
+    const novoTicket = parseBR(el?.value)||0;
+    const acumHoje   = Number(D.vendasVend[v.id]?.[hj2]?.val||0);
+    soma += acumHoje + novoTicket; // mostra total do dia (acumulado + novo ticket)
   });
   const somaEl=document.getElementById("soma-vend");
   if(somaEl) somaEl.textContent=fmt(soma);
@@ -5969,12 +5980,23 @@ function atualizarSomaDia(){
 }
 
 function limparVend(vendId){
+  // Zera o acumulado do dia desta vendedora E limpa o campo visual
+  const hj2 = hoje();
+  if(D.vendasVend[vendId]?.[hj2]){
+    if(!D._undoLanc) D._undoLanc={};
+    D._undoLanc[vendId] = {...D.vendasVend[vendId][hj2]};
+    delete D.vendasVend[vendId][hj2];
+  }
   const el = document.getElementById("vlanc_"+vendId);
   const at = document.getElementById("vatend_"+vendId);
   if(el){ el.value=''; }
   if(at){ at.value=''; }
   atualizarSomaDia();
   atualizarCardVend(vendId, 0, 0);
+  // Atualizar o "Acumulado" no card
+  const selLoja = document.getElementById("lanc-loja-sel");
+  const lid2 = isAdmin()?(selLoja?.value||LOJAS[0].id):lojaId();
+  if(lid2) carregarVendsForm(lid2);
 }
 
 function limparCamposLanc(){
@@ -6047,16 +6069,38 @@ async function salvarLanc(){
 
     D.vendas[lid][data] = dadosLanc;
 
-    // Salvar vendas de cada vendedora em D
+    // Salvar vendas de cada vendedora em D — SOMANDO ao existente
+    // Conceito: cada "Salvar" é um ticket/venda adicional no dia, não uma substituição
+    // Para zerar, usar o botão ✕ (limparVend) no card da vendedora
+    let fatTotal = 0, transTotal2 = 0;
     vendasParaSalvar.forEach(({v, vval, vatend})=>{
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
-      const tmV = vatend>0 ? parseFloat((vval/vatend).toFixed(2)) : 0;
-      D.vendasVend[v.id][data] = {val:vval, trans:vatend, cli:vatend, aniv:0, inativ:0, tm:tmV};
+      // Pegar o registro existente do dia (se houver)
+      const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0};
+      const novoVal   = (Number(regExist.val)||0)   + vval;
+      const novoTrans = (Number(regExist.trans)||0) + (vatend||0);
+      const novoTM    = novoTrans>0 ? parseFloat((novoVal/novoTrans).toFixed(2)) : 0;
+      D.vendasVend[v.id][data] = {
+        val:   novoVal,
+        trans: novoTrans,
+        cli:   novoTrans,
+        aniv:  regExist.aniv||0,
+        inativ:regExist.inativ||0,
+        tm:    novoTM
+      };
+      fatTotal   += novoVal;
+      transTotal2+= novoTrans;
       // [FIX TOMBSTONE] Remover tombstone desta vendedora/data
       if(D._vendasVendExcluidas?.[v.id]){
         D._vendasVendExcluidas[v.id] = D._vendasVendExcluidas[v.id].filter(dt => dt !== data);
       }
     });
+    // Atualizar D.vendas[lid] com a SOMA total de todas as vendedoras
+    const tmTotal = transTotal2>0 ? parseFloat((fatTotal/transTotal2).toFixed(2)) : 0;
+    dadosLanc.fat   = fatTotal;
+    dadosLanc.trans = transTotal2;
+    dadosLanc.tm    = tmTotal;
+    D.vendas[lid][data] = {...dadosLanc, fat:fatTotal, trans:transTotal2, tm:tmTotal};
 
     // [DIAGNÓSTICO] Confirmar o que vai ser gravado
     console.log("[Avatim] salvarLanc: lid="+lid+" | data="+data+" | fat="+fat);
@@ -9081,67 +9125,18 @@ async function salvarCampReal(){
     vendObss:   _vendData.vendObss,
     lancadoEm: hoje()
   };
-  // ── Somar vendas da campanha em D.vendasVend ─────────────────
-  // Se o lançamento já existia, remover o valor antigo antes de somar o novo
-  // para evitar dupla contagem na edição
-  const lancamentoAnterior = existIdx>=0 ? D.campRealizados[existIdx] : null;
-  if(lancamentoAnterior?.vendedoras){
-    // Remover contribuição anterior para não duplicar
-    Object.entries(lancamentoAnterior.vendedoras).forEach(([vId, valAnterior])=>{
-      if(!D.vendasVend[vId]) return;
-      const registro = D.vendasVend[vId][lancamentoAnterior.data];
-      if(registro){
-        registro.val = Math.max(0, (Number(registro.val)||0) - Number(valAnterior));
-        // Limpar campo de campanha que originou
-        if(registro._campIds) registro._campIds = registro._campIds.filter(id=>id!==lancamentoAnterior.id);
-      }
-    });
-  }
-
+  // Lançamento de campanha é INDEPENDENTE do faturamento do dia.
+  // Mede adesão à campanha (quantas clientes compraram, em que valor/qtd).
+  // NÃO soma em D.vendas nem D.vendasVend — evita confusão com o total de vendas.
   if(existIdx>=0){
     D.campRealizados[existIdx] = lancamento;
-    showToast('Lançamento atualizado!');
+    showToast('Lançamento atualizado! ✅');
   } else {
     D.campRealizados.push(lancamento);
     showToast('Dia lançado! ✅');
   }
 
-  // ── Projetar vendas da campanha em D.vendasVend ───────────────
-  // Cada vendedora com valor preenchido tem sua venda somada no dia
-  // Isso garante que calcMes/calcDia/calcSem incluam as vendas de campanha
-  if(lancamento.vendedoras && Object.keys(lancamento.vendedoras).length > 0){
-    Object.entries(lancamento.vendedoras).forEach(([vId, valor])=>{
-      if(!valor || Number(valor)<=0) return;
-      if(!D.vendasVend[vId]) D.vendasVend[vId] = {};
-      const reg = D.vendasVend[vId][data] || {val:0, trans:0, aniv:0, inativ:0, _campIds:[]};
-      reg.val = (Number(reg.val)||0) + Number(valor);
-      // Marcar origem: lista de IDs de campanha que contribuíram (evita dupla contagem futura)
-      if(!Array.isArray(reg._campIds)) reg._campIds = [];
-      if(!reg._campIds.includes(lancamento.id)) reg._campIds.push(lancamento.id);
-      // Atendimentos: somar do lançamento global (atend distribuído proporcional ou 1 por vendedora)
-      if(atend > 0 && !reg.trans){
-        const nVends = Object.keys(lancamento.vendedoras).filter(k=>Number(lancamento.vendedoras[k])>0).length;
-        reg.trans = (reg.trans||0) + Math.round(atend / Math.max(1, nVends));
-      }
-      D.vendasVend[vId][data] = reg;
-    });
-    // Atualizar D.vendas[lid][data].fat para refletir no Painel do Dia
-    // Somar o valor total desta campanha ao lançamento do dia (sem sobrescrever vendas normais)
-    if(!D.vendas[lid]) D.vendas[lid] = {};
-    const _regDia = D.vendas[lid][data] || {fat:0, trans:0, cli:0, clinov:0, visit:0, tm:0, obs:'', ts:Date.now()};
-    const _totalCamp = Object.values(lancamento.vendedoras).reduce((s,v)=>s+Number(v),0);
-    // Se já havia um registro DESTE lançamento de campanha, remover o anterior
-    if(lancamentoAnterior?.vendedoras){
-      const _totalAnt = Object.values(lancamentoAnterior.vendedoras).reduce((s,v)=>s+Number(v),0);
-      _regDia.fat = Math.max(0, _regDia.fat - _totalAnt);
-    }
-    _regDia.fat += _totalCamp;
-    if(atend>0) _regDia.trans = (_regDia.trans||0) + atend;
-    D.vendas[lid][data] = _regDia;
-    console.log('[Avatim] campReal → vendasVend atualizado para', Object.keys(lancamento.vendedoras).length, 'vendedoras | D.vendas[lid][data].fat=', _regDia.fat);
-  }
-
-  // [FIX Race Condition] Snapshot antes de gravar campanha
+    // [FIX Race Condition] Snapshot antes de gravar campanha
   localStorage.setItem("avatim_v5", JSON.stringify(D));
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   // Gravar Firebase diretamente
