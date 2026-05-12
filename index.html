@@ -4498,7 +4498,7 @@ function showApp(){
   // Mostrar/esconder itens admin-only e loja-only
   const adminMode = isAdmin();
   document.querySelectorAll(".admin-only").forEach(e=>{
-    e.style.display = adminMode ? (e.tagName==="BUTTON"||e.tagName==="A" ? "flex" : "block") : "none";
+    e.style.display = adminMode ? (e.tagName==="BUTTON"||e.tagName==="A" ? "" : "block") : "none";
   });
   document.querySelectorAll(".admin-item").forEach(e=>{
     e.style.display = adminMode ? "flex" : "none";
@@ -8335,8 +8335,12 @@ function renderRelCamp(){
       const lancsLoja = reaisObj.filter(x=>x.lojaId===lid);
       const fatTotal  = lancsLoja.reduce((s,r)=>s+r.fat,0);
       const atdTotal  = lancsLoja.reduce((s,r)=>s+(r.atend||0),0);
+      const tmMed     = atdTotal>0 ? fatTotal/atdTotal : 0;
       const metaL = (obj.metasPorLoja&&obj.metasPorLoja[lid])||obj.metaLoja||0;
-      linhas.push({campNome:`${info2.emoji} ${obj.nome}`,loja:'',fat:r?.fat||0,meta:metaL,atend:r?.atend||0,tm:r?.tm||0,per:r?.per||'',obs:r?.obs||'',lancado:!!r});
+      linhas.push({campNome:`${info2.emoji} ${obj.nome}`,loja:'',fat:fatTotal,meta:metaL,atend:atdTotal,tm:tmMed,
+        per:lancsLoja.length>0?`${lancsLoja.length} dia(s)`:'',
+        obs:lancsLoja.map(l2=>l2.obs).filter(Boolean).join('; '),
+        lancado:lancsLoja.length>0});
     }
   });
 
@@ -8368,10 +8372,15 @@ function exportarRelCamp(){
   objs.forEach(obj=>{
     const info2 = CAMP_TIPOS[obj.tipo]||{label:obj.tipo};
     LOJAS.forEach(l=>{
-      const r = reaisAll.find(x=>x.campId===obj.id&&x.lojaId===l.id);
+      const lancs = reaisAll.filter(x=>x.campId===obj.id&&x.lojaId===l.id);
       const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
-      const pct3 = metaL>0&&r ? (r.fat/metaL*100).toFixed(1)+'%' : '--';
-      csv += [obj.nome,info2.label,l.nome,r?r.fat.toFixed(2):'0',metaL.toFixed(2),pct3,r?.atend||0,r?.tm?r.tm.toFixed(2):'0',r?.per||'',r?.obs||''].join(';')+'\n';
+      const fatL  = lancs.reduce((s,x)=>s+x.fat,0);
+      const atdL  = lancs.reduce((s,x)=>s+(x.atend||0),0);
+      const tmL   = atdL>0 ? fatL/atdL : 0;
+      const pct3  = metaL>0&&fatL>0 ? (fatL/metaL*100).toFixed(1)+'%' : '--';
+      const perL  = lancs.length>0 ? `${lancs.length} dia(s)` : '';
+      const obsL  = lancs.map(x=>x.obs).filter(Boolean).join('; ');
+      csv += [obj.nome,info2.label,l.nome,fatL.toFixed(2),metaL.toFixed(2),pct3,atdL,tmL>0?tmL.toFixed(2):'0',perL,obsL].join(';')+'\n';
     });
   });
 
@@ -8478,7 +8487,7 @@ function exportarPDFCamp(){
           <td><strong>${l.nome}</strong></td>
           <td>${l.fat>0?fmt(l.fat):'<span style="color:#aaa">—</span>'}</td>
           <td>${l.meta>0?fmt(l.meta):'<span style="color:#aaa">—</span>'}</td>
-          <td>${pct!==null?`<span class="badge-${badge}">${pct.toFixed(0)}%</span>`:'<span style="color:#aaa">—</span>'}</td>
+          <td>${pct!==null?'<span class="badge-'+badge+'">'+pct.toFixed(0)+'%</span>':'<span style="color:#aaa">—</span>'}</td>
           <td>${l.atend||'<span style="color:#aaa">—</span>'}</td>
           <td colspan="2">${tm>0?fmt(tm):'<span style="color:#aaa">—</span>'}</td>
         </tr>${vendRows2}`;
@@ -8513,7 +8522,7 @@ function exportarPDFCamp(){
       <td>${info2.label}</td>
       <td>${fatO>0?fmt(fatO):'<span style="color:#aaa">Sem lançamento</span>'}</td>
       <td>${metaO>0?fmt(metaO):'<span style="color:#aaa">—</span>'}</td>
-      <td>${pctO!==null?`<span class="badge-${badge}">${pctO.toFixed(0)}%</span>`:'<span style="color:#aaa">—</span>'}</td>
+      <td>${pctO!==null?'<span class="badge-'+badge+'">'+pctO.toFixed(0)+'%</span>':'<span style="color:#aaa">—</span>'}</td>
       <td>${atdO||'—'}</td>
       <td>${isAdmin()?lojasO+'/'+LOJAS.length:per}</td>
       <td>${per}</td>
@@ -8536,31 +8545,22 @@ function exportarPDFCamp(){
   // Para cada loja relevante: calcular fat total e fat nos dias com campanha
   const lojasImpacto = (isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid))
     .map(l=>{
-      const fatHoj     = calcMesDia ? (Number(D.vendas[l.id]?.[hj]?.fat)||0) : 0;
-      // Fat no mês atual
-      let fatMes=0, fatSem=0;
-      Object.entries(D.vendas[l.id]||{}).forEach(([d,vd])=>{
-        if(d.startsWith(mes)) fatMes+=Number(vd.fat||0);
-      });
-      vendsReais(l.id).forEach(v=>{
-        Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
-          if(d.startsWith(mes)) fatMes=0; // já somado acima via D.vendas
-        });
-      });
-      // Fat do mês pela soma das vendedoras (mais preciso)
-      fatMes = calcMes(l.id);
-      fatSem = calcSem(l.id);
+      // Fat total da loja (dia/semana/mês) — sem calcMesDia (undefined)
+      const fatHoj = Number(D.vendas[l.id]?.[hj]?.fat) || (() => {
+        let s=0;
+        vendsAtivas(l.id).forEach(v=>{ s+=Number(D.vendasVend[v.id]?.[hj]?.val||0); });
+        return s;
+      })();
+      const fatMes = calcMes(l.id);
+      const fatSem = calcSem(l.id);
 
-      // Fat da campanha nesta loja no mês atual
+      // Fat de CAMPANHA desta loja nos mesmos períodos
       const fatCampMes = reaisAll
         .filter(r=>r.lojaId===l.id && r.data && r.data.startsWith(mes))
         .reduce((s,r)=>s+r.fat,0);
       const fatCampSem = reaisAll
-        .filter(r=>{
-          if(r.lojaId!==l.id || !r.data) return false;
-          const d=new Date(r.data); const dsw=semanaDoMes(r.data);
-          return r.data.startsWith(mes) && dsw===_sw;
-        }).reduce((s,r)=>s+r.fat,0);
+        .filter(r=>r.lojaId===l.id && r.data && r.data.startsWith(mes) && semanaDoMes(r.data)===_sw)
+        .reduce((s,r)=>s+r.fat,0);
       const fatCampHoj = reaisAll
         .filter(r=>r.lojaId===l.id && r.data===hj)
         .reduce((s,r)=>s+r.fat,0);
@@ -8599,6 +8599,19 @@ function exportarPDFCamp(){
     <td>${l.fatMes>0?fmt(l.fatMes):'—'}</td>
     <td style="color:${corImp(l.pctImpMes)};font-weight:700">${l.fatMes>0&&l.fatCampMes>0?l.pctImpMes.toFixed(0)+'%':'—'}</td>
   </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#aaa">Sem dados de impacto ainda.</td></tr>';
+
+  const _tabelaImpacto = lojasImpacto.length>1
+    ? '<table style="margin-bottom:0"><thead>'
+      +'<tr style="background:#f0f0f8"><th rowspan="2">Loja</th>'
+      +'<th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📅 Hoje</th>'
+      +'<th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📆 Semana</th>'
+      +'<th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">🗓️ Mês</th></tr>'
+      +'<tr style="background:#f8f8ff">'
+      +'<th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>'
+      +'<th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>'
+      +'<th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th></tr>'
+      +'</thead><tbody>'+rowsImpacto+'</tbody></table>'
+    : '';
 
   const html = `
     <div class="kgrid-pdf">
@@ -8644,23 +8657,7 @@ function exportarPDFCamp(){
         <div style="font-size:11px;color:#555;margin-top:4px">${fmt(totalCampMes)} / ${fmt(totalFatMes)}</div>
       </div>
     </div>
-    ${lojasImpacto.length>1?`
-    <table style="margin-bottom:0">
-      <thead>
-        <tr style="background:#f0f0f8">
-          <th rowspan="2">Loja</th>
-          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📅 Hoje</th>
-          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📆 Semana</th>
-          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">🗓️ Mês</th>
-        </tr>
-        <tr style="background:#f8f8ff">
-          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
-          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
-          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
-        </tr>
-      </thead>
-      <tbody>${rowsImpacto}</tbody>
-    </table>`:''}
+    ${_tabelaImpacto}
 
     <h2 style="margin-top:18px">🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
     <table>
@@ -13665,6 +13662,90 @@ function _preencherSelHistPg(){
   if(ate && !ate.value) ate.value = hj;
 }
 
+
+// ── calcCrescimento: função global (extraída de buscarHistoricoLoja)
+function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
+  const mesesSet = new Set(Object.keys(diasMapInput).map(d=>d.slice(0,7)));
+  const mesesOrd = [...mesesSet].sort();
+  const porMes = mesesOrd.map(mes=>{
+    let fat=0,trans=0,aniv=0,inativ=0;
+    Object.entries(diasMapInput).forEach(([d,r])=>{
+      if(d.startsWith(mes)){
+        const vals = getFatTransFn ? getFatTransFn(d,r) : {fat:r.fat||0,trans:r.trans||0};
+        fat+=vals.fat; trans+=vals.trans;
+        aniv  +=(r.aniv  ||0);
+        inativ+=(r.inativ||0);
+      }
+    });
+    const tm=trans>0?fat/trans:fat>0?fat:0;
+    const nome=new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+    const meta = metasPorMes?.[mes] || 0;
+    const pctMeta = meta>0 ? fat/meta*100 : null;
+    return {mes,fat,trans,aniv,inativ,tm,nome,meta,pctMeta};
+  });
+  const porAno={};
+  Object.entries(diasMapInput).forEach(([d,r])=>{
+    const ano=d.slice(0,4);
+    if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
+    const vals=getFatTransFn?getFatTransFn(d,r):{fat:r.fat||0,trans:r.trans||0};
+    porAno[ano].fat+=vals.fat; porAno[ano].trans+=vals.trans;
+  });
+  const anosOrd=Object.keys(porAno).sort().map(ano=>({ano,...porAno[ano],tm:porAno[ano].trans>0?porAno[ano].fat/porAno[ano].trans:porAno[ano].fat}));
+  const corV=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
+  const fmtV=v=>v===null?'—':(v>=0?'+':'')+v.toFixed(1)+'%';
+  const mesRows=porMes.map((m2,i)=>{
+    const pv=i>0?porMes[i-1]:null;
+    const vF=pv&&pv.fat>0?(m2.fat-pv.fat)/pv.fat*100:null;
+    const vT=pv&&pv.tm>0?(m2.tm-pv.tm)/pv.tm*100:null;
+    const vA=pv&&pv.trans>0?(m2.trans-pv.trans)/pv.trans*100:null;
+    const corMeta=m2.pctMeta===null?'#888':m2.pctMeta>=100?'var(--verde)':m2.pctMeta>=70?'var(--ouro)':'var(--verm)';
+    const metaStr=m2.pctMeta!==null?`<span style="color:${corMeta};font-weight:700">${m2.pctMeta.toFixed(0)}%</span>${m2.meta>0?'<br><span style="font-size:9px;color:#888">meta: '+fmt(m2.meta)+'</span>':''}`:'—';
+    return `<tr>
+      <td><strong>${m2.nome}</strong></td>
+      <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
+      <td>${metaStr}</td>
+      <td style="color:${corV(vF)};font-size:10px">${fmtV(vF)}</td>
+      <td style="color:var(--azul)">${fmt(m2.tm)}</td>
+      <td style="color:${corV(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
+      <td>${m2.trans}</td>
+      <td style="color:${corV(vA)};font-size:10px">${fmtV(vA)}</td>
+      <td style="color:var(--roxo)">${m2.aniv||'—'}</td>
+      <td style="color:var(--laranja)">${m2.inativ||'—'}</td>
+    </tr>`;
+  }).join('');
+  const anoRows=anosOrd.map((a,i)=>{
+    const pa=i>0?anosOrd[i-1]:null;
+    const vF=pa&&pa.fat>0?(a.fat-pa.fat)/pa.fat*100:null;
+    const vT=pa&&pa.tm>0?(a.tm-pa.tm)/pa.tm*100:null;
+    const vA=pa&&pa.trans>0?(a.trans-pa.trans)/pa.trans*100:null;
+    const corV2=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
+    return `<tr>
+      <td><strong>${a.ano}</strong></td>
+      <td style="color:var(--ouro);font-weight:600">${fmt(a.fat)}</td>
+      <td style="color:${corV2(vF)};font-size:10px">${fmtV(vF)}</td>
+      <td style="color:var(--azul)">${fmt(a.tm)}</td>
+      <td style="color:${corV2(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
+      <td>${a.trans}</td>
+      <td style="color:${corV2(vA)};font-size:10px">${fmtV(vA)}</td>
+    </tr>`;
+  }).join('');
+  if(porMes.length<2) return '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Selecione ao menos 2 meses para ver a comparação.</div>';
+  return `
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:8px">📅 Evolução Mês a Mês</div>
+      <div style="overflow-x:auto"><table class="dtable">
+        <thead><tr><th>Mês</th><th>Fat.</th><th>% Meta</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+        <tbody>${mesRows}</tbody>
+      </table></div>
+    </div>
+    ${anosOrd.length>=2?`<div>
+      <div style="font-size:11px;font-weight:700;color:var(--azul);margin-bottom:8px">📆 Comparação Ano a Ano</div>
+      <div style="overflow-x:auto"><table class="dtable">
+        <thead><tr><th>Ano</th><th>Fat.</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th></tr></thead>
+        <tbody>${anoRows}</tbody>
+      </table></div>
+    </div>`:''}`;
+}
 async function buscarHistoricoLoja(){
   const de  = document.getElementById('hist-loja-de')?.value;
   const ate = document.getElementById('hist-loja-ate')?.value;
@@ -13850,88 +13931,6 @@ async function buscarHistoricoLoja(){
   }
 
   // Comparação TM/Fat/Atend mês a mês e ano a ano
-  function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
-    const mesesSet = new Set(Object.keys(diasMapInput).map(d=>d.slice(0,7)));
-    const mesesOrd = [...mesesSet].sort();
-    const porMes = mesesOrd.map(mes=>{
-      let fat=0,trans=0,aniv=0,inativ=0;
-      Object.entries(diasMapInput).forEach(([d,r])=>{
-        if(d.startsWith(mes)){
-          const vals = getFatTransFn ? getFatTransFn(d,r) : {fat:r.fat||0,trans:r.trans||0};
-          fat+=vals.fat; trans+=vals.trans;
-          aniv  +=(r.aniv  ||0);
-          inativ+=(r.inativ||0);
-        }
-      });
-      const tm=trans>0?fat/trans:fat>0?fat:0;
-      const nome=new Date(mes+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
-      const meta = metasPorMes?.[mes] || 0;
-      const pctMeta = meta>0 ? fat/meta*100 : null;
-      return {mes,fat,trans,aniv,inativ,tm,nome,meta,pctMeta};
-    });
-    const porAno={};
-    Object.entries(diasMapInput).forEach(([d,r])=>{
-      const ano=d.slice(0,4);
-      if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
-      const vals=getFatTransFn?getFatTransFn(d,r):{fat:r.fat||0,trans:r.trans||0};
-      porAno[ano].fat+=vals.fat; porAno[ano].trans+=vals.trans;
-    });
-    const anosOrd=Object.keys(porAno).sort().map(ano=>({ano,...porAno[ano],tm:porAno[ano].trans>0?porAno[ano].fat/porAno[ano].trans:porAno[ano].fat}));
-    const corV=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
-    const fmtV=v=>v===null?'—':(v>=0?'+':'')+v.toFixed(1)+'%';
-    const mesRows=porMes.map((m2,i)=>{
-      const pv=i>0?porMes[i-1]:null;
-      const vF=pv&&pv.fat>0?(m2.fat-pv.fat)/pv.fat*100:null;
-      const vT=pv&&pv.tm>0?(m2.tm-pv.tm)/pv.tm*100:null;
-      const vA=pv&&pv.trans>0?(m2.trans-pv.trans)/pv.trans*100:null;
-      const corMeta=m2.pctMeta===null?'#888':m2.pctMeta>=100?'var(--verde)':m2.pctMeta>=70?'var(--ouro)':'var(--verm)';
-      const metaStr=m2.pctMeta!==null?`<span style="color:${corMeta};font-weight:700">${m2.pctMeta.toFixed(0)}%</span>${m2.meta>0?'<br><span style="font-size:9px;color:#888">meta: '+fmt(m2.meta)+'</span>':''}`:'—';
-      return `<tr>
-        <td><strong>${m2.nome}</strong></td>
-        <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
-        <td>${metaStr}</td>
-        <td style="color:${corV(vF)};font-size:10px">${fmtV(vF)}</td>
-        <td style="color:var(--azul)">${fmt(m2.tm)}</td>
-        <td style="color:${corV(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
-        <td>${m2.trans}</td>
-        <td style="color:${corV(vA)};font-size:10px">${fmtV(vA)}</td>
-        <td style="color:var(--roxo)">${m2.aniv||'—'}</td>
-        <td style="color:var(--laranja)">${m2.inativ||'—'}</td>
-      </tr>`;
-    }).join('');
-    const anoRows=anosOrd.map((a,i)=>{
-      const pa=i>0?anosOrd[i-1]:null;
-      const vF=pa&&pa.fat>0?(a.fat-pa.fat)/pa.fat*100:null;
-      const vT=pa&&pa.tm>0?(a.tm-pa.tm)/pa.tm*100:null;
-      const vA=pa&&pa.trans>0?(a.trans-pa.trans)/pa.trans*100:null;
-      const corV2=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
-      return `<tr>
-        <td><strong>${a.ano}</strong></td>
-        <td style="color:var(--ouro);font-weight:600">${fmt(a.fat)}</td>
-        <td style="color:${corV2(vF)};font-size:10px">${fmtV(vF)}</td>
-        <td style="color:var(--azul)">${fmt(a.tm)}</td>
-        <td style="color:${corV2(vT)};font-size:10px;font-weight:${vT!==null&&Math.abs(vT)>10?700:400}">${fmtV(vT)}</td>
-        <td>${a.trans}</td>
-        <td style="color:${corV2(vA)};font-size:10px">${fmtV(vA)}</td>
-      </tr>`;
-    }).join('');
-    if(porMes.length<2) return '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Selecione ao menos 2 meses para ver a comparação.</div>';
-    return `
-      <div style="margin-bottom:14px">
-        <div style="font-size:11px;font-weight:700;color:var(--ouro);margin-bottom:8px">📅 Evolução Mês a Mês</div>
-        <div style="overflow-x:auto"><table class="dtable">
-          <thead><tr><th>Mês</th><th>Fat.</th><th>% Meta</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
-          <tbody>${mesRows}</tbody>
-        </table></div>
-      </div>
-      ${anosOrd.length>=2?`<div>
-        <div style="font-size:11px;font-weight:700;color:var(--azul);margin-bottom:8px">📆 Comparação Ano a Ano</div>
-        <div style="overflow-x:auto"><table class="dtable">
-          <thead><tr><th>Ano</th><th>Fat.</th><th>Δ Fat.</th><th>TM</th><th>Δ TM ⬆️</th><th>Atend.</th><th>Δ Atend.</th></tr></thead>
-          <tbody>${anoRows}</tbody>
-        </table></div>
-      </div>`:''}`;
-  }
 
   // Seção crescimento TM loja — incluir mês anterior se só 1 mês no período
   const crescEl = document.getElementById('hist-loja-crescimento');
