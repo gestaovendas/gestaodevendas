@@ -8524,6 +8524,82 @@ function exportarPDFCamp(){
     ? (objs[0]?.nome||'Campanha')
     : 'Todas as Campanhas';
 
+  // ══ Calcular impacto nas vendas do dia / semana / mês ══════════
+  // Para cada loja: comparar fat de dias COM campanha vs dias SEM campanha
+  const hj = hoje();
+  const mes = hj.slice(0,7);
+  const _sw = semanaDoMes(hj);
+
+  // Dias com campanha (de todos os lançamentos realizados desta seleção)
+  const diasComCamp = new Set(reaisAll.map(r=>r.data).filter(Boolean));
+
+  // Para cada loja relevante: calcular fat total e fat nos dias com campanha
+  const lojasImpacto = (isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid))
+    .map(l=>{
+      const fatHoj     = calcMesDia ? (Number(D.vendas[l.id]?.[hj]?.fat)||0) : 0;
+      // Fat no mês atual
+      let fatMes=0, fatSem=0;
+      Object.entries(D.vendas[l.id]||{}).forEach(([d,vd])=>{
+        if(d.startsWith(mes)) fatMes+=Number(vd.fat||0);
+      });
+      vendsReais(l.id).forEach(v=>{
+        Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+          if(d.startsWith(mes)) fatMes=0; // já somado acima via D.vendas
+        });
+      });
+      // Fat do mês pela soma das vendedoras (mais preciso)
+      fatMes = calcMes(l.id);
+      fatSem = calcSem(l.id);
+
+      // Fat da campanha nesta loja no mês atual
+      const fatCampMes = reaisAll
+        .filter(r=>r.lojaId===l.id && r.data && r.data.startsWith(mes))
+        .reduce((s,r)=>s+r.fat,0);
+      const fatCampSem = reaisAll
+        .filter(r=>{
+          if(r.lojaId!==l.id || !r.data) return false;
+          const d=new Date(r.data); const dsw=semanaDoMes(r.data);
+          return r.data.startsWith(mes) && dsw===_sw;
+        }).reduce((s,r)=>s+r.fat,0);
+      const fatCampHoj = reaisAll
+        .filter(r=>r.lojaId===l.id && r.data===hj)
+        .reduce((s,r)=>s+r.fat,0);
+
+      const pctImpMes = fatMes>0 ? fatCampMes/fatMes*100 : 0;
+      const pctImpSem = fatSem>0 ? fatCampSem/fatSem*100 : 0;
+      const pctImpHoj = fatHoj>0 ? fatCampHoj/fatHoj*100 : 0;
+
+      return {id:l.id, nome:l.nome,
+        fatMes, fatSem, fatHoj,
+        fatCampMes, fatCampSem, fatCampHoj,
+        pctImpMes, pctImpSem, pctImpHoj};
+    }).filter(l=>l.fatCampMes>0 || l.fatCampSem>0 || l.fatCampHoj>0);
+
+  const totalFatMes    = lojasImpacto.reduce((s,l)=>s+l.fatMes,0);
+  const totalFatSem    = lojasImpacto.reduce((s,l)=>s+l.fatSem,0);
+  const totalFatHoj    = lojasImpacto.reduce((s,l)=>s+l.fatHoj,0);
+  const totalCampMes   = lojasImpacto.reduce((s,l)=>s+l.fatCampMes,0);
+  const totalCampSem   = lojasImpacto.reduce((s,l)=>s+l.fatCampSem,0);
+  const totalCampHoj   = lojasImpacto.reduce((s,l)=>s+l.fatCampHoj,0);
+  const pctTotalMes    = totalFatMes>0?totalCampMes/totalFatMes*100:0;
+  const pctTotalSem    = totalFatSem>0?totalCampSem/totalFatSem*100:0;
+  const pctTotalHoj    = totalFatHoj>0?totalCampHoj/totalFatHoj*100:0;
+  const corImp         = p=>p>=30?'#2ecc87':p>=15?'#c9a84c':p>0?'#5b8def':'#aaa';
+
+  // Tabela de impacto por loja
+  const rowsImpacto = lojasImpacto.map(l=>`<tr>
+    <td><strong>${l.nome}</strong></td>
+    <td>${l.fatCampHoj>0?fmt(l.fatCampHoj):'—'}</td>
+    <td>${l.fatHoj>0?fmt(l.fatHoj):'—'}</td>
+    <td style="color:${corImp(l.pctImpHoj)};font-weight:700">${l.fatHoj>0&&l.fatCampHoj>0?l.pctImpHoj.toFixed(0)+'%':'—'}</td>
+    <td>${l.fatCampSem>0?fmt(l.fatCampSem):'—'}</td>
+    <td>${l.fatSem>0?fmt(l.fatSem):'—'}</td>
+    <td style="color:${corImp(l.pctImpSem)};font-weight:700">${l.fatSem>0&&l.fatCampSem>0?l.pctImpSem.toFixed(0)+'%':'—'}</td>
+    <td>${l.fatCampMes>0?fmt(l.fatCampMes):'—'}</td>
+    <td>${l.fatMes>0?fmt(l.fatMes):'—'}</td>
+    <td style="color:${corImp(l.pctImpMes)};font-weight:700">${l.fatMes>0&&l.fatCampMes>0?l.pctImpMes.toFixed(0)+'%':'—'}</td>
+  </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#aaa">Sem dados de impacto ainda.</td></tr>';
+
   const html = `
     <div class="kgrid-pdf">
       <div class="kcard-pdf">
@@ -8546,7 +8622,47 @@ function exportarPDFCamp(){
       </div>
     </div>
 
-    <h2>🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
+    <h2>📈 Impacto das Campanhas nas Vendas — Dia / Semana / Mês</h2>
+    <p style="font-size:11px;color:#666;margin:0 0 10px">
+      Mostra quanto das vendas totais de cada loja veio de clientes que participaram das campanhas.
+      Percentual = faturamento da campanha ÷ faturamento total do período.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">
+      <div style="background:#f9f9f9;border:1px solid #eee;border-top:3px solid ${corImp(pctTotalHoj)};border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Impacto Hoje</div>
+        <div style="font-size:26px;font-weight:900;color:${corImp(pctTotalHoj)}">${pctTotalHoj>0?pctTotalHoj.toFixed(0)+'%':'—'}</div>
+        <div style="font-size:11px;color:#555;margin-top:4px">${fmt(totalCampHoj)} / ${fmt(totalFatHoj)}</div>
+      </div>
+      <div style="background:#f9f9f9;border:1px solid #eee;border-top:3px solid ${corImp(pctTotalSem)};border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Impacto Semana</div>
+        <div style="font-size:26px;font-weight:900;color:${corImp(pctTotalSem)}">${pctTotalSem>0?pctTotalSem.toFixed(0)+'%':'—'}</div>
+        <div style="font-size:11px;color:#555;margin-top:4px">${fmt(totalCampSem)} / ${fmt(totalFatSem)}</div>
+      </div>
+      <div style="background:#f9f9f9;border:1px solid #eee;border-top:3px solid ${corImp(pctTotalMes)};border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Impacto no Mês</div>
+        <div style="font-size:26px;font-weight:900;color:${corImp(pctTotalMes)}">${pctTotalMes>0?pctTotalMes.toFixed(0)+'%':'—'}</div>
+        <div style="font-size:11px;color:#555;margin-top:4px">${fmt(totalCampMes)} / ${fmt(totalFatMes)}</div>
+      </div>
+    </div>
+    ${lojasImpacto.length>1?`
+    <table style="margin-bottom:0">
+      <thead>
+        <tr style="background:#f0f0f8">
+          <th rowspan="2">Loja</th>
+          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📅 Hoje</th>
+          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">📆 Semana</th>
+          <th colspan="3" style="text-align:center;border-bottom:1px solid #ddd">🗓️ Mês</th>
+        </tr>
+        <tr style="background:#f8f8ff">
+          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
+          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
+          <th>Camp.</th><th>Total</th><th style="color:#1a1a3a">%</th>
+        </tr>
+      </thead>
+      <tbody>${rowsImpacto}</tbody>
+    </table>`:''}
+
+    <h2 style="margin-top:18px">🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
     <table>
       <thead><tr><th>#</th><th>Loja / Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>Qtd</th><th>Nº Venda / Obs</th></tr></thead>
       <tbody>${rowsLojas}</tbody>
