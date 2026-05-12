@@ -3717,6 +3717,36 @@ async function waitForFirebase(timeout=5000){
   });
 }
 
+
+// ══════════════════════════════════════════════════════════════
+// MERGE SEGURO DE VENDAS — função central usada por todos os syncs
+// Regra única: dados locais NUNCA são sobrescritos por dados remotos
+// O Firebase só preenche dias que NÃO existem localmente
+// Isso evita que syncs apaguem lançamentos recém-feitos pelas lojas
+// ══════════════════════════════════════════════════════════════
+function _mergeVendasSeguro(remoto){
+  // D.vendas: merge por loja > dia
+  if(remoto.vendas){
+    Object.entries(remoto.vendas).forEach(([lid2, dias])=>{
+      if(!D.vendas[lid2]) D.vendas[lid2] = {};
+      const excl = D._vendasExcluidas?.[lid2] || [];
+      Object.entries(dias||{}).forEach(([dt, val])=>{
+        if(!excl.includes(dt) && !(dt in D.vendas[lid2])) D.vendas[lid2][dt] = val;
+      });
+    });
+  }
+  // D.vendasVend: merge por vendedora > dia
+  if(remoto.vendasVend){
+    Object.entries(remoto.vendasVend).forEach(([vid, dias])=>{
+      if(!D.vendasVend[vid]) D.vendasVend[vid] = {};
+      const excl = D._vendasVendExcluidas?.[vid] || [];
+      Object.entries(dias||{}).forEach(([dt, val])=>{
+        if(!excl.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
+      });
+    });
+  }
+}
+
 async function loadFromFirestore(){
   const ok = await waitForFirebase(3000);
   if(!ok){
@@ -4333,24 +4363,28 @@ function calcSem(lid){
     const d=new Date(seg); d.setDate(seg.getDate()+i);
     if(d<=hoje_d) dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  // [FIX] vendsReais: exclui placeholders mas inclui arquivadas (têm histórico válido)
+  const vends=vendsReais(lid);
   let t=0;
   vends.forEach(v=>{ dias.forEach(d=>{ t+=Number(D.vendasVend[v.id]?.[d]?.val||0); }); });
-  if(t===0 && vends.length===0) dias.forEach(d=>{ t+=Number(D.vendas[lid]?.[d]?.fat||0); });
+  if(t===0) dias.forEach(d=>{ t+=Number(D.vendas[lid]?.[d]?.fat||0); });
   // Campanha é métrica separada — não entra no realizado da semana
   return t;
 }
 function calcMes(lid){
   // Soma do mês atual pelas vendedoras
+  // [FIX] Usar vendsReais (exclui placeholders nome=loja) mas INCLUI arquivadas
+  // Vendedoras arquivadas têm histórico que DEVE ser contabilizado no total da loja
   const mes=hoje().slice(0,7);
-  const vends=D.vendedoras.filter(v=>v.loja===lid);
+  const vends=vendsReais(lid); // exclui placeholder mas inclui ativa===false
   let t=0;
   vends.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
       if(d.startsWith(mes)) t+=Number(vd.val||0);
     });
   });
-  if(t===0 && vends.length===0){
+  if(t===0){
+    // Fallback: usar D.vendas consolidado da loja
     Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{ if(d.startsWith(mes)) t+=Number(vd.fat||0); });
   }
   // Campanha é métrica separada — não entra no realizado do mês
@@ -4359,7 +4393,8 @@ function calcMes(lid){
 // TM = Faturamento Total / Atendimentos totais (trans); se não tiver, usa contagem de vendedoras com lançamento
 function calcNAtend(lid, periodo){
   // Soma os atendimentos (trans) das vendedoras no período. Fallback: conta registros com val>0
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  // [FIX] vendsReais: exclui placeholders mas inclui arquivadas
+  const vends = vendsReais(lid);
   let n=0;
   if(periodo==="dia"){
     const hj=hoje();
@@ -11437,21 +11472,13 @@ function iniciarAutoRefresh(){
           const remoto = JSON.parse(dadosJSON);
           // Admin: remoto SEMPRE tem prioridade sobre D local
           // (D local do admin não tem dados de vendas das lojas — só das lojas)
-          if(remoto.vendas){
-            Object.entries(remoto.vendas).forEach(([lid,dias])=>{
-              if(!D.vendas[lid]) D.vendas[lid]={};
-              const excl = D._vendasExcluidas?.[lid] || [];
-              Object.entries(dias).forEach(([dt,val])=>{
-                if(!excl.includes(dt)) D.vendas[lid][dt] = val; // sempre sobrescreve
-              });
-            });
-          }
+          _mergeVendasSeguro(remoto); // merge centralizado — nunca sobrescreve local
           if(remoto.vendasVend){
             Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
               const excl = D._vendasVendExcluidas?.[vid] || [];
               Object.entries(dias).forEach(([dt,val])=>{
-                if(!excl.includes(dt)) D.vendasVend[vid][dt] = val; // sempre sobrescreve
+                if(!excl.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val; // merge: só ausentes
               });
             });
           }
@@ -11582,14 +11609,17 @@ async function forceSyncAdmin(){
       Object.entries(remoto.vendas).forEach(([l,ds])=>{
         if(!D.vendas[l]) D.vendas[l]={};
         const excl = D._vendasExcluidas?.[l]||[];
-        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt)) D.vendas[l][dt]=val; });
+        // [FIX CRÍTICO] Só preencher dias AUSENTES — nunca sobrescrever dados locais
+        // forceSyncAdmin também pode sobrescrever lançamentos recentes do Ibirapuera/Santana
+        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt) && !(dt in D.vendas[l])) D.vendas[l][dt]=val; });
       });
     }
     if(remoto.vendasVend){
       Object.entries(remoto.vendasVend).forEach(([v,ds])=>{
         if(!D.vendasVend[v]) D.vendasVend[v]={};
         const excl = D._vendasVendExcluidas?.[v]||[];
-        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt)) D.vendasVend[v][dt]=val; });
+        // [FIX CRÍTICO] Só preencher dias AUSENTES — nunca sobrescrever dados locais
+        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt) && !(dt in D.vendasVend[v])) D.vendasVend[v][dt]=val; });
       });
     }
     if(remoto.campRealizados?.length){
