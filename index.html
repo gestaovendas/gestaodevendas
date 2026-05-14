@@ -11461,9 +11461,12 @@ function iniciarAutoRefresh(){
     return;
   }
   async function syncAdmin(){
+    // [BUG1 FIX] Pular sync se há gravação pendente — evita race condition
+    if(window._pendingLocalData){
+      console.log("[Avatim] syncAdmin: _pendingLocalData ativo — adiando sync");
+      return;
+    }
     // [FIX CRÍTICO] Sempre usar fsCarregar (docs loja_*) como fonte de dados.
-    // Os caminhos SB_OK/FB_OK buscavam em coleções 'lancamentos' separadas que
-    // só têm dados se saveWithSync gravou — o sistema principal usa docs loja_*.
     try{
       const ok = await waitForFirebase(3000);
       if(ok && window.fsCarregar){
