@@ -424,12 +424,20 @@ try{
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
               if(!base.vendas[l]) base.vendas[l]={};
-              Object.assign(base.vendas[l], dias);
+              // [FIX C] Merge seguro — nunca sobrescrever dias locais com Firebase antigo
+              const _excFSC = base._vendasExcluidas?.[l]||[];
+              Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                if(!_excFSC.includes(_dt) && !(_dt in base.vendas[l])) base.vendas[l][_dt]=_val;
+              });
             });
             if(!base.vendasVend) base.vendasVend={};
             Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
               if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-              Object.assign(base.vendasVend[vid], dias);
+              // [FIX C] Merge seguro vendasVend — nunca sobrescrever dias locais
+              const _excVVL = base._vendasVendExcluidas?.[vid]||[];
+              Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                if(!_excVVL.includes(_dt) && !(_dt in base.vendasVend[vid])) base.vendasVend[vid][_dt]=_val;
+              });
             });
             // Merge campRealizados desta loja
             if(pedaco.campRealizados && pedaco.campRealizados.length){
@@ -491,12 +499,16 @@ try{
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
                 if(!base.vendas[l]) base.vendas[l]={};
-                Object.assign(base.vendas[l], dias);
+                Object.entries(dias||{}).forEach(([_dt2,_val2])=>{ if(!(_dt2 in base.vendas[l])) base.vendas[l][_dt2]=_val2; });
               });
               if(!base.vendasVend) base.vendasVend={};
               Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-                Object.assign(base.vendasVend[vid], dias);
+                // [FIX C] Merge seguro vendasVend — nunca sobrescrever dias locais
+                const _excVV = base._vendasVendExcluidas?.[vid]||[];
+                Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                  if(!_excVV.includes(_dt) && !(_dt in base.vendasVend[vid])) base.vendasVend[vid][_dt]=_val;
+                });
               });
               // Merge campRealizados desta loja ao base (respeitando tombstones)
               if(pedaco.campRealizados && pedaco.campRealizados.length){
@@ -3633,6 +3645,7 @@ function save(){
   // [FIX Race Condition] Guardar snapshot dos dados no momento do save
   // para que loadFromFirestore nao sobrescreva dados locais nao-sincronizados
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now(); // timestamp para timeout do guard
   setTimeout(async ()=>{
     _savePending = false;
     // Verificar se há dados reais para gravar
@@ -3666,8 +3679,10 @@ function save(){
         console.log("[Avatim] save() sincronizado com Firebase OK");
       }catch(e){
         console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
+        // [FIX A] SEMPRE zerar _pendingLocalData ao falhar — nunca deixar syncAdmin bloqueado
+        window._pendingLocalData = null;
         showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
-        // [FIX Bug3] Retry com feedback ao usuario
+        // Retry após 10s
         setTimeout(async ()=>{
           if(window.fsGravar){
             try{
@@ -3683,7 +3698,8 @@ function save(){
       }
     } else {
       console.warn("[Avatim] Firebase indisponivel - dado salvo so no localStorage");
-      // [FIX Bug3] Feedback imediato ao usuario
+      // [FIX A] Zerar _pendingLocalData para não bloquear syncAdmin
+      window._pendingLocalData = null;
       showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
       const retryOk = await waitForFirebase(30000);
       if(retryOk && window.fsGravar){
@@ -11382,11 +11398,14 @@ function iniciarAutoRefresh(){
       try{
         const ok = await waitForFirebase(3000);
         if(!ok || !window.fsCarregar) return;
-        // [FIX Race Condition] Se ha dados pendentes aguardando Firebase,
-        // pular o sync de vendas para nao sobrescrever com dados antigos
+        // [FIX B] Guard com timeout — pendente <60s pula, >60s força sync
         if(window._pendingLocalData){
-          console.log("[Avatim] syncLoja: pendingLocalData ativo — adiando sync de vendas");
-          return;
+          const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
+          if(pendingAge < 60000){
+            console.log("[Avatim] syncLoja: pendingLocalData ativo — adiando sync");
+            return;
+          }
+          window._pendingLocalData = null;
         }
         const dadosJSON = await window.fsCarregar();
         if(!dadosJSON) return;
@@ -11461,10 +11480,17 @@ function iniciarAutoRefresh(){
     return;
   }
   async function syncAdmin(){
-    // [BUG1 FIX] Pular sync se há gravação pendente — evita race condition
+    // [FIX B] Guard com timeout — pular sync se há gravação pendente recente (<60s)
+    // Se _pendingLocalData ficar preso (bug), não bloquear syncAdmin para sempre
     if(window._pendingLocalData){
-      console.log("[Avatim] syncAdmin: _pendingLocalData ativo — adiando sync");
-      return;
+      const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
+      if(pendingAge < 60000){
+        console.log("[Avatim] syncAdmin: pendingLocalData ativo (" + Math.round(pendingAge/1000) + "s) — adiando sync");
+        return;
+      }
+      // Mais de 60s pendente — forçar limpeza e prosseguir
+      console.warn("[Avatim] syncAdmin: _pendingLocalData preso há " + Math.round(pendingAge/1000) + "s — forçando sync");
+      window._pendingLocalData = null;
     }
     // [FIX CRÍTICO] Sempre usar fsCarregar (docs loja_*) como fonte de dados.
     try{
@@ -11473,18 +11499,8 @@ function iniciarAutoRefresh(){
         const dadosJSON = await window.fsCarregar();
         if(dadosJSON){
           const remoto = JSON.parse(dadosJSON);
-          // Admin: remoto SEMPRE tem prioridade sobre D local
-          // (D local do admin não tem dados de vendas das lojas — só das lojas)
-          _mergeVendasSeguro(remoto); // merge centralizado — nunca sobrescreve local
-          if(remoto.vendasVend){
-            Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              const excl = D._vendasVendExcluidas?.[vid] || [];
-              Object.entries(dias).forEach(([dt,val])=>{
-                if(!excl.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val; // merge: só ausentes
-              });
-            });
-          }
+          // [FIX] Merge centralizado e seguro para vendas e vendasVend
+          _mergeVendasSeguro(remoto); // nunca sobrescreve dados locais existentes
           if(remoto.campRealizados && remoto.campRealizados.length){
             if(!D.campRealizados) D.campRealizados=[];
             remoto.campRealizados.forEach(r=>{
