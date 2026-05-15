@@ -463,8 +463,11 @@ try{
               pedaco.vendedoras.forEach(rv=>{
                 if(_excBase.includes(rv.id)) return; // excluída — não restaurar
                 const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
-                if(vi>=0) base.vendedoras[vi]=rv;
-                else base.vendedoras.push(rv);
+                if(vi>=0){
+                  // [FIX] Preservar ativa local (arquivamento não deve ser revertido pelo Firebase)
+                  const ativaLocal = base.vendedoras[vi].ativa;
+                  base.vendedoras[vi]={...rv, ativa: ativaLocal!==undefined ? ativaLocal : rv.ativa};
+                } else base.vendedoras.push(rv);
               });
             }
             if(pedaco.metasLoja){
@@ -536,8 +539,10 @@ try{
                 pedaco.vendedoras.forEach(rv=>{
                   if(_excLj.includes(rv.id)) return; // excluída — não restaurar
                   const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
-                  if(vi>=0) base.vendedoras[vi]=rv;
-                  else base.vendedoras.push(rv);
+                  if(vi>=0){
+                    const ativaLoc = base.vendedoras[vi].ativa;
+                    base.vendedoras[vi]={...rv, ativa: ativaLoc!==undefined ? ativaLoc : rv.ativa};
+                  } else base.vendedoras.push(rv);
                 });
               }
               if(pedaco.metasLoja && pedaco.metasLoja[lid]){
@@ -3831,6 +3836,8 @@ async function loadFromFirestore(){
                   ticketAlvo:   D.vendedoras[idx].ticketAlvo,
                   metaAniv:     D.vendedoras[idx].metaAniv,
                   metaInativ:   D.vendedoras[idx].metaInativ,
+                  // [FIX] Preservar ativa:false (arquivamento local tem prioridade)
+                  ativa: D.vendedoras[idx].ativa !== undefined ? D.vendedoras[idx].ativa : rv.ativa,
                 };
               } else {
                 D.vendedoras[idx] = rv;
@@ -11543,13 +11550,15 @@ function iniciarAutoRefresh(){
                 }
                 const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(_i>=0){
+                  const _ativaSA = D.vendedoras[_i].ativa;
                   D.vendedoras[_i]=_hpSA?{...rv,
                     metaMes:D.vendedoras[_i].metaMes,
                     superMetaMes:D.vendedoras[_i].superMetaMes,
                     ticketAlvo:D.vendedoras[_i].ticketAlvo,
                     metaAniv:D.vendedoras[_i].metaAniv,
-                    metaInativ:D.vendedoras[_i].metaInativ
-                  }:rv;
+                    metaInativ:D.vendedoras[_i].metaInativ,
+                    ativa:_ativaSA!==undefined?_ativaSA:rv.ativa
+                  }:{...rv, ativa:_ativaSA!==undefined?_ativaSA:rv.ativa};
                 } else D.vendedoras.push(rv);
               });
             }
@@ -11605,20 +11614,24 @@ async function forceSyncAdmin(){
         });
       });
     }
-    // [FIX] merge vendedoras preservando metas locais
+    // [FIX] merge vendedoras preservando metas locais E campo ativa (arquivamento)
     if(remoto.vendedoras){
       if(!D.vendedoras||!D.vendedoras.length){ D.vendedoras=remoto.vendedoras; }
       else {
         remoto.vendedoras.forEach(rv=>{
           const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
-          if(_im>=0) D.vendedoras[_im]={...rv,
-            metaMes:D.vendedoras[_im].metaMes||rv.metaMes,
-            superMetaMes:D.vendedoras[_im].superMetaMes||rv.superMetaMes,
-            ticketAlvo:D.vendedoras[_im].ticketAlvo||rv.ticketAlvo,
-            metaAniv:D.vendedoras[_im].metaAniv||rv.metaAniv,
-            metaInativ:D.vendedoras[_im].metaInativ||rv.metaInativ
-          };
-          else D.vendedoras.push(rv);
+          if(_im>=0){
+            const _ativaFSA = D.vendedoras[_im].ativa;
+            D.vendedoras[_im]={...rv,
+              metaMes:D.vendedoras[_im].metaMes||rv.metaMes,
+              superMetaMes:D.vendedoras[_im].superMetaMes||rv.superMetaMes,
+              ticketAlvo:D.vendedoras[_im].ticketAlvo||rv.ticketAlvo,
+              metaAniv:D.vendedoras[_im].metaAniv||rv.metaAniv,
+              metaInativ:D.vendedoras[_im].metaInativ||rv.metaInativ,
+              // [FIX] ativa local sempre tem prioridade — arquivamento não é revertido pelo sync
+              ativa: _ativaFSA !== undefined ? _ativaFSA : rv.ativa
+            };
+          } else D.vendedoras.push(rv);
         });
       }
     }
