@@ -474,7 +474,11 @@ try{
               if(!base.metasLoja) base.metasLoja={};
               Object.entries(pedaco.metasLoja).forEach(([lid2,meses])=>{
                 if(!base.metasLoja[lid2]) base.metasLoja[lid2]={};
-                Object.entries(meses||{}).forEach(([mr,m])=>{ base.metasLoja[lid2][mr]=m; });
+                Object.entries(meses||{}).forEach(([mr,m])=>{
+                  // [FIX C] Só preencher meses ausentes — não sobrescrever metas locais recentes
+                  if(!base.metasLoja[lid2][mr] || !base.metasLoja[lid2][mr].mes)
+                    base.metasLoja[lid2][mr]=m;
+                }); 
               });
             }
             console.log("[Avatim] Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
@@ -10025,13 +10029,15 @@ function salvarMetaLoja(lid){
       const aniv = parseInt(anivEl?.value)||0;
       const inat = parseInt(inativEl?.value)||0;
       const idx  = D.vendedoras.findIndex(x=>x.id===v.id);
-      if(idx!==-1 && mv>0){
+      if(idx!==-1 && mesEl){
+        // [FIX A] Salvar mesmo se mv===0 (usuário pode querer zerar meta)
+        // Só não contar na soma se mv===0
         D.vendedoras[idx].metaMes       = mv;
         D.vendedoras[idx].superMetaMes  = smv;
         D.vendedoras[idx].ticketAlvo    = tick;
         D.vendedoras[idx].metaAniv      = aniv;
         D.vendedoras[idx].metaInativ    = inat;
-        somaMes+=mv; somaSmes+=smv; nVend++;
+        if(mv>0){ somaMes+=mv; somaSmes+=smv; nVend++; }
       }
     });
   } else {
@@ -11527,7 +11533,11 @@ function iniciarAutoRefresh(){
             Object.entries(remoto.metasLoja).forEach(([lid,meses])=>{
               if(!D.metasLoja[lid]) D.metasLoja[lid]={};
               Object.entries(meses||{}).forEach(([mr,metaObj])=>{
-                D.metasLoja[lid][mr] = metaObj; // admin: sobrescreve sempre
+                // [FIX B] Admin sobrescreve (fonte de verdade) | Loja só preenche ausentes
+                const _isAdmin = isAdmin ? isAdmin() : false;
+                if(_isAdmin || !D.metasLoja[lid][mr] || !D.metasLoja[lid][mr].mes){
+                  D.metasLoja[lid][mr] = metaObj;
+                }
               });
             });
           }
