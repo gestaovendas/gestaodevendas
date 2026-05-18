@@ -464,9 +464,17 @@ try{
                 if(_excBase.includes(rv.id)) return; // excluída — não restaurar
                 const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(vi>=0){
-                  // [FIX] Preservar ativa local (arquivamento não deve ser revertido pelo Firebase)
-                  const ativaLocal = base.vendedoras[vi].ativa;
-                  base.vendedoras[vi]={...rv, ativa: ativaLocal!==undefined ? ativaLocal : rv.ativa};
+                  // [FIX] Preservar metas locais (admin acabou de editar)
+                  // E preservar ativa local (arquivamento)
+                  const bvi = base.vendedoras[vi];
+                  base.vendedoras[vi]={...rv,
+                    metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
+                    superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
+                    ticketAlvo:   bvi.ticketAlvo   !== undefined ? bvi.ticketAlvo   : rv.ticketAlvo,
+                    metaAniv:     bvi.metaAniv     !== undefined ? bvi.metaAniv     : rv.metaAniv,
+                    metaInativ:   bvi.metaInativ   !== undefined ? bvi.metaInativ   : rv.metaInativ,
+                    ativa:        bvi.ativa        !== undefined ? bvi.ativa        : rv.ativa
+                  };
                 } else base.vendedoras.push(rv);
               });
             }
@@ -544,8 +552,16 @@ try{
                   if(_excLj.includes(rv.id)) return; // excluída — não restaurar
                   const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                   if(vi>=0){
-                    const ativaLoc = base.vendedoras[vi].ativa;
-                    base.vendedoras[vi]={...rv, ativa: ativaLoc!==undefined ? ativaLoc : rv.ativa};
+                    // [FIX] Preservar todas as metas e ativa locais
+                    const bvi2 = base.vendedoras[vi];
+                    base.vendedoras[vi]={...rv,
+                      metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
+                      superMetaMes: bvi2.superMetaMes !== undefined ? bvi2.superMetaMes : rv.superMetaMes,
+                      ticketAlvo:   bvi2.ticketAlvo   !== undefined ? bvi2.ticketAlvo   : rv.ticketAlvo,
+                      metaAniv:     bvi2.metaAniv     !== undefined ? bvi2.metaAniv     : rv.metaAniv,
+                      metaInativ:   bvi2.metaInativ   !== undefined ? bvi2.metaInativ   : rv.metaInativ,
+                      ativa:        bvi2.ativa        !== undefined ? bvi2.ativa        : rv.ativa
+                    };
                   } else base.vendedoras.push(rv);
                 });
               }
@@ -11618,14 +11634,17 @@ function iniciarAutoRefresh(){
                 const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(_i>=0){
                   const _ativaSA = D.vendedoras[_i].ativa;
-                  D.vendedoras[_i]=_hpSA?{...rv,
-                    metaMes:D.vendedoras[_i].metaMes,
-                    superMetaMes:D.vendedoras[_i].superMetaMes,
-                    ticketAlvo:D.vendedoras[_i].ticketAlvo,
-                    metaAniv:D.vendedoras[_i].metaAniv,
-                    metaInativ:D.vendedoras[_i].metaInativ,
-                    ativa:_ativaSA!==undefined?_ativaSA:rv.ativa
-                  }:{...rv, ativa:_ativaSA!==undefined?_ativaSA:rv.ativa};
+                  // [FIX] Sempre preservar metas locais — não só quando _hpSA
+                  // O sync NUNCA deve sobrescrever metas que o usuário acabou de editar
+                  const _bvi3 = D.vendedoras[_i];
+                  D.vendedoras[_i]={...rv,
+                    metaMes:      _bvi3.metaMes      !== undefined ? _bvi3.metaMes      : rv.metaMes,
+                    superMetaMes: _bvi3.superMetaMes !== undefined ? _bvi3.superMetaMes : rv.superMetaMes,
+                    ticketAlvo:   _bvi3.ticketAlvo   !== undefined ? _bvi3.ticketAlvo   : rv.ticketAlvo,
+                    metaAniv:     _bvi3.metaAniv     !== undefined ? _bvi3.metaAniv     : rv.metaAniv,
+                    metaInativ:   _bvi3.metaInativ   !== undefined ? _bvi3.metaInativ   : rv.metaInativ,
+                    ativa:        _ativaSA           !== undefined ? _ativaSA           : rv.ativa
+                  };
                 } else D.vendedoras.push(rv);
               });
             }
