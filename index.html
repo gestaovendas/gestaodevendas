@@ -10059,6 +10059,11 @@ function salvarMetaLoja(lid){
     // mas manter as individuais como digitadas
   }
   saveWithSync({meta:{lid,dados:D.metasLoja[lid]}});
+  // [FIX CRÍTICO] saveWithSync só grava no Supabase/Firebase legados
+  // Precisamos chamar save() para enviar D completo via fsGravar (Firestore)
+  // Caso contrário a meta editada NUNCA chega ao Firebase real
+  // e o próximo sync sobrescreve com a meta antiga
+  save();
   showToast("✅ Meta salva!");
   // renderMetasLojas após salvar — D.vendedoras já foi atualizado
   renderMetasLojas(); carregarDash(); carregarVendsForm();
