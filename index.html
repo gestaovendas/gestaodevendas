@@ -3664,7 +3664,11 @@ function save(){
     const temMetas     = D.metasLoja && Object.keys(D.metasLoja).some(lid=>Object.keys(D.metasLoja[lid]||{}).length>0);
     const temCamp      = D.campRealizados && D.campRealizados.length>0;
     const temFluxo     = D.fluxo && D.fluxo.length>0;
-    const temDados     = temVendas || temVendVend || temMetas || temCamp || temFluxo;
+    const temVendedoras = D.vendedoras && D.vendedoras.length > 0;
+    const temMetasLoja  = D.metasLoja && Object.keys(D.metasLoja).some(lid =>
+      Object.keys(D.metasLoja[lid]||{}).some(mr => (D.metasLoja[lid][mr]?.mes||0) > 0)
+    );
+    const temDados     = temVendas || temVendVend || temMetas || temCamp || temFluxo || temVendedoras || temMetasLoja;
 
     // Bloquear SOMENTE se não há absolutamente nenhum dado E não é admin
     // (admin sempre pode salvar metas, vendedoras, etc.)
@@ -3790,15 +3794,15 @@ async function loadFromFirestore(){
       // antes do fsGravar terminar (race condition)
       if(remoto.metasLoja){
         if(!D.metasLoja) D.metasLoja = {};
-        const _admBootMeta = (window._currentUser?.email === 'admin@avatim.com') ||
-                             (window._currentUser?.email === 'monique@avatim.com');
         Object.entries(remoto.metasLoja).forEach(([lid, meses])=>{
           if(!D.metasLoja[lid]) D.metasLoja[lid] = {};
           Object.entries(meses||{}).forEach(([mr, metaObj])=>{
-            // Admin: remoto sempre tem prioridade (admin define as metas canônicas)
-            // Loja: só aceita remoto se não há dado local para aquele mês
-            // Isso evita que o Firebase antigo apague a meta que a loja acabou de salvar
-            if(_admBootMeta || !D.metasLoja[lid][mr]){
+            // [FIX 4 CRÍTICO] NUNCA sobrescrever meta local com valor > 0
+            // (vale para admin E loja — admin acabou de editar, não pode ser sobrescrita)
+            // Evita race condition: salvar meta → sync 30s traz meta antiga → sobrescreve
+            const localMeta = D.metasLoja[lid]?.[mr];
+            const temLocal  = localMeta && (localMeta.mes||0) > 0;
+            if(!temLocal){
               D.metasLoja[lid][mr] = metaObj;
             }
           });
@@ -4061,9 +4065,13 @@ function metaDiaLojaProgressiva(lid, dataRef){
   const diasRestantes = diasAbertosRestantes(lid);
   const acumulado = calcMesAte(lid, dataRef);
   const restante  = Math.max(0, m.mes - acumulado);
-  const dia       = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : 0;
+  // [FIX 6] Quando meta já batida, mostrar meta dia BASE (não 0)
+  // Isso evita que a tela mostre "Meta dia: R$0" parecendo erro
+  const diaBase   = m.dia || (m.du>0 ? m.mes/m.du : m.mes/26);
+  const dia       = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : diaBase;
   const resSuper  = Math.max(0, (m.superMes||m.mes*1.255) - acumulado);
-  const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : 0;
+  const superDiaBase = m.superDia || (m.du>0 ? (m.superMes||m.mes*1.255)/m.du : m.mes*1.255/26);
+  const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : superDiaBase;
   return {dia, superDia, diasRestantes, acumulado, restante};
 }
 // Vendas acumuladas da loja até (exclusive) uma data
@@ -4178,15 +4186,22 @@ function arquivarVendedora(vid, arquivar){
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*1.255);
-  // Usar dias ÚTEIS do mês (não dias corridos) para meta dia de referência
-  // diasAbertosNoMes conta seg-sab (ou seg-dom para lojas 7 dias)
-  const DU = lid ? diasAbertosNoMes(lid) : (diasAbertosNoMes ? diasAbertosNoMes('') || 26 : 26);
-  const SW = 4; // 4 semanas por mês
-  const dia      = DU>0 ? parseFloat((mes/DU).toFixed(2)) : 0;
+  // [FIX 3] Evitar divisão por zero/NaN quando chamada sem lid ou em casos de borda
+  let DU;
+  if(lid && typeof diasAbertosNoMes === 'function'){
+    DU = diasAbertosNoMes(lid);
+  } else {
+    // Fallback: dias corridos do mês atual (29-31)
+    const [_y,_m] = mesAtual().split('-').map(Number);
+    DU = new Date(_y, _m, 0).getDate();
+  }
+  const _DU = Math.max(Number(DU)||0, 1); // nunca zero
+  const SW  = 4;
+  const dia      = parseFloat((mes/_DU).toFixed(2));
   const sem      = parseFloat((mes/SW).toFixed(2));
-  const superDia = DU>0 ? parseFloat((superMes/DU).toFixed(2)) : 0;
+  const superDia = parseFloat((superMes/_DU).toFixed(2));
   const superSem = parseFloat((superMes/SW).toFixed(2));
-  return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:DU, sw:SW};
+  return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:_DU, sw:SW};
 }
 
 // ── NOVA LÓGICA DE META SEMANAL PROGRESSIVA (35/25/25/15%) ──────────────────
@@ -4299,7 +4314,10 @@ function metaDiaProgressivaVend(vendId, dataRef){
     if(dt.startsWith(_mes) && dt < dataRef) acumulado += Number(vd.val||0);
   });
   const restante = Math.max(0, metaMes - acumulado);
-  return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : 0;
+  // [FIX 6] Quando meta batida, mostrar meta dia BASE (não 0)
+  const DUv = lid && typeof diasAbertosNoMes==='function' ? diasAbertosNoMes(lid) : 26;
+  const diaBaseV = DUv>0 ? metaMes/DUv : 0;
+  return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : parseFloat(diaBaseV.toFixed(2));
 }
 
 function superMetaDiaProgressivaVend(vendId, dataRef){
@@ -9926,13 +9944,29 @@ function salvarMetasVendedoras(lid){
     const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
     D.metasLoja[lid][_mr]=autoMetas;
   }
-  // BUG 6 FIX: salvar D completo via save() (inclui vendedoras) não só meta
-  // Isso garante que metaMes individual chega ao Firebase antes do próximo sync
+  // [FIX 5 CRÍTICO] Gravar direto no Firebase sem passar por save() com guards
   localStorage.setItem('avatim_v5', JSON.stringify(D));
-  window._pendingLocalData = JSON.parse(JSON.stringify(D));
-  save(); // grava D completo incluindo vendedoras atualizadas
-  showToast(n+" vendedoras salvas! Meta loja → "+fmt(somaMes));
+  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now();
+  showToast(n + " vendedoras salvas! Sincronizando...");
   renderMetasLojas(); carregarDash(); carregarVendsForm();
+
+  (async () => {
+    const _okFBv = await waitForFirebase(8000);
+    if(_okFBv && window.fsGravar){
+      try{
+        await window.fsGravar(JSON.stringify(D));
+        window._pendingLocalData = null;
+        showToast("✅ Metas das vendedoras gravadas no Firebase!");
+      } catch(eV){
+        window._pendingLocalData = null;
+        showToast("⚠️ Salvo localmente. Firebase: " + (eV.code||eV.message), "warn");
+      }
+    } else {
+      window._pendingLocalData = null;
+      showToast("⚠️ Firebase offline. Metas salvas localmente.", "warn");
+    }
+  })();
 }
 function renderMetasVendSection(lid){
   const vends=vendsReais(lid);
@@ -10058,15 +10092,32 @@ function salvarMetaLoja(lid){
     // Soma individual difere da meta da loja — usar a meta da loja como canônica
     // mas manter as individuais como digitadas
   }
-  saveWithSync({meta:{lid,dados:D.metasLoja[lid]}});
-  // [FIX CRÍTICO] saveWithSync só grava no Supabase/Firebase legados
-  // Precisamos chamar save() para enviar D completo via fsGravar (Firestore)
-  // Caso contrário a meta editada NUNCA chega ao Firebase real
-  // e o próximo sync sobrescreve com a meta antiga
-  save();
-  showToast("✅ Meta salva!");
-  // renderMetasLojas após salvar — D.vendedoras já foi atualizado
+  // [FIX CRÍTICO] Gravar localmente IMEDIATAMENTE e enviar ao Firestore direto
+  // Bypass do save() que pode ter guards bloqueando admin
+  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now();
+  showToast("✅ Meta salva! Sincronizando...");
   renderMetasLojas(); carregarDash(); carregarVendsForm();
+
+  // Gravar no Firebase direto via fsGravar — sem passar pelo save() com guards
+  (async () => {
+    const _okFB = await waitForFirebase(8000);
+    if(_okFB && window.fsGravar){
+      try{
+        await window.fsGravar(JSON.stringify(D));
+        window._pendingLocalData = null;
+        showToast("✅ Meta gravada no Firebase!");
+        console.log("[Avatim] salvarMetaLoja Firebase OK:", lid, _mr, mes);
+      } catch(eMeta){
+        window._pendingLocalData = null;
+        showToast("⚠️ Salvo localmente. Firebase: " + (eMeta.code||eMeta.message), "warn");
+      }
+    } else {
+      window._pendingLocalData = null;
+      showToast("⚠️ Firebase offline. Meta salva localmente.", "warn");
+    }
+  })();
 }
 function resetEmergencia(){
   if(!confirm("Isso vai APAGAR todas as metas salvas e manter apenas os lançamentos de vendas.\n\nUse somente se os valores estiverem aparecendo errados (ex: R$ 6,00 em vez de R$ 6.000,00).\n\nContinuar?")) return;
@@ -11538,9 +11589,10 @@ function iniciarAutoRefresh(){
             Object.entries(remoto.metasLoja).forEach(([lid,meses])=>{
               if(!D.metasLoja[lid]) D.metasLoja[lid]={};
               Object.entries(meses||{}).forEach(([mr,metaObj])=>{
-                // [FIX B] Admin sobrescreve (fonte de verdade) | Loja só preenche ausentes
-                const _isAdmin = isAdmin ? isAdmin() : false;
-                if(_isAdmin || !D.metasLoja[lid][mr] || !D.metasLoja[lid][mr].mes){
+                // [FIX 4 CRÍTICO] NUNCA sobrescrever meta local com valor > 0
+                // (vale para admin E loja — admin acabou de editar, não pode ser sobrescrita)
+                const localMetaSA = D.metasLoja[lid]?.[mr];
+                if(!localMetaSA || (localMetaSA.mes||0) === 0){
                   D.metasLoja[lid][mr] = metaObj;
                 }
               });
