@@ -9827,7 +9827,7 @@ function renderMetasLojas(){
     const rD = ehMesAtual ? (D.vendas[loja.id]?.[hoje()]?.fat||0) : 0;
     const pM=m.mes>0?Math.min(100,rM/m.mes*100):0;
     const cor=pM>=100?"var(--verde)":pM>=70?"var(--ouro)":"var(--verm)";
-    const nv=vendsReais(loja.id).length;
+    const nv=vendsAtivas(loja.id).length;
     const miniB=(lbl,r,mt,sm)=>{const p=mt>0?Math.min(120,r/mt*100):0,c=p>=120?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":r>0?"var(--verm)":"var(--muted)";return`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px"><span style="color:var(--muted)">${lbl}</span><span style="color:${c};font-weight:600">${fmt(r)} / ${fmtK(mt)} (${p.toFixed(0)}%)</span></div><div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden"><div style="width:${Math.min(100,p)}%;height:100%;background:${c};border-radius:3px"></div></div></div>`;};
     return`<div style="background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -9914,7 +9914,7 @@ function calcPrevLoja(lid){
   if(mes<=0){if(prev)prev.style.display="none";return;}
   const auto = calcMetasAuto(mes, ticket, smes);
   if(prev) prev.style.display="block";
-  const nv = vendsReais(lid).length;
+  const nv = vendsAtivas(lid).length;
   const el = id => document.getElementById(id);
   const _mr2 = mesAtual();
   const _dd  = diasDoMes(_mr2);
@@ -9927,7 +9927,9 @@ function calcPrevLoja(lid){
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
-  const vends=vendsReais(lid);
+  // [FIX] vendsAtivas: mesmo filtro do form de renderização
+  // Arquivadas não aparecem no form, não devem ter metas editadas
+  const vends=vendsAtivas(lid);
   let n=0, somaMes=0, somaSmes=0;
   vends.forEach(v=>{
     const mesEl=document.getElementById("mv-mes-"+v.id);
@@ -9985,7 +9987,9 @@ function salvarMetasVendedoras(lid){
   })();
 }
 function renderMetasVendSection(lid){
-  const vends=vendsReais(lid);
+  // [FIX] vendsAtivas exclui vendedoras arquivadas (ativa===false)
+  // Arquivadas não devem aparecer para receber novas metas
+  const vends=vendsAtivas(lid);
   if(!vends.length) return "";
   // Layout: 2 linhas por vendedora — linha 1: nome+acum | meta | super; linha 2: ticket | aniv | inativ
   const rows=vends.map(v=>`
@@ -10058,10 +10062,9 @@ function salvarMetaLoja(lid){
   D.metasLoja[lid][_mr]=autoMetas;
 
   // ── Salvar metas individuais das vendedoras ─────────────────
-  // CRÍTICO: ler os valores dos campos AGORA (antes do renderMetasLojas)
-  // para que D.vendedoras reflita o que o usuário digitou,
-  // evitando que a re-renderização reverta os campos para os valores antigos.
-  const vends=vendsReais(lid);
+  // [FIX] vendsAtivas: arquivadas não aparecem no form, não devem receber metas
+  // (mantém histórico mas não recebe distribuição nova)
+  const vends=vendsAtivas(lid);
   let somaMes=0, somaSmes=0, nVend=0;
   const temCamposVend = vends.some(v=>document.getElementById("mv-mes-"+v.id));
   if(temCamposVend){
@@ -10091,10 +10094,10 @@ function salvarMetaLoja(lid){
       }
     });
   } else {
-    // Campos não visíveis — distribuir apenas no primeiro setup
-    const temMetas = vendsReais(lid).some(v=>v.metaMes && Number(v.metaMes)>0);
-    if(!temMetas && vendsReais(lid).length>0){
-      const _vr=vendsReais(lid);
+    // Campos não visíveis — distribuir apenas no primeiro setup, só entre ativas
+    const temMetas = vendsAtivas(lid).some(v=>v.metaMes && Number(v.metaMes)>0);
+    if(!temMetas && vendsAtivas(lid).length>0){
+      const _vr=vendsAtivas(lid);
       const mv=parseFloat((mes/_vr.length).toFixed(2));
       const smv=parseFloat((smes/_vr.length).toFixed(2));
       _vr.forEach(v=>{
@@ -10158,7 +10161,8 @@ function salvarTodasMetas(){
       const smes=parseBR(document.getElementById("ml-smes-"+loja.id)?.value)||Math.round(mes*1.255);
       const ticket=parseBR(document.getElementById("ml-ticket-"+loja.id)?.value)||150;
       D.metasLoja[loja.id]=calcMetasAuto(mes,ticket,smes);
-      const vends=vendsReais(loja.id);
+      // [FIX] Distribuir só entre ativas — arquivadas não recebem nova meta
+      const vends=vendsAtivas(loja.id);
       if(vends.length){const mv=Math.round(mes/vends.length);const smv=Math.round(smes/vends.length);vends.forEach(v=>{const i=D.vendedoras.findIndex(x=>x.id===v.id);if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;}});}
       n++;
     }
