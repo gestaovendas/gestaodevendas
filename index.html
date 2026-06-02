@@ -3642,26 +3642,23 @@ function limparTombstonesAntigos(){
       }
       return;
     }
-    // Estrutura nova: {mesRef: {mes, dia, ...}}
-    Object.keys(lm).forEach(mr=>{
-      if(!/^\d{4}-\d{2}$/.test(mr)) return;
-      const m = lm[mr];
-      if(!m || typeof m.mes !== "number") return;
-      // Meta com mes>0 mas dia absurdamente pequeno = corrompida
-      if(m.mes > 0 && m.dia > 0 && m.dia < m.mes / 40){
-        delete D.metasLoja[l.id][mr];
-        corrompidas++;
-      }
-      // Meta com mes <= 0 mas tinha valor = corrompida (ex: mes=190 de "190.000")
-      if(m.mes > 0 && m.mes < 500 && m.dia <= 20){
-        delete D.metasLoja[l.id][mr];
-        corrompidas++;
-      }
-    });
+    // [FIX CRÍTICO] DESATIVADO - validação automática estava DELETANDO metas válidas
+    // O usuário reportou que metas salvas estavam sendo perdidas após recarregar.
+    // A causa raiz era esta validação heurística que excluía metas legítimas.
+    // Se houver dados realmente corrompidos, o usuário usa a função resetEmergencia() manualmente.
+    //
+    // Código antigo (DESATIVADO):
+    // Object.keys(lm).forEach(mr=>{
+    //   if(!/^\d{4}-\d{2}$/.test(mr)) return;
+    //   const m = lm[mr];
+    //   if(!m || typeof m.mes !== "number") return;
+    //   if(m.mes > 0 && m.dia > 0 && m.dia < m.mes / 40){ delete D.metasLoja[l.id][mr]; corrompidas++; }
+    //   if(m.mes > 0 && m.mes < 500 && m.dia <= 20){ delete D.metasLoja[l.id][mr]; corrompidas++; }
+    // });
   });
   if(corrompidas > 0){
     localStorage.setItem("avatim_v5", JSON.stringify(D));
-    console.warn("[Avatim] "+corrompidas+" meta(s) corrompida(s) removida(s) automaticamente.");
+    console.warn("[Avatim] "+corrompidas+" meta(s) em formato antigo migrada(s).");
   }
 })();
 // ── FIRESTORE SYNC ──────────────────────────────────────────
@@ -9963,6 +9960,7 @@ function calcPrevLoja(lid){
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
+  console.log("[salvarMetasVendedoras] INICIO", {lid});
   // [FIX] vendsAtivas: mesmo filtro do form de renderização
   // Arquivadas não aparecem no form, não devem ter metas editadas
   const vends=vendsAtivas(lid);
@@ -9989,14 +9987,23 @@ function salvarMetasVendedoras(lid){
       somaMes+=mes; somaSmes+=smes; n++;
     }
   });
-  // Atualizar D.metasLoja[lid] com a soma das metas individuais
-  // para que getMetas(lid) retorne valores corretos no dashboard admin
+  // [FIX CRÍTICO] NÃO sobrescrever D.metasLoja[lid] automaticamente com soma das vendedoras
+  // A meta da LOJA é independente da soma das vendedoras individuais
+  // Usuário pode definir meta da loja = 176600 e meta por vendedora = 75000 cada (soma 225000)
+  // Antes este código sobrescrevia a meta da loja com 225000, gerando confusão
+  //
+  // Se NÃO houver meta de loja salva ainda para o mês, criar com base na soma das vendedoras
   if(somaMes>0){
     if(!D.metasLoja[lid]) D.metasLoja[lid]={};
     const _mr=_mesMeta||mesAtual();
-    const ticket=parseBR(document.getElementById("ml-ticket-"+lid)?.value)||350;
-    const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
-    D.metasLoja[lid][_mr]=autoMetas;
+    // Só criar/atualizar meta da loja se ela ainda NÃO existe para este mês
+    // Se já existe, preservar o valor definido pelo usuário em "Salvar Meta da Loja"
+    if(!D.metasLoja[lid][_mr] || !D.metasLoja[lid][_mr].mes){
+      const ticket=parseBR(document.getElementById("ml-ticket-"+lid)?.value)||350;
+      const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
+      D.metasLoja[lid][_mr]=autoMetas;
+    }
+    // Senão: meta da loja já está definida, preservar
   }
   // [FIX 5 CRÍTICO] Gravar direto no Firebase sem passar por save() com guards
   localStorage.setItem('avatim_v5', JSON.stringify(D));
@@ -10009,12 +10016,16 @@ function salvarMetasVendedoras(lid){
     const _okFBv = await waitForFirebase(8000);
     if(_okFBv && window.fsGravar){
       try{
-        await window.fsGravar(JSON.stringify(D));
+        // [FIX Race] Snapshot antes de gravar
+        const _snapMV = JSON.stringify(D);
+        await window.fsGravar(_snapMV);
         window._pendingLocalData = null;
         showToast("✅ Metas das vendedoras gravadas no Firebase!");
+        console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
       } catch(eV){
         window._pendingLocalData = null;
         showToast("⚠️ Salvo localmente. Firebase: " + (eV.code||eV.message), "warn");
+        console.error("[salvarMetasVendedoras] Firebase ERRO:", eV);
       }
     } else {
       window._pendingLocalData = null;
@@ -10086,6 +10097,7 @@ function calcAcumVend(vid){
 function salvarMetaLoja(lid){
   const metaCli=parseInt(document.getElementById("ml-cli-"+lid)?.value)||0;
   const mes=parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
+  console.log("[salvarMetaLoja] INICIO", {lid, mes_raw: document.getElementById("ml-mes-"+lid)?.value, mes_parsed: mes});
   if(mes<=0){showToast("Informe a meta mensal!","err");return;}
   const smes  = parseBR(document.getElementById("ml-smes-"+lid)?.value)||parseFloat((mes*1.255).toFixed(2));
   const ticket= parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
@@ -10096,6 +10108,7 @@ function salvarMetaLoja(lid){
   const _metaCliExist = D.metasLoja[lid]?.[_mr]?.metaCli || 0;
   autoMetas.metaCli = metaCli || _metaCliExist;
   D.metasLoja[lid][_mr]=autoMetas;
+  console.log("[salvarMetaLoja] GRAVADO em D.metasLoja", {lid, _mr, meta: D.metasLoja[lid][_mr]});
 
   // ── Salvar metas individuais das vendedoras ─────────────────
   // [FIX] vendsAtivas: arquivadas não aparecem no form, não devem receber metas
@@ -10152,6 +10165,8 @@ function salvarMetaLoja(lid){
   localStorage.setItem("avatim_v5", JSON.stringify(D));
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
+  // [FIX Race Condition] Snapshot antes de gravar — evita que D seja alterado durante o await
+  const _snapshotMeta = JSON.stringify(D);
   showToast("✅ Meta salva! Sincronizando...");
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 
@@ -10160,13 +10175,14 @@ function salvarMetaLoja(lid){
     const _okFB = await waitForFirebase(8000);
     if(_okFB && window.fsGravar){
       try{
-        await window.fsGravar(JSON.stringify(D));
+        await window.fsGravar(_snapshotMeta);
         window._pendingLocalData = null;
         showToast("✅ Meta gravada no Firebase!");
-        console.log("[Avatim] salvarMetaLoja Firebase OK:", lid, _mr, mes);
+        console.log("[salvarMetaLoja] Firebase OK:", lid, _mr, "mes=", mes, "objeto=", D.metasLoja[lid][_mr]);
       } catch(eMeta){
         window._pendingLocalData = null;
         showToast("⚠️ Salvo localmente. Firebase: " + (eMeta.code||eMeta.message), "warn");
+        console.error("[salvarMetaLoja] Firebase ERRO:", eMeta);
       }
     } else {
       window._pendingLocalData = null;
