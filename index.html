@@ -3661,6 +3661,40 @@ function limparTombstonesAntigos(){
     console.warn("[Avatim] "+corrompidas+" meta(s) em formato antigo migrada(s).");
   }
 })();
+// ============================================================
+// FUNÇÃO DE DEBUG: chamar no console para inspecionar o Firebase
+// Uso: await debugMeta('perdizes') — mostra meta no D local e no Firebase
+// ============================================================
+window.debugMeta = async function(lid){
+  const mr = mesAtual();
+  console.log("====================================================");
+  console.log("DEBUG META — loja:", lid, "| mês:", mr);
+  console.log("====================================================");
+  console.log("1. Meta no D local (memória):", D.metasLoja?.[lid]?.[mr]);
+  console.log("2. Meta no localStorage:", JSON.parse(localStorage.getItem("avatim_v5")||"{}")?.metasLoja?.[lid]?.[mr]);
+
+  if(window.fsCarregar){
+    try{
+      const fb = await window.fsCarregar();
+      if(fb){
+        const fbData = JSON.parse(fb);
+        console.log("3. Meta no Firebase (combinado):", fbData.metasLoja?.[lid]?.[mr]);
+      } else {
+        console.log("3. Firebase retornou null");
+      }
+    }catch(e){
+      console.error("3. Firebase ERRO:", e.message);
+    }
+  } else {
+    console.log("3. fsCarregar NÃO disponível");
+  }
+  console.log("====================================================");
+  console.log("Se o valor for diferente entre os 3, há bug no fluxo.");
+  console.log("Para corrigir manualmente uma meta agora:");
+  console.log('  D.metasLoja["' + lid + '"]["' + mr + '"] = {mes: 100000, dia: 3334, sem: 25000, ticket: 250, superMes: 125000, superSem: 31250, superDia: 4167, du: 30, sw: 4};');
+  console.log("  await window.fsGravar(JSON.stringify(D));");
+};
+
 // ── FIRESTORE SYNC ──────────────────────────────────────────
 let _savePending = false;
 
@@ -10168,25 +10202,52 @@ function salvarMetaLoja(lid){
   // [FIX Race Condition] Snapshot antes de gravar — evita que D seja alterado durante o await
   const _snapshotMeta = JSON.stringify(D);
   showToast("✅ Meta salva! Sincronizando...");
+
+  // VERIFICAÇÃO CRÍTICA: confirmar que a meta foi gravada no D
+  const _verMetaNoD = D.metasLoja?.[lid]?.[_mr]?.mes;
+  console.log("[salvarMetaLoja] VERIFICAÇÃO D após salvar:", {lid, _mr, meta_no_D: _verMetaNoD, esperado: mes, match: _verMetaNoD === mes});
+
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 
   // Gravar no Firebase direto via fsGravar — sem passar pelo save() com guards
   (async () => {
     const _okFB = await waitForFirebase(8000);
+    console.log("[salvarMetaLoja] waitForFirebase =", _okFB, "| fsGravar disponível:", !!window.fsGravar);
     if(_okFB && window.fsGravar){
       try{
+        console.log("[salvarMetaLoja] Chamando fsGravar com snapshot...");
         await window.fsGravar(_snapshotMeta);
         window._pendingLocalData = null;
         showToast("✅ Meta gravada no Firebase!");
-        console.log("[salvarMetaLoja] Firebase OK:", lid, _mr, "mes=", mes, "objeto=", D.metasLoja[lid][_mr]);
+        console.log("[salvarMetaLoja] ✅ Firebase OK:", lid, _mr, "mes=", mes);
+
+        // VERIFICAÇÃO PÓS-GRAVAÇÃO: ler do Firebase imediatamente para confirmar
+        setTimeout(async ()=>{
+          try{
+            const verifyJSON = await window.fsCarregar();
+            if(verifyJSON){
+              const verifyData = JSON.parse(verifyJSON);
+              const metaVerif = verifyData.metasLoja?.[lid]?.[_mr]?.mes;
+              console.log("[salvarMetaLoja] VERIFICAÇÃO FIREBASE:", {lid, _mr, meta_no_FB: metaVerif, esperado: mes, match: metaVerif === mes});
+              if(metaVerif !== mes){
+                showToast("⚠️ ATENÇÃO: Firebase retornou meta diferente! Esperado " + mes + " mas Firebase tem " + metaVerif, "err");
+              } else {
+                console.log("[salvarMetaLoja] ✅✅ CONFIRMADO: Firebase tem a meta correta:", metaVerif);
+              }
+            }
+          }catch(eVer){
+            console.warn("[salvarMetaLoja] Erro na verificação:", eVer.message);
+          }
+        }, 2000);
       } catch(eMeta){
         window._pendingLocalData = null;
-        showToast("⚠️ Salvo localmente. Firebase: " + (eMeta.code||eMeta.message), "warn");
-        console.error("[salvarMetaLoja] Firebase ERRO:", eMeta);
+        showToast("❌ FALHA ao gravar no Firebase: " + (eMeta.code||eMeta.message), "err");
+        console.error("[salvarMetaLoja] ❌ Firebase ERRO:", eMeta, eMeta.code, eMeta.message);
       }
     } else {
       window._pendingLocalData = null;
-      showToast("⚠️ Firebase offline. Meta salva localmente.", "warn");
+      showToast("❌ Firebase indisponível. Meta salva localmente APENAS.", "err");
+      console.error("[salvarMetaLoja] Firebase NÃO DISPONÍVEL — meta NÃO foi para o servidor!");
     }
   })();
 }
