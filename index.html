@@ -569,7 +569,11 @@ try{
                 if(!base.metasLoja) base.metasLoja={};
                 if(!base.metasLoja[lid]) base.metasLoja[lid]={};
                 Object.entries(pedaco.metasLoja[lid]).forEach(([mr,m])=>{
-                  base.metasLoja[lid][mr]=m;
+                  // [FIX CRÍTICO] Só preencher meses ausentes — o principal já trouxe
+                  // as metas oficiais (admin = fonte de verdade). loja_* só preenche o que falta.
+                  // Bug anterior: sobrescrevia meta nova do admin com meta antiga do loja_*
+                  if(!base.metasLoja[lid][mr] || !base.metasLoja[lid][mr].mes)
+                    base.metasLoja[lid][mr]=m;
                 });
               }
               console.log("[Avatim] Loja "+lid+" carregada (vendas+metas+vendedoras)");
@@ -3864,7 +3868,18 @@ async function loadFromFirestore(){
                   ativa: D.vendedoras[idx].ativa !== undefined ? D.vendedoras[idx].ativa : rv.ativa,
                 };
               } else {
-                D.vendedoras[idx] = rv;
+                // [FIX CRÍTICO] Mesmo SEM pending, preservar ativa e metas locais
+                // O sync nunca deve reverter arquivamento ou apagar metas editadas
+                const _dvi = D.vendedoras[idx];
+                D.vendedoras[idx] = {
+                  ...rv,
+                  metaMes:      _dvi.metaMes      !== undefined ? _dvi.metaMes      : rv.metaMes,
+                  superMetaMes: _dvi.superMetaMes !== undefined ? _dvi.superMetaMes : rv.superMetaMes,
+                  ticketAlvo:   _dvi.ticketAlvo   !== undefined ? _dvi.ticketAlvo   : rv.ticketAlvo,
+                  metaAniv:     _dvi.metaAniv     !== undefined ? _dvi.metaAniv     : rv.metaAniv,
+                  metaInativ:   _dvi.metaInativ   !== undefined ? _dvi.metaInativ   : rv.metaInativ,
+                  ativa:        _dvi.ativa        !== undefined ? _dvi.ativa        : rv.ativa,
+                };
               }
             } else {
               D.vendedoras.push(rv);
@@ -4192,12 +4207,33 @@ function arquivarVendedora(vid, arquivar){
   const idx = D.vendedoras.findIndex(v=>v.id===vid);
   if(idx<0){ showToast("Vendedora não encontrada","err"); return; }
   D.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
-  save();
   const nome = D.vendedoras[idx].nome;
+  // [FIX CRÍTICO] Gravar imediatamente no localStorage e Firebase
+  // bypass do save() que pode ter guards bloqueando admin
+  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now();
   showToast(arquivar ? "📦 "+nome+" arquivada" : "✅ "+nome+" reativada");
   renderTabelaVend();
   carregarVendsForm();
   preencherSelectVends();
+
+  (async () => {
+    const _okAV = await waitForFirebase(8000);
+    if(_okAV && window.fsGravar){
+      try{
+        await window.fsGravar(JSON.stringify(D));
+        window._pendingLocalData = null;
+        console.log('[Avatim] arquivarVendedora Firebase OK:', vid, 'ativa=', !arquivar);
+      } catch(eA){
+        window._pendingLocalData = null;
+        showToast("⚠️ "+nome+" salva localmente. Firebase: "+(eA.code||eA.message),"warn");
+      }
+    } else {
+      window._pendingLocalData = null;
+      showToast("⚠️ Firebase offline. "+nome+" salva localmente.","warn");
+    }
+  })();
 }
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
@@ -11706,9 +11742,25 @@ async function forceSyncAdmin(){
     }
     // [FIX] merge vendedoras preservando metas locais E campo ativa (arquivamento)
     if(remoto.vendedoras){
-      if(!D.vendedoras||!D.vendedoras.length){ D.vendedoras=remoto.vendedoras; }
+      // Sync tombstone primeiro
+      if(remoto._vendsExcluidas?.length){
+        if(!D._vendsExcluidas) D._vendsExcluidas=[];
+        remoto._vendsExcluidas.forEach(vid=>{
+          if(!D._vendsExcluidas.includes(vid)) D._vendsExcluidas.push(vid);
+        });
+      }
+      const _excFSA2 = D._vendsExcluidas||[];
+      if(!D.vendedoras||!D.vendedoras.length){
+        // Filtrar tombstones ao inicializar
+        D.vendedoras=remoto.vendedoras.filter(rv=>!_excFSA2.includes(rv.id));
+      }
       else {
         remoto.vendedoras.forEach(rv=>{
+          // [FIX] Respeitar tombstone — excluídas não voltam
+          if(_excFSA2.includes(rv.id)){
+            D.vendedoras = D.vendedoras.filter(lv=>lv.id!==rv.id);
+            return;
+          }
           const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
           if(_im>=0){
             const _ativaFSA = D.vendedoras[_im].ativa;
