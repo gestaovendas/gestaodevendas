@@ -3609,19 +3609,27 @@ if(!D.fluxo)      D.fluxo=[];
 function limparTombstonesAntigos(){
   const limite = Date.now() - (90 * 24 * 60 * 60 * 1000);
   let removidos = 0;
-  // _vendasExcluidas: {id: timestamp}
-  if(D._vendasExcluidas && typeof D._vendasExcluidas === 'object'){
+  // _vendasExcluidas: {loja: [datas]} — manter como está
+  if(D._vendasExcluidas && typeof D._vendasExcluidas === 'object' && !Array.isArray(D._vendasExcluidas)){
     Object.keys(D._vendasExcluidas).forEach(id=>{
       const ts = D._vendasExcluidas[id];
       if(typeof ts === 'number' && ts < limite){ delete D._vendasExcluidas[id]; removidos++; }
     });
   }
-  // _campExcluidos: {id: timestamp}
-  if(D._campExcluidos && typeof D._campExcluidos === 'object'){
-    Object.keys(D._campExcluidos).forEach(id=>{
-      const ts = D._campExcluidos[id];
-      if(typeof ts === 'number' && ts < limite){ delete D._campExcluidos[id]; removidos++; }
-    });
+  // [FIX Bug2] _campExcluidos: objeto {id: timestamp} — migrar array legado e expirar
+  if(D._campExcluidos){
+    // Migrar array legado para objeto {id: ts} se necessário
+    if(Array.isArray(D._campExcluidos)){
+      const _arrLeg = D._campExcluidos;
+      D._campExcluidos = {};
+      _arrLeg.forEach(id => { D._campExcluidos[id] = Date.now() - 1000; });
+      console.log('[Avatim] _campExcluidos migrado para objeto:', Object.keys(D._campExcluidos).length);
+    }
+    if(typeof D._campExcluidos === 'object'){
+      Object.keys(D._campExcluidos).forEach(id=>{
+        if(D._campExcluidos[id] < limite){ delete D._campExcluidos[id]; removidos++; }
+      });
+    }
   }
   if(removidos>0) console.log('[Avatim] Tombstones expirados removidos:', removidos);
 }
@@ -3695,6 +3703,13 @@ window.debugMeta = async function(lid){
   console.log("  await window.fsGravar(JSON.stringify(D));");
 };
 
+// ── HELPER: verificar tombstone de campanha (suporta array legado e objeto com ts) ─
+function _isCampExcluido(id){
+  if(!D._campExcluidos) return false;
+  if(Array.isArray(D._campExcluidos)) return D._campExcluidos.includes(id);
+  return !!D._campExcluidos[id]; // objeto {id: timestamp}
+}
+
 // ── FIRESTORE SYNC ──────────────────────────────────────────
 let _savePending = false;
 
@@ -3733,7 +3748,8 @@ function save(){
       try{
         await window.fsGravar(JSON.stringify(D));
         // [FIX Race Condition] Dados gravados — limpar snapshot pendente
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX Bug3]
         // [FIX] Feedback de sync para TODOS os perfis (nao so admin)
         const syncEl = document.getElementById('sync-badge');
         if(syncEl){
@@ -3851,9 +3867,12 @@ async function loadFromFirestore(){
             // [FIX 4 CRÍTICO] NUNCA sobrescrever meta local com valor > 0
             // (vale para admin E loja — admin acabou de editar, não pode ser sobrescrita)
             // Evita race condition: salvar meta → sync 30s traz meta antiga → sobrescreve
-            const localMeta = D.metasLoja[lid]?.[mr];
-            const temLocal  = localMeta && (localMeta.mes||0) > 0;
-            if(!temLocal){
+            const localMeta  = D.metasLoja[lid]?.[mr];
+            const _lTs1      = localMeta?._savedAt || 0;
+            const _rTs1      = metaObj?._savedAt   || 0;
+            const temLocal   = localMeta && (localMeta.mes||0) > 0;
+            // [FIX Bug1+Bug3] Aplicar remoto só se não há local válida OU se remoto é mais recente
+            if(!temLocal || _rTs1 > _lTs1){
               D.metasLoja[lid][mr] = metaObj;
             }
           });
@@ -4007,6 +4026,7 @@ async function loadFromFirestore(){
       if(remoto.campRealizados && remoto.campRealizados.length){
         if(!D.campRealizados) D.campRealizados=[];
         remoto.campRealizados.forEach(r=>{
+          if(_isCampExcluido(r.id)) return; // [FIX Bug2] tombstone ativo
           const i = D.campRealizados.findIndex(x=>x.id===r.id);
           if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
         });
@@ -4254,7 +4274,8 @@ function arquivarVendedora(vid, arquivar){
     if(_okAV && window.fsGravar){
       try{
         await window.fsGravar(JSON.stringify(D));
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX Bug3]
         console.log('[Avatim] arquivarVendedora Firebase OK:', vid, 'ativa=', !arquivar);
       } catch(eA){
         window._pendingLocalData = null;
@@ -4284,7 +4305,7 @@ function calcMetasAuto(mes, ticket, superMes, lid){
   const sem      = parseFloat((mes/SW).toFixed(2));
   const superDia = parseFloat((superMes/_DU).toFixed(2));
   const superSem = parseFloat((superMes/SW).toFixed(2));
-  return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:_DU, sw:SW};
+  return{mes, sem, dia, ticket:Number(ticket)||150, superMes, superSem, superDia, du:_DU, sw:SW, _savedAt:Date.now()};
 }
 
 // ── NOVA LÓGICA DE META SEMANAL PROGRESSIVA (35/25/25/15%) ──────────────────
@@ -6311,7 +6332,8 @@ async function salvarLanc(){
       }
       try{
         await window.fsGravar(_snapshotParaGravar);
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX Bug3]
         localStorage.removeItem("avatim_pending");
         const syncEl = document.getElementById('sync-badge');
         if(syncEl){ syncEl.textContent = '✅ Salvo: '+new Date().toLocaleTimeString('pt-BR'); syncEl.style.color='var(--verde)'; }
@@ -9381,9 +9403,13 @@ function editarLancCamp(id){
 function excluirLancCamp(id){
   if(!confirm('Remover este lançamento?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  // Registrar ID excluído como tombstone para evitar que o Firebase traga de volta
-  if(!D._campExcluidos) D._campExcluidos = [];
-  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+  // [FIX Bug2] Tombstone como objeto {id: timestamp} — permite expiração após 90 dias
+  if(!D._campExcluidos || Array.isArray(D._campExcluidos)){
+    const _legCR = Array.isArray(D._campExcluidos) ? D._campExcluidos : [];
+    D._campExcluidos = {};
+    _legCR.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
+  }
+  D._campExcluidos[id] = Date.now();
   save();
   const campId = document.getElementById('camp-sel-real')?.value;
   if(campId){ renderHistoricoCamp(campId, lojaId()); atualizarObjetivoCamp(); }
@@ -9426,6 +9452,14 @@ async function salvarCampReal(){
     vendObss:   _vendData.vendObss,
     lancadoEm: hoje()
   };
+  // [FIX Bug2] Migrar _campExcluidos legado e remover tombstone ao re-lançar
+  if(Array.isArray(D._campExcluidos)){
+    const _lg = D._campExcluidos; D._campExcluidos = {};
+    _lg.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
+  }
+  if(!D._campExcluidos) D._campExcluidos = {};
+  // Se havia tombstone deste ID, remover — usuário está relançando intencionalmente
+  if(D._campExcluidos[lancamento.id]) delete D._campExcluidos[lancamento.id];
   // Lançamento de campanha é INDEPENDENTE do faturamento do dia.
   // Mede adesão à campanha (quantas clientes compraram, em que valor/qtd).
   // NÃO soma em D.vendas nem D.vendasVend — evita confusão com o total de vendas.
@@ -9780,6 +9814,13 @@ function editarCampObj(id){
 function excluirCampObj(id){
   if(!confirm('Excluir este objetivo? Os realizados vinculados também serão removidos.')) return;
   D.campObjetivos = D.campObjetivos.filter(o=>o.id!==id);
+  // [FIX Bug2] Registrar tombstone para cada realizado excluído com o objetivo
+  if(!D._campExcluidos || Array.isArray(D._campExcluidos)){
+    const _legCO = Array.isArray(D._campExcluidos) ? D._campExcluidos : [];
+    D._campExcluidos = {};
+    _legCO.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
+  }
+  D.campRealizados.filter(r=>r.campId===id).forEach(r=>{ D._campExcluidos[r.id] = Date.now(); });
   D.campRealizados = D.campRealizados.filter(r=>r.campId!==id);
   save(); renderCampLista();
 }
@@ -10053,7 +10094,8 @@ function salvarMetasVendedoras(lid){
         // [FIX Race] Snapshot antes de gravar
         const _snapMV = JSON.stringify(D);
         await window.fsGravar(_snapMV);
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX Bug3]
         showToast("✅ Metas das vendedoras gravadas no Firebase!");
         console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
       } catch(eV){
@@ -10141,6 +10183,7 @@ function salvarMetaLoja(lid){
   // BUG 7 FIX: preservar metaCli existente se o campo estiver vazio
   const _metaCliExist = D.metasLoja[lid]?.[_mr]?.metaCli || 0;
   autoMetas.metaCli = metaCli || _metaCliExist;
+  autoMetas._savedAt = Date.now(); // [FIX Bug1] timestamp para evitar race condition
   D.metasLoja[lid][_mr]=autoMetas;
   console.log("[salvarMetaLoja] GRAVADO em D.metasLoja", {lid, _mr, meta: D.metasLoja[lid][_mr]});
 
@@ -10217,7 +10260,8 @@ function salvarMetaLoja(lid){
       try{
         console.log("[salvarMetaLoja] Chamando fsGravar com snapshot...");
         await window.fsGravar(_snapshotMeta);
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX Bug3]
         showToast("✅ Meta gravada no Firebase!");
         console.log("[salvarMetaLoja] ✅ Firebase OK:", lid, _mr, "mes=", mes);
 
@@ -11654,9 +11698,8 @@ function iniciarAutoRefresh(){
         }
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
-          const excluidos = D._campExcluidos || [];
           remoto.campRealizados.forEach(r=>{
-            if(excluidos.includes(r.id)) return; // não trazer de volta excluídos
+            if(_isCampExcluido(r.id)) return; // [FIX Bug2]
             const i=D.campRealizados.findIndex(x=>x.id===r.id);
             if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
           });
@@ -11690,9 +11733,10 @@ function iniciarAutoRefresh(){
         console.log("[Avatim] syncAdmin: pendingLocalData ativo (" + Math.round(pendingAge/1000) + "s) — adiando sync");
         return;
       }
-      // Mais de 60s pendente — forçar limpeza e prosseguir
+      // [FIX Bug3] Mais de 60s pendente — forçar limpeza para não bloquear sync para sempre
       console.warn("[Avatim] syncAdmin: _pendingLocalData preso há " + Math.round(pendingAge/1000) + "s — forçando sync");
-      window._pendingLocalData = null;
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
     }
     // [FIX CRÍTICO] Sempre usar fsCarregar (docs loja_*) como fonte de dados.
     try{
@@ -11706,6 +11750,7 @@ function iniciarAutoRefresh(){
           if(remoto.campRealizados && remoto.campRealizados.length){
             if(!D.campRealizados) D.campRealizados=[];
             remoto.campRealizados.forEach(r=>{
+              if(_isCampExcluido(r.id)) return; // [FIX Bug2]
               const idx = D.campRealizados.findIndex(x=>x.id===r.id);
               if(idx>=0) D.campRealizados[idx]=r; else D.campRealizados.push(r);
             });
@@ -11725,7 +11770,10 @@ function iniciarAutoRefresh(){
                 // [FIX 4 CRÍTICO] NUNCA sobrescrever meta local com valor > 0
                 // (vale para admin E loja — admin acabou de editar, não pode ser sobrescrita)
                 const localMetaSA = D.metasLoja[lid]?.[mr];
-                if(!localMetaSA || (localMetaSA.mes||0) === 0){
+                const _lTs_sa2 = localMetaSA?._savedAt || 0;
+                const _rTs_sa2 = metaObj?._savedAt || 0;
+                // [FIX Bug1+Bug3] Aceitar remoto se: local não existe, OU remoto mais recente
+                if(!localMetaSA || (localMetaSA.mes||0) === 0 || _rTs_sa2 > _lTs_sa2){
                   D.metasLoja[lid][mr] = metaObj;
                 }
               });
@@ -11813,7 +11861,14 @@ async function forceSyncAdmin(){
       Object.entries(remoto.metasLoja).forEach(([lid_r,meses_r])=>{
         if(!D.metasLoja[lid_r]) D.metasLoja[lid_r]={};
         Object.entries(meses_r||{}).forEach(([mr_r,obj_r])=>{
-          D.metasLoja[lid_r][mr_r] = obj_r; // sync manual: sobrescreve (admin iniciou)
+          // [FIX Bug1+Bug3] Respeitar _savedAt — não sobrescrever meta local mais recente
+          const _lM_fsa  = D.metasLoja[lid_r]?.[mr_r];
+          const _lTs_fsa = _lM_fsa?._savedAt || 0;
+          const _rTs_fsa = obj_r?._savedAt   || 0;
+          const _tL_fsa  = _lM_fsa && (_lM_fsa.mes||0) > 0;
+          if(!_tL_fsa || _rTs_fsa > _lTs_fsa){
+            D.metasLoja[lid_r][mr_r] = obj_r;
+          }
         });
       });
     }
@@ -11875,9 +11930,8 @@ async function forceSyncAdmin(){
     }
     if(remoto.campRealizados?.length){
       if(!D.campRealizados) D.campRealizados=[];
-      const excl = D._campExcluidos||[];
       remoto.campRealizados.forEach(r=>{
-        if(excl.includes(r.id)) return;
+        if(_isCampExcluido(r.id)) return; // [FIX Bug2]
         const i=D.campRealizados.findIndex(x=>x.id===r.id);
         if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
       });
