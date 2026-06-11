@@ -424,19 +424,27 @@ try{
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
               if(!base.vendas[l]) base.vendas[l]={};
-              // [FIX C] Merge seguro — nunca sobrescrever dias locais com Firebase antigo
+              // [FIX cross-device] Merge timestamp-aware
               const _excFSC = base._vendasExcluidas?.[l]||[];
               Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                if(!_excFSC.includes(_dt) && !(_dt in base.vendas[l])) base.vendas[l][_dt]=_val;
+                if(_excFSC.includes(_dt)) return;
+                const _lv = base.vendas[l][_dt];
+                const _lT = (_lv && _lv._savedAt) || 0;
+                const _rT = (_val && _val._savedAt) || 0;
+                if(!_lv || _rT > _lT) base.vendas[l][_dt]=_val;
               });
             });
             if(!base.vendasVend) base.vendasVend={};
             Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
               if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-              // [FIX C] Merge seguro vendasVend — nunca sobrescrever dias locais
+              // [FIX cross-device] Merge seguro vendasVend timestamp-aware
               const _excVVL = base._vendasVendExcluidas?.[vid]||[];
               Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                if(!_excVVL.includes(_dt) && !(_dt in base.vendasVend[vid])) base.vendasVend[vid][_dt]=_val;
+                if(_excVVL.includes(_dt)) return;
+                const _lvv = base.vendasVend[vid][_dt];
+                const _lTv = (_lvv && _lvv._savedAt) || 0;
+                const _rTv = (_val && _val._savedAt) || 0;
+                if(!_lvv || _rTv > _lTv) base.vendasVend[vid][_dt]=_val;
               });
             });
             // Merge campRealizados desta loja
@@ -464,17 +472,26 @@ try{
                 if(_excBase.includes(rv.id)) return; // excluída — não restaurar
                 const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(vi>=0){
-                  // [FIX] Preservar metas locais (admin acabou de editar)
-                  // E preservar ativa local (arquivamento)
+                  // [FIX cross-device] Comparar _savedAt: aceitar a versão mais RECENTE
+                  // Se remoto é mais novo → aceita remoto inteiro (cross-device sync)
+                  // Se local é mais novo → preserva local (edição em andamento)
                   const bvi = base.vendedoras[vi];
-                  base.vendedoras[vi]={...rv,
-                    metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
-                    superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
-                    ticketAlvo:   bvi.ticketAlvo   !== undefined ? bvi.ticketAlvo   : rv.ticketAlvo,
-                    metaAniv:     bvi.metaAniv     !== undefined ? bvi.metaAniv     : rv.metaAniv,
-                    metaInativ:   bvi.metaInativ   !== undefined ? bvi.metaInativ   : rv.metaInativ,
-                    ativa:        bvi.ativa        !== undefined ? bvi.ativa        : rv.ativa
-                  };
+                  const _lTs = bvi._savedAt || 0;
+                  const _rTs = rv._savedAt  || 0;
+                  if(_rTs > _lTs){
+                    base.vendedoras[vi] = rv; // remoto mais recente → sobrescreve inteiro
+                  } else {
+                    // local mais recente OU iguais → preservar campos editáveis locais
+                    base.vendedoras[vi]={...rv,
+                      metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
+                      superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
+                      ticketAlvo:   bvi.ticketAlvo   !== undefined ? bvi.ticketAlvo   : rv.ticketAlvo,
+                      metaAniv:     bvi.metaAniv     !== undefined ? bvi.metaAniv     : rv.metaAniv,
+                      metaInativ:   bvi.metaInativ   !== undefined ? bvi.metaInativ   : rv.metaInativ,
+                      ativa:        bvi.ativa        !== undefined ? bvi.ativa        : rv.ativa,
+                      _savedAt:     _lTs || _rTs
+                    };
+                  }
                 } else base.vendedoras.push(rv);
               });
             }
@@ -514,15 +531,25 @@ try{
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
                 if(!base.vendas[l]) base.vendas[l]={};
-                Object.entries(dias||{}).forEach(([_dt2,_val2])=>{ if(!(_dt2 in base.vendas[l])) base.vendas[l][_dt2]=_val2; });
+                Object.entries(dias||{}).forEach(([_dt2,_val2])=>{
+                  // [FIX cross-device] Merge timestamp-aware
+                  const _lvL = base.vendas[l][_dt2];
+                  const _lTL = (_lvL && _lvL._savedAt) || 0;
+                  const _rTL = (_val2 && _val2._savedAt) || 0;
+                  if(!_lvL || _rTL > _lTL) base.vendas[l][_dt2]=_val2;
+                });
               });
               if(!base.vendasVend) base.vendasVend={};
               Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-                // [FIX C] Merge seguro vendasVend — nunca sobrescrever dias locais
+                // [FIX cross-device] Merge seguro vendasVend timestamp-aware
                 const _excVV = base._vendasVendExcluidas?.[vid]||[];
                 Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                  if(!_excVV.includes(_dt) && !(_dt in base.vendasVend[vid])) base.vendasVend[vid][_dt]=_val;
+                  if(_excVV.includes(_dt)) return;
+                  const _lvvL = base.vendasVend[vid][_dt];
+                  const _lTvL = (_lvvL && _lvvL._savedAt) || 0;
+                  const _rTvL = (_val && _val._savedAt) || 0;
+                  if(!_lvvL || _rTvL > _lTvL) base.vendasVend[vid][_dt]=_val;
                 });
               });
               // Merge campRealizados desta loja ao base (respeitando tombstones)
@@ -552,16 +579,23 @@ try{
                   if(_excLj.includes(rv.id)) return; // excluída — não restaurar
                   const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                   if(vi>=0){
-                    // [FIX] Preservar todas as metas e ativa locais
+                    // [FIX cross-device] Timestamp-aware merge
                     const bvi2 = base.vendedoras[vi];
-                    base.vendedoras[vi]={...rv,
-                      metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
-                      superMetaMes: bvi2.superMetaMes !== undefined ? bvi2.superMetaMes : rv.superMetaMes,
-                      ticketAlvo:   bvi2.ticketAlvo   !== undefined ? bvi2.ticketAlvo   : rv.ticketAlvo,
-                      metaAniv:     bvi2.metaAniv     !== undefined ? bvi2.metaAniv     : rv.metaAniv,
-                      metaInativ:   bvi2.metaInativ   !== undefined ? bvi2.metaInativ   : rv.metaInativ,
-                      ativa:        bvi2.ativa        !== undefined ? bvi2.ativa        : rv.ativa
-                    };
+                    const _lTs2 = bvi2._savedAt || 0;
+                    const _rTs2 = rv._savedAt  || 0;
+                    if(_rTs2 > _lTs2){
+                      base.vendedoras[vi] = rv;
+                    } else {
+                      base.vendedoras[vi]={...rv,
+                        metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
+                        superMetaMes: bvi2.superMetaMes !== undefined ? bvi2.superMetaMes : rv.superMetaMes,
+                        ticketAlvo:   bvi2.ticketAlvo   !== undefined ? bvi2.ticketAlvo   : rv.ticketAlvo,
+                        metaAniv:     bvi2.metaAniv     !== undefined ? bvi2.metaAniv     : rv.metaAniv,
+                        metaInativ:   bvi2.metaInativ   !== undefined ? bvi2.metaInativ   : rv.metaInativ,
+                        ativa:        bvi2.ativa        !== undefined ? bvi2.ativa        : rv.ativa,
+                        _savedAt:     _lTs2 || _rTs2
+                      };
+                    }
                   } else base.vendedoras.push(rv);
                 });
               }
@@ -3816,28 +3850,37 @@ async function waitForFirebase(timeout=5000){
 
 // ══════════════════════════════════════════════════════════════
 // MERGE SEGURO DE VENDAS — função central usada por todos os syncs
-// Regra única: dados locais NUNCA são sobrescritos por dados remotos
-// O Firebase só preenche dias que NÃO existem localmente
-// Isso evita que syncs apaguem lançamentos recém-feitos pelas lojas
+// Regra TIMESTAMP-AWARE: aceitar remoto se mais RECENTE que local
+// _savedAt ausente = timestamp 0 (sempre perde para versão com _savedAt)
+// Isso permite cross-device sync: PC1 atualiza → PC2 abre e VÊ o novo
 // ══════════════════════════════════════════════════════════════
 function _mergeVendasSeguro(remoto){
-  // D.vendas: merge por loja > dia
+  // D.vendas: merge por loja > dia, com comparação de _savedAt
   if(remoto.vendas){
     Object.entries(remoto.vendas).forEach(([lid2, dias])=>{
       if(!D.vendas[lid2]) D.vendas[lid2] = {};
       const excl = D._vendasExcluidas?.[lid2] || [];
       Object.entries(dias||{}).forEach(([dt, val])=>{
-        if(!excl.includes(dt) && !(dt in D.vendas[lid2])) D.vendas[lid2][dt] = val;
+        if(excl.includes(dt)) return;
+        const localVal = D.vendas[lid2][dt];
+        const _lTsV = (localVal && localVal._savedAt) || 0;
+        const _rTsV = (val && val._savedAt) || 0;
+        // Aceitar remoto se: local não existe OU remoto é MAIS RECENTE
+        if(!localVal || _rTsV > _lTsV) D.vendas[lid2][dt] = val;
       });
     });
   }
-  // D.vendasVend: merge por vendedora > dia
+  // D.vendasVend: merge por vendedora > dia, com comparação de _savedAt
   if(remoto.vendasVend){
     Object.entries(remoto.vendasVend).forEach(([vid, dias])=>{
       if(!D.vendasVend[vid]) D.vendasVend[vid] = {};
       const excl = D._vendasVendExcluidas?.[vid] || [];
       Object.entries(dias||{}).forEach(([dt, val])=>{
-        if(!excl.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
+        if(excl.includes(dt)) return;
+        const localValV = D.vendasVend[vid][dt];
+        const _lTsVV = (localValV && localValV._savedAt) || 0;
+        const _rTsVV = (val && val._savedAt) || 0;
+        if(!localValV || _rTsVV > _lTsVV) D.vendasVend[vid][dt] = val;
       });
     });
   }
@@ -3906,21 +3949,27 @@ async function loadFromFirestore(){
             }
             const idx = D.vendedoras.findIndex(lv => lv.id === rv.id);
             if(idx >= 0){
-              if(_hasPending){
+              // [FIX cross-device] Comparar _savedAt — aceita o mais recente
+              const _dvi = D.vendedoras[idx];
+              const _lTsLF = _dvi._savedAt || 0;
+              const _rTsLF = rv._savedAt   || 0;
+              if(_rTsLF > _lTsLF){
+                // Remoto mais recente → sobrescreve completo (cross-device sync)
+                D.vendedoras[idx] = rv;
+              } else if(_hasPending){
+                // Pending local + local mais recente → preservar metas locais
                 D.vendedoras[idx] = {
                   ...rv,
-                  metaMes:      D.vendedoras[idx].metaMes,
-                  superMetaMes: D.vendedoras[idx].superMetaMes,
-                  ticketAlvo:   D.vendedoras[idx].ticketAlvo,
-                  metaAniv:     D.vendedoras[idx].metaAniv,
-                  metaInativ:   D.vendedoras[idx].metaInativ,
-                  // [FIX] Preservar ativa:false (arquivamento local tem prioridade)
-                  ativa: D.vendedoras[idx].ativa !== undefined ? D.vendedoras[idx].ativa : rv.ativa,
+                  metaMes:      _dvi.metaMes,
+                  superMetaMes: _dvi.superMetaMes,
+                  ticketAlvo:   _dvi.ticketAlvo,
+                  metaAniv:     _dvi.metaAniv,
+                  metaInativ:   _dvi.metaInativ,
+                  ativa:        _dvi.ativa !== undefined ? _dvi.ativa : rv.ativa,
+                  _savedAt:     _lTsLF || _rTsLF
                 };
               } else {
-                // [FIX CRÍTICO] Mesmo SEM pending, preservar ativa e metas locais
-                // O sync nunca deve reverter arquivamento ou apagar metas editadas
-                const _dvi = D.vendedoras[idx];
+                // Sem pending + local mais recente ou igual → preservar local
                 D.vendedoras[idx] = {
                   ...rv,
                   metaMes:      _dvi.metaMes      !== undefined ? _dvi.metaMes      : rv.metaMes,
@@ -3929,6 +3978,7 @@ async function loadFromFirestore(){
                   metaAniv:     _dvi.metaAniv     !== undefined ? _dvi.metaAniv     : rv.metaAniv,
                   metaInativ:   _dvi.metaInativ   !== undefined ? _dvi.metaInativ   : rv.metaInativ,
                   ativa:        _dvi.ativa        !== undefined ? _dvi.ativa        : rv.ativa,
+                  _savedAt:     _lTsLF || _rTsLF
                 };
               }
             } else {
@@ -4258,6 +4308,7 @@ function arquivarVendedora(vid, arquivar){
   const idx = D.vendedoras.findIndex(v=>v.id===vid);
   if(idx<0){ showToast("Vendedora não encontrada","err"); return; }
   D.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
+  D.vendedoras[idx]._savedAt = Date.now(); // [FIX cross-device] timestamp para merge
   const nome = D.vendedoras[idx].nome;
   // [FIX CRÍTICO] Gravar imediatamente no localStorage e Firebase
   // bypass do save() que pode ter guards bloqueando admin
@@ -6258,7 +6309,9 @@ async function salvarLanc(){
     const obs = document.getElementById("l-obs")?.value||"";
     const transCount = totalAtend || vendasParaSalvar.length;
     const tm = transCount>0 ? parseFloat((fat/transCount).toFixed(2)) : 0;
-    const dadosLanc = {fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, obs, ts:Date.now()};
+    // [FIX cross-device] _savedAt no payload → merge timestamp-aware ao sincronizar
+    const _nowTs = Date.now();
+    const dadosLanc = {fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, obs, ts:_nowTs, _savedAt:_nowTs};
 
     // [FIX TOMBSTONE] Remover tombstone desta data antes de salvar
     // Evita que exclusões anteriores bloqueiem novos lançamentos
@@ -6285,7 +6338,8 @@ async function salvarLanc(){
         cli:   novoTrans,
         aniv:  regExist.aniv||0,
         inativ:regExist.inativ||0,
-        tm:    novoTM
+        tm:    novoTM,
+        _savedAt: _nowTs // [FIX cross-device] timestamp para merge
       };
       fatTotal   += novoVal;
       transTotal2+= novoTrans;
@@ -6299,7 +6353,7 @@ async function salvarLanc(){
     dadosLanc.fat   = fatTotal;
     dadosLanc.trans = transTotal2;
     dadosLanc.tm    = tmTotal;
-    D.vendas[lid][data] = {...dadosLanc, fat:fatTotal, trans:transTotal2, tm:tmTotal};
+    D.vendas[lid][data] = {...dadosLanc, fat:fatTotal, trans:transTotal2, tm:tmTotal, _savedAt:_nowTs};
 
     // [DIAGNÓSTICO] Confirmar o que vai ser gravado
     console.log("[Avatim] salvarLanc: lid="+lid+" | data="+data+" | fat="+fat);
@@ -10248,6 +10302,7 @@ function salvarMetaLoja(lid){
         D.vendedoras[idx].ticketAlvo    = tick;
         D.vendedoras[idx].metaAniv      = aniv;
         D.vendedoras[idx].metaInativ    = inat;
+        D.vendedoras[idx]._savedAt      = Date.now(); // [FIX cross-device] timestamp
         if(mv>0){ somaMes+=mv; somaSmes+=smv; nVend++; }
       }
     });
@@ -10258,9 +10313,10 @@ function salvarMetaLoja(lid){
       const _vr=vendsAtivas(lid);
       const mv=parseFloat((mes/_vr.length).toFixed(2));
       const smv=parseFloat((smes/_vr.length).toFixed(2));
+      const _tsB = Date.now();
       _vr.forEach(v=>{
         const i=D.vendedoras.findIndex(x=>x.id===v.id);
-        if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;somaMes+=mv;somaSmes+=smv;nVend++;}
+        if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;D.vendedoras[i]._savedAt=_tsB;somaMes+=mv;somaSmes+=smv;nVend++;}
       });
     }
   }
