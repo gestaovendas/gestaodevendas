@@ -3774,6 +3774,24 @@ function _isCampExcluido(id){
   return !!D._campExcluidos[id]; // objeto {id: timestamp}
 }
 
+// [FIX BUG 1] Helpers para somas consistentes de campanha
+// PROBLEMA: r.fat pode ter sido digitado manualmente antes do fix readonly
+// (divergindo da soma das vendedoras). Lançamento por vendedora é a fonte da verdade.
+// Estes helpers SEMPRE somam a partir das vendedoras se houver dados; caso contrário usam r.fat.
+function _fatLancamento(r){
+  if(r && r.vendedoras && typeof r.vendedoras === 'object'){
+    const soma = Object.values(r.vendedoras).reduce((s,v)=>s+(Number(v)||0),0);
+    if(soma > 0) return soma; // soma das vendedoras é fonte da verdade
+  }
+  return Number(r?.fat)||0;
+}
+function _atendLancamento(r){
+  if(r && r.vendQtds && typeof r.vendQtds === 'object'){
+    const soma = Object.values(r.vendQtds).reduce((s,v)=>s+(Number(v)||0),0);
+    if(soma > 0) return soma;
+  }
+  return Number(r?.atend)||0;
+}
 // ── FIRESTORE SYNC ──────────────────────────────────────────
 let _savePending = false;
 
@@ -7912,7 +7930,10 @@ function calcularComissao(){
 }
 
 function renderRankComissao(){
-  const lid=lojaId(), vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const lid=lojaId();
+  // [FIX BUG 2] Filtrar vendedoras INATIVAS — não devem aparecer no ranking de comissão
+  // Inativas (ativa===false) = arquivadas, não recebem comissão
+  const vends=D.vendedoras.filter(v=>(isAdmin()||v.loja===lid) && v.ativa!==false);
   const lojaOks={};
   LOJAS.forEach(l=>{const m=getMetas(l.id);lojaOks[l.id]=m.mes>0&&calcMes(l.id)/m.mes>=1;});
   const ranked=vends.map(v=>{
@@ -8441,7 +8462,7 @@ function renderRelCamp(){
   if(!isAdmin()) reaisAll = reaisAll.filter(r=>r.lojaId===lid);
 
   // ── KPIs ───────────────────────────────────────────────────
-  const totalFat  = reaisAll.reduce((s,r)=>s+r.fat,0);
+  const totalFat  = reaisAll.reduce((s,r)=>s+_fatLancamento(r),0);
   const totalAtend= reaisAll.reduce((s,r)=>s+r.atend,0);
   const tmMedio   = totalAtend>0 ? totalFat/totalAtend : 0;
   const metaTotal = objs.reduce((s,o)=>{
@@ -8590,8 +8611,8 @@ function renderRelCamp(){
       lojasVisiveis.forEach(l=>{
         // SOMAR todos os lançamentos diários desta loja (não só o primeiro)
         const lancsLoja = reaisObj.filter(x=>x.lojaId===l.id);
-        const fatTotal  = lancsLoja.reduce((s,r)=>s+r.fat,0);
-        const atdTotal  = lancsLoja.reduce((s,r)=>s+(r.atend||0),0);
+        const fatTotal  = lancsLoja.reduce((s,r)=>s+_fatLancamento(r),0);
+        const atdTotal  = lancsLoja.reduce((s,r)=>s+_atendLancamento(r),0);
         const tmMed     = atdTotal>0 ? fatTotal/atdTotal : 0;
         const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
         // Só incluir linha se tem lançamento OU tem meta definida
@@ -8604,8 +8625,8 @@ function renderRelCamp(){
       });
     } else {
       const lancsLoja = reaisObj.filter(x=>x.lojaId===lid);
-      const fatTotal  = lancsLoja.reduce((s,r)=>s+r.fat,0);
-      const atdTotal  = lancsLoja.reduce((s,r)=>s+(r.atend||0),0);
+      const fatTotal  = lancsLoja.reduce((s,r)=>s+_fatLancamento(r),0);
+      const atdTotal  = lancsLoja.reduce((s,r)=>s+_atendLancamento(r),0);
       const tmMed     = atdTotal>0 ? fatTotal/atdTotal : 0;
       const metaL = (obj.metasPorLoja&&obj.metasPorLoja[lid])||obj.metaLoja||0;
       linhas.push({campNome:`${info2.emoji} ${obj.nome}`,loja:'',fat:fatTotal,meta:metaL,atend:atdTotal,tm:tmMed,
@@ -8645,8 +8666,8 @@ function exportarRelCamp(){
     LOJAS.forEach(l=>{
       const lancs = reaisAll.filter(x=>x.campId===obj.id&&x.lojaId===l.id);
       const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
-      const fatL  = lancs.reduce((s,x)=>s+x.fat,0);
-      const atdL  = lancs.reduce((s,x)=>s+(x.atend||0),0);
+      const fatL  = lancs.reduce((s,x)=>s+_fatLancamento(x),0);
+      const atdL  = lancs.reduce((s,x)=>s+_atendLancamento(x),0);
       const tmL   = atdL>0 ? fatL/atdL : 0;
       const pct3  = metaL>0&&fatL>0 ? (fatL/metaL*100).toFixed(1)+'%' : '--';
       const perL  = lancs.length>0 ? `${lancs.length} dia(s)` : '';
@@ -8688,8 +8709,8 @@ function exportarPDFCamp(){
   objs.forEach(o=>{
     LOJAS.forEach(l=>{
       const lancs = reaisAll.filter(r=>r.campId===o.id&&r.lojaId===l.id);
-      porLojaMap[l.id].fat   += lancs.reduce((s,r)=>s+r.fat,0);
-      porLojaMap[l.id].atend += lancs.reduce((s,r)=>s+(r.atend||0),0);
+      porLojaMap[l.id].fat   += lancs.reduce((s,r)=>s+_fatLancamento(r),0);
+      porLojaMap[l.id].atend += lancs.reduce((s,r)=>s+_atendLancamento(r),0);
       porLojaMap[l.id].meta  += (o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0;
     });
   });
@@ -8712,8 +8733,8 @@ function exportarPDFCamp(){
   const rankVends = Object.values(porVendMap).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
 
   // ── KPIs gerais ───────────────────────────────────────────────
-  const totalFatC = reaisAll.reduce((s,r)=>s+r.fat,0);
-  const totalAtdC = reaisAll.reduce((s,r)=>s+(r.atend||0),0);
+  const totalFatC = reaisAll.reduce((s,r)=>s+_fatLancamento(r),0);
+  const totalAtdC = reaisAll.reduce((s,r)=>s+_atendLancamento(r),0);
   const tmGeral   = totalAtdC>0?totalFatC/totalAtdC:0;
   const lojasComLanc = rankLojas.filter(l=>l.fat>0).length;
   const totalMeta = rankLojas.reduce((s,l)=>s+l.meta,0);
@@ -8784,8 +8805,8 @@ function exportarPDFCamp(){
   const rowsCamps = objs.map(o=>{
     const info2 = CAMP_TIPOS[o.tipo]||{emoji:'📌',label:o.tipo};
     const reaisO = reaisAll.filter(r=>r.campId===o.id);
-    const fatO   = reaisO.reduce((s,r)=>s+r.fat,0);
-    const atdO   = reaisO.reduce((s,r)=>s+(r.atend||0),0);
+    const fatO   = reaisO.reduce((s,r)=>s+_fatLancamento(r),0);
+    const atdO   = reaisO.reduce((s,r)=>s+_atendLancamento(r),0);
     const metaO  = isAdmin()
       ? LOJAS.reduce((s,l)=>s+((o.metasPorLoja&&o.metasPorLoja[l.id])||o.metaLoja||0),0)
       : (o.metasPorLoja&&o.metasPorLoja[lid])||o.metaLoja||0;
@@ -8833,13 +8854,13 @@ function exportarPDFCamp(){
       // Fat de CAMPANHA desta loja nos mesmos períodos
       const fatCampMes = reaisAll
         .filter(r=>r.lojaId===l.id && r.data && r.data.startsWith(mes))
-        .reduce((s,r)=>s+r.fat,0);
+        .reduce((s,r)=>s+_fatLancamento(r),0);
       const fatCampSem = reaisAll
         .filter(r=>r.lojaId===l.id && r.data && r.data.startsWith(mes) && semanaDoMes(r.data)===_sw)
-        .reduce((s,r)=>s+r.fat,0);
+        .reduce((s,r)=>s+_fatLancamento(r),0);
       const fatCampHoj = reaisAll
         .filter(r=>r.lojaId===l.id && r.data===hj)
-        .reduce((s,r)=>s+r.fat,0);
+        .reduce((s,r)=>s+_fatLancamento(r),0);
 
       const pctImpMes = fatMes>0 ? fatCampMes/fatMes*100 : 0;
       const pctImpSem = fatSem>0 ? fatCampSem/fatSem*100 : 0;
@@ -9364,7 +9385,7 @@ function atualizarProgrCamp(){
   if(!meta){ document.getElementById('camp-prog-wrap').style.display='none'; return; }
   // Acumulado dos lançamentos + o que está sendo digitado agora
   const lancados  = (D.campRealizados||[]).filter(r=>r.campId===campId && r.lojaId===lid);
-  const acumulado = lancados.reduce((s,r)=>s+r.fat,0);
+  const acumulado = lancados.reduce((s,r)=>s+_fatLancamento(r),0);
   const hoje_fat  = parseBR(document.getElementById('camp-real-fat')?.value)||0;
   const total     = acumulado + hoje_fat;
   const pct       = Math.min(100, total/meta*100);
@@ -9390,7 +9411,7 @@ function renderHistoricoCamp(campId, lid){
     .filter(r=>r.campId===campId && r.lojaId===lids)
     .sort((a,b)=>b.data.localeCompare(a.data));
   if(!lancs.length){ wrap.style.display='none'; return; }
-  const total = lancs.reduce((s,r)=>s+r.fat,0);
+  const total = lancs.reduce((s,r)=>s+_fatLancamento(r),0);
   wrap.style.display = '';
   lista.innerHTML = lancs.map(l=>{
     // Vendedoras deste lançamento
@@ -9669,12 +9690,12 @@ function renderCampLista(){
   el.innerHTML = objs.map(obj=>{
     const info      = CAMP_TIPOS[obj.tipo]||{label:obj.tipo,emoji:'📌'};
     const reais     = D.campRealizados.filter(r=>r.campId===obj.id);
-    const totalReal = reais.reduce((s,r)=>s+r.fat,0);
+    const totalReal = reais.reduce((s,r)=>s+_fatLancamento(r),0);
     const pctRede   = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
     const corRede   = pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
     // Se filtro de loja ativo, usar cor baseada no % desta loja específica
     const _reaisLojFil = _campFiltroLoja ? reais.filter(r=>r.lojaId===_campFiltroLoja) : [];
-    const _fatLojFil   = _reaisLojFil.reduce((s,r)=>s+r.fat,0);
+    const _fatLojFil   = _reaisLojFil.reduce((s,r)=>s+_fatLancamento(r),0);
     const _metaLojFil  = _campFiltroLoja&&obj.metasPorLoja ? (obj.metasPorLoja[_campFiltroLoja]||0) : 0;
     const _pctLojFil   = _metaLojFil>0 ? _fatLojFil/_metaLojFil*100 : pctRede;
     const _corFil      = _pctLojFil>=100?'var(--verde)':_pctLojFil>=70?'var(--ouro)':'var(--verm)';
@@ -9684,10 +9705,10 @@ function renderCampLista(){
     // Agrupar lançamentos diários da loja em um objeto consolidado
     const meusLancs = reais.filter(r=>r.lojaId===lid);
     const meuReal   = meusLancs.length ? {
-      fat:   meusLancs.reduce((s,r)=>s+r.fat,0),
-      atend: meusLancs.reduce((s,r)=>s+(r.atend||0),0),
-      tm:    meusLancs.reduce((s,r)=>s+(r.atend||0),0)>0
-               ? meusLancs.reduce((s,r)=>s+r.fat,0)/meusLancs.reduce((s,r)=>s+(r.atend||0),0)
+      fat:   meusLancs.reduce((s,r)=>s+_fatLancamento(r),0),
+      atend: meusLancs.reduce((s,r)=>s+_atendLancamento(r),0),
+      tm:    meusLancs.reduce((s,r)=>s+_atendLancamento(r),0)>0
+               ? meusLancs.reduce((s,r)=>s+_fatLancamento(r),0)/meusLancs.reduce((s,r)=>s+_atendLancamento(r),0)
                : 0,
       dias:  meusLancs.length,
       id:    meusLancs[0].id
@@ -9816,7 +9837,7 @@ function renderCampLista(){
     const reaisFiltrados = _campFiltroLoja
       ? reais.filter(r=>r.lojaId===_campFiltroLoja)
       : reais;
-    const totalFiltrado = reaisFiltrados.reduce((s,r)=>s+r.fat,0);
+    const totalFiltrado = reaisFiltrados.reduce((s,r)=>s+_fatLancamento(r),0);
     const tabelaReais = isAdmin() && reaisFiltrados.length ? `
       <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
@@ -9832,11 +9853,11 @@ function renderCampLista(){
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:8px">
           ${reaisFiltrados.map(r=>{
             const metaR = (obj.metasPorLoja&&obj.metasPorLoja[r.lojaId]) || obj.metaLoja || 0;
-            const pct2  = metaR>0?r.fat/metaR*100:0;
+            const pct2  = metaR>0?_fatLancamento(r)/metaR*100:0;
             const c2    = pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
             return `<div style="background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:10px">
               <div style="font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px">${r.lojaNome}</div>
-              <div style="font-size:16px;font-weight:800;color:${c2}">${fmt(r.fat)}</div>
+              <div style="font-size:16px;font-weight:800;color:${c2}">${fmt(_fatLancamento(r))}</div>
               ${metaR>0?`<div style="font-size:10px;color:${c2};margin-top:2px">${pct2.toFixed(0)}% da meta (${fmt(metaR)})</div>`:''}
               ${r.atend>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px">👥 ${r.atend} atend · TM ${fmt(r.tm)}</div>`:''}
               ${r.per?`<div style="font-size:9px;color:var(--muted)">📅 ${r.per}</div>`:''}
@@ -11214,7 +11235,7 @@ function buscarHistLoja(){
         const cf=r.fat>=idealDia?'var(--verde)':'var(--verm)';
         return `<tr>
           <td>${d.split('-').reverse().join('/')}</td>
-          <td style="color:${cf};font-weight:600">${fmt(r.fat)}</td>
+          <td style="color:${cf};font-weight:600">${fmt(_fatLancamento(r))}</td>
           <td style="color:var(--ouro)">${fmt(idealDia)}</td>
           <td style="color:${cg}">${g2>=0?'+':''}${fmt(g2)}</td>
           <td style="color:var(--azul)">${fmt(tm2)}</td>
@@ -11346,7 +11367,8 @@ function renderRankingLoja() {
     : '';
 
   // ── Ranking TM por vendedora da loja
-  const vendsTM = D.vendedoras.filter(v=>v.loja===lid).map(v=>{
+  // [FIX BUG 2] Filtrar inativas — não devem aparecer no ranking TM
+  const vendsTM = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false).map(v=>{
     const fat   = calcVendPer(v.id, perV);
     const tm    = calcTMVend(v.id, perV);
     const vd    = D.vendasVend[v.id]||{};
@@ -14391,7 +14413,7 @@ async function buscarHistoricoLoja(){
           const corPct = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':pctDia>0?'var(--verm)':'var(--muted)';
           return `<tr style="${isHj?'background:rgba(201,168,76,.05)':''}">
             <td style="font-weight:${isHj?700:400};color:${isHj?'var(--ouro)':'var(--texto)'}">${dFmt}${isHj?' <span style="font-size:9px;color:var(--ouro)">HOJE</span>':''}</td>
-            <td style="color:var(--verde);font-weight:600">${fmt(r.fat)}</td>
+            <td style="color:var(--verde);font-weight:600">${fmt(_fatLancamento(r))}</td>
             <td style="color:${corPct};font-weight:700">${mDia>0?pctDia.toFixed(0)+'%':'—'}</td>
             <td style="color:var(--azul)">${fmt(tm2)}</td>
             <td>${r.trans}</td>
