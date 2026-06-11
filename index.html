@@ -4012,21 +4012,21 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
-      // ── VENDAS: estratégia diferente para admin e loja ───────────────
-      // Admin: remoto sempre tem prioridade (admin não faz lançamentos de vendas,
-      //         então D.vendas local pode estar desatualizado ou zerado)
-      // Loja: LOCAL tem prioridade (evita que sync apague lançamento recente)
-      const _admBoot = (window._currentUser?.email === 'admin@avatim.com');
+      // ── VENDAS: estratégia timestamp-aware para cross-device sync ───
+      // Bug anterior: !(dt in D.vendas[lid]) bloqueava updates entre máquinas
+      // Agora: aceita remoto se mais recente OU se local não existe
+      // _savedAt no objeto venda controla a ordem temporal
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
           const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            // NUNCA sobrescrever dados locais de vendas — sempre merge
-            // Bug ibirapuera: _admBoot sobrescrevia dados locais recentes com Firebase antigo
-            // Regra: Firebase só preenche dias que NÃO existem localmente
-            if(!(dt in D.vendas[lid])) D.vendas[lid][dt] = val;
+            const _lvLF = D.vendas[lid][dt];
+            const _lTsLF1 = (_lvLF && _lvLF._savedAt) || 0;
+            const _rTsLF1 = (val && val._savedAt) || 0;
+            // Aceitar remoto se: local ausente OU remoto MAIS RECENTE
+            if(!_lvLF || _rTsLF1 > _lTsLF1) D.vendas[lid][dt] = val;
           });
         });
       }
@@ -4036,8 +4036,10 @@ async function loadFromFirestore(){
           const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
             if(excl.includes(dt)) return;
-            // Mesmo para vendasVend: merge, nunca sobrescrever
-            if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = val;
+            const _lvvLF = D.vendasVend[vid][dt];
+            const _lTsLF2 = (_lvvLF && _lvvLF._savedAt) || 0;
+            const _rTsLF2 = (val && val._savedAt) || 0;
+            if(!_lvvLF || _rTsLF2 > _lTsLF2) D.vendasVend[vid][dt] = val;
           });
         });
       }
@@ -10719,13 +10721,23 @@ async function tabRankPer(per, el, ctx) {
           if(remoto.vendasVend){
             Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+              Object.entries(dias).forEach(([dt,val])=>{
+                const _lvX = D.vendasVend[vid][dt];
+                const _lT = (_lvX && _lvX._savedAt) || 0;
+                const _rT = (val && val._savedAt) || 0;
+                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
+              });
             });
           }
           if(remoto.vendas){
             Object.entries(remoto.vendas).forEach(([lid,dias])=>{
               if(!D.vendas[lid]) D.vendas[lid]={};
-              Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendas[lid])) D.vendas[lid][dt]=val; });
+              Object.entries(dias).forEach(([dt,val])=>{
+                const _lvY = D.vendas[lid][dt];
+                const _lT2 = (_lvY && _lvY._savedAt) || 0;
+                const _rT2 = (val && val._savedAt) || 0;
+                if(!_lvY || _rT2 > _lT2) D.vendas[lid][dt] = val;
+              });
             });
           }
           localStorage.setItem('avatim_v5', JSON.stringify(D));
@@ -11082,7 +11094,12 @@ function tabRankPerLoja(per, el){
               const remoto = JSON.parse(json);
               if(remoto.vendasVend) Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
                 if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-                Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+                Object.entries(dias).forEach(([dt,val])=>{
+                const _lvX = D.vendasVend[vid][dt];
+                const _lT = (_lvX && _lvX._savedAt) || 0;
+                const _rT = (val && val._savedAt) || 0;
+                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
+              });
               });
               localStorage.setItem('avatim_v5', JSON.stringify(D));
             }
@@ -11753,8 +11770,13 @@ function iniciarAutoRefresh(){
         if(remoto.vendas?.[lid2]){
           if(!D.vendas[lid2]) D.vendas[lid2]={};
           const excDias = D._vendasExcluidas?.[lid2] || [];
+          // [FIX cross-device] Timestamp-aware
           Object.entries(remoto.vendas[lid2]).forEach(([dt,dados])=>{
-            if(!excDias.includes(dt) && !(dt in D.vendas[lid2])) D.vendas[lid2][dt] = dados;
+            if(excDias.includes(dt)) return;
+            const _lvSL = D.vendas[lid2][dt];
+            const _lTsSL = (_lvSL && _lvSL._savedAt) || 0;
+            const _rTsSL = (dados && dados._savedAt) || 0;
+            if(!_lvSL || _rTsSL > _lTsSL) D.vendas[lid2][dt] = dados;
           });
         }
         if(remoto.vendasVend){
@@ -11763,8 +11785,13 @@ function iniciarAutoRefresh(){
             if(v && v.loja===lid2){
               if(!D.vendasVend[vid]) D.vendasVend[vid]={};
               const excDiasV = D._vendasVendExcluidas?.[vid] || [];
+              // [FIX cross-device] Timestamp-aware
               Object.entries(dias).forEach(([dt,dados])=>{
-                if(!excDiasV.includes(dt) && !(dt in D.vendasVend[vid])) D.vendasVend[vid][dt] = dados;
+                if(excDiasV.includes(dt)) return;
+                const _lvvSL = D.vendasVend[vid][dt];
+                const _lTsSL2 = (_lvvSL && _lvvSL._savedAt) || 0;
+                const _rTsSL2 = (dados && dados._savedAt) || 0;
+                if(!_lvvSL || _rTsSL2 > _lTsSL2) D.vendasVend[vid][dt] = dados;
               });
             }
           });
@@ -11886,18 +11913,24 @@ function iniciarAutoRefresh(){
                 }
                 const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(_i>=0){
-                  const _ativaSA = D.vendedoras[_i].ativa;
-                  // [FIX] Sempre preservar metas locais — não só quando _hpSA
-                  // O sync NUNCA deve sobrescrever metas que o usuário acabou de editar
+                  // [FIX cross-device] Comparar _savedAt
                   const _bvi3 = D.vendedoras[_i];
-                  D.vendedoras[_i]={...rv,
-                    metaMes:      _bvi3.metaMes      !== undefined ? _bvi3.metaMes      : rv.metaMes,
-                    superMetaMes: _bvi3.superMetaMes !== undefined ? _bvi3.superMetaMes : rv.superMetaMes,
-                    ticketAlvo:   _bvi3.ticketAlvo   !== undefined ? _bvi3.ticketAlvo   : rv.ticketAlvo,
-                    metaAniv:     _bvi3.metaAniv     !== undefined ? _bvi3.metaAniv     : rv.metaAniv,
-                    metaInativ:   _bvi3.metaInativ   !== undefined ? _bvi3.metaInativ   : rv.metaInativ,
-                    ativa:        _ativaSA           !== undefined ? _ativaSA           : rv.ativa
-                  };
+                  const _lTsSA3 = _bvi3._savedAt || 0;
+                  const _rTsSA3 = rv._savedAt   || 0;
+                  if(_rTsSA3 > _lTsSA3){
+                    D.vendedoras[_i] = rv; // remoto mais recente → sobrescreve
+                  } else {
+                    const _ativaSA = _bvi3.ativa;
+                    D.vendedoras[_i]={...rv,
+                      metaMes:      _bvi3.metaMes      !== undefined ? _bvi3.metaMes      : rv.metaMes,
+                      superMetaMes: _bvi3.superMetaMes !== undefined ? _bvi3.superMetaMes : rv.superMetaMes,
+                      ticketAlvo:   _bvi3.ticketAlvo   !== undefined ? _bvi3.ticketAlvo   : rv.ticketAlvo,
+                      metaAniv:     _bvi3.metaAniv     !== undefined ? _bvi3.metaAniv     : rv.metaAniv,
+                      metaInativ:   _bvi3.metaInativ   !== undefined ? _bvi3.metaInativ   : rv.metaInativ,
+                      ativa:        _ativaSA           !== undefined ? _ativaSA           : rv.ativa,
+                      _savedAt:     _lTsSA3 || _rTsSA3
+                    };
+                  }
                 } else D.vendedoras.push(rv);
               });
             }
@@ -11983,16 +12016,24 @@ async function forceSyncAdmin(){
           }
           const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
           if(_im>=0){
-            const _ativaFSA = D.vendedoras[_im].ativa;
-            D.vendedoras[_im]={...rv,
-              metaMes:D.vendedoras[_im].metaMes||rv.metaMes,
-              superMetaMes:D.vendedoras[_im].superMetaMes||rv.superMetaMes,
-              ticketAlvo:D.vendedoras[_im].ticketAlvo||rv.ticketAlvo,
-              metaAniv:D.vendedoras[_im].metaAniv||rv.metaAniv,
-              metaInativ:D.vendedoras[_im].metaInativ||rv.metaInativ,
-              // [FIX] ativa local sempre tem prioridade — arquivamento não é revertido pelo sync
-              ativa: _ativaFSA !== undefined ? _ativaFSA : rv.ativa
-            };
+            // [FIX cross-device] Comparar _savedAt
+            const _bviFSA = D.vendedoras[_im];
+            const _lTsFSA = _bviFSA._savedAt || 0;
+            const _rTsFSA = rv._savedAt      || 0;
+            if(_rTsFSA > _lTsFSA){
+              D.vendedoras[_im] = rv;
+            } else {
+              const _ativaFSA = _bviFSA.ativa;
+              D.vendedoras[_im]={...rv,
+                metaMes:_bviFSA.metaMes||rv.metaMes,
+                superMetaMes:_bviFSA.superMetaMes||rv.superMetaMes,
+                ticketAlvo:_bviFSA.ticketAlvo||rv.ticketAlvo,
+                metaAniv:_bviFSA.metaAniv||rv.metaAniv,
+                metaInativ:_bviFSA.metaInativ||rv.metaInativ,
+                ativa: _ativaFSA !== undefined ? _ativaFSA : rv.ativa,
+                _savedAt: _lTsFSA || _rTsFSA
+              };
+            }
           } else D.vendedoras.push(rv);
         });
       }
@@ -12003,17 +12044,28 @@ async function forceSyncAdmin(){
       Object.entries(remoto.vendas).forEach(([l,ds])=>{
         if(!D.vendas[l]) D.vendas[l]={};
         const excl = D._vendasExcluidas?.[l]||[];
-        // [FIX CRÍTICO] Só preencher dias AUSENTES — nunca sobrescrever dados locais
-        // forceSyncAdmin também pode sobrescrever lançamentos recentes do Ibirapuera/Santana
-        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt) && !(dt in D.vendas[l])) D.vendas[l][dt]=val; });
+        // [FIX cross-device] Timestamp-aware: aceitar remoto se mais recente
+        Object.entries(ds).forEach(([dt,val])=>{
+          if(excl.includes(dt)) return;
+          const _lvFS = D.vendas[l][dt];
+          const _lTsFS = (_lvFS && _lvFS._savedAt) || 0;
+          const _rTsFS = (val && val._savedAt) || 0;
+          if(!_lvFS || _rTsFS > _lTsFS) D.vendas[l][dt] = val;
+        });
       });
     }
     if(remoto.vendasVend){
       Object.entries(remoto.vendasVend).forEach(([v,ds])=>{
         if(!D.vendasVend[v]) D.vendasVend[v]={};
         const excl = D._vendasVendExcluidas?.[v]||[];
-        // [FIX CRÍTICO] Só preencher dias AUSENTES — nunca sobrescrever dados locais
-        Object.entries(ds).forEach(([dt,val])=>{ if(!excl.includes(dt) && !(dt in D.vendasVend[v])) D.vendasVend[v][dt]=val; });
+        // [FIX cross-device] Timestamp-aware
+        Object.entries(ds).forEach(([dt,val])=>{
+          if(excl.includes(dt)) return;
+          const _lvvFS = D.vendasVend[v][dt];
+          const _lTsFS2 = (_lvvFS && _lvvFS._savedAt) || 0;
+          const _rTsFS2 = (val && val._savedAt) || 0;
+          if(!_lvvFS || _rTsFS2 > _lTsFS2) D.vendasVend[v][dt] = val;
+        });
       });
     }
     if(remoto.campRealizados?.length){
@@ -14196,13 +14248,23 @@ async function buscarHistoricoLoja(){
         if(remoto.vendas){
           Object.entries(remoto.vendas).forEach(([l,dias])=>{
             if(!D.vendas[l]) D.vendas[l]={};
-            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendas[l])) D.vendas[l][dt]=val; });
+            Object.entries(dias).forEach(([dt,val])=>{
+            const _lvZ = D.vendas[l][dt];
+            const _lT3 = (_lvZ && _lvZ._savedAt) || 0;
+            const _rT3 = (val && val._savedAt) || 0;
+            if(!_lvZ || _rT3 > _lT3) D.vendas[l][dt] = val;
+          });
           });
         }
         if(remoto.vendasVend){
           Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
             if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+            Object.entries(dias).forEach(([dt,val])=>{
+                const _lvX = D.vendasVend[vid][dt];
+                const _lT = (_lvX && _lvX._savedAt) || 0;
+                const _rT = (val && val._savedAt) || 0;
+                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
+              });
           });
         }
         localStorage.setItem('avatim_v5', JSON.stringify(D));
@@ -14428,7 +14490,12 @@ async function buscarHistoricoVend(){
         if(remoto.vendasVend){
           Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
             if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-            Object.entries(dias).forEach(([dt,val])=>{ if(!(dt in D.vendasVend[vid])) D.vendasVend[vid][dt]=val; });
+            Object.entries(dias).forEach(([dt,val])=>{
+                const _lvX = D.vendasVend[vid][dt];
+                const _lT = (_lvX && _lvX._savedAt) || 0;
+                const _rT = (val && val._savedAt) || 0;
+                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
+              });
           });
         }
         localStorage.setItem('avatim_v5', JSON.stringify(D));
