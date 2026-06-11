@@ -2057,11 +2057,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div class="ig"><label>Data</label>
           <input type="date" id="camp-real-data">
         </div>
-        <div class="ig"><label>Faturamento do Dia (R$)</label>
-          <input type="text" id="camp-real-fat" placeholder="R$ 0,00" oninput="maskBR(this);calcTMCampReal();atualizarProgrCamp()">
+        <div class="ig"><label>Faturamento do Dia (R$) <span style="font-size:9px;color:var(--ouro);font-weight:600">— auto: soma das vendedoras</span></label>
+          <input type="text" id="camp-real-fat" placeholder="Será calculado automaticamente" readonly style="background:rgba(201,168,76,.06);font-weight:700;color:var(--ouro)">
         </div>
-        <div class="ig"><label>Nº de Atendimentos</label>
-          <input type="number" id="camp-real-atend" placeholder="0" min="0" oninput="calcTMCampReal()">
+        <div class="ig"><label>Nº de Atendimentos <span style="font-size:9px;color:var(--azul);font-weight:600">— auto: soma das qtds</span></label>
+          <input type="number" id="camp-real-atend" placeholder="0" min="0" readonly style="background:rgba(91,141,239,.06);font-weight:700;color:var(--azul)">
         </div>
         <div class="ig"><label>Ticket Médio (R$)</label>
           <input type="text" id="camp-real-tm" placeholder="Calculado automaticamente" readonly style="opacity:.6">
@@ -8649,11 +8649,12 @@ function exportarPDFCamp(){
         reaisLoja.forEach(r=>{
           if(!r.vendedoras) return;
           Object.entries(r.vendedoras).forEach(([vId,val])=>{
-            if(!vendDetalhe[vId]) vendDetalhe[vId]={nome:'',fat:0,qtd:0,nrs:[],obss:[]};
+            if(!vendDetalhe[vId]) vendDetalhe[vId]={nome:'',fat:0,qtd:0,kits:0,nrs:[],obss:[]};
             const vObj = D.vendedoras.find(v=>v.id===vId);
             if(vObj) vendDetalhe[vId].nome = vObj.nome;
             vendDetalhe[vId].fat += Number(val)||0;
             if(r.vendQtds?.[vId]) vendDetalhe[vId].qtd += r.vendQtds[vId];
+            if(r.vendKits?.[vId]) vendDetalhe[vId].kits += r.vendKits[vId];
             if(r.vendNrs?.[vId] && !vendDetalhe[vId].nrs.includes(r.vendNrs[vId])) vendDetalhe[vId].nrs.push(r.vendNrs[vId]);
             if(r.vendObss?.[vId] && !vendDetalhe[vId].obss.includes(r.vendObss[vId])) vendDetalhe[vId].obss.push(r.vendObss[vId]);
           });
@@ -8664,9 +8665,12 @@ function exportarPDFCamp(){
             <td style="color:#888;font-size:10px">${fmt(v.fat)}</td>
             <td></td><td></td>
             <td style="color:#5b8def;font-size:10px">${v.qtd>0?v.qtd+' un.':'—'}</td>
+            <td style="color:#e879f9;font-size:10px">${v.kits>0?'🎁 '+v.kits:'—'}</td>
             <td style="color:#2ecc87;font-size:10px">${v.nrs.length?v.nrs.join(', '):'—'}</td>
             <td style="color:#888;font-size:10px;font-style:italic">${v.obss.join('; ')||'—'}</td>
           </tr>`).join('');
+        // [FIX] Total de kits da loja = soma dos kits de todas vendedoras
+        const totKitsLoja = Object.values(vendDetalhe).reduce((s,v)=>s+(v.kits||0),0);
         return `<tr>
           <td>${medals[i]||(i+1)+'º'}</td>
           <td><strong>${l.nome}</strong></td>
@@ -8674,10 +8678,11 @@ function exportarPDFCamp(){
           <td>${l.meta>0?fmt(l.meta):'<span style="color:#aaa">—</span>'}</td>
           <td>${pct!==null?'<span class="badge-'+badge+'">'+pct.toFixed(0)+'%</span>':'<span style="color:#aaa">—</span>'}</td>
           <td>${l.atend||'<span style="color:#aaa">—</span>'}</td>
-          <td colspan="2">${tm>0?fmt(tm):'<span style="color:#aaa">—</span>'}</td>
+          <td style="color:#a855f7;font-weight:700">${totKitsLoja>0?'🎁 '+totKitsLoja:'<span style="color:#aaa">—</span>'}</td>
+          <td colspan="2">${tm>0?'TM: '+fmt(tm):'<span style="color:#aaa">—</span>'}</td>
         </tr>${vendRows2}`;
       }).join('')
-    : '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:16px">Nenhum lançamento registrado.</td></tr>';
+    : '<tr><td colspan="9" style="text-align:center;color:#aaa;padding:16px">Nenhum lançamento registrado.</td></tr>';
 
   // ── Tabela: Ranking de Vendedoras ─────────────────────────────
   const rowsVends = rankVends.length
@@ -8846,7 +8851,7 @@ function exportarPDFCamp(){
 
     <h2 style="margin-top:18px">🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja / Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>Qtd</th><th>Nº Venda / Obs</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja / Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>🎁 Kits</th><th>Nº Venda</th><th>Obs</th></tr></thead>
       <tbody>${rowsLojas}</tbody>
     </table>
 
@@ -9158,6 +9163,7 @@ function renderVendCampForm(campId){
   const lanc   = (D.campRealizados||[]).find(r=>r.campId===campId && r.lojaId===lid && r.data===data);
   const vendVals   = lanc?.vendedoras   || {};
   const vendQtds   = lanc?.vendQtds     || {};
+  const vendKits   = lanc?.vendKits     || {};
   const vendNrs    = lanc?.vendNrs      || {};
   const vendObss   = lanc?.vendObss     || {};
   el.innerHTML = vends.map(v=>`
@@ -9169,7 +9175,7 @@ function renderVendCampForm(campId){
         </div>
         <div id="camp-vend-pct-${v.id}" style="font-size:10px;color:var(--ouro);font-weight:700"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:6px;margin-bottom:6px">
+      <div style="display:grid;grid-template-columns:1fr 70px 70px 1fr;gap:6px;margin-bottom:6px">
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">💰 Valor (R$)</div>
           <input type="text" id="camp-vend-${v.id}"
@@ -9183,7 +9189,17 @@ function renderVendCampForm(campId){
           <input type="number" id="camp-vend-qtd-${v.id}"
             placeholder="0" min="0"
             value="${vendQtds[v.id]||''}"
+            oninput="calcTotalVendsCamp()"
             style="width:100%;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:6px;padding:7px 6px;color:var(--azul);font-size:13px;font-weight:700;text-align:center;outline:none">
+        </div>
+        <div>
+          <div style="font-size:8px;color:var(--rosa,#e879f9);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">🎁 Kit</div>
+          <input type="number" id="camp-vend-kit-${v.id}"
+            placeholder="0" min="0"
+            value="${vendKits[v.id]||''}"
+            oninput="calcTotalVendsCamp()"
+            title="Quantidade de kits vendidos (opcional)"
+            style="width:100%;background:var(--cinza);border:1px solid rgba(232,121,249,.3);border-radius:6px;padding:7px 6px;color:#e879f9;font-size:13px;font-weight:700;text-align:center;outline:none">
         </div>
         <div>
           <div style="font-size:8px;color:var(--verde);font-weight:700;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">🧾 Nº Venda</div>
@@ -9207,40 +9223,50 @@ function renderVendCampForm(campId){
 function calcTotalVendsCamp(){
   const lid   = lojaId();
   const vends = vendsAtivas(lid);
-  let soma = 0;
+  let somaFat = 0, somaAtend = 0, somaKits = 0;
   vends.forEach(v=>{
-    const el = document.getElementById('camp-vend-'+v.id);
-    if(el) soma += parseBR(el.value)||0;
+    const elVal = document.getElementById('camp-vend-'+v.id);
+    const elQtd = document.getElementById('camp-vend-qtd-'+v.id);
+    const elKit = document.getElementById('camp-vend-kit-'+v.id);
+    if(elVal) somaFat   += parseBR(elVal.value)||0;
+    if(elQtd) somaAtend += parseInt(elQtd.value)||0;
+    if(elKit) somaKits  += parseInt(elKit.value)||0;
   });
-  if(soma>0){
-    const fatEl = document.getElementById('camp-real-fat');
-    if(fatEl && (!parseBR(fatEl.value))) {
-      fatEl.value = soma.toFixed(2).replace('.',',');
-      calcTMCampReal();
-      atualizarProgrCamp();
-    }
-  }
+  // [FIX] Auto-preencher SEMPRE — fat = soma das vendedoras, atend = soma das qtds
+  // Total da loja é SEMPRE a soma das vendedoras (não pode divergir)
+  const fatEl = document.getElementById('camp-real-fat');
+  const atEl  = document.getElementById('camp-real-atend');
+  if(fatEl) fatEl.value = somaFat>0 ? somaFat.toFixed(2).replace('.',',') : '';
+  if(atEl)  atEl.value  = somaAtend>0 ? somaAtend : '';
+  // Exibir total de kits (se elemento existir)
+  const kitTotEl = document.getElementById('camp-real-kits-total');
+  if(kitTotEl) kitTotEl.textContent = somaKits>0 ? somaKits+' kit'+(somaKits>1?'s':'') : '—';
+  calcTMCampReal();
+  atualizarProgrCamp();
 }
 
 function getVendCampVals(){
   const lid   = lojaId();
   const vends = vendsAtivas(lid);
-  const vals={}, qtds={}, nrs={}, obss={};
+  const vals={}, qtds={}, kits={}, nrs={}, obss={};
   vends.forEach(v=>{
     const elVal = document.getElementById('camp-vend-'+v.id);
     const elQtd = document.getElementById('camp-vend-qtd-'+v.id);
+    const elKit = document.getElementById('camp-vend-kit-'+v.id);
     const elNr  = document.getElementById('camp-vend-nr-'+v.id);
     const elObs = document.getElementById('camp-vend-obs-'+v.id);
     const val = elVal ? (parseBR(elVal.value)||0) : 0;
     const qtd = elQtd ? (parseInt(elQtd.value)||0) : 0;
+    const kit = elKit ? (parseInt(elKit.value)||0) : 0;
     const nr  = elNr  ? (elNr.value.trim()) : '';
     const obs = elObs ? (elObs.value.trim()) : '';
     if(val>0){ vals[v.id]=val; }
     if(qtd>0){ qtds[v.id]=qtd; }
+    if(kit>0){ kits[v.id]=kit; }
     if(nr)   { nrs[v.id]=nr;  }
     if(obs)  { obss[v.id]=obs; }
   });
-  return {vendedoras:vals, vendQtds:qtds, vendNrs:nrs, vendObss:obss};
+  return {vendedoras:vals, vendQtds:qtds, vendKits:kits, vendNrs:nrs, vendObss:obss};
 }
 
 function atualizarProgrCamp(){
@@ -9285,9 +9311,10 @@ function renderHistoricoCamp(campId, lid){
     const vendRows = l.vendedoras && Object.keys(l.vendedoras).length
       ? D.vendedoras.filter(v=>l.vendedoras[v.id]>0).map(v=>{
           const qtd = l.vendQtds?.[v.id] ? ` · <span style="color:var(--azul)">${l.vendQtds[v.id]} un.</span>` : '';
+          const kit = l.vendKits?.[v.id] ? ` · <span style="color:#e879f9">🎁 ${l.vendKits[v.id]} kit${l.vendKits[v.id]>1?'s':''}</span>` : '';
           const nr  = l.vendNrs?.[v.id]  ? ` · <span style="color:var(--verde)">Nº ${l.vendNrs[v.id]}</span>` : '';
           const obs2= l.vendObss?.[v.id] ? ` · <span style="color:var(--muted);font-style:italic">${l.vendObss[v.id]}</span>` : '';
-          return `<div style="font-size:9px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.15);border-radius:6px;padding:3px 8px;color:var(--ouro2);margin-bottom:3px">${v.nome}: ${fmt(l.vendedoras[v.id])}${qtd}${nr}${obs2}</div>`;
+          return `<div style="font-size:9px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.15);border-radius:6px;padding:3px 8px;color:var(--ouro2);margin-bottom:3px">${v.nome}: ${fmt(l.vendedoras[v.id])}${qtd}${kit}${nr}${obs2}</div>`;
         }).join('')
       : '';
     return `
@@ -9441,13 +9468,17 @@ async function salvarCampReal(){
     : D.campRealizados.findIndex(r=>r.campId===campId && r.lojaId===lid && r.data===data);
   window._editandoLancCampId = null; // limpar após usar
   const _vendData = getVendCampVals();
+  // [FIX] Total de kits da loja = soma dos kits das vendedoras
+  const totalKits = Object.values(_vendData.vendKits||{}).reduce((s,n)=>s+(Number(n)||0),0);
   const lancamento = {
     id: existIdx>=0 ? D.campRealizados[existIdx].id : 'real_'+Date.now(),
     campId, lojaId: lid, lojaNome, data,
     fat, atend, tm: atend>0?fat/atend:0,
+    kits: totalKits, // [NEW] total de kits do dia
     obs,
     vendedoras: _vendData.vendedoras,
     vendQtds:   _vendData.vendQtds,
+    vendKits:   _vendData.vendKits, // [NEW] kits por vendedora
     vendNrs:    _vendData.vendNrs,
     vendObss:   _vendData.vendObss,
     lancadoEm: hoje()
@@ -9492,11 +9523,12 @@ async function salvarCampReal(){
   document.getElementById('camp-real-tm').value='';
   document.getElementById('camp-real-obs').value='';
   document.getElementById('camp-real-data').value = hoje();
-  // Limpar campos de vendedoras (valor + qtd + nr + obs)
+  // Limpar campos de vendedoras (valor + qtd + kit + nr + obs)
   const lidL = lojaId();
   D.vendedoras.filter(v=>v.loja===lidL).forEach(v=>{
     const elV  = document.getElementById('camp-vend-'+v.id);     if(elV)  elV.value='';
     const elQ  = document.getElementById('camp-vend-qtd-'+v.id); if(elQ)  elQ.value='';
+    const elK  = document.getElementById('camp-vend-kit-'+v.id); if(elK)  elK.value='';
     const elNr = document.getElementById('camp-vend-nr-'+v.id);  if(elNr) elNr.value='';
     const elOb = document.getElementById('camp-vend-obs-'+v.id); if(elOb) elOb.value='';
   });
