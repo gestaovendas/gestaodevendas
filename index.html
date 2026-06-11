@@ -286,7 +286,9 @@ try{
           if(Object.keys(diasFiltrados).length > 0) vendasVendLoja[vid] = diasFiltrados;
         });
 
-        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !excCamp.includes(r.id));
+        // [FIX BUG 2] Usar _isCampExcluido (suporta array legado E objeto com timestamp)
+        // Antes: excCamp.includes(r.id) só funcionava com array legado, falhava com objeto
+        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !_isCampExcluido(r.id));
         const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid);
 
         // ── Merge com Firebase: preservar histórico não presente localmente ──
@@ -500,9 +502,13 @@ try{
               Object.entries(pedaco.metasLoja).forEach(([lid2,meses])=>{
                 if(!base.metasLoja[lid2]) base.metasLoja[lid2]={};
                 Object.entries(meses||{}).forEach(([mr,m])=>{
-                  // [FIX C] Só preencher meses ausentes — não sobrescrever metas locais recentes
-                  if(!base.metasLoja[lid2][mr] || !base.metasLoja[lid2][mr].mes)
-                    base.metasLoja[lid2][mr]=m;
+                  // [FIX BUG 1] Comparar _savedAt — meta mais recente vence
+                  // Antes: loja_* sobrescrevia meta do principal (admin) porque lia por último
+                  const _bMeta = base.metasLoja[lid2]?.[mr];
+                  const _rTsM  = m?._savedAt      || 0;
+                  const _lTsM  = _bMeta?._savedAt || 0;
+                  if(!_bMeta || !_bMeta.mes || _rTsM > _lTsM)
+                    base.metasLoja[lid2][mr] = m;
                 }); 
               });
             }
@@ -555,9 +561,9 @@ try{
               // Merge campRealizados desta loja ao base (respeitando tombstones)
               if(pedaco.campRealizados && pedaco.campRealizados.length){
                 if(!base.campRealizados) base.campRealizados=[];
-                const excluidos = D._campExcluidos || [];
                 pedaco.campRealizados.forEach(r=>{
-                  if(excluidos.includes(r.id)) return; // não trazer de volta excluídos
+                  // [FIX BUG 2] _isCampExcluido suporta array legado E objeto com timestamp
+                  if(_isCampExcluido(r.id)) return; // não trazer de volta excluídos
                   const rIdx = base.campRealizados.findIndex(x=>x.id===r.id);
                   if(rIdx>=0) base.campRealizados[rIdx]=r;
                   else base.campRealizados.push(r);
@@ -613,6 +619,30 @@ try{
               console.log("[Avatim] Loja "+lid+" carregada (vendas+metas+vendedoras)");
             }
           }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
+        }
+        // [FIX CRÍTICO Bug 1] Loja só vê SUAS vendedoras (filtrar outras lojas)
+        // base.vendedoras vem do principal com TODAS as vendedoras
+        // → filtrar para retornar apenas as da própria loja
+        if(lid && base.vendedoras){
+          base.vendedoras = base.vendedoras.filter(v => v.loja === lid);
+        }
+        // [FIX CRÍTICO Bug 1] metasLoja: loja só vê SUA própria
+        if(lid && base.metasLoja){
+          const _minhaMeta = base.metasLoja[lid] || {};
+          base.metasLoja = { [lid]: _minhaMeta };
+        }
+        // [FIX] vendasVend: filtrar apenas das vendedoras da própria loja
+        if(lid && base.vendasVend){
+          const _idsLoja = new Set(base.vendedoras.map(v => v.id));
+          const _vvFiltrado = {};
+          Object.entries(base.vendasVend).forEach(([vid, dias])=>{
+            if(_idsLoja.has(vid)) _vvFiltrado[vid] = dias;
+          });
+          base.vendasVend = _vvFiltrado;
+        }
+        // [FIX] vendas: filtrar apenas da própria loja
+        if(lid && base.vendas){
+          base.vendas = { [lid]: base.vendas[lid] || {} };
         }
       }
 
@@ -11763,6 +11793,9 @@ function iniciarAutoRefresh(){
         const remoto = JSON.parse(dadosJSON);
         // Atualizar campObjetivos (vem do doc principal — admin gerencia)
         if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+        // [FIX BUG 3] Atualizar D.campanhas (campo legado) junto com campObjetivos
+        // Antes: lojas com campo legado não recebiam campanhas criadas pelo admin
+        if(remoto.campanhas) D.campanhas = remoto.campanhas;
         // Merge só vendas e vendasVend desta loja
         const lid = lojaId();
         // LOCAL SEMPRE TEM PRIORIDADE — remoto só preenche dias ausentes
