@@ -334,8 +334,18 @@ try{
             vendasVend:     vendasVendLoja,
             campRealizados: campLoja,
             fluxo:          fluxoLoja,
-            vendedoras:     (D2.vendedoras||[]).filter(v=>v.loja===lid),
-            metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} }
+            // [FIX] Filtrar vendedoras tombstoneadas — excluídas não voltam
+            // Antes: loja ainda gravava Maria, e na próxima carga admin via Maria voltar
+            vendedoras:     (D2.vendedoras||[]).filter(v=>
+              v.loja===lid &&
+              !(Array.isArray(D2._vendsExcluidas) && D2._vendsExcluidas.includes(v.id))
+            ),
+            metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} },
+            // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
+            _vendsExcluidas:      D2._vendsExcluidas      || [],
+            _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
+            _vendasVendExcluidas: D2._vendasVendExcluidas  || {},
+            _campExcluidos:       D2._campExcluidos       || []
           }),
           lojaId: lid,
           ts:     Date.now(),
@@ -466,6 +476,40 @@ try{
               });
             }
             // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
+            // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
+            // Lojas também podem ter exclusões registradas que o admin precisa respeitar
+            if(pedaco._vendsExcluidas?.length){
+              if(!base._vendsExcluidas) base._vendsExcluidas=[];
+              pedaco._vendsExcluidas.forEach(vid=>{
+                if(!base._vendsExcluidas.includes(vid)) base._vendsExcluidas.push(vid);
+              });
+            }
+            if(pedaco._campExcluidos){
+              if(!base._campExcluidos) base._campExcluidos = Array.isArray(pedaco._campExcluidos)?[]:{};
+              if(Array.isArray(pedaco._campExcluidos)){
+                if(Array.isArray(base._campExcluidos)){
+                  pedaco._campExcluidos.forEach(id=>{
+                    if(!base._campExcluidos.includes(id)) base._campExcluidos.push(id);
+                  });
+                }
+              } else {
+                Object.entries(pedaco._campExcluidos).forEach(([id,ts])=>{
+                  if(typeof base._campExcluidos === 'object' && !Array.isArray(base._campExcluidos)){
+                    base._campExcluidos[id] = base._campExcluidos[id] || ts;
+                  }
+                });
+              }
+            }
+            if(pedaco._vendasVendExcluidas){
+              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
+              Object.entries(pedaco._vendasVendExcluidas).forEach(([vid,dias])=>{
+                if(!base._vendasVendExcluidas[vid]) base._vendasVendExcluidas[vid]=[];
+                (dias||[]).forEach(dt=>{
+                  if(!base._vendasVendExcluidas[vid].includes(dt))
+                    base._vendasVendExcluidas[vid].push(dt);
+                });
+              });
+            }
             if(pedaco.vendedoras && pedaco.vendedoras.length){
               if(!base.vendedoras) base.vendedoras=[];
               // Respeitar tombstone _vendsExcluidas do principal
@@ -515,6 +559,12 @@ try{
             console.log("[Avatim] Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
           }catch(e3){ console.warn("[Avatim] Parse erro loja "+lid+":", e3.message); }
         });
+        // [FIX BUG ressurreição] Aplicar tombstone FINAL após merge de todos os loja_*
+        // Garante que vendedoras excluídas por qualquer admin/loja não voltem
+        if(base._vendsExcluidas?.length && base.vendedoras){
+          const _exFinal = base._vendsExcluidas;
+          base.vendedoras = base.vendedoras.filter(v=>!_exFinal.includes(v.id));
+        }
         console.log("[Avatim] ✅ Admin: todos os dados carregados em paralelo");
       } else {
         // Loja carrega só seus dados e faz merge sobre o base
@@ -576,6 +626,13 @@ try{
                   if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
                 });
               }
+              // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
+              if(pedaco._vendsExcluidas?.length){
+                if(!base._vendsExcluidas) base._vendsExcluidas=[];
+                pedaco._vendsExcluidas.forEach(vid=>{
+                  if(!base._vendsExcluidas.includes(vid)) base._vendsExcluidas.push(vid);
+                });
+              }
               // [FIX CRITICO] vendedoras e metasLoja do loja_* sobrepõem o principal
               // A loja edita metas localmente → salva no loja_* → ao recarregar deve LER do loja_*
               if(pedaco.vendedoras && pedaco.vendedoras.length){
@@ -623,8 +680,10 @@ try{
         // [FIX CRÍTICO Bug 1] Loja só vê SUAS vendedoras (filtrar outras lojas)
         // base.vendedoras vem do principal com TODAS as vendedoras
         // → filtrar para retornar apenas as da própria loja
+        // [FIX BUG ressurreição] + filtrar tombstoneadas (_vendsExcluidas)
         if(lid && base.vendedoras){
-          base.vendedoras = base.vendedoras.filter(v => v.loja === lid);
+          const _exLojaFinal = base._vendsExcluidas||[];
+          base.vendedoras = base.vendedoras.filter(v => v.loja === lid && !_exLojaFinal.includes(v.id));
         }
         // [FIX CRÍTICO Bug 1] metasLoja: loja só vê SUA própria
         if(lid && base.metasLoja){
@@ -3653,7 +3712,53 @@ document.addEventListener("DOMContentLoaded", () => {
 let D=JSON.parse(localStorage.getItem("avatim_v5")||"{}");
 if(!D.metasLoja)  D.metasLoja={};
 if(!D.vendas)     D.vendas={};
-if(!D.vendedoras) D.vendedoras=JSON.parse(JSON.stringify(VENDEDORAS_PADRAO));
+// [FIX CRÍTICO BUG ressurreição] NÃO popular automaticamente com VENDEDORAS_PADRAO
+// Antes: em qualquer máquina nova (cache vazio), o sistema criava 35 "Vendedora 1, 2, 3, 4, 5"
+// por loja. Quando o usuário excluía, o tombstone só existia naquela máquina.
+// Resultado: outra máquina abre → popula 35 fantasmas → usuário exclui → infinito.
+//
+// Agora: D.vendedoras inicia VAZIO. O fsCarregar trará as vendedoras reais do Firebase.
+// Se for primeira execução genuína (Firebase também vazio), o usuário cadastra manualmente.
+if(!D.vendedoras) D.vendedoras=[];
+
+// [FIX MIGRAÇÃO] Remover vendedoras fantasmas que sobraram de execuções antigas
+// IDs do padrão antigo: v_m1..v_m5, v_l1..v_l5, v_p1..v_p5, v_s1..v_s5,
+//                      v_j1..v_j5, v_pi1..v_pi5, v_i1..v_i5
+// Nome padrão: "Vendedora N" (sem cadastro real)
+(function limparVendedorasFantasmas(){
+  const fantasmaIds = [
+    "v_m1","v_m2","v_m3","v_m4","v_m5",
+    "v_l1","v_l2","v_l3","v_l4","v_l5",
+    "v_p1","v_p2","v_p3","v_p4","v_p5",
+    "v_s1","v_s2","v_s3","v_s4","v_s5",
+    "v_j1","v_j2","v_j3","v_j4","v_j5",
+    "v_pi1","v_pi2","v_pi3","v_pi4","v_pi5",
+    "v_i1","v_i2","v_i3","v_i4","v_i5"
+  ];
+  const fantasmaNomeRe = /^Vendedora\s+\d+$/i;
+
+  if(!D._vendsExcluidas) D._vendsExcluidas=[];
+
+  // Identificar fantasmas no D.vendedoras
+  const idsParaTombstonar = new Set();
+  (D.vendedoras||[]).forEach(v=>{
+    // Critério 1: ID do padrão antigo
+    if(fantasmaIds.includes(v.id)) idsParaTombstonar.add(v.id);
+    // Critério 2: Nome genérico "Vendedora N" sem cadastro real
+    else if(fantasmaNomeRe.test((v.nome||"").trim())) idsParaTombstonar.add(v.id);
+  });
+
+  if(idsParaTombstonar.size > 0){
+    // Remover de D.vendedoras
+    D.vendedoras = D.vendedoras.filter(v=>!idsParaTombstonar.has(v.id));
+    // Adicionar ao tombstone para propagar para Firebase
+    idsParaTombstonar.forEach(id=>{
+      if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
+    });
+    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedoras fantasmas (padrão antigo). Tombstones criados.");
+  }
+})();
 if(!D.vendasVend) D.vendasVend={};
 if(!D.campanhas)  D.campanhas=[];
 if(!D.campObjetivos)  D.campObjetivos=[];
