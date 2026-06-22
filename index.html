@@ -64,6 +64,7 @@ try{
   const db   = getFirestore(app);
 
   window._fbOk   = true;
+  window._fbDb   = db;     // exposto para debugMeta() conseguir ler direto do Firestore
   window._auth   = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
@@ -3848,32 +3849,107 @@ function limparTombstonesAntigos(){
 // ============================================================
 window.debugMeta = async function(lid){
   const mr = mesAtual();
-  console.log("====================================================");
-  console.log("DEBUG META — loja:", lid, "| mês:", mr);
-  console.log("====================================================");
-  console.log("1. Meta no D local (memória):", D.metasLoja?.[lid]?.[mr]);
-  console.log("2. Meta no localStorage:", JSON.parse(localStorage.getItem("avatim_v5")||"{}")?.metasLoja?.[lid]?.[mr]);
+  console.log("════════════════════════════════════════════════════════════");
+  console.log("🔍 DEBUG META — loja:", lid, "| mês:", mr);
+  console.log("════════════════════════════════════════════════════════════");
 
-  if(window.fsCarregar){
-    try{
+  console.log("\n📍 CAMADA 1: D em memória (RAM)");
+  const memMeta = D.metasLoja?.[lid]?.[mr];
+  console.log("   meta:", memMeta);
+  console.log("   _savedAt:", memMeta?._savedAt, "→", memMeta?._savedAt ? new Date(memMeta._savedAt).toLocaleString('pt-BR') : 'sem timestamp');
+
+  console.log("\n📍 CAMADA 2: localStorage");
+  const lsData = JSON.parse(localStorage.getItem("avatim_v5")||"{}");
+  const lsMeta = lsData?.metasLoja?.[lid]?.[mr];
+  console.log("   meta:", lsMeta);
+  console.log("   _savedAt:", lsMeta?._savedAt, "→", lsMeta?._savedAt ? new Date(lsMeta._savedAt).toLocaleString('pt-BR') : 'sem timestamp');
+
+  // CAMADA 3 e 4: ler DIRETO do Firestore SEM merge
+  try{
+    const fbMod = await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
+    const { getDoc, doc } = fbMod;
+    const _db = window._fbDb || (await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js")).getFirestore();
+
+    console.log("\n📍 CAMADA 3: Firestore — doc 'principal' (admin grava aqui)");
+    const snapP = await getDoc(doc(_db, "avatim", "principal"));
+    if(snapP.exists()){
+      const principal = JSON.parse(snapP.data().dados||"{}");
+      const pMeta = principal?.metasLoja?.[lid]?.[mr];
+      console.log("   meta:", pMeta);
+      console.log("   _savedAt:", pMeta?._savedAt, "→", pMeta?._savedAt ? new Date(pMeta._savedAt).toLocaleString('pt-BR') : 'sem timestamp');
+      console.log("   ts doc:", snapP.data().ts, "por:", snapP.data().por);
+    } else {
+      console.log("   ❌ doc 'principal' não existe");
+    }
+
+    console.log("\n📍 CAMADA 4: Firestore — doc 'loja_" + lid + "' (loja grava aqui)");
+    const snapL = await getDoc(doc(_db, "avatim", "loja_"+lid));
+    if(snapL.exists()){
+      const lojaDoc = JSON.parse(snapL.data().dados||"{}");
+      const lMeta = lojaDoc?.metasLoja?.[lid]?.[mr];
+      console.log("   meta:", lMeta);
+      console.log("   _savedAt:", lMeta?._savedAt, "→", lMeta?._savedAt ? new Date(lMeta._savedAt).toLocaleString('pt-BR') : 'sem timestamp');
+      console.log("   ts doc:", snapL.data().ts, "por:", snapL.data().por);
+    } else {
+      console.log("   ❌ doc 'loja_" + lid + "' não existe");
+    }
+
+    console.log("\n📍 CAMADA 5: o que fsCarregar retorna (com merge)");
+    if(window.fsCarregar){
       const fb = await window.fsCarregar();
       if(fb){
         const fbData = JSON.parse(fb);
-        console.log("3. Meta no Firebase (combinado):", fbData.metasLoja?.[lid]?.[mr]);
-      } else {
-        console.log("3. Firebase retornou null");
+        const fbMeta = fbData?.metasLoja?.[lid]?.[mr];
+        console.log("   meta:", fbMeta);
+        console.log("   _savedAt:", fbMeta?._savedAt);
       }
-    }catch(e){
-      console.error("3. Firebase ERRO:", e.message);
     }
-  } else {
-    console.log("3. fsCarregar NÃO disponível");
+  } catch(e){
+    console.error("❌ Erro ao acessar Firestore direto:", e.message);
   }
-  console.log("====================================================");
-  console.log("Se o valor for diferente entre os 3, há bug no fluxo.");
-  console.log("Para corrigir manualmente uma meta agora:");
-  console.log('  D.metasLoja["' + lid + '"]["' + mr + '"] = {mes: 100000, dia: 3334, sem: 25000, ticket: 250, superMes: 125000, superSem: 31250, superDia: 4167, du: 30, sw: 4};');
-  console.log("  await window.fsGravar(JSON.stringify(D));");
+
+  console.log("\n════════════════════════════════════════════════════════════");
+  console.log("📊 ANÁLISE: compare os _savedAt acima");
+  console.log("   Se principal tem _savedAt MENOR que loja_*, o merge faz loja vencer");
+  console.log("   Se principal tem meta antiga, o último save() do admin não chegou");
+  console.log("════════════════════════════════════════════════════════════");
+};
+
+// Função auxiliar: forçar gravação só da meta da loja no principal
+window.forcarMetaPrincipal = async function(lid, valorMes){
+  const mr = mesAtual();
+  const fbMod = await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
+  const { getDoc, setDoc, doc } = fbMod;
+  const _db = window._fbDb;
+
+  const snapP = await getDoc(doc(_db, "avatim", "principal"));
+  if(!snapP.exists()){ console.error("❌ Doc principal não existe"); return; }
+
+  const principal = JSON.parse(snapP.data().dados||"{}");
+  if(!principal.metasLoja) principal.metasLoja = {};
+  if(!principal.metasLoja[lid]) principal.metasLoja[lid] = {};
+
+  const novaMeta = {
+    mes: valorMes,
+    dia: Math.round(valorMes/30),
+    sem: Math.round(valorMes/4),
+    ticket: 150,
+    superMes: Math.round(valorMes*1.255),
+    superSem: Math.round(valorMes*1.255/4),
+    superDia: Math.round(valorMes*1.255/30),
+    du: 30,
+    sw: 4,
+    _savedAt: Date.now()
+  };
+  principal.metasLoja[lid][mr] = novaMeta;
+
+  await setDoc(doc(_db, "avatim", "principal"), {
+    dados: JSON.stringify(principal),
+    ts: Date.now(),
+    por: window._currentUser?.email || "debug"
+  });
+  console.log("✅ Meta forçada no principal:", lid, mr, valorMes);
+  console.log("   Agora recarregue a página em todas as máquinas");
 };
 
 // ── HELPER: verificar tombstone de campanha (suporta array legado e objeto com ts) ─
