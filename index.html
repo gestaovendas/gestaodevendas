@@ -666,11 +666,15 @@ try{
                 if(!base.metasLoja) base.metasLoja={};
                 if(!base.metasLoja[lid]) base.metasLoja[lid]={};
                 Object.entries(pedaco.metasLoja[lid]).forEach(([mr,m])=>{
-                  // [FIX CRÍTICO] Só preencher meses ausentes — o principal já trouxe
-                  // as metas oficiais (admin = fonte de verdade). loja_* só preenche o que falta.
-                  // Bug anterior: sobrescrevia meta nova do admin com meta antiga do loja_*
-                  if(!base.metasLoja[lid][mr] || !base.metasLoja[lid][mr].mes)
-                    base.metasLoja[lid][mr]=m;
+                  // [FIX CRÍTICO] Comparar _savedAt — meta mais recente vence
+                  // (vale para principal vs loja_* — quem tem timestamp maior ganha)
+                  // Antes: só preenchia meses ausentes → admin atualizava no principal
+                  // mas loja_* continuava com meta antiga e nunca era atualizada
+                  const _bMetaL = base.metasLoja[lid][mr];
+                  const _rTsML  = m?._savedAt       || 0;
+                  const _lTsML  = _bMetaL?._savedAt || 0;
+                  if(!_bMetaL || !_bMetaL.mes || _rTsML > _lTsML)
+                    base.metasLoja[lid][mr] = m;
                 });
               }
               console.log("[Avatim] Loja "+lid+" carregada (vendas+metas+vendedoras)");
@@ -11962,10 +11966,13 @@ function iniciarAutoRefresh(){
           Object.entries(remoto.metasLoja).forEach(([lid_m,meses])=>{
             if(!D.metasLoja[lid_m]) D.metasLoja[lid_m]={};
             Object.entries(meses||{}).forEach(([mr,metaObj])=>{
-              // Só aceitar remoto se a loja não salvou meta para este mês
-              // (se a loja salvou, D.metasLoja[lid_m][mr] já existe com valor > 0)
+              // [FIX CRÍTICO] Comparar _savedAt — meta mais recente vence
+              // Antes: se loja tinha meta local (>0), admin NUNCA conseguia atualizar
+              // Bug raiz da reclamação "meta não atualiza ao abrir em outra máquina"
               const localMeta = D.metasLoja[lid_m]?.[mr];
-              if(!localMeta || !localMeta.mes || localMeta.mes <= 0){
+              const _lTs_sl = localMeta?._savedAt || 0;
+              const _rTs_sl = metaObj?._savedAt   || 0;
+              if(!localMeta || !localMeta.mes || localMeta.mes <= 0 || _rTs_sl > _lTs_sl){
                 D.metasLoja[lid_m][mr] = metaObj;
               }
             });
