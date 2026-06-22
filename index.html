@@ -5841,7 +5841,7 @@ function carregarDash(){
   const lojasBase2 = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid);
   let cliHj=0, clinovHj=0;
   lojasBase2.forEach(l=>{
-    D.vendedoras.filter(v=>v.loja===l.id).forEach(v=>{
+    D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false).forEach(v=>{
       cliHj += D.vendasVend[v.id]?.[hj]?.trans || (D.vendasVend[v.id]?.[hj]?.val>0?1:0);
     });
     clinovHj+=(D.vendas[l.id]?.[hj]?.clinov||0);
@@ -6073,7 +6073,7 @@ function renderPainelDia(){
   // Renderizar cards das vendedoras no período
   const grid = document.getElementById('vend-lanc-grid');
   if(grid){
-    const vends = D.vendedoras.filter(v=>v.loja===lid);
+    const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
     if(!vends.length){
       grid.innerHTML = "<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Nenhuma vendedora cadastrada nesta loja.</div>";
     } else {
@@ -6894,7 +6894,7 @@ function renderMetas(){
     // Agrupa por loja
     let html="";
     LOJAS.forEach(lj=>{
-      const vls=D.vendedoras.filter(v=>v.loja===lj.id);
+      const vls=D.vendedoras.filter(v=>v.loja===lj.id && v.ativa!==false);
       if(!vls.length) return;
       const rLoja=_tabMeta==="dia"?calcDia(lj.id):_tabMeta==="semana"?calcSem(lj.id):calcMes(lj.id);
       const mLoja=_tabMeta==="dia"?getMetas(lj.id).dia:_tabMeta==="semana"?getMetas(lj.id).sem:getMetas(lj.id).mes;
@@ -6961,7 +6961,7 @@ function renderMetas(){
         const sm=_tabMeta==="dia"?ml.superDia:_tabMeta==="semana"?ml.superSem:ml.superMes;
         const pl=mt>0?rl/mt*100:0;
         const cl=pl>=120?"var(--roxo)":pl>=100?"var(--verde)":pl>=70?"var(--ouro)":rl>0?"var(--verm)":"var(--muted)";
-        const nv=D.vendedoras.filter(v=>v.loja===l.id).length;
+        const nv=D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false).length;
         totalReal+=rl; totalMeta+=mt;
         return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -7398,7 +7398,7 @@ function preencherSelHistVend(){
   if(!sel) return;
   const vends = isAdmin()
     ? D.vendedoras
-    : D.vendedoras.filter(v=>v.loja===lojaId());
+    : D.vendedoras.filter(v=>v.loja===lojaId() && v.ativa!==false);
   sel.innerHTML = '<option value="">Selecione...</option>'
     + vends.map(v=>`<option value="${v.id}">${v.nome} (${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja})</option>`).join('');
   // pré-selecionar a própria vendedora se for loja
@@ -8306,7 +8306,7 @@ function renderLojas(per="hoje"){
     const alertaTxt = pProj>=120?"🏆 Super Meta!" : pProj>=100?"✅ No ritmo" : pProj>=70?"⚠️ Acelerar" : "🔴 Crítico";
     const alertaCor = pProj>=100?"var(--verde)" : pProj>=70?"var(--ouro)" : "var(--verm)";
     // Soma das vendedoras hoje
-    const somavv = D.vendedoras.filter(v=>v.loja===l.id)
+    const somavv = D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false)
       .reduce((s,v)=>s+(D.vendasVend[v.id]?.[hoje()]?.val||0),0);
     return `<div class="ritem">
       <div class="rpos ${cls[i]}">${i+1}</div>
@@ -10562,15 +10562,34 @@ function limparMetasCorretas(){
 }
 function salvarTodasMetas(){
   let n=0;
+  const _mr = _mesMeta||mesAtual();
   LOJAS.forEach(loja=>{
     const mes=parseBR(document.getElementById("ml-mes-"+loja.id)?.value)||0;
     if(mes>0){
       const smes=parseBR(document.getElementById("ml-smes-"+loja.id)?.value)||Math.round(mes*1.255);
       const ticket=parseBR(document.getElementById("ml-ticket-"+loja.id)?.value)||150;
-      D.metasLoja[loja.id]=calcMetasAuto(mes,ticket,smes);
+      // [FIX CRÍTICO] Usar estrutura {mesRef: meta} — não substituir tudo
+      // Antes: D.metasLoja[loja.id] = calcMetasAuto() destruía meses anteriores
+      // e quebrava toda leitura de meta (que espera lm[mr])
+      if(!D.metasLoja[loja.id]) D.metasLoja[loja.id] = {};
+      const autoMetas = calcMetasAuto(mes,ticket,smes,loja.id);
+      autoMetas._savedAt = Date.now(); // timestamp para sync cross-device
+      D.metasLoja[loja.id][_mr] = autoMetas;
       // [FIX] Distribuir só entre ativas — arquivadas não recebem nova meta
       const vends=vendsAtivas(loja.id);
-      if(vends.length){const mv=Math.round(mes/vends.length);const smv=Math.round(smes/vends.length);vends.forEach(v=>{const i=D.vendedoras.findIndex(x=>x.id===v.id);if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;}});}
+      if(vends.length){
+        const mv=Math.round(mes/vends.length);
+        const smv=Math.round(smes/vends.length);
+        const _ts=Date.now();
+        vends.forEach(v=>{
+          const i=D.vendedoras.findIndex(x=>x.id===v.id);
+          if(i!==-1){
+            D.vendedoras[i].metaMes=mv;
+            D.vendedoras[i].superMetaMes=smv;
+            D.vendedoras[i]._savedAt=_ts; // timestamp para sync
+          }
+        });
+      }
       n++;
     }
   });
@@ -10916,7 +10935,7 @@ async function tabRankPer(per, el, ctx) {
 function calcAno(lid){
   // Soma faturamento do ano corrente via vendasVend
   const ano = hoje().slice(0,4);
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
   let t = 0;
   vends.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
@@ -10941,7 +10960,7 @@ function calcVendAno(vid){
 
 function calcNAtendAno(lid){
   const ano = hoje().slice(0,4);
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
   let n = 0;
   vends.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
@@ -11223,7 +11242,7 @@ function tabRankPerLoja(per, el){
     const sel = document.getElementById('rh-sel-vend');
     if(sel){
       sel.innerHTML = '<option value="">Todas da loja</option>'
-        + D.vendedoras.filter(v=>v.loja===lid)
+        + D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false)
             .map(v=>`<option value="${v.id}">${v.nome}</option>`).join('');
     }
     // datas padrão = mês atual
@@ -11242,7 +11261,7 @@ function tabRankPerLoja(per, el){
     if(per==='ano' && window.fsCarregar){
       const ano = hoje().slice(0,4);
       const lid2 = isAdmin() ? (document.getElementById('sel-loja-rank')?.value||(LOJAS[0]?.id||'')) : lojaId();
-      const temAno = D.vendedoras.filter(v=>v.loja===lid2).some(v=>
+      const temAno = D.vendedoras.filter(v=>v.loja===lid2 && v.ativa!==false).some(v=>
         Object.keys(D.vendasVend[v.id]||{}).some(d=>d.startsWith(ano))
       );
       if(!temAno){
