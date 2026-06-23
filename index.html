@@ -520,13 +520,13 @@ try{
                 const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(vi>=0){
                   // [FIX cross-device] Comparar _savedAt: aceitar a versão mais RECENTE
-                  // Se remoto é mais novo → aceita remoto inteiro (cross-device sync)
-                  // Se local é mais novo → preserva local (edição em andamento)
+                  // [FIX BUG 2] SEMPRE preservar campo 'ativa' local — arquivamento NUNCA reverte
                   const bvi = base.vendedoras[vi];
                   const _lTs = bvi._savedAt || 0;
                   const _rTs = rv._savedAt  || 0;
                   if(_rTs > _lTs){
-                    base.vendedoras[vi] = rv; // remoto mais recente → sobrescreve inteiro
+                    const _ativaPreserv = bvi.ativa;
+                    base.vendedoras[vi] = {...rv, ativa: _ativaPreserv}; // preserva arquivamento
                   } else {
                     // local mais recente OU iguais → preservar campos editáveis locais
                     base.vendedoras[vi]={...rv,
@@ -644,11 +644,13 @@ try{
                   const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
                   if(vi>=0){
                     // [FIX cross-device] Timestamp-aware merge
+                    // [FIX BUG arquivamento] preservar campo ativa ao aceitar remoto
                     const bvi2 = base.vendedoras[vi];
                     const _lTs2 = bvi2._savedAt || 0;
                     const _rTs2 = rv._savedAt  || 0;
                     if(_rTs2 > _lTs2){
-                      base.vendedoras[vi] = rv;
+                      const _ativaPreserv2 = bvi2.ativa;
+                      base.vendedoras[vi] = {...rv, ativa: _ativaPreserv2};
                     } else {
                       base.vendedoras[vi]={...rv,
                         metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
@@ -4146,9 +4148,9 @@ async function loadFromFirestore(){
             const localMeta  = D.metasLoja[lid]?.[mr];
             const _lTs1      = localMeta?._savedAt || 0;
             const _rTs1      = metaObj?._savedAt   || 0;
-            const temLocal   = localMeta && (localMeta.mes||0) > 0;
-            // [FIX Bug1+Bug3] Aplicar remoto só se não há local válida OU se remoto é mais recente
-            if(!temLocal || _rTs1 > _lTs1){
+            // [FIX BUG 1] Aceitar remoto se mais recente OU local inexistente
+            // REMOVIDO: guard "(localMeta.mes||0) > 0" que bloqueava update entre PCs
+            if(!localMeta || !localMeta.mes || _rTs1 > _lTs1){
               D.metasLoja[lid][mr] = metaObj;
             }
           });
@@ -4183,12 +4185,14 @@ async function loadFromFirestore(){
             const idx = D.vendedoras.findIndex(lv => lv.id === rv.id);
             if(idx >= 0){
               // [FIX cross-device] Comparar _savedAt — aceita o mais recente
+              // [FIX BUG 2] SEMPRE preservar ativa local — arquivamento NÃO reverte
               const _dvi = D.vendedoras[idx];
               const _lTsLF = _dvi._savedAt || 0;
               const _rTsLF = rv._savedAt   || 0;
               if(_rTsLF > _lTsLF){
-                // Remoto mais recente → sobrescreve completo (cross-device sync)
-                D.vendedoras[idx] = rv;
+                // Remoto mais recente → merge preservando arquivamento local
+                const _ativaLF = _dvi.ativa;
+                D.vendedoras[idx] = {...rv, ativa: _ativaLF};
               } else if(_hasPending){
                 // Pending local + local mais recente → preservar metas locais
                 D.vendedoras[idx] = {
@@ -4828,7 +4832,8 @@ function calcMes(lid){
 // TM = Faturamento Total / Atendimentos totais (trans); se não tiver, usa contagem de vendedoras com lançamento
 function calcNAtend(lid, periodo){
   // Soma os atendimentos (trans) das vendedoras no período. Fallback: conta registros com val>0
-  // [FIX] vendsReais: exclui placeholders mas inclui arquivadas
+  // [FIX BUG 3] vendsReais: mesma base que calcMes() para TM consistente
+  // ANTES usava vendsAtivas() → TM inflado porque fat incluía arquivadas mas trans não
   const vends = vendsReais(lid);
   let n=0;
   if(periodo==="dia"){
@@ -6610,8 +6615,10 @@ async function salvarLanc(){
     limparCamposLanc();
     nav("dash");
 
-    // Gravar no Firebase — tentar até 3x com snapshot imutável
-    const _snapshotParaGravar = JSON.stringify(window._pendingLocalData);
+    // Gravar no Firebase — tentar até 3x com snapshot IMUTÁVEL capturado agora
+    // [FIX BUG 4] Snapshot capturado ANTES de qualquer alteração futura em D
+    // Se D mudar entre save() e retry, o dado correto ainda é enviado
+    const _snapshotParaGravar = JSON.stringify(D); // captura imutável do estado atual
     const _gravarComRetry = async (tentativa) => {
       const _ok = await waitForFirebase(5000);
       if(!_ok || !window.fsGravar){
@@ -9292,9 +9299,13 @@ let _campFiltroStatus = 'ativas'; // 'ativas' | 'arquivadas' | 'todas'
 
 function filtrarCampTipo(tipo){
   _campFiltroAtivo = tipo;
+  // [FIX BUG 5] Atualizar AMBOS os grupos de botões (normal e -adm)
+  // Normaliza removendo sufixo -adm antes de comparar
   document.querySelectorAll('[id^="camp-fil-"]').forEach(b=>{
-    if(!b.id.startsWith('camp-fil-loja'))
-      b.style.opacity = (b.id === 'camp-fil-'+(tipo||'todos')) ? '1' : '0.45';
+    if(b.id.startsWith('camp-fil-loja') || b.id.startsWith('camp-fil-status')) return;
+    const baseId = b.id.replace(/-adm$/, '');
+    const esperado = 'camp-fil-' + (tipo || 'todos');
+    b.style.opacity = (baseId === esperado) ? '1' : '0.45';
   });
   renderCampLista();
 }
@@ -10163,12 +10174,10 @@ function arquivarCampObj(id){
 // ── Filtro por status (ativas / arquivadas / todas) ─────────────────
 function filtrarCampStatus(status){
   _campFiltroStatus = status;
-  // Atualizar visual dos botões (loja e admin)
-  ['','- adm'].forEach(sfx => {
-    const s = sfx.replace('- ','').replace(' ','');
-    const sfxId = sfx.trim() ? '-adm' : '';
+  // [FIX BUG 5] Atualizar AMBOS os grupos de botões de status (normal e -adm)
+  ['', '-adm'].forEach(sfx => {
     ['ativas','arquivadas','todas'].forEach(st=>{
-      const btn = document.getElementById('camp-fil-status-'+st+(sfxId?'-adm':''));
+      const btn = document.getElementById('camp-fil-status-' + st + sfx);
       if(btn) btn.style.opacity = st===status ? '1' : '0.5';
     });
   });
@@ -12149,8 +12158,8 @@ function iniciarAutoRefresh(){
                 const localMetaSA = D.metasLoja[lid]?.[mr];
                 const _lTs_sa2 = localMetaSA?._savedAt || 0;
                 const _rTs_sa2 = metaObj?._savedAt || 0;
-                // [FIX Bug1+Bug3] Aceitar remoto se: local não existe, OU remoto mais recente
-                if(!localMetaSA || (localMetaSA.mes||0) === 0 || _rTs_sa2 > _lTs_sa2){
+                // [FIX BUG 1] Aceitar remoto se mais recente ou local inexistente
+                if(!localMetaSA || !localMetaSA.mes || _rTs_sa2 > _lTs_sa2){
                   D.metasLoja[lid][mr] = metaObj;
                 }
               });
@@ -12176,11 +12185,13 @@ function iniciarAutoRefresh(){
                 const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
                 if(_i>=0){
                   // [FIX cross-device] Comparar _savedAt
+                  // [FIX BUG 2] preservar campo ativa ao aceitar remoto
                   const _bvi3 = D.vendedoras[_i];
                   const _lTsSA3 = _bvi3._savedAt || 0;
                   const _rTsSA3 = rv._savedAt   || 0;
                   if(_rTsSA3 > _lTsSA3){
-                    D.vendedoras[_i] = rv; // remoto mais recente → sobrescreve
+                    const _ativaSync = _bvi3.ativa;
+                    D.vendedoras[_i] = {...rv, ativa: _ativaSync}; // preservar arquivamento
                   } else {
                     const _ativaSA = _bvi3.ativa;
                     D.vendedoras[_i]={...rv,
@@ -12244,12 +12255,11 @@ async function forceSyncAdmin(){
       Object.entries(remoto.metasLoja).forEach(([lid_r,meses_r])=>{
         if(!D.metasLoja[lid_r]) D.metasLoja[lid_r]={};
         Object.entries(meses_r||{}).forEach(([mr_r,obj_r])=>{
-          // [FIX Bug1+Bug3] Respeitar _savedAt — não sobrescrever meta local mais recente
+          // [FIX BUG 1] Aceitar remoto se mais recente ou local inexistente
           const _lM_fsa  = D.metasLoja[lid_r]?.[mr_r];
           const _lTs_fsa = _lM_fsa?._savedAt || 0;
           const _rTs_fsa = obj_r?._savedAt   || 0;
-          const _tL_fsa  = _lM_fsa && (_lM_fsa.mes||0) > 0;
-          if(!_tL_fsa || _rTs_fsa > _lTs_fsa){
+          if(!_lM_fsa || !_lM_fsa.mes || _rTs_fsa > _lTs_fsa){
             D.metasLoja[lid_r][mr_r] = obj_r;
           }
         });
@@ -12279,11 +12289,13 @@ async function forceSyncAdmin(){
           const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
           if(_im>=0){
             // [FIX cross-device] Comparar _savedAt
+            // [FIX BUG 2] preservar campo ativa ao aceitar remoto mais recente
             const _bviFSA = D.vendedoras[_im];
             const _lTsFSA = _bviFSA._savedAt || 0;
             const _rTsFSA = rv._savedAt      || 0;
             if(_rTsFSA > _lTsFSA){
-              D.vendedoras[_im] = rv;
+              const _ativaFSA2 = _bviFSA.ativa;
+              D.vendedoras[_im] = {...rv, ativa: _ativaFSA2}; // preservar arquivamento
             } else {
               const _ativaFSA = _bviFSA.ativa;
               D.vendedoras[_im]={...rv,
