@@ -529,6 +529,9 @@ try{
                     base.vendedoras[vi] = {...rv, ativa: _ativaPreserv}; // preserva arquivamento
                   } else {
                     // local mais recente OU iguais → preservar campos editáveis locais
+                    // [FIX BUG META] mas APENAS se remoto NÃO tiver timestamp maior — comparar pré-merge
+                    // Se _rTs > _lTs, esse else NÃO executa (vai pro if acima)
+                    // Aqui local é mais recente, então preserva local
                     base.vendedoras[vi]={...rv,
                       metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
                       superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
@@ -3764,6 +3767,46 @@ if(!D.vendedoras) D.vendedoras=[];
     });
     localStorage.setItem("avatim_v5", JSON.stringify(D));
     console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedoras fantasmas (padrão antigo). Tombstones criados.");
+  }
+})();
+
+// [FIX BUG META MAIO/JUNHO] Migração: recalcular metaMes das vendedoras a partir da meta da loja
+// Cenário: até agora, salvarMetaLoja não redistribuía metaMes se vendedoras já tinham valor.
+// Resultado: cache local podia ter metaMes de meses anteriores que NÃO bate com a meta atual da loja.
+// Esta migração detecta divergência e recalcula automaticamente.
+(function migrarMetasVendedoras(){
+  const mr = (new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0'));
+  let corrigidas = 0;
+  Object.entries(D.metasLoja||{}).forEach(([lid, meses])=>{
+    const metaMesLoja = meses?.[mr]?.mes;
+    if(!metaMesLoja || metaMesLoja <= 0) return;
+    const vendsLoja = (D.vendedoras||[]).filter(v=>v.loja===lid && v.ativa!==false);
+    if(!vendsLoja.length) return;
+    // Soma das metaMes individuais
+    const somaMetaIndividual = vendsLoja.reduce((s,v)=>s+(Number(v.metaMes)||0), 0);
+    // Se soma diverge da meta da loja em mais de 1% → redistribuir
+    if(Math.abs(somaMetaIndividual - metaMesLoja) / metaMesLoja > 0.01){
+      const mv = parseFloat((metaMesLoja / vendsLoja.length).toFixed(2));
+      const superMesLoja = meses[mr].superMes || metaMesLoja * 1.255;
+      const smv = parseFloat((superMesLoja / vendsLoja.length).toFixed(2));
+      const _ts = Date.now();
+      vendsLoja.forEach(v=>{
+        const i = D.vendedoras.findIndex(x=>x.id===v.id);
+        if(i !== -1){
+          D.vendedoras[i].metaMes = mv;
+          D.vendedoras[i].superMetaMes = smv;
+          D.vendedoras[i]._savedAt = _ts;
+          corrigidas++;
+        }
+      });
+      console.warn("[Avatim MIGRAÇÃO META]", lid, ": meta loja R$"+metaMesLoja+
+        " | soma antiga: R$"+somaMetaIndividual.toFixed(2)+
+        " → redistribuída: R$"+mv+" × "+vendsLoja.length+" vendedoras");
+    }
+  });
+  if(corrigidas > 0){
+    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    console.warn("[Avatim MIGRAÇÃO META] Total corrigido: "+corrigidas+" vendedoras");
   }
 })();
 if(!D.vendasVend) D.vendasVend={};
@@ -10554,16 +10597,28 @@ function salvarMetaLoja(lid){
       }
     });
   } else {
-    // Campos não visíveis — distribuir apenas no primeiro setup, só entre ativas
-    const temMetas = vendsAtivas(lid).some(v=>v.metaMes && Number(v.metaMes)>0);
-    if(!temMetas && vendsAtivas(lid).length>0){
-      const _vr=vendsAtivas(lid);
-      const mv=parseFloat((mes/_vr.length).toFixed(2));
-      const smv=parseFloat((smes/_vr.length).toFixed(2));
+    // Campos não visíveis — RECALCULAR e distribuir entre vendedoras ativas
+    // [FIX BUG META MAIO/JUNHO] Antes: só distribuía no primeiro setup
+    // (se alguma vendedora já tivesse metaMes > 0, NÃO redistribuía)
+    // Resultado: ao editar meta da loja em junho, metaMes ficava com valor de maio
+    //
+    // Agora: SEMPRE redistribui quando a meta da loja é alterada — pois a meta
+    // da loja é fonte de verdade. Vendedoras herdam proporcionalmente.
+    const _vr = vendsAtivas(lid);
+    if(_vr.length > 0){
+      const mv = parseFloat((mes/_vr.length).toFixed(2));
+      const smv = parseFloat((smes/_vr.length).toFixed(2));
       const _tsB = Date.now();
       _vr.forEach(v=>{
-        const i=D.vendedoras.findIndex(x=>x.id===v.id);
-        if(i!==-1){D.vendedoras[i].metaMes=mv;D.vendedoras[i].superMetaMes=smv;D.vendedoras[i]._savedAt=_tsB;somaMes+=mv;somaSmes+=smv;nVend++;}
+        const i = D.vendedoras.findIndex(x=>x.id===v.id);
+        if(i !== -1){
+          D.vendedoras[i].metaMes = mv;
+          D.vendedoras[i].superMetaMes = smv;
+          D.vendedoras[i]._savedAt = _tsB; // timestamp para sync cross-device
+          somaMes += mv;
+          somaSmes += smv;
+          nVend++;
+        }
       });
     }
   }
