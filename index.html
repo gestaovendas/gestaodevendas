@@ -1231,6 +1231,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="sb-lbl">Analise</div>
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
+    <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">&#127970;</span>Prospec&ccedil;&atilde;o B2B</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
     <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
@@ -1828,6 +1829,127 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
     <div id="fluxo-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
       Nenhum registro ainda. Clique em <strong>+ Registrar Cliente</strong> para começar.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════
+     PROSPECÇÃO B2B — captação de empresas (corporativo, eventos, kits)
+     ════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-prospec">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Prospec&ccedil;&atilde;o <span>B2B</span></h1>
+      <div class="ps">Captação de empresas — registre o contato, status e conversão em reunião</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn-p" onclick="toggleFormProspec()">+ Nova Prospec&ccedil;&atilde;o</button>
+    </div>
+  </div>
+
+  <!-- Formulário (oculto por padrão) -->
+  <div id="form-prospec" class="sc" style="display:none;margin-bottom:16px">
+    <div class="st">Registrar Prospec&ccedil;&atilde;o de Empresa</div>
+    <div class="gr">
+      <div class="ig"><label>Empresa <span style="color:var(--verm)">*</span></label>
+        <input type="text" id="pr-empresa" placeholder="Ex: Hospital São Luiz">
+      </div>
+      <div class="ig"><label>Pessoa de Contato <span style="color:var(--verm)">*</span></label>
+        <input type="text" id="pr-contato" placeholder="Ex: Ana Beatriz Silva">
+      </div>
+      <div class="ig"><label>Cargo</label>
+        <input type="text" id="pr-cargo" placeholder="Ex: RH, Eventos, Diretora">
+      </div>
+      <div class="ig"><label>Telefone / E-mail</label>
+        <input type="text" id="pr-tel" placeholder="(11) 99999-9999 ou email@empresa.com">
+      </div>
+      <div class="ig"><label>Data do Contato</label>
+        <input type="date" id="pr-data">
+      </div>
+      <div class="ig"><label>Loja respons&aacute;vel</label>
+        <select id="pr-loja">
+          <option value="mooca">Mooca Plaza</option>
+          <option value="leopoldina">Vila Leopoldina</option>
+          <option value="perdizes">Perdizes</option>
+          <option value="santana">Santana</option>
+          <option value="jarpaul">Jardim Paulista</option>
+          <option value="pinheiros">Alto de Pinheiros</option>
+          <option value="ibirapuera">Shopping Ibirapuera</option>
+        </select>
+      </div>
+      <div class="ig"><label>Vendedora respons&aacute;vel</label>
+        <select id="pr-vend"><option value="">Selecione...</option></select>
+      </div>
+      <div class="ig"><label>Status da resposta <span style="color:var(--verm)">*</span></label>
+        <select id="pr-status">
+          <option value="aguardando">⏳ Aguardando resposta</option>
+          <option value="sim">✅ SIM — interessado</option>
+          <option value="nao">❌ NÃO — não interessado</option>
+        </select>
+      </div>
+      <div class="ig"><label>Reuni&atilde;o marcada</label>
+        <select id="pr-reuniao" onchange="toggleProspecReuniao()">
+          <option value="nao">Não marcada ainda</option>
+          <option value="sim">✅ Marcada</option>
+          <option value="realizada">✔️ Já realizada</option>
+        </select>
+      </div>
+      <div class="ig" id="pr-reuniao-data-wrap" style="display:none">
+        <label>Data da reuni&atilde;o</label>
+        <input type="date" id="pr-reuniao-data">
+      </div>
+      <div class="ig" style="grid-column:1/-1"><label>Observa&ccedil;&otilde;es</label>
+        <input type="text" id="pr-obs" placeholder="Ex: empresa com 200 funcionários, interessada em kits de aniversário">
+      </div>
+    </div>
+    <div class="btn-r">
+      <button class="btn-p" onclick="salvarProspec()">Salvar</button>
+      <button class="btn-s" onclick="toggleFormProspec()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- Filtros e período -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <div class="tabs" style="margin:0">
+      <button class="tab active" onclick="tabProspec('mes',this)">Este M&ecirc;s</button>
+      <button class="tab" onclick="tabProspec('semana',this)">Esta Semana</button>
+      <button class="tab" onclick="tabProspec('tudo',this)">Tudo</button>
+    </div>
+    <div class="tabs" style="margin:0">
+      <button class="tab active" onclick="filtroStatusProspec('todos',this)">Todos</button>
+      <button class="tab" onclick="filtroStatusProspec('aguardando',this)">⏳ Aguardando</button>
+      <button class="tab" onclick="filtroStatusProspec('sim',this)">✅ Sim</button>
+      <button class="tab" onclick="filtroStatusProspec('nao',this)">❌ Não</button>
+    </div>
+    <div id="pr-filtro-loja" style="display:none">
+      <select id="pr-sel-loja" onchange="renderProspec()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+        <option value="">Todas as lojas</option>
+        <option value="mooca">Mooca Plaza</option>
+        <option value="leopoldina">Vila Leopoldina</option>
+        <option value="perdizes">Perdizes</option>
+        <option value="santana">Santana</option>
+        <option value="jarpaul">Jardim Paulista</option>
+        <option value="pinheiros">Alto de Pinheiros</option>
+        <option value="ibirapuera">Shopping Ibirapuera</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kgrid" id="prospec-kpis" style="margin-bottom:16px"></div>
+
+  <!-- Lista de prospecções -->
+  <div class="sc">
+    <div class="st">📋 Prospec&ccedil;&otilde;es Registradas</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Data</th><th>Empresa</th><th>Contato</th><th>Cargo</th><th>Status</th><th>Reuni&atilde;o</th><th>Vendedora</th><th>Loja</th><th></th></tr></thead>
+        <tbody id="tbody-prospec"></tbody>
+      </table>
+    </div>
+    <div id="prospec-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Nenhuma prospec&ccedil;&atilde;o registrada. Clique em <strong>+ Nova Prospec&ccedil;&atilde;o</strong> para come&ccedil;ar.
     </div>
   </div>
 </div>
@@ -3819,6 +3941,7 @@ if(!D.metasProd)  D.metasProd=[];
 if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
+if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 // ============================================================
 // LIMPEZA AUTOMÁTICA DE DADOS CORROMPIDOS
 // Detecta metas salvas com bug decimal antigo e descarta
@@ -5272,7 +5395,19 @@ function nav(pg){
       }
     },
     fluxo:renderFluxo,metaslojas:()=>{_metaNavAtiva=false;renderMetasLojas();},
-    gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},lanc:()=>{
+    gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},
+    prospec:()=>{
+      // [NEW] Prospecção B2B
+      const dEl = document.getElementById('pr-data');
+      if(dEl && !dEl.value) dEl.value = hoje();
+      // Mostrar filtro de loja só para admin
+      const fl = document.getElementById('pr-filtro-loja');
+      if(fl) fl.style.display = isAdmin() ? 'block' : 'none';
+      // Preencher select de vendedoras
+      preencherSelectProspec();
+      renderProspec();
+    },
+    lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
       const lDataEl=document.getElementById('l-data');
       if(lDataEl) lDataEl.value=hoje();
@@ -14984,6 +15119,232 @@ function _tabelaParaPDF(html){
     .replace(/<button[^>]*>[\s\S]*?<\/button>/g, '')
     .replace(/<input[^>]*>/g, '');
 }
+
+// ════════════════════════════════════════════════════════════════════
+// PROSPECÇÃO B2B — captação de empresas
+// ════════════════════════════════════════════════════════════════════
+let _tabProspec = 'mes';
+let _filtroStatusProspec = 'todos';
+
+function toggleFormProspec(){
+  const f = document.getElementById('form-prospec');
+  if(!f) return;
+  const visible = f.style.display !== 'none';
+  f.style.display = visible ? 'none' : 'block';
+  if(!visible){
+    // Limpar campos ao abrir
+    ['pr-empresa','pr-contato','pr-cargo','pr-tel','pr-obs','pr-reuniao-data'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+    const dEl = document.getElementById('pr-data');
+    if(dEl) dEl.value = hoje();
+    const sEl = document.getElementById('pr-status');
+    if(sEl) sEl.value = 'aguardando';
+    const rEl = document.getElementById('pr-reuniao');
+    if(rEl) rEl.value = 'nao';
+    toggleProspecReuniao();
+    // Loja: travar no próprio lid
+    const ljEl = document.getElementById('pr-loja');
+    if(ljEl){
+      if(!isAdmin()){ ljEl.value = lojaId(); ljEl.disabled = true; }
+      else ljEl.disabled = false;
+    }
+    preencherSelectProspec();
+  }
+}
+
+function toggleProspecReuniao(){
+  const sel = document.getElementById('pr-reuniao')?.value;
+  const wrap = document.getElementById('pr-reuniao-data-wrap');
+  if(wrap) wrap.style.display = (sel === 'sim' || sel === 'realizada') ? 'block' : 'none';
+}
+
+function preencherSelectProspec(){
+  const sel = document.getElementById('pr-vend');
+  if(!sel) return;
+  const lid = isAdmin() ? (document.getElementById('pr-loja')?.value || lojaId()) : lojaId();
+  const vends = vendsAtivas(lid);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    vends.map(v=>`<option value="${v.id}">${v.nome}</option>`).join('');
+}
+
+function salvarProspec(){
+  const empresa = document.getElementById('pr-empresa')?.value.trim();
+  const contato = document.getElementById('pr-contato')?.value.trim();
+  if(!empresa){ showToast('Informe o nome da empresa!','err'); return; }
+  if(!contato){ showToast('Informe a pessoa de contato!','err'); return; }
+
+  const cargo   = document.getElementById('pr-cargo')?.value.trim() || '';
+  const tel     = document.getElementById('pr-tel')?.value.trim() || '';
+  const data    = document.getElementById('pr-data')?.value || hoje();
+  const loja    = document.getElementById('pr-loja')?.value || lojaId();
+  const vendId  = document.getElementById('pr-vend')?.value || '';
+  const status  = document.getElementById('pr-status')?.value || 'aguardando';
+  const reuniao = document.getElementById('pr-reuniao')?.value || 'nao';
+  const reuniaoData = document.getElementById('pr-reuniao-data')?.value || '';
+  const obs     = document.getElementById('pr-obs')?.value.trim() || '';
+
+  const _ts = Date.now();
+  if(!D.prospeccoes) D.prospeccoes = [];
+  D.prospeccoes.push({
+    id: 'pr_' + _ts,
+    empresa, contato, cargo, tel, data, loja, vendId,
+    status, reuniao, reuniaoData, obs,
+    ts: _ts,
+    _savedAt: _ts // para sync cross-device
+  });
+
+  save();
+  showToast('Prospec\u00e7\u00e3o registrada!');
+  toggleFormProspec();
+  renderProspec();
+}
+
+function tabProspec(per, btn){
+  _tabProspec = per;
+  if(btn){
+    btn.parentNode.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  renderProspec();
+}
+
+function filtroStatusProspec(st, btn){
+  _filtroStatusProspec = st;
+  if(btn){
+    btn.parentNode.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  renderProspec();
+}
+
+function excluirProspec(id){
+  if(!confirm('Excluir esta prospec\u00e7\u00e3o?')) return;
+  D.prospeccoes = (D.prospeccoes||[]).filter(p=>p.id!==id);
+  save();
+  renderProspec();
+  showToast('Prospec\u00e7\u00e3o exclu\u00edda');
+}
+
+function _filtrarProspeccoes(){
+  const hj = hoje();
+  const mes = hj.slice(0,7);
+  // semana ISO simples — segunda a domingo da data atual
+  const d = new Date(hj+'T12:00:00');
+  const dia = d.getDay() || 7;
+  const seg = new Date(d); seg.setDate(d.getDate() - (dia-1));
+  const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+  const ini = seg.toISOString().slice(0,10);
+  const fim = dom.toISOString().slice(0,10);
+
+  const lojaFiltro = document.getElementById('pr-sel-loja')?.value || '';
+  const lid = lojaId();
+  return (D.prospeccoes||[]).filter(p=>{
+    // Loja: só vê suas próprias
+    if(!isAdmin() && p.loja !== lid) return false;
+    // Admin: filtro opcional por loja
+    if(isAdmin() && lojaFiltro && p.loja !== lojaFiltro) return false;
+    // Filtro por período
+    if(_tabProspec === 'mes' && !p.data.startsWith(mes)) return false;
+    if(_tabProspec === 'semana' && (p.data < ini || p.data > fim)) return false;
+    // Filtro por status
+    if(_filtroStatusProspec !== 'todos' && p.status !== _filtroStatusProspec) return false;
+    return true;
+  }).sort((a,b)=>b.ts - a.ts);
+}
+
+function renderProspec(){
+  const lista = _filtrarProspeccoes();
+
+  // KPIs
+  const kpis = document.getElementById('prospec-kpis');
+  if(kpis){
+    const total = lista.length;
+    const sim   = lista.filter(p=>p.status==='sim').length;
+    const nao   = lista.filter(p=>p.status==='nao').length;
+    const aguard= lista.filter(p=>p.status==='aguardando').length;
+    const reunMarcadas = lista.filter(p=>p.reuniao==='sim' || p.reuniao==='realizada').length;
+    const taxaConv = total>0 ? (sim/total*100).toFixed(1) : '0.0';
+    kpis.innerHTML = `
+      <div class="kbox"><div class="kn">${total}</div><div class="kl">Total</div></div>
+      <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+        <div class="kn" style="color:var(--verde)">${sim}</div>
+        <div class="kl">✅ Sim</div>
+      </div>
+      <div class="kbox" style="border-color:rgba(220,53,69,.3)">
+        <div class="kn" style="color:var(--verm)">${nao}</div>
+        <div class="kl">❌ Não</div>
+      </div>
+      <div class="kbox" style="border-color:rgba(201,168,76,.3)">
+        <div class="kn" style="color:var(--ouro)">${aguard}</div>
+        <div class="kl">⏳ Aguardando</div>
+      </div>
+      <div class="kbox" style="border-color:rgba(91,141,239,.3)">
+        <div class="kn" style="color:var(--azul)">${reunMarcadas}</div>
+        <div class="kl">📅 Reuniões</div>
+      </div>
+      <div class="kbox">
+        <div class="kn">${taxaConv}%</div>
+        <div class="kl">Taxa de conversão</div>
+      </div>`;
+  }
+
+  // Tabela
+  const tb = document.getElementById('tbody-prospec');
+  const empty = document.getElementById('prospec-empty');
+  if(!tb) return;
+  if(!lista.length){
+    tb.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
+  const statusBadge = (st)=>{
+    if(st==='sim')  return '<span style="background:rgba(46,204,135,.15);color:var(--verde);padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700">✅ SIM</span>';
+    if(st==='nao')  return '<span style="background:rgba(220,53,69,.15);color:var(--verm);padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700">❌ NÃO</span>';
+    return '<span style="background:rgba(201,168,76,.15);color:var(--ouro);padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700">⏳ AGUARDANDO</span>';
+  };
+  const reuniaoBadge = (p)=>{
+    if(p.reuniao==='realizada') return '<span style="color:var(--verde);font-weight:600">✔️ Realizada</span>' + (p.reuniaoData?'<br><span style="font-size:9px;color:var(--muted)">'+brData(p.reuniaoData)+'</span>':'');
+    if(p.reuniao==='sim')       return '<span style="color:var(--azul);font-weight:600">📅 Marcada</span>' + (p.reuniaoData?'<br><span style="font-size:9px;color:var(--muted)">'+brData(p.reuniaoData)+'</span>':'');
+    return '<span style="color:var(--muted)">—</span>';
+  };
+  const vendNome = (vid)=>{
+    if(!vid) return '<span style="color:var(--muted)">—</span>';
+    const v = D.vendedoras.find(x=>x.id===vid);
+    return v ? v.nome : '<span style="color:var(--muted)">?</span>';
+  };
+  const lojaNome = (lid)=>{
+    const L = LOJAS.find(l=>l.id===lid);
+    return L ? L.nome : lid;
+  };
+
+  tb.innerHTML = lista.map(p=>`
+    <tr>
+      <td style="font-size:11px">${brData(p.data)}</td>
+      <td><strong>${p.empresa||'—'}</strong>${p.obs?'<br><span style="font-size:9px;color:var(--muted);font-style:italic">'+p.obs+'</span>':''}</td>
+      <td>${p.contato||'—'}${p.tel?'<br><span style="font-size:9px;color:var(--muted)">'+p.tel+'</span>':''}</td>
+      <td style="font-size:11px">${p.cargo||'<span style="color:var(--muted)">—</span>'}</td>
+      <td>${statusBadge(p.status)}</td>
+      <td>${reuniaoBadge(p)}</td>
+      <td style="font-size:11px">${vendNome(p.vendId)}</td>
+      <td style="font-size:11px">${lojaNome(p.loja)}</td>
+      <td><button onclick="excluirProspec('${p.id}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
+    </tr>
+  `).join('');
+}
+
+// Helper de formatação BR de data — caso brData não exista globalmente
+if(typeof brData !== 'function'){
+  window.brData = function(d){
+    if(!d) return '';
+    const [y,m,dd] = d.split('-');
+    return dd+'/'+m+'/'+y;
+  };
+}
+
 </script>
 </body>
 </html>
