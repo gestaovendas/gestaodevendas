@@ -1231,7 +1231,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="sb-lbl">Analise</div>
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
-    <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">&#127970;</span>Prospec&ccedil;&atilde;o B2B</button>
+    <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
+    <button class="ni" onclick="nav('historicoanu')" id="nav-historicoanu"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
     <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
@@ -1951,6 +1953,75 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="prospec-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
       Nenhuma prospec&ccedil;&atilde;o registrada. Clique em <strong>+ Nova Prospec&ccedil;&atilde;o</strong> para come&ccedil;ar.
     </div>
+  </div>
+</div>
+
+
+<!-- MÊS ANTERIOR — performance do mês passado -->
+<div class="page" id="page-mesant">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Mês <span>Anterior</span></h1>
+      <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
+    </div>
+  </div>
+
+  <!-- Cards resumo -->
+  <div class="kgrid" id="mesant-kpis" style="margin-bottom:16px"></div>
+
+  <!-- Tabela por loja -->
+  <div class="sc">
+    <div class="st">📊 Performance por Loja</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th></tr></thead>
+        <tbody id="tbody-mesant"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- HISTÓRICO ANUAL — 2021 até agora, mês a mês -->
+<div class="page" id="page-historicoanu">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Histórico <span>Anual</span></h1>
+      <div class="ps">Performance mês a mês desde 2021 — consolidado das 7 lojas</div>
+    </div>
+  </div>
+
+  <!-- Filtro de ano -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <label style="font-size:12px;font-weight:600">Ano:</label>
+    <select id="hanu-ano" onchange="renderHistoricoAnual()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="2021">2021</option>
+      <option value="2022">2022</option>
+      <option value="2023">2023</option>
+      <option value="2024">2024</option>
+      <option value="2025">2025</option>
+      <option value="2026" selected>2026</option>
+    </select>
+  </div>
+
+  <!-- Tabela histórico -->
+  <div class="sc">
+    <div class="st">📋 Mês a Mês</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Mês</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th></tr></thead>
+        <tbody id="tbody-historicoanu"></tbody>
+      </table>
+    </div>
+    <div id="historicoanu-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Sem dados para este período.
+    </div>
+  </div>
+
+  <!-- Gráfico de evolução -->
+  <div class="sc" style="margin-top:16px">
+    <div class="st">📈 Evolução Meta vs Realizado</div>
+    <div id="historicoanu-chart" style="height:250px;display:flex;align-items:flex-end;gap:4px;padding:16px;background:rgba(91,141,239,.05);border-radius:8px">--</div>
   </div>
 </div>
 
@@ -4317,6 +4388,8 @@ async function loadFromFirestore(){
             // [FIX BUG 1] Aceitar remoto se mais recente OU local inexistente
             // REMOVIDO: guard "(localMeta.mes||0) > 0" que bloqueava update entre PCs
             if(!localMeta || !localMeta.mes || _rTs1 > _lTs1){
+              // [FIX] garantir _savedAt mesmo que Firebase não tenha (retrocompat)
+              if(metaObj && !metaObj._savedAt) metaObj._savedAt = _rTs1 || Date.now();
               D.metasLoja[lid][mr] = metaObj;
             }
           });
@@ -5406,6 +5479,16 @@ function nav(pg){
       // Preencher select de vendedoras
       preencherSelectProspec();
       renderProspec();
+    },
+    mesant:()=>{
+      // [NEW] Mês Anterior
+      renderMesAnterior();
+    },
+    historicoanu:()=>{
+      // [NEW] Histórico Anual
+      const selAno = document.getElementById('hanu-ano');
+      if(selAno && !selAno.value) selAno.value = '2026';
+      renderHistoricoAnual();
     },
     lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
@@ -15344,6 +15427,188 @@ if(typeof brData !== 'function'){
     return dd+'/'+m+'/'+y;
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
+// ════════════════════════════════════════════════════════════════════
+function renderMesAnterior(){
+  const hj = hoje();
+  const [yyyy, mm, dd] = hj.split('-');
+  let mesAnterior, anoAnterior;
+  const mesNum = parseInt(mm);
+  if(mesNum === 1){
+    anoAnterior = parseInt(yyyy) - 1;
+    mesAnterior = '12';
+  } else {
+    anoAnterior = parseInt(yyyy);
+    mesAnterior = String(mesNum - 1).padStart(2, '0');
+  }
+  const mesRef = anoAnterior + '-' + mesAnterior;
+  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(mesAnterior)];
+  
+  // Titulo
+  const titulo = document.getElementById('mesant-titulo');
+  if(titulo) titulo.textContent = `Performance de ${mesNome}/${anoAnterior}`;
+
+  // Cálculos por loja
+  const dados = LOJAS.map(loja=>{
+    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const fat = calcMesRef(loja.id, mesRef) || 0;
+    const nVendas = countVendasRef(loja.id, mesRef);
+    const tm = nVendas > 0 ? fat / nVendas : 0;
+    const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
+    return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta };
+  });
+
+  // KPIs consolidados
+  const kpis = document.getElementById('mesant-kpis');
+  if(kpis){
+    const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
+    const totFat = dados.reduce((s, d)=>s+d.fat, 0);
+    const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
+    const totTm = totVendas > 0 ? totFat / totVendas : 0;
+    const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
+    kpis.innerHTML = `
+      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+      <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+        <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
+        <div class="kl">Realizado</div>
+      </div>
+      <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
+      <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
+    `;
+  }
+
+  // Tabela
+  const tb = document.getElementById('tbody-mesant');
+  if(tb){
+    tb.innerHTML = dados.map(d=>`
+      <tr>
+        <td><strong>${d.loja}</strong></td>
+        <td>R$ ${fmt(d.meta)}</td>
+        <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
+        <td>${d.pctMeta.toFixed(1)}%</td>
+        <td>R$ ${fmt(d.tm)}</td>
+        <td>${d.nVendas}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// HISTÓRICO ANUAL — 2021 até agora, mês a mês
+// ════════════════════════════════════════════════════════════════════
+function renderHistoricoAnual(){
+  const anoSel = document.getElementById('hanu-ano')?.value || '2026';
+  const ano = parseInt(anoSel);
+  
+  // Meses de 2026: só até o atual
+  const hj = hoje();
+  const mesAtual = parseInt(hj.split('-')[1]);
+  const mesMax = ano === parseInt(hj.split('-')[0]) ? mesAtual : 12;
+  
+  // Gerar dados para cada mês
+  const dados = [];
+  for(let m = 1; m <= mesMax; m++){
+    const mesRef = ano + '-' + String(m).padStart(2, '0');
+    const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m];
+    
+    // Consolidado de todas as 7 lojas
+    let totMeta = 0, totFat = 0, totVendas = 0;
+    LOJAS.forEach(loja=>{
+      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const fat = calcMesRef(loja.id, mesRef) || 0;
+      const nVendas = countVendasRef(loja.id, mesRef);
+      totMeta += meta;
+      totFat += fat;
+      totVendas += nVendas;
+    });
+    
+    const tm = totVendas > 0 ? totFat / totVendas : 0;
+    const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
+    dados.push({ mesRef, mesNome, totMeta, totFat, tm, totVendas, pctMeta });
+  }
+  
+  // Tabela
+  const tb = document.getElementById('tbody-historicoanu');
+  const empty = document.getElementById('historicoanu-empty');
+  if(!dados.length){
+    if(tb) tb.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+  
+  if(tb){
+    tb.innerHTML = dados.map(d=>`
+      <tr>
+        <td><strong>${d.mesNome}/${ano}</strong></td>
+        <td>R$ ${fmt(d.totMeta)}</td>
+        <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.totFat)}</td>
+        <td>${d.pctMeta.toFixed(1)}%</td>
+        <td>R$ ${fmt(d.tm)}</td>
+        <td>${d.totVendas}</td>
+      </tr>
+    `).join('');
+  }
+  
+  // Gráfico simples (barras de altura proporcional)
+  const chart = document.getElementById('historicoanu-chart');
+  if(chart){
+    const maxFat = Math.max(...dados.map(d=>d.totFat), 1);
+    chart.innerHTML = dados.map(d=>{
+      const altMeta = (d.totMeta / maxFat * 100) + '%';
+      const altFat = (d.totFat / maxFat * 100) + '%';
+      return `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
+          <div style="display:flex;gap:2px;height:100%;align-items:flex-end">
+            <div style="width:40%;background:rgba(201,168,76,.4);height:${altMeta};border-radius:2px" title="Meta: R$ ${fmt(d.totMeta)}"></div>
+            <div style="width:40%;background:rgba(46,204,135,.6);height:${altFat};border-radius:2px" title="Real: R$ ${fmt(d.totFat)}"></div>
+          </div>
+          <div style="font-size:9px;font-weight:600;margin-top:4px">${d.mesNome}</div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Helpers para cálculos históricos
+// ════════════════════════════════════════════════════════════════════
+function getMetas(lid, mesRef){
+  if(!mesRef) mesRef = mesAtual();
+  return D.metasLoja?.[lid]?.[mesRef] || {};
+}
+function calcMesRef(lid, mesRef){
+  if(!mesRef) mesRef = mesAtual();
+  let soma = 0;
+  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
+    if(dt.startsWith(mesRef)){
+      Object.values(vendas).forEach(v=>{
+        soma += Number(v?.val||0);
+      });
+    }
+  });
+  return soma;
+}
+function countVendasRef(lid, mesRef){
+  if(!mesRef) mesRef = mesAtual();
+  let count = 0;
+  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
+    if(dt.startsWith(mesRef)){
+      Object.values(vendas).forEach(v=>{
+        if(Number(v?.val||0) > 0) count++;
+      });
+    }
+  });
+  return count;
+}
+function mesAtual(){
+  const hj = hoje();
+  return hj.slice(0, 7);
+}
+
 
 </script>
 </body>
