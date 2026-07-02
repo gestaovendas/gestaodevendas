@@ -1360,6 +1360,15 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         </div>
       </div>
 
+      <!-- Mês Anterior (widget no Dashboard) -->
+      <div class="rcard" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600">📈 Mês Anterior</div>
+          <button onclick="nav('mesant')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver análise</button>
+        </div>
+        <div id="mesant-dash-widget" style="display:grid;gap:8px;grid-template-columns:repeat(2,1fr)">--</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -1965,6 +1974,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <h1 class="pt">Mês <span>Anterior</span></h1>
       <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
     </div>
+  </div>
+
+  <!-- Filtro de loja -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <label style="font-size:12px;font-weight:600">Loja:</label>
+    <select id="mesant-loja" onchange="renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="">📊 Todas as Lojas</option>
+      <option value="mooca">🏪 Mooca Plaza</option>
+      <option value="leopoldina">🏪 Vila Leopoldina</option>
+      <option value="perdizes">🏪 Perdizes</option>
+      <option value="santana">🏪 Santana</option>
+      <option value="jarpaul">🏪 Jardim Paulista</option>
+      <option value="pinheiros">🏪 Alto de Pinheiros</option>
+      <option value="ibirapuera">🏪 Shopping Ibirapuera</option>
+    </select>
   </div>
 
   <!-- Cards resumo -->
@@ -6179,6 +6203,9 @@ function gerarDiagnostico(){
       </div>
     `;
   }
+
+  // [NEW] Renderizar widget de Mês Anterior
+  renderMesAnteriorDashboard();
 
   showToast('✅ Diagnóstico atualizado!');
 }
@@ -15539,57 +15566,112 @@ function renderMesAnterior(){
   const mesRef = anoAnterior + '-' + mesAnterior;
   const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(mesAnterior)];
   
-  // Titulo
+  // Filtro de loja
+  const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
   const titulo = document.getElementById('mesant-titulo');
-  if(titulo) titulo.textContent = `Performance de ${mesNome}/${anoAnterior}`;
-
-  // Cálculos por loja
-  const dados = LOJAS.map(loja=>{
+  
+  if(lojaFiltro){
+    // Modo: uma loja específica
+    const loja = LOJAS.find(l=>l.id === lojaFiltro);
+    if(!loja){
+      if(titulo) titulo.textContent = 'Loja não encontrada';
+      return;
+    }
     const meta = getMetas(loja.id, mesRef)?.mes || 0;
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     const tm = nVendas > 0 ? fat / nVendas : 0;
     const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-    // PA: buscar de D.historicoMeses se lançado manualmente, senão —
-    const historicoKey = mesRef; // "YYYY-MM"
+    const historicoKey = mesRef;
     const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
-    return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
-  });
-
-  // KPIs consolidados
-  const kpis = document.getElementById('mesant-kpis');
-  if(kpis){
-    const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
-    const totFat = dados.reduce((s, d)=>s+d.fat, 0);
-    const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
-    const totTm = totVendas > 0 ? totFat / totVendas : 0;
-    const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-    kpis.innerHTML = `
-      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
-      <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-        <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
-        <div class="kl">Realizado</div>
-      </div>
-      <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
-      <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
-    `;
-  }
-
-  // Tabela
-  const tb = document.getElementById('tbody-mesant');
-  if(tb){
-    tb.innerHTML = dados.map(d=>`
-      <tr>
-        <td><strong>${d.loja}</strong></td>
-        <td>R$ ${fmt(d.meta)}</td>
-        <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
-        <td>${d.pctMeta.toFixed(1)}%</td>
-        <td>R$ ${fmt(d.tm)}</td>
-        <td>${d.nVendas}</td>
-        <td>${d.pa !== null ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
-      </tr>
-    `).join('');
+    
+    if(titulo) titulo.textContent = `${loja.nome} — ${mesNome}/${anoAnterior}`;
+    
+    // KPIs da loja individual
+    const kpis = document.getElementById('mesant-kpis');
+    if(kpis){
+      kpis.innerHTML = `
+        <div class="kbox"><div class="kn">R$ ${fmt(meta)}</div><div class="kl">Meta</div></div>
+        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+          <div class="kn" style="color:var(--verde)">R$ ${fmt(fat)}</div>
+          <div class="kl">Realizado</div>
+        </div>
+        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+        <div class="kbox"><div class="kn">R$ ${fmt(tm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
+        <div class="kbox"><div class="kn">${paHistorico !== null ? paHistorico.toFixed(2) : '—'}</div><div class="kl">PA</div></div>
+      `;
+    }
+    
+    // Tabela com 1 linha
+    const tb = document.getElementById('tbody-mesant');
+    if(tb){
+      tb.innerHTML = `
+        <tr>
+          <td><strong>${loja.nome}</strong></td>
+          <td>R$ ${fmt(meta)}</td>
+          <td style="color:var(--verde);font-weight:600">R$ ${fmt(fat)}</td>
+          <td>${pctMeta.toFixed(1)}%</td>
+          <td>R$ ${fmt(tm)}</td>
+          <td>${nVendas}</td>
+          <td>${paHistorico !== null ? paHistorico.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
+        </tr>
+      `;
+    }
+  } else {
+    // Modo: consolidado todas as lojas
+    const dados = LOJAS.map(loja=>{
+      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const fat = calcMesRef(loja.id, mesRef) || 0;
+      const nVendas = countVendasRef(loja.id, mesRef);
+      const tm = nVendas > 0 ? fat / nVendas : 0;
+      const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
+      const historicoKey = mesRef;
+      const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+      return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
+    });
+    
+    if(titulo) titulo.textContent = `Performance geral — ${mesNome}/${anoAnterior}`;
+    
+    // KPIs consolidados
+    const kpis = document.getElementById('mesant-kpis');
+    if(kpis){
+      const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
+      const totFat = dados.reduce((s, d)=>s+d.fat, 0);
+      const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
+      const totTm = totVendas > 0 ? totFat / totVendas : 0;
+      const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
+      // PA consolidado
+      const historicoKey = mesRef;
+      const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+      kpis.innerHTML = `
+        <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+          <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
+          <div class="kl">Realizado</div>
+        </div>
+        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+        <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
+        <div class="kbox"><div class="kn">${paHistorico !== null ? paHistorico.toFixed(2) : '—'}</div><div class="kl">PA</div></div>
+      `;
+    }
+    
+    // Tabela
+    const tb = document.getElementById('tbody-mesant');
+    if(tb){
+      tb.innerHTML = dados.map(d=>`
+        <tr>
+          <td><strong>${d.loja}</strong></td>
+          <td>R$ ${fmt(d.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
+          <td>${d.pctMeta.toFixed(1)}%</td>
+          <td>R$ ${fmt(d.tm)}</td>
+          <td>${d.nVendas}</td>
+          <td>${d.pa !== null ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
+        </tr>
+      `).join('');
+    }
   }
 }
 
@@ -15770,6 +15852,69 @@ function atualizaPAPreview(){
   }
   const pa = Math.round((qtditens / nvendas) * 100) / 100;
   preview.textContent = pa.toFixed(2) + ' itens/atendimento';
+}
+
+function renderMesAnteriorDashboard(){
+  // Renderiza widget de Mês Anterior no Dashboard
+  const hj = hoje();
+  const [yyyy, mm, dd] = hj.split('-');
+  let mesAnterior, anoAnterior;
+  const mesNum = parseInt(mm);
+  if(mesNum === 1){
+    anoAnterior = parseInt(yyyy) - 1;
+    mesAnterior = '12';
+  } else {
+    anoAnterior = parseInt(yyyy);
+    mesAnterior = String(mesNum - 1).padStart(2, '0');
+  }
+  const mesRef = anoAnterior + '-' + mesAnterior;
+  const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(mesAnterior)];
+  
+  // Consolidado de todas as 7 lojas
+  let totMeta = 0, totFat = 0, totVendas = 0;
+  LOJAS.forEach(loja=>{
+    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const fat = calcMesRef(loja.id, mesRef) || 0;
+    const nVendas = countVendasRef(loja.id, mesRef);
+    totMeta += meta;
+    totFat += fat;
+    totVendas += nVendas;
+  });
+  
+  const tm = totVendas > 0 ? totFat / totVendas : 0;
+  const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
+  const historicoKey = mesRef;
+  const paHistorico = D.historicoMeses?.[historicoKey]?.pa || 0;
+  
+  const widget = document.getElementById('mesant-dash-widget');
+  if(!widget) return;
+  
+  widget.innerHTML = `
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--ouro)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">META</div>
+      <div style="font-size:14px;font-weight:700">R$ ${fmt(totMeta)}</div>
+    </div>
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--verde)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">REALIZADO</div>
+      <div style="font-size:14px;font-weight:700;color:var(--verde)">R$ ${fmt(totFat)}</div>
+    </div>
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--azul)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">% META</div>
+      <div style="font-size:14px;font-weight:700;color:${pctMeta>=100?'var(--verde)':pctMeta>=70?'var(--ouro)':'var(--verm)'}">${pctMeta.toFixed(1)}%</div>
+    </div>
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--roxo)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">TM</div>
+      <div style="font-size:14px;font-weight:700">R$ ${fmt(tm)}</div>
+    </div>
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--ciano)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">NÚM. VENDAS</div>
+      <div style="font-size:14px;font-weight:700">${totVendas}</div>
+    </div>
+    <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--laranja)">
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">PA</div>
+      <div style="font-size:14px;font-weight:700">${paHistorico > 0 ? paHistorico.toFixed(2) : '—'}</div>
+    </div>
+  `;
 }
 
 function renderHistoricoMes(){
