@@ -1234,6 +1234,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
     <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
     <button class="ni" onclick="nav('historicoanu')" id="nav-historicoanu"><span class="ic">📊</span>Histórico Anual</button>
+    <button class="ni" onclick="nav('lanchistorico')" id="nav-lanchistorico"><span class="ic">📝</span>Lançar Histórico</button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
     <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
@@ -1974,7 +1975,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📊 Performance por Loja</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th></tr></thead>
+        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
         <tbody id="tbody-mesant"></tbody>
       </table>
     </div>
@@ -2009,7 +2010,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📋 Mês a Mês</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Mês</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th></tr></thead>
+        <thead><tr><th>Mês</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
         <tbody id="tbody-historicoanu"></tbody>
       </table>
     </div>
@@ -2022,6 +2023,93 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc" style="margin-top:16px">
     <div class="st">📈 Evolução Meta vs Realizado</div>
     <div id="historicoanu-chart" style="height:250px;display:flex;align-items:flex-end;gap:4px;padding:16px;background:rgba(91,141,239,.05);border-radius:8px">--</div>
+  </div>
+</div>
+
+
+<!-- LANÇAMENTO HISTÓRICO — entrada de dados de meses/anos anteriores -->
+<div class="page" id="page-lanchistorico">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Lançar <span>Histórico</span></h1>
+      <div class="ps">Registre meta, realizado e TM de meses anteriores para análise de crescimento</div>
+    </div>
+  </div>
+
+  <!-- Formulário -->
+  <div class="sc">
+    <div class="st">Lançar Dados do Mês</div>
+    <div class="gr">
+      <div class="ig"><label>Mês <span style="color:var(--verm)">*</span></label>
+        <select id="lh-mes">
+          <option value="01">Janeiro</option>
+          <option value="02">Fevereiro</option>
+          <option value="03">Março</option>
+          <option value="04">Abril</option>
+          <option value="05">Maio</option>
+          <option value="06">Junho</option>
+          <option value="07">Julho</option>
+          <option value="08">Agosto</option>
+          <option value="09">Setembro</option>
+          <option value="10">Outubro</option>
+          <option value="11">Novembro</option>
+          <option value="12">Dezembro</option>
+        </select>
+      </div>
+      <div class="ig"><label>Ano <span style="color:var(--verm)">*</span></label>
+        <select id="lh-ano">
+          <option value="2021">2021</option>
+          <option value="2022">2022</option>
+          <option value="2023">2023</option>
+          <option value="2024">2024</option>
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+        </select>
+      </div>
+      <div class="ig"><label>Meta (R$) <span style="color:var(--verm)">*</span></label>
+        <input type="number" id="lh-meta" placeholder="176600" min="0" step="100">
+      </div>
+      <div class="ig"><label>Realizado (R$) <span style="color:var(--verm)">*</span></label>
+        <input type="number" id="lh-real" placeholder="125691" min="0" step="100">
+      </div>
+      <div class="ig"><label>TM — Ticket Médio (R$)</label>
+        <input type="number" id="lh-tm" placeholder="511" min="0" step="1">
+      </div>
+      <div class="ig"><label>Nº de Vendas</label>
+        <input type="number" id="lh-nvendas" placeholder="246" min="0" step="1" oninput="atualizaPAPreview()">
+      </div>
+      <div class="ig"><label>Quantidade de Itens</label>
+        <input type="number" id="lh-qtditens" placeholder="510" min="0" step="1" oninput="atualizaPAPreview()">
+      </div>
+    </div>
+    <div style="background:rgba(91,141,239,.08);border-left:3px solid var(--azul);padding:12px;border-radius:4px;margin-bottom:16px">
+      <div style="font-size:11px;color:var(--texto)"><strong>PA (Produto por Atendimento):</strong> <span id="lh-pa-preview">—</span></div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px">= Quantidade de Itens ÷ Nº de Vendas</div>
+    </div>
+    <div class="btn-r">
+      <button class="btn-p" onclick="salvarHistoricoMes()">Salvar</button>
+      <button class="btn-s" onclick="limparFormHistorico()">Limpar</button>
+    </div>
+  </div>
+
+  <!-- Tabela com YoY -->
+  <div class="sc" style="margin-top:16px">
+    <div class="st">📊 Histórico Lançado — com Análise YoY</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Mês/Ano</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th><th>Qtd Itens</th><th>YoY %</th><th></th></tr></thead>
+        <tbody id="tbody-lanchistorico"></tbody>
+      </table>
+    </div>
+    <div id="lanchistorico-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Nenhum dado lançado ainda.
+    </div>
+  </div>
+
+  <!-- Gráfico YoY -->
+  <div class="sc" style="margin-top:16px">
+    <div class="st">📈 Crescimento YoY (Mesmo mês, anos consecutivos)</div>
+    <div id="lanchistorico-yoy" style="height:300px;display:flex;align-items:flex-end;gap:8px;padding:16px;background:rgba(46,204,135,.05);border-radius:8px;font-size:9px">--</div>
   </div>
 </div>
 
@@ -4013,6 +4101,7 @@ if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
+if(!D.historicoMeses) D.historicoMeses={}; // [NEW] Histórico de meses — meta/realizado/TM lançado manualmente
 // ============================================================
 // LIMPEZA AUTOMÁTICA DE DADOS CORROMPIDOS
 // Detecta metas salvas com bug decimal antigo e descarta
@@ -5489,6 +5578,10 @@ function nav(pg){
       const selAno = document.getElementById('hanu-ano');
       if(selAno && !selAno.value) selAno.value = '2026';
       renderHistoricoAnual();
+    },
+    lanchistorico:()=>{
+      // [NEW] Lançar Histórico
+      renderHistoricoMes();
     },
     lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
@@ -15457,7 +15550,10 @@ function renderMesAnterior(){
     const nVendas = countVendasRef(loja.id, mesRef);
     const tm = nVendas > 0 ? fat / nVendas : 0;
     const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-    return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta };
+    // PA: buscar de D.historicoMeses se lançado manualmente, senão —
+    const historicoKey = mesRef; // "YYYY-MM"
+    const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+    return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
   });
 
   // KPIs consolidados
@@ -15491,6 +15587,7 @@ function renderMesAnterior(){
         <td>${d.pctMeta.toFixed(1)}%</td>
         <td>R$ ${fmt(d.tm)}</td>
         <td>${d.nVendas}</td>
+        <td>${d.pa !== null ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
       </tr>
     `).join('');
   }
@@ -15515,7 +15612,7 @@ function renderHistoricoAnual(){
     const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m];
     
     // Consolidado de todas as 7 lojas
-    let totMeta = 0, totFat = 0, totVendas = 0;
+    let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
     LOJAS.forEach(loja=>{
       const meta = getMetas(loja.id, mesRef)?.mes || 0;
       const fat = calcMesRef(loja.id, mesRef) || 0;
@@ -15525,9 +15622,15 @@ function renderHistoricoAnual(){
       totVendas += nVendas;
     });
     
+    // Buscar Qtd Itens de D.historicoMeses se disponível
+    const historicoKey = mesRef; // "YYYY-MM"
+    const qtdItensHistorico = D.historicoMeses?.[historicoKey]?.qtditens || 0;
+    totQtdItens = qtdItensHistorico > 0 ? qtdItensHistorico : 0;
+    
     const tm = totVendas > 0 ? totFat / totVendas : 0;
+    const pa = totVendas > 0 ? Math.round((totQtdItens / totVendas) * 100) / 100 : 0;
     const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-    dados.push({ mesRef, mesNome, totMeta, totFat, tm, totVendas, pctMeta });
+    dados.push({ mesRef, mesNome, totMeta, totFat, tm, totVendas, pctMeta, pa });
   }
   
   // Tabela
@@ -15549,6 +15652,7 @@ function renderHistoricoAnual(){
         <td>${d.pctMeta.toFixed(1)}%</td>
         <td>R$ ${fmt(d.tm)}</td>
         <td>${d.totVendas}</td>
+        <td>${d.pa > 0 ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
       </tr>
     `).join('');
   }
@@ -15608,6 +15712,198 @@ function mesAtual(){
   const hj = hoje();
   return hj.slice(0, 7);
 }
+
+// ════════════════════════════════════════════════════════════════════
+// LANÇAMENTO HISTÓRICO — entrada manual de dados de meses anteriores
+// ════════════════════════════════════════════════════════════════════
+function salvarHistoricoMes(){
+  const mes = document.getElementById('lh-mes')?.value;
+  const ano = document.getElementById('lh-ano')?.value;
+  const meta = parseFloat(document.getElementById('lh-meta')?.value || 0);
+  const real = parseFloat(document.getElementById('lh-real')?.value || 0);
+  const tm = parseFloat(document.getElementById('lh-tm')?.value || 0);
+  const nvendas = parseInt(document.getElementById('lh-nvendas')?.value || 0);
+  const qtditens = parseInt(document.getElementById('lh-qtditens')?.value || 0);
+
+  if(!mes || !ano){ showToast('Informe mês e ano!','err'); return; }
+  if(meta <= 0){ showToast('Meta deve ser maior que 0!','err'); return; }
+  if(real < 0){ showToast('Realizado não pode ser negativo!','err'); return; }
+
+  const key = ano + '-' + mes; // ex: "2026-06"
+  if(!D.historicoMeses) D.historicoMeses = {};
+  
+  // Calcular PA = Qtd Itens / Nº Vendas
+  const pa = nvendas > 0 ? Math.round((qtditens / nvendas) * 100) / 100 : 0;
+  
+  D.historicoMeses[key] = {
+    meta: Math.round(meta),
+    realizado: Math.round(real),
+    tm: tm > 0 ? Math.round(tm * 100) / 100 : 0,
+    nvendas: nvendas,
+    qtditens: qtditens,
+    pa: pa,
+    ts: Date.now()
+  };
+
+  save();
+  showToast('Dados do mês salvo!');
+  limparFormHistorico();
+  renderHistoricoMes();
+}
+
+function limparFormHistorico(){
+  ['lh-meta','lh-real','lh-tm','lh-nvendas','lh-qtditens'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  atualizaPAPreview();
+}
+
+function atualizaPAPreview(){
+  const qtditens = parseInt(document.getElementById('lh-qtditens')?.value || 0);
+  const nvendas = parseInt(document.getElementById('lh-nvendas')?.value || 0);
+  const preview = document.getElementById('lh-pa-preview');
+  if(!preview) return;
+  if(nvendas <= 0){
+    preview.textContent = '—';
+    return;
+  }
+  const pa = Math.round((qtditens / nvendas) * 100) / 100;
+  preview.textContent = pa.toFixed(2) + ' itens/atendimento';
+}
+
+function renderHistoricoMes(){
+  // Listar todos os históricos lançados e calcular YoY
+  const historicoArray = Object.entries(D.historicoMeses||{}).map(([key, data])=>{
+    const [ano, mes] = key.split('-');
+    return {key, ano: parseInt(ano), mes: parseInt(mes), ...data};
+  }).sort((a,b)=>{
+    if(a.ano !== b.ano) return a.ano - b.ano;
+    return a.mes - b.mes;
+  });
+
+  const tb = document.getElementById('tbody-lanchistorico');
+  const empty = document.getElementById('lanchistorico-empty');
+  
+  if(!historicoArray.length){
+    if(tb) tb.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
+  // Calcular YoY para cada mês: (realizado_ano - realizado_anoAnterior) / realizado_anoAnterior
+  const calcYoY = (ano, mes) => {
+    const anoAtual = historicoArray.find(h=>h.ano === ano && h.mes === mes);
+    const anoAnterior = historicoArray.find(h=>h.ano === ano-1 && h.mes === mes);
+    if(!anoAtual || !anoAnterior || anoAnterior.realizado === 0) return null;
+    const yoy = ((anoAtual.realizado - anoAnterior.realizado) / anoAnterior.realizado) * 100;
+    return yoy;
+  };
+
+  if(tb){
+    tb.innerHTML = historicoArray.map(h=>{
+      const pctMeta = h.meta > 0 ? (h.realizado / h.meta * 100) : 0;
+      const yoy = calcYoY(h.ano, h.mes);
+      const yoyBadge = yoy === null 
+        ? '<span style="color:var(--muted)">—</span>'
+        : `<span style="color:${yoy>=0?'var(--verde)':'var(--verm)'};font-weight:600">${yoy>=0?'+':''}${yoy.toFixed(1)}%</span>`;
+      
+      return `
+        <tr>
+          <td><strong>${String(h.mes).padStart(2,'0')}/${h.ano}</strong></td>
+          <td>${fmt(h.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(h.realizado)}</td>
+          <td>${pctMeta.toFixed(1)}%</td>
+          <td>${fmt(h.tm||0)}</td>
+          <td>${h.nvendas||'—'}</td>
+          <td><strong>${(h.pa||0).toFixed(2)}</strong></td>
+          <td>${h.qtditens||'—'}</td>
+          <td>${yoyBadge}</td>
+          <td><button onclick="excluirHistoricoMes('${h.key}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Gráfico YoY
+  renderYoYChart();
+}
+
+function excluirHistoricoMes(key){
+  if(!confirm('Excluir este mês?')) return;
+  delete D.historicoMeses[key];
+  save();
+  renderHistoricoMes();
+  showToast('Mês excluído');
+}
+
+function renderYoYChart(){
+  // Agrupar por mês, mostrar evolução entre anos
+  const historicoArray = Object.entries(D.historicoMeses||{}).map(([key, data])=>{
+    const [ano, mes] = key.split('-');
+    return {key, ano: parseInt(ano), mes: parseInt(mes), ...data};
+  });
+
+  // Agrupar por mês (1-12)
+  const porMes = {};
+  historicoArray.forEach(h=>{
+    if(!porMes[h.mes]) porMes[h.mes] = [];
+    porMes[h.mes].push(h);
+  });
+
+  const chart = document.getElementById('lanchistorico-yoy');
+  if(!chart) return;
+
+  // Se não há dados ou só 1 ano, não desenha
+  const anos = new Set(historicoArray.map(h=>h.ano));
+  if(anos.size < 2){
+    chart.innerHTML = '<div style="width:100%;text-align:center;color:var(--muted)">Precisa de pelo menos 2 anos de dados para comparação YoY</div>';
+    return;
+  }
+
+  // Para cada mês, mostrar barras de crescimento
+  let html = '';
+  const meses = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  for(let m = 1; m <= 12; m++){
+    if(!porMes[m]) continue;
+    const dados = porMes[m].sort((a,b)=>a.ano - b.ano);
+    if(dados.length < 2) continue;
+
+    let yoyGrupo = [];
+    for(let i = 1; i < dados.length; i++){
+      const atual = dados[i].realizado;
+      const anterior = dados[i-1].realizado;
+      if(anterior > 0){
+        const yoy = ((atual - anterior) / anterior) * 100;
+        yoyGrupo.push(yoy);
+      }
+    }
+
+    if(!yoyGrupo.length) continue;
+
+    // Desenhar barra para este mês
+    const yoyMed = yoyGrupo.reduce((a,b)=>a+b) / yoyGrupo.length;
+    const cor = yoyMed >= 0 ? 'rgba(46,204,135,.6)' : 'rgba(220,53,69,.6)';
+    const altura = Math.min(Math.abs(yoyMed) / 100 * 200, 200); // max 200px
+    html += `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+        <div style="display:flex;height:${altura}px;align-items:flex-end;width:100%">
+          <div style="width:100%;background:${cor};border-radius:2px" title="YoY ${meses[m]}: ${yoyMed.toFixed(1)}%"></div>
+        </div>
+        <div style="font-weight:600;font-size:10px;color:${yoyMed>=0?'var(--verde)':'var(--verm)'}">${yoyMed.toFixed(0)}%</div>
+        <div style="font-size:9px;font-weight:600">${meses[m]}</div>
+      </div>
+    `;
+  }
+
+  if(!html){
+    chart.innerHTML = '<div style="width:100%;text-align:center;color:var(--muted)">Sem comparação YoY disponível para os meses</div>';
+  } else {
+    chart.innerHTML = html;
+  }
+}
+
 
 
 </script>
