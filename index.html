@@ -1402,7 +1402,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
         <select id="l-loja" onchange="carregarVendsForm()">
           <option value="">Selecione uma loja...</option>
-          <option value="mooca">Mooca Plaza</option>
+          <option value="mooca" selected>Mooca Plaza</option>
           <option value="leopoldina">Vila Leopoldina</option>
           <option value="perdizes">Perdizes</option>
           <option value="santana">Santana</option>
@@ -5570,11 +5570,6 @@ function showApp(){
     if(btnAdm) btnAdm.style.display="inline-flex";
   }
 
-  // Renderizar IMEDIATAMENTE com dados do localStorage
-  carregarVendsForm();
-  preencherSelectVends();
-  carregarDash();
-
   // Se há um lançamento pendente não sincronizado (ex: Firebase falhou antes),
   // gravar ANTES de carregar do Firebase para não perder o dado
   const _pendingStr = localStorage.getItem("avatim_pending");
@@ -5595,16 +5590,37 @@ function showApp(){
     })();
   }
 
-  // Carregar dados do Firestore em background
+  // [FIX CRÍTICO METAS] Carregar dados do Firestore e renderizar APÓS carregar
+  // Isso garante que D.metasLoja está preenchido quando carregarVendsForm() é chamado
   loadFromFirestore().then(sincronizado=>{
-    if(sincronizado){
-      // Dados atualizados — re-renderizar silenciosamente
-      carregarVendsForm();
-      preencherSelectVends();
-      carregarDash();
+    console.log("[Avatim] showApp: loadFromFirestore completo, sincronizado =", sincronizado, "| D.metasLoja keys:", Object.keys(D.metasLoja||{}).join(","));
+    // SEMPRE renderizar após carregar (mesmo se sincronizado=false, pois pode ter dados locais)
+    // Isso garante que se as metas vieram do Firebase, elas apareçam
+    carregarVendsForm();
+    preencherSelectVends();
+    carregarDash();
+    if(!sincronizado){
+      console.warn("[Avatim] showApp: Firestore não retornou dados atualizados, usando localStorage");
     }
+    // [FIX CRÍTICO FORMULÁRIO] Garantir que selects l-loja e l-vend são populados
+    const selLoja = document.getElementById('l-loja');
+    if(selLoja && !selLoja.value){
+      selLoja.value = 'mooca'; // pré-selecionar primeira loja
+    }
+    // Chamar carregarVendsForm novamente para garantir que l-vend é preenchido
+    carregarVendsForm();
   }).catch(e=>{
-    console.warn("[Avatim] Firestore background load falhou:", e?.message||e);
+    console.warn("[Avatim] showApp: Firestore load falhou, renderizando com dados locais:", e?.message||e);
+    // Em caso de erro, renderizar com o que temos no localStorage
+    carregarVendsForm();
+    preencherSelectVends();
+    carregarDash();
+    // Garantir inicialização dos selects
+    const selLoja = document.getElementById('l-loja');
+    if(selLoja && !selLoja.value){
+      selLoja.value = 'mooca';
+    }
+    carregarVendsForm();
   });
   renderProdutos("","");
   iniciarAutoRefresh();
@@ -6849,6 +6865,25 @@ function carregarVendsForm(lidOverride){
     console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando no lançamento");
     return;
   }
+  
+  // [FIX CRÍTICO] Atualizar select "l-vend" com vendedoras da loja selecionada
+  const selLoja = document.getElementById('l-loja');
+  const selVend = document.getElementById('l-vend');
+  if(selLoja && selVend){
+    const lidSel = selLoja.value;
+    if(lidSel){
+      // Loja foi selecionada — buscar vendedoras
+      const vends = vendsAtivas(lidSel);
+      const optionsHTML = '<option value="">Selecione uma vendedora...</option>' +
+        vends.map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
+      selVend.innerHTML = optionsHTML;
+      console.log("[Avatim] carregarVendsForm: populado l-vend com", vends.length, "vendedoras para loja", lidSel);
+    } else {
+      // Nenhuma loja selecionada
+      selVend.innerHTML = '<option value="">Selecione uma loja primeiro...</option>';
+    }
+  }
+  
   // Admin sem override: usar a primeira loja real (nunca "admin")
   let lid;
   if(lidOverride && lidOverride !== 'admin') {
