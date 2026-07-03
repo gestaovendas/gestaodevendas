@@ -543,7 +543,7 @@ try{
                       _savedAt:     _lTs || _rTs
                     };
                   }
-                } else base.vendedoras.push(rv);
+                } else base.vendedoras.push(normalizarVendedora(rv));
               });
             }
             if(pedaco.metasLoja){
@@ -666,7 +666,7 @@ try{
                         _savedAt:     _lTs2 || _rTs2
                       };
                     }
-                  } else base.vendedoras.push(rv);
+                  } else base.vendedoras.push(normalizarVendedora(rv));
                 });
               }
               if(pedaco.metasLoja && pedaco.metasLoja[lid]){
@@ -1198,7 +1198,12 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <button class="btn-lg" onclick="login()">Entrar</button>
   <div class="lerr" id="lerr"></div>
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--borda);text-align:center">
-    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados aparecendo errados? Clique abaixo:</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados atrasados? Recarregue:</div>
+    <button onclick="recarregarDadosFirebase()" style="background:none;border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer;margin-right:4px">
+      🔄 Recarregar dados
+    </button>
+    <br/>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;margin-bottom:8px">Dados apareando errados? Clique abaixo:</div>
     <button onclick="resetEmergencia()" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer">
       🔄 Limpar dados corrompidos
     </button>
@@ -4801,7 +4806,7 @@ async function loadFromFirestore(){
                 };
               }
             } else {
-              D.vendedoras.push(rv);
+              D.vendedoras.push(normalizarVendedora(rv));
             }
           });
         }
@@ -4903,7 +4908,18 @@ async function loadFromFirestore(){
         });
       }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados do Firestore! campRealizados:", D.campRealizados?.length||0);
+      
+      // [FIX CRÍTICO] Normalizar D.vendedoras após carregar
+      // Garantir que v.loja SEMPRE é lowercase (pode vir do Firebase com dados antigos)
+      if(D.vendedoras && D.vendedoras.length){
+        D.vendedoras.forEach(v => {
+          if(v.loja && typeof v.loja === 'string'){
+            v.loja = v.loja.toLowerCase().trim();
+          }
+        });
+      }
+      
+      console.log("[Avatim] ✅ Dados carregados do Firestore! vendedoras:", D.vendedoras?.length||0, "| campRealizados:", D.campRealizados?.length||0);
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -5110,18 +5126,75 @@ function diasPassadosNoMes(){
 
 // ── Helper: vendedoras REAIS (exclui placeholders com nome de loja e cargo VRLL)
 function vendsReais(lid){
-  const _lojaNames=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
-  return D.vendedoras.filter(v=>
-    v.loja===lid &&
-    v.cargo!=='VRLL' &&
-    !_lojaNames.includes((v.nome||'').toLowerCase().trim())
-  );
+  // [FIX CRÍTICO] Remover filtro errado de _lojaNames que excluia se nome era igual a loja
+  // Apenas filtrar por v.loja===lid e cargo!=='VRLL'
+  // Validar que v.loja é lowercase (pode vir do Firebase com dados antigos)
+  return D.vendedoras.filter(v=>{
+    const vendLojaLower = (v.loja||'').toLowerCase().trim();
+    const lojaIdLower = (lid||'').toLowerCase().trim();
+    return vendLojaLower === lojaIdLower && v.cargo!=='VRLL';
+  });
+}
+
+// [FIX CRÍTICO] Função auxiliar para normalizar vendedora após carregar do Firebase
+function normalizarVendedora(v){
+  if(!v) return v;
+  return {
+    ...v,
+    loja: (v.loja||'').toLowerCase().trim()  // SEMPRE lowercase
+  };
 }
 
 // ── Helper: vendedoras ATIVAS (reais + não arquivadas)
 // ativa===false → arquivada. Sem campo ativa → retrocompatível (ativa por padrão)
 function vendsAtivas(lid){
   return vendsReais(lid).filter(v=>v.ativa !== false);
+}
+
+// [FIX CRÍTICO SINCRONIZAÇÃO] Função para forçar reload completo dos dados
+async function recarregarDadosFirebase(){
+  showToast("🔄 Recarregando dados...", "info");
+  console.log("[Avatim] recarregarDadosFirebase: iniciando");
+  
+  try {
+    // Limpar dados locais (forçar re-carregamento do Firebase)
+    D = {
+      metasLoja: {},
+      vendas: {},
+      vendasVend: {},
+      vendedoras: [],
+      historicoLojas: {},
+      historicoMeses: {},
+      fluxo: [],
+      campRealizados: [],
+      campObjetivos: {},
+      arquivos: [],
+      saldosOverride: {},
+      produtosExtras: [],
+      configCom: {},
+      _vendsExcluidas: [],
+      _campExcluidos: {},
+      _vendasVendExcluidas: {}
+    };
+    
+    // Carregar tudo do Firebase
+    const sincronizado = await loadFromFirestore();
+    console.log("[Avatim] recarregarDadosFirebase: sincronizado =", sincronizado);
+    
+    // Re-renderizar TUDO
+    carregarVendsForm();
+    preencherSelectVends();
+    carregarDash();
+    renderTabelaVend();
+    renderVendRanking(_tabVend||{});
+    renderMetasLojas();
+    
+    showToast("✅ Dados recarregados com sucesso!", "ok");
+    console.log("[Avatim] recarregarDadosFirebase: completo!");
+  } catch(e) {
+    console.error("[Avatim] recarregarDadosFirebase: erro =", e);
+    showToast("❌ Erro ao recarregar dados: " + (e.message||e), "err");
+  }
 }
 
 // ── Arquivar / reativar vendedora
@@ -8115,7 +8188,9 @@ function salvarVend(){
     });
   }
   // Cadastrar nova vendedora já com a meta proporcional
-  D.vendedoras.push({id:"v"+Date.now(),nome,loja:lid,metaMes:metaMesAuto,superMetaMes:superMetaMesAuto,cargo});
+  // [FIX CRÍTICO] Normalizar lid para lowercase antes de salvar
+  const lidNormalizado = (lid||'').toLowerCase().trim();
+  D.vendedoras.push({id:"v"+Date.now(),nome,loja:lidNormalizado,metaMes:metaMesAuto,superMetaMes:superMetaMesAuto,cargo});
   save();
   const msg=metaMesAuto>0
     ? "✅ "+nome+" cadastrada! Meta: "+fmt(metaMesAuto)+" ("+novoTotal+"x vendedoras)"
@@ -12944,7 +13019,7 @@ function iniciarAutoRefresh(){
                       _savedAt:     _lTsSA3 || _rTsSA3
                     };
                   }
-                } else D.vendedoras.push(rv);
+                } else D.vendedoras.push(normalizarVendedora(rv));
               });
             }
           }
@@ -13049,7 +13124,7 @@ async function forceSyncAdmin(){
                 _savedAt: _lTsFSA || _rTsFSA
               };
             }
-          } else D.vendedoras.push(rv);
+          } else D.vendedoras.push(normalizarVendedora(rv));
         });
       }
     }
