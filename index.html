@@ -1233,14 +1233,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
-    <button class="ni" onclick="nav('historicoanu')" id="nav-historicoanu"><span class="ic">📊</span>Histórico Anual</button>
-    <button class="ni" onclick="nav('lanchistorico')" id="nav-lanchistorico"><span class="ic">📝</span>Lançar Histórico</button>
-    <button class="ni" onclick="nav('lancperloja')" id="nav-lancperloja"><span class="ic">🏪</span>Lançamento por Loja</button>
-    <button class="ni" onclick="nav('acompgeral')" id="nav-acompgeral"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
+    <button class="ni admin-only" onclick="nav('mesant')" id="nav-mesant" style="display:none"><span class="ic">📈</span>Mês Anterior</button>
+    <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
+    <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
+    <button class="ni admin-only" onclick="nav('lancperloja')" id="nav-lancperloja" style="display:none"><span class="ic">🏪</span>Lançamento por Loja</button>
+    <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
-    <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
+    <button class="ni admin-only" onclick="nav('historico')" id="nav-historico" style="display:none"><span class="ic">📅</span>Histórico</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">🏷️</span>Campanhas</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -5748,7 +5748,7 @@ function logout(){
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao'];
+  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','mesant','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
