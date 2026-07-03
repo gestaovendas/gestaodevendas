@@ -4728,8 +4728,9 @@ async function loadFromFirestore(){
             const _lTs1      = localMeta?._savedAt || 0;
             const _rTs1      = metaObj?._savedAt   || 0;
             // [FIX BUG 1] Aceitar remoto se mais recente OU local inexistente
-            // REMOVIDO: guard "(localMeta.mes||0) > 0" que bloqueava update entre PCs
-            if(!localMeta || !localMeta.mes || _rTs1 > _lTs1){
+            // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
+            // Isso garante que metas apareçam no time mesmo na primeira sincronização
+            if(!localMeta || !localMeta.mes || _rTs1 > _lTs1 || (_rTs1 === 0 && _lTs1 === 0 && metaObj?.mes)){
               // [FIX] garantir _savedAt mesmo que Firebase não tenha (retrocompat)
               if(metaObj && !metaObj._savedAt) metaObj._savedAt = _rTs1 || Date.now();
               D.metasLoja[lid][mr] = metaObj;
@@ -12768,7 +12769,8 @@ function iniciarAutoRefresh(){
               const localMeta = D.metasLoja[lid_m]?.[mr];
               const _lTs_sl = localMeta?._savedAt || 0;
               const _rTs_sl = metaObj?._savedAt   || 0;
-              if(!localMeta || !localMeta.mes || localMeta.mes <= 0 || _rTs_sl > _lTs_sl){
+              // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
+              if(!localMeta || !localMeta.mes || localMeta.mes <= 0 || _rTs_sl > _lTs_sl || (_rTs_sl === 0 && _lTs_sl === 0 && metaObj?.mes)){
                 D.metasLoja[lid_m][mr] = metaObj;
               }
             });
@@ -12851,7 +12853,8 @@ function iniciarAutoRefresh(){
                 const _lTs_sa2 = localMetaSA?._savedAt || 0;
                 const _rTs_sa2 = metaObj?._savedAt || 0;
                 // [FIX BUG 1] Aceitar remoto se mais recente ou local inexistente
-                if(!localMetaSA || !localMetaSA.mes || _rTs_sa2 > _lTs_sa2){
+                // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
+                if(!localMetaSA || !localMetaSA.mes || _rTs_sa2 > _lTs_sa2 || (_rTs_sa2 === 0 && _lTs_sa2 === 0 && metaObj?.mes)){
                   D.metasLoja[lid][mr] = metaObj;
                 }
               });
@@ -12948,10 +12951,11 @@ async function forceSyncAdmin(){
         if(!D.metasLoja[lid_r]) D.metasLoja[lid_r]={};
         Object.entries(meses_r||{}).forEach(([mr_r,obj_r])=>{
           // [FIX BUG 1] Aceitar remoto se mais recente ou local inexistente
+          // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
           const _lM_fsa  = D.metasLoja[lid_r]?.[mr_r];
           const _lTs_fsa = _lM_fsa?._savedAt || 0;
           const _rTs_fsa = obj_r?._savedAt   || 0;
-          if(!_lM_fsa || !_lM_fsa.mes || _rTs_fsa > _lTs_fsa){
+          if(!_lM_fsa || !_lM_fsa.mes || _rTs_fsa > _lTs_fsa || (_rTs_fsa === 0 && _lTs_fsa === 0 && obj_r?.mes)){
             D.metasLoja[lid_r][mr_r] = obj_r;
           }
         });
