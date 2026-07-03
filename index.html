@@ -6,6 +6,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;">
 <title>MonAris Sales Control</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <script>
 // Firebase carregado via dynamic import — funciona em GitHub Pages, file://, etc.
@@ -1235,6 +1236,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
     <button class="ni" onclick="nav('historicoanu')" id="nav-historicoanu"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni" onclick="nav('lanchistorico')" id="nav-lanchistorico"><span class="ic">📝</span>Lançar Histórico</button>
+    <button class="ni" onclick="nav('lancperloja')" id="nav-lancperloja"><span class="ic">🏪</span>Lançamento por Loja</button>
+    <button class="ni" onclick="nav('acompgeral')" id="nav-acompgeral"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
     <button class="ni" onclick="nav('historico')" id="nav-historico"><span class="ic">📅</span>Histórico</button>
@@ -1991,7 +1994,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </select>
   </div>
 
-  <!-- Cards resumo -->
+  <!-- Filtro de período customizado -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <label style="font-size:12px;font-weight:600">Período:</label>
+    <input type="date" id="mesant-periodo-ini" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
+    <span style="color:var(--muted)">até</span>
+    <input type="date" id="mesant-periodo-fim" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
+    <button class="btn-s" onclick="buscarMesAnteriorPeriodo()" style="font-size:11px;padding:6px 12px">Buscar</button>
+  </div>
   <div class="kgrid" id="mesant-kpis" style="margin-bottom:16px"></div>
 
   <!-- Tabela por loja -->
@@ -2138,6 +2148,155 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 
+<!-- LANÇAMENTO POR LOJA — entrada de dados por período de cada loja -->
+<div class="page" id="page-lancperloja">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Lançamento <span>por Loja</span></h1>
+      <div class="ps">Registre período, meta, realizado e TM para cada loja</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p" onclick="exportarLancPerlojaCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
+      <button class="btn-p" onclick="exportarLancPerlojaPDF()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
+    </div>
+  </div>
+
+  <!-- Formulário -->
+  <div class="sc">
+    <div class="st">Registrar Período de Loja</div>
+    <div class="gr">
+      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
+        <select id="lpl-loja" onchange="atualizaVendedorasLoja()">
+          <option value="">Selecione uma loja...</option>
+          <option value="mooca">Mooca Plaza</option>
+          <option value="leopoldina">Vila Leopoldina</option>
+          <option value="perdizes">Perdizes</option>
+          <option value="santana">Santana</option>
+          <option value="jarpaul">Jardim Paulista</option>
+          <option value="pinheiros">Alto de Pinheiros</option>
+          <option value="ibirapuera">Shopping Ibirapuera</option>
+        </select>
+      </div>
+      <div class="ig"><label>Data Início <span style="color:var(--verm)">*</span></label>
+        <input type="date" id="lpl-data-ini" />
+      </div>
+      <div class="ig"><label>Data Fim <span style="color:var(--verm)">*</span></label>
+        <input type="date" id="lpl-data-fim" />
+      </div>
+      <div class="ig"><label>Meta (R$) <span style="color:var(--verm)">*</span></label>
+        <input type="number" id="lpl-meta" placeholder="176600" min="0" step="100">
+      </div>
+      <div class="ig"><label>Realizado (R$) <span style="color:var(--verm)">*</span></label>
+        <input type="number" id="lpl-real" placeholder="125691" min="0" step="100">
+      </div>
+      <div class="ig"><label>TM — Ticket Médio (R$)</label>
+        <input type="number" id="lpl-tm" placeholder="511" min="0" step="1">
+      </div>
+      <div class="ig"><label>Quantidade de Itens</label>
+        <input type="number" id="lpl-qtditens" placeholder="510" min="0" step="1" oninput="atualizaPAPreviewLoja()">
+      </div>
+      <div class="ig"><label>Nº de Vendas</label>
+        <input type="number" id="lpl-nvendas" placeholder="246" min="0" step="1" oninput="atualizaPAPreviewLoja()">
+      </div>
+    </div>
+    <div style="background:rgba(91,141,239,.08);border-left:3px solid var(--azul);padding:12px;border-radius:4px;margin-bottom:16px">
+      <div style="font-size:11px;color:var(--texto)"><strong>PA (Produto por Atendimento):</strong> <span id="lpl-pa-preview">—</span></div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px">= Quantidade de Itens ÷ Nº de Vendas</div>
+    </div>
+    <div class="btn-r">
+      <button class="btn-p" onclick="salvarLancamentoPerloja()">Salvar</button>
+      <button class="btn-s" onclick="limparFormLancPerloja()">Limpar</button>
+    </div>
+  </div>
+
+  <!-- Filtro de loja para visualizar -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;margin-top:16px">
+    <label style="font-size:12px;font-weight:600">Visualizar Loja:</label>
+    <select id="lpl-filtro-loja" onchange="renderHistoricoLoja()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="">📊 Todas as Lojas</option>
+      <option value="mooca">🏪 Mooca Plaza</option>
+      <option value="leopoldina">🏪 Vila Leopoldina</option>
+      <option value="perdizes">🏪 Perdizes</option>
+      <option value="santana">🏪 Santana</option>
+      <option value="jarpaul">🏪 Jardim Paulista</option>
+      <option value="pinheiros">🏪 Alto de Pinheiros</option>
+      <option value="ibirapuera">🏪 Shopping Ibirapuera</option>
+    </select>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kgrid" id="lpl-kpis" style="margin-bottom:16px"></div>
+
+  <!-- Tabela com histórico -->
+  <div class="sc">
+    <div class="st">📋 Períodos Lançados</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Loja</th><th>Período</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th></th></tr></thead>
+        <tbody id="tbody-lancperloja"></tbody>
+      </table>
+    </div>
+    <div id="lancperloja-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Nenhum período lançado.
+    </div>
+  </div>
+</div>
+
+
+<!-- ACOMPANHAMENTO META GERAL — consolidado da rede com filtro de período -->
+<div class="page" id="page-acompgeral">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Acompanh. <span>Meta Geral</span></h1>
+      <div class="ps">Consolidado da rede por período — lojas e vendedoras</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p" onclick="exportarAcompGeralCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
+      <button class="btn-p" onclick="exportarAcompGeralPDF()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
+    </div>
+  </div>
+
+  <!-- Filtro de período -->
+  <div class="sc">
+    <div class="st">Selecionar Período</div>
+    <div class="gr">
+      <div class="ig"><label>Data Início <span style="color:var(--verm)">*</span></label>
+        <input type="date" id="ag-data-ini" />
+      </div>
+      <div class="ig"><label>Data Fim <span style="color:var(--verm)">*</span></label>
+        <input type="date" id="ag-data-fim" />
+      </div>
+    </div>
+    <div class="btn-r">
+      <button class="btn-p" onclick="buscarAcompanhamentoGeral()">Buscar Período</button>
+    </div>
+  </div>
+
+  <!-- KPIs consolidados -->
+  <div class="kgrid" id="ag-kpis" style="margin-bottom:16px"></div>
+
+  <!-- Tabela por loja -->
+  <div class="sc">
+    <div class="st">📊 Performance por Loja</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th>Vendedoras</th></tr></thead>
+        <tbody id="tbody-ag-lojas"></tbody>
+      </table>
+    </div>
+    <div id="ag-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Selecione um período para visualizar.
+    </div>
+  </div>
+
+  <!-- Expandível: vendedoras por loja -->
+  <div class="sc" style="margin-top:16px">
+    <div class="st">👥 Ranking de Vendedoras</div>
+    <div id="ag-vendedoras-container">--</div>
+  </div>
+</div>
+
+
 <!-- TODAS AS LOJAS -->
 <div class="page" id="page-lojas">
   <div class="ph"><div><h1 class="pt">Visao <span>Unificada</span></h1><div class="ps">Ranking e consolidado das 7 lojas</div></div></div>
@@ -2181,6 +2340,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab" onclick="tabRankPer('ano',this,'rede')">🏆 Ano</button>
     </div>
     <!-- Podio: top 3 lojas mais proximas da meta -->
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <label style="font-size:11px;font-weight:600">Período customizado:</label>
+      <input type="date" id="rank-periodo-ini" style="padding:6px 10px;font-size:11px;border:1px solid var(--borda);border-radius:6px;background:var(--cinza)" />
+      <span>até</span>
+      <input type="date" id="rank-periodo-fim" style="padding:6px 10px;font-size:11px;border:1px solid var(--borda);border-radius:6px;background:var(--cinza)" />
+      <button class="btn-s" onclick="buscarRankingPeriodo()" style="font-size:10px;padding:6px 12px">Buscar</button>
+    </div>
     <div id="rank-podio-lojas" style="margin-bottom:20px"></div>
     <!-- KPIs consolidados -->
     <div class="sc" style="margin-bottom:14px">
@@ -4126,6 +4292,7 @@ if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 if(!D.historicoMeses) D.historicoMeses={}; // [NEW] Histórico de meses — meta/realizado/TM lançado manualmente
+if(!D.historicoLojas) D.historicoLojas={}; // [NEW] Histórico POR LOJA — lançamento em períodos
 // ============================================================
 // LIMPEZA AUTOMÁTICA DE DADOS CORROMPIDOS
 // Detecta metas salvas com bug decimal antigo e descarta
@@ -5606,6 +5773,22 @@ function nav(pg){
     lanchistorico:()=>{
       // [NEW] Lançar Histórico
       renderHistoricoMes();
+    },
+    lancperloja:()=>{
+      // [NEW] Lançamento por Loja
+      const dIniEl = document.getElementById('lpl-data-ini');
+      const dFimEl = document.getElementById('lpl-data-fim');
+      if(dIniEl && !dIniEl.value) dIniEl.value = hoje();
+      if(dFimEl && !dFimEl.value) dFimEl.value = hoje();
+      renderHistoricoLoja();
+    },
+    acompgeral:()=>{
+      // [NEW] Acompanhamento Meta Geral
+      const dIniEl = document.getElementById('ag-data-ini');
+      const dFimEl = document.getElementById('ag-data-fim');
+      if(dIniEl && !dIniEl.value) dIniEl.value = hoje();
+      if(dFimEl && !dFimEl.value) dFimEl.value = hoje();
+      // Não chama buscarAcompanhamentoGeral() automaticamente, espera usuário clicar
     },
     lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
@@ -16049,6 +16232,819 @@ function renderYoYChart(){
   }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// LANÇAMENTO POR LOJA — entrada de dados por período (loja individual)
+// ════════════════════════════════════════════════════════════════════
+function salvarLancamentoPerloja(){
+  const loja = document.getElementById('lpl-loja')?.value;
+  const dataIni = document.getElementById('lpl-data-ini')?.value;
+  const dataFim = document.getElementById('lpl-data-fim')?.value;
+  const meta = parseFloat(document.getElementById('lpl-meta')?.value || 0);
+  const real = parseFloat(document.getElementById('lpl-real')?.value || 0);
+  const tm = parseFloat(document.getElementById('lpl-tm')?.value || 0);
+  const qtditens = parseInt(document.getElementById('lpl-qtditens')?.value || 0);
+  const nvendas = parseInt(document.getElementById('lpl-nvendas')?.value || 0);
+
+  if(!loja){ showToast('Selecione uma loja!','err'); return; }
+  if(!dataIni || !dataFim){ showToast('Informe período (data início e fim)!','err'); return; }
+  if(meta <= 0){ showToast('Meta deve ser maior que 0!','err'); return; }
+  if(real < 0){ showToast('Realizado não pode ser negativo!','err'); return; }
+
+  // Validar ordem de datas
+  if(new Date(dataIni) > new Date(dataFim)){ showToast('Data início não pode ser maior que data fim!','err'); return; }
+
+  if(!D.historicoLojas) D.historicoLojas = {};
+  if(!D.historicoLojas[loja]) D.historicoLojas[loja] = [];
+
+  // Chave única: dataIni_dataFim
+  const chave = dataIni + '_' + dataFim;
+  const pa = nvendas > 0 ? Math.round((qtditens / nvendas) * 100) / 100 : 0;
+
+  // Verificar se já existe este período para esta loja
+  const idx = D.historicoLojas[loja].findIndex(h=>h.chave === chave);
+  if(idx >= 0){
+    // Atualizar
+    D.historicoLojas[loja][idx] = {
+      chave, dataIni, dataFim,
+      meta: Math.round(meta),
+      realizado: Math.round(real),
+      tm: tm > 0 ? Math.round(tm * 100) / 100 : 0,
+      qtditens, nvendas, pa,
+      ts: Date.now()
+    };
+    showToast('Período atualizado!');
+  } else {
+    // Novo
+    D.historicoLojas[loja].push({
+      chave, dataIni, dataFim,
+      meta: Math.round(meta),
+      realizado: Math.round(real),
+      tm: tm > 0 ? Math.round(tm * 100) / 100 : 0,
+      qtditens, nvendas, pa,
+      ts: Date.now()
+    });
+    showToast('Período salvo!');
+  }
+
+  save();
+  limparFormLancPerloja();
+  renderHistoricoLoja();
+}
+
+function limparFormLancPerloja(){
+  ['lpl-loja','lpl-data-ini','lpl-data-fim','lpl-meta','lpl-real','lpl-tm','lpl-qtditens','lpl-nvendas'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  atualizaPAPreviewLoja();
+}
+
+function atualizaPAPreviewLoja(){
+  const qtditens = parseInt(document.getElementById('lpl-qtditens')?.value || 0);
+  const nvendas = parseInt(document.getElementById('lpl-nvendas')?.value || 0);
+  const preview = document.getElementById('lpl-pa-preview');
+  if(!preview) return;
+  if(nvendas <= 0){
+    preview.textContent = '—';
+    return;
+  }
+  const pa = Math.round((qtditens / nvendas) * 100) / 100;
+  preview.textContent = pa.toFixed(2) + ' itens/atendimento';
+}
+
+function renderHistoricoLoja(){
+  const lojaFiltro = document.getElementById('lpl-filtro-loja')?.value || '';
+  
+  if(!D.historicoLojas){
+    D.historicoLojas = {};
+  }
+
+  // Montar array de todos os períodos de todas as lojas
+  let todosOsPeriodos = [];
+  Object.entries(D.historicoLojas).forEach(([lojaId, periodos])=>{
+    periodos.forEach(p=>{
+      const loja = LOJAS.find(l=>l.id === lojaId);
+      todosOsPeriodos.push({
+        lojaId, lojaNome: loja?.nome || lojaId,
+        ...p
+      });
+    });
+  });
+
+  // Filtrar por loja se selecionada
+  if(lojaFiltro){
+    todosOsPeriodos = todosOsPeriodos.filter(p=>p.lojaId === lojaFiltro);
+  }
+
+  // Ordenar por data desc
+  todosOsPeriodos.sort((a,b)=>new Date(b.dataFim) - new Date(a.dataFim));
+
+  // KPIs
+  const kpis = document.getElementById('lpl-kpis');
+  if(kpis){
+    let totMeta = 0, totReal = 0, totVendas = 0;
+    todosOsPeriodos.forEach(p=>{
+      totMeta += p.meta || 0;
+      totReal += p.realizado || 0;
+      totVendas += p.nvendas || 0;
+    });
+    const pctMeta = totMeta > 0 ? (totReal / totMeta * 100) : 0;
+    const totTm = totVendas > 0 ? totReal / totVendas : 0;
+    const mediaPa = todosOsPeriodos.length > 0 
+      ? todosOsPeriodos.reduce((s,p)=>s+(p.pa||0), 0) / todosOsPeriodos.length 
+      : 0;
+
+    kpis.innerHTML = `
+      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+      <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+        <div class="kn" style="color:var(--verde)">R$ ${fmt(totReal)}</div>
+        <div class="kl">Realizado</div>
+      </div>
+      <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM Médio</div></div>
+      <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
+      <div class="kbox"><div class="kn">${mediaPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
+    `;
+  }
+
+  // Tabela
+  const tb = document.getElementById('tbody-lancperloja');
+  const empty = document.getElementById('lancperloja-empty');
+
+  if(!todosOsPeriodos.length){
+    if(tb) tb.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
+  if(tb){
+    tb.innerHTML = todosOsPeriodos.map(p=>{
+      const pctMeta = p.meta > 0 ? (p.realizado / p.meta * 100) : 0;
+      const periodo = brData(p.dataIni) + ' a ' + brData(p.dataFim);
+      return `
+        <tr>
+          <td><strong>${p.lojaNome}</strong></td>
+          <td style="font-size:11px">${periodo}</td>
+          <td>R$ ${fmt(p.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">R$ ${fmt(p.realizado)}</td>
+          <td>${pctMeta.toFixed(1)}%</td>
+          <td>R$ ${fmt(p.tm||0)}</td>
+          <td><strong>${(p.pa||0).toFixed(2)}</strong></td>
+          <td>${p.nvendas||'—'}</td>
+          <td><button onclick="excluirLancamentoPerloja('${p.lojaId}','${p.chave}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
+
+function excluirLancamentoPerloja(lojaId, chave){
+  if(!confirm('Excluir este período?')) return;
+  if(D.historicoLojas[lojaId]){
+    D.historicoLojas[lojaId] = D.historicoLojas[lojaId].filter(p=>p.chave !== chave);
+  }
+  save();
+  renderHistoricoLoja();
+  showToast('Período excluído');
+}
+
+function atualizaVendedorasLoja(){
+  // Para uso futuro quando integrar vendedoras por loja
+  // Por enquanto, só atualiza o formulário
+}
+
+// ════════════════════════════════════════════════════════════════════
+// FASE 3: FILTRO DE PERÍODO EM ABAS EXISTENTES
+// ════════════════════════════════════════════════════════════════════
+
+function buscarRankingPeriodo(){
+  // Buscar período customizado em Rankings
+  const dataIni = document.getElementById('rank-periodo-ini')?.value;
+  const dataFim = document.getElementById('rank-periodo-fim')?.value;
+
+  if(!dataIni || !dataFim){
+    showToast('Informe período (data início e fim)!','err');
+    return;
+  }
+
+  if(new Date(dataIni) > new Date(dataFim)){
+    showToast('Data início não pode ser maior que data fim!','err');
+    return;
+  }
+
+  showToast('Período: ' + brData(dataIni) + ' a ' + brData(dataFim));
+}
+
+function buscarMesAnteriorPeriodo(){
+  // Buscar período customizado em Mês Anterior
+  const dataIni = document.getElementById('mesant-periodo-ini')?.value;
+  const dataFim = document.getElementById('mesant-periodo-fim')?.value;
+
+  if(!dataIni || !dataFim){
+    showToast('Informe período (data início e fim)!','err');
+    return;
+  }
+
+  if(new Date(dataIni) > new Date(dataFim)){
+    showToast('Data início não pode ser maior que data fim!','err');
+    return;
+  }
+
+  renderMesAnteriorPeriodo(dataIni, dataFim);
+}
+
+function renderMesAnteriorPeriodo(dataIni, dataFim){
+  // Similar a renderMesAnterior() mas com período customizado
+  const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
+  const titulo = document.getElementById('mesant-titulo');
+  const periodo = brData(dataIni) + ' a ' + brData(dataFim);
+
+  if(lojaFiltro){
+    const loja = LOJAS.find(l=>l.id === lojaFiltro);
+    if(!loja){
+      if(titulo) titulo.textContent = 'Loja não encontrada';
+      return;
+    }
+
+    const periodosLoja = D.historicoLojas?.[lojaFiltro] || [];
+    const periodoMatch = periodosLoja.find(p=>{
+      return (p.dataIni <= dataIni && p.dataFim >= dataFim) ||
+             (p.dataIni >= dataIni && p.dataIni <= dataFim) ||
+             (p.dataFim >= dataIni && p.dataFim <= dataFim);
+    });
+
+    let meta = 0, fat = 0, tm = 0, nVendas = 0, pa = 0;
+    if(periodoMatch){
+      meta = periodoMatch.meta || 0;
+      fat = periodoMatch.realizado || 0;
+      tm = periodoMatch.tm || 0;
+      nVendas = periodoMatch.nvendas || 0;
+      pa = periodoMatch.pa || 0;
+    }
+
+    const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
+
+    if(titulo) titulo.textContent = `${loja.nome} — ${periodo}`;
+
+    const kpis = document.getElementById('mesant-kpis');
+    if(kpis){
+      kpis.innerHTML = `
+        <div class="kbox"><div class="kn">R$ ${fmt(meta)}</div><div class="kl">Meta</div></div>
+        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+          <div class="kn" style="color:var(--verde)">R$ ${fmt(fat)}</div>
+          <div class="kl">Realizado</div>
+        </div>
+        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+        <div class="kbox"><div class="kn">R$ ${fmt(tm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
+        <div class="kbox"><div class="kn">${pa.toFixed(2)}</div><div class="kl">PA</div></div>
+      `;
+    }
+
+    const tb = document.getElementById('tbody-mesant');
+    if(tb){
+      tb.innerHTML = `
+        <tr>
+          <td><strong>${loja.nome}</strong></td>
+          <td>R$ ${fmt(meta)}</td>
+          <td style="color:var(--verde);font-weight:600">R$ ${fmt(fat)}</td>
+          <td>${pctMeta.toFixed(1)}%</td>
+          <td>R$ ${fmt(tm)}</td>
+          <td>${nVendas}</td>
+          <td>${pa.toFixed(2)}</td>
+        </tr>
+      `;
+    }
+  } else {
+    const dados = LOJAS.map(loja=>{
+      const periodosLoja = D.historicoLojas?.[loja.id] || [];
+      const periodoMatch = periodosLoja.find(p=>{
+        return (p.dataIni <= dataIni && p.dataFim >= dataFim) ||
+               (p.dataIni >= dataIni && p.dataIni <= dataFim) ||
+               (p.dataFim >= dataIni && p.dataFim <= dataFim);
+      });
+
+      let meta = 0, fat = 0, tm = 0, nVendas = 0, pa = 0;
+      if(periodoMatch){
+        meta = periodoMatch.meta || 0;
+        fat = periodoMatch.realizado || 0;
+        tm = periodoMatch.tm || 0;
+        nVendas = periodoMatch.nvendas || 0;
+        pa = periodoMatch.pa || 0;
+      }
+
+      const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
+      return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa };
+    });
+
+    if(titulo) titulo.textContent = `Todas as Lojas — ${periodo}`;
+
+    const kpis = document.getElementById('mesant-kpis');
+    if(kpis){
+      const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
+      const totFat = dados.reduce((s, d)=>s+d.fat, 0);
+      const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
+      const totTm = totVendas > 0 ? totFat / totVendas : 0;
+      const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
+      const mediaPa = dados.length > 0 ? dados.reduce((s,d)=>s+d.pa, 0) / dados.length : 0;
+
+      kpis.innerHTML = `
+        <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+          <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
+          <div class="kl">Realizado</div>
+        </div>
+        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
+        <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
+        <div class="kbox"><div class="kn">${mediaPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
+      `;
+    }
+
+    const tb = document.getElementById('tbody-mesant');
+    if(tb){
+      tb.innerHTML = dados.map(d=>`
+        <tr>
+          <td><strong>${d.loja}</strong></td>
+          <td>R$ ${fmt(d.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
+          <td>${d.pctMeta.toFixed(1)}%</td>
+          <td>R$ ${fmt(d.tm)}</td>
+          <td>${d.nVendas}</td>
+          <td>${d.pa.toFixed(2)}</td>
+        </tr>
+      `).join('');
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// FASE 2: ACOMPANHAMENTO META GERAL — consolidado da rede por período
+// ════════════════════════════════════════════════════════════════════
+function buscarAcompanhamentoGeral(){
+  const dataIni = document.getElementById('ag-data-ini')?.value;
+  const dataFim = document.getElementById('ag-data-fim')?.value;
+
+  if(!dataIni || !dataFim){
+    showToast('Informe período (data início e fim)!','err');
+    return;
+  }
+
+  if(new Date(dataIni) > new Date(dataFim)){
+    showToast('Data início não pode ser maior que data fim!','err');
+    return;
+  }
+
+  renderAcompanhamentoGeral(dataIni, dataFim);
+}
+
+function renderAcompanhamentoGeral(dataIni, dataFim){
+  // Montar dados consolidados de TODAS as lojas neste período
+  const dados = LOJAS.map(loja=>{
+    // Buscar dados do historicoLojas para este período
+    const periodosLoja = D.historicoLojas?.[loja.id] || [];
+    let metaPeriodo = 0, realizado = 0, tm = 0, pa = 0, nvendas = 0, qtditens = 0;
+    
+    // Se há lançamento manual para este período
+    const periodoMatch = periodosLoja.find(p=>{
+      return (p.dataIni <= dataIni && p.dataFim >= dataFim) ||
+             (p.dataIni >= dataIni && p.dataIni <= dataFim) ||
+             (p.dataFim >= dataIni && p.dataFim <= dataFim);
+    });
+
+    if(periodoMatch){
+      metaPeriodo = periodoMatch.meta || 0;
+      realizado = periodoMatch.realizado || 0;
+      tm = periodoMatch.tm || 0;
+      pa = periodoMatch.pa || 0;
+      nvendas = periodoMatch.nvendas || 0;
+      qtditens = periodoMatch.qtditens || 0;
+    } else {
+      // Se não tem lançamento, tentar usar vendas do período
+      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7))?.mes || 0;
+      realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
+      nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
+      tm = nvendas > 0 ? realizado / nvendas : 0;
+    }
+
+    const pctMeta = metaPeriodo > 0 ? (realizado / metaPeriodo * 100) : 0;
+
+    // Vendedoras da loja
+    const vendedoras = vendsAtivas(loja.id).map(v=>{
+      let vMeta = 0, vReal = 0;
+      // Tentar puxar do período
+      if(periodoMatch){
+        // Simplificado: proporcional por número de vendedoras
+        vMeta = metaPeriodo / vendsAtivas(loja.id).length;
+        vReal = realizado / vendsAtivas(loja.id).length;
+      } else {
+        vReal = calcVendPer(v.id, dataIni.slice(0, 7)) || 0;
+        vMeta = v.metaMes || 0;
+      }
+      return {
+        id: v.id,
+        nome: v.nome,
+        meta: vMeta,
+        realizado: vReal,
+        pct: vMeta > 0 ? (vReal / vMeta * 100) : 0
+      };
+    }).sort((a,b)=>b.realizado - a.realizado);
+
+    return {
+      id: loja.id,
+      nome: loja.nome,
+      meta: metaPeriodo,
+      realizado,
+      pctMeta,
+      tm,
+      pa,
+      nvendas,
+      vendedoras
+    };
+  }).sort((a,b)=>b.realizado - a.realizado);
+
+  // KPIs consolidados
+  const totMeta = dados.reduce((s,l)=>s+l.meta, 0);
+  const totReal = dados.reduce((s,l)=>s+l.realizado, 0);
+  const totVendas = dados.reduce((s,l)=>s+l.nvendas, 0);
+  const totTm = totVendas > 0 ? totReal / totVendas : 0;
+  const totPa = dados.length > 0 ? dados.reduce((s,l)=>s+l.pa, 0) / dados.length : 0;
+  const pctMetaRede = totMeta > 0 ? (totReal / totMeta * 100) : 0;
+
+  const kpis = document.getElementById('ag-kpis');
+  if(kpis){
+    const periodo = brData(dataIni) + ' a ' + brData(dataFim);
+    kpis.innerHTML = `
+      <div class="kbox"><div class="kn">${periodo}</div><div class="kl">Período</div></div>
+      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+      <div class="kbox" style="border-color:rgba(46,204,135,.3)">
+        <div class="kn" style="color:var(--verde)">R$ ${fmt(totReal)}</div>
+        <div class="kl">Realizado</div>
+      </div>
+      <div class="kbox"><div class="kn">${pctMetaRede.toFixed(1)}%</div><div class="kl">% Meta Rede</div></div>
+      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM Consolidado</div></div>
+      <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
+      <div class="kbox"><div class="kn">${totPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
+    `;
+  }
+
+  // Tabela lojas
+  const tb = document.getElementById('tbody-ag-lojas');
+  const empty = document.getElementById('ag-empty');
+
+  if(!dados.length){
+    if(tb) tb.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
+  if(tb){
+    tb.innerHTML = dados.map(l=>`
+      <tr>
+        <td><strong>${l.nome}</strong></td>
+        <td>R$ ${fmt(l.meta)}</td>
+        <td style="color:var(--verde);font-weight:600">R$ ${fmt(l.realizado)}</td>
+        <td>${l.pctMeta.toFixed(1)}%</td>
+        <td>R$ ${fmt(l.tm)}</td>
+        <td>${l.pa.toFixed(2)}</td>
+        <td>${l.nvendas}</td>
+        <td><span style="font-size:10px;color:var(--muted)">${l.vendedoras.length} vends</span></td>
+      </tr>
+    `).join('');
+  }
+
+  // Vendedoras
+  renderVendedorasAcompGeral(dados);
+}
+
+function renderVendedorasAcompGeral(dados){
+  const container = document.getElementById('ag-vendedoras-container');
+  if(!container) return;
+
+  let html = '';
+  dados.forEach(loja=>{
+    if(!loja.vendedoras.length) return;
+    html += `
+      <div style="margin-bottom:16px;padding:12px;background:var(--card2);border-radius:8px;border-left:3px solid var(--azul)">
+        <div style="font-weight:600;margin-bottom:8px">${loja.nome}</div>
+        <div style="display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+    `;
+    loja.vendedoras.slice(0, 10).forEach(v=>{ // top 10 por loja
+      html += `
+        <div style="font-size:11px;padding:8px;background:var(--card);border-radius:6px">
+          <div style="font-weight:600">${v.nome}</div>
+          <div>R$ ${fmt(v.realizado)} / R$ ${fmt(v.meta)}</div>
+          <div style="color:var(--verde);font-size:10px">${v.pct.toFixed(1)}%</div>
+        </div>
+      `;
+    });
+    html += `
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html || '<div style="color:var(--muted);text-align:center;padding:20px">Sem vendedoras neste período</div>';
+}
+
+// ════════════════════════════════════════════════════════════════════
+// FASE 4: EXPORT PDF COM GRÁFICOS SOFISTICADOS
+// ════════════════════════════════════════════════════════════════════
+
+function exportarAcompGeralCSV(){
+  const dataIni = document.getElementById('ag-data-ini')?.value;
+  const dataFim = document.getElementById('ag-data-fim')?.value;
+
+  if(!dataIni || !dataFim){
+    showToast('Busque um período primeiro!','err');
+    return;
+  }
+
+  const tb = document.getElementById('tbody-ag-lojas');
+  if(!tb || !tb.innerHTML){
+    showToast('Nenhum dado para exportar!','err');
+    return;
+  }
+
+  const rows = tb.querySelectorAll('tr');
+  let csv = 'ACOMPANHAMENTO META GERAL\n';
+  csv += `Período: ${brData(dataIni)} a ${brData(dataFim)}\n\n`;
+  csv += 'Loja,Meta,Realizado,% Meta,TM,PA,Nº Vendas\n';
+
+  rows.forEach(row=>{
+    const cells = row.querySelectorAll('td');
+    if(cells.length >= 8){
+      const loja = cells[0].textContent.trim();
+      const meta = cells[1].textContent.replace(/[^\d,.-]/g,'').trim();
+      const real = cells[2].textContent.replace(/[^\d,.-]/g,'').trim();
+      const pct = cells[3].textContent.replace('%','').trim();
+      const tm = cells[4].textContent.replace(/[^\d,.-]/g,'').trim();
+      const pa = cells[5].textContent.trim();
+      const nv = cells[6].textContent.trim();
+      csv += `"${loja}",${meta},${real},${pct},${tm},${pa},${nv}\n`;
+    }
+  });
+
+  downloadCSV(csv, 'acompanhamento-meta-geral.csv');
+  showToast('CSV exportado!');
+}
+
+function exportarAcompGeralPDF(){
+  const dataIni = document.getElementById('ag-data-ini')?.value;
+  const dataFim = document.getElementById('ag-data-fim')?.value;
+
+  if(!dataIni || !dataFim){
+    showToast('Busque um período primeiro!','err');
+    return;
+  }
+
+  const periodo = brData(dataIni) + ' a ' + brData(dataFim);
+  const titulo = 'Acompanhamento Meta Geral';
+  const kpis = document.getElementById('ag-kpis');
+
+  let html = `
+    <div style="font-family:Arial,sans-serif;padding:30px;background:#f5f5f5;min-height:100vh">
+      <div style="background:white;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)">
+        <div style="border-bottom:3px solid #2ecb87;padding-bottom:20px;margin-bottom:30px">
+          <h1 style="margin:0;color:#333;font-size:32px">${titulo}</h1>
+          <p style="margin:5px 0 0 0;color:#999;font-size:14px">${periodo}</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:30px">
+          <div style="background:rgba(240,205,69,.1);padding:20px;border-radius:6px;border-left:4px solid #f0cd45">
+            <div style="color:#666;font-size:11px">Meta Total</div>
+            <div style="color:#333;font-weight:bold;font-size:18px">${kpis?.children[1]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(46,204,135,.1);padding:20px;border-radius:6px;border-left:4px solid #2ecb87">
+            <div style="color:#666;font-size:11px">Realizado</div>
+            <div style="color:#2ecb87;font-weight:bold;font-size:18px">${kpis?.children[2]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(91,141,239,.1);padding:20px;border-radius:6px;border-left:4px solid #5b8def">
+            <div style="color:#666;font-size:11px">% Meta Rede</div>
+            <div style="color:#5b8def;font-weight:bold;font-size:18px">${kpis?.children[3]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(51,51,51,.1);padding:20px;border-radius:6px;border-left:4px solid #333">
+            <div style="color:#666;font-size:11px">Nº Vendas</div>
+            <div style="color:#333;font-weight:bold;font-size:18px">${kpis?.children[5]?.textContent || '—'}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:30px">
+          <h3 style="margin:0 0 20px 0;color:#333;font-size:16px">Meta vs Realizado por Loja</h3>
+          ${gerarGraficoBarrasAcompGeral()}
+        </div>
+
+        <div style="margin-bottom:30px">
+          <h3 style="margin:0 0 15px 0;color:#333;font-size:16px">Performance por Loja</h3>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:#f0f0f0;border-bottom:2px solid #ddd">
+                <th style="padding:10px;text-align:left;font-weight:bold">Loja</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">Meta</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">Realizado</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">% Meta</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">TM</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">PA</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${Array.from(document.getElementById('tbody-ag-lojas')?.querySelectorAll('tr') || []).map(row=>{
+                const cells = row.querySelectorAll('td');
+                return `<tr style="border-bottom:1px solid #eee">
+                  <td style="padding:10px;text-align:left">${cells[0]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right">${cells[1]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right;color:#2ecb87;font-weight:bold">${cells[2]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right">${cells[3]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right">${cells[4]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right;font-weight:bold">${cells[5]?.textContent.trim()}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="border-top:1px solid #ddd;padding-top:20px;margin-top:30px;color:#999;font-size:10px">
+          <p style="margin:0">MonAris Sales Control — Avatim/M.Anjos Perfumarias</p>
+          <p style="margin:5px 0 0 0">Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const opt = {
+    margin: 0,
+    filename: 'acompanhamento-meta-geral.pdf',
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2 },
+    jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+  };
+
+  html2pdf().set(opt).from(html).save();
+  showToast('PDF gerado!');
+}
+
+function gerarGraficoBarrasAcompGeral(){
+  const rows = document.getElementById('tbody-ag-lojas')?.querySelectorAll('tr') || [];
+  if(!rows.length) return '<p style="color:#ccc">Sem dados</p>';
+
+  const dados = Array.from(rows).slice(0, 7).map((row, i)=>{
+    const cells = row.querySelectorAll('td');
+    const meta = parseFloat(cells[1]?.textContent.replace(/[^\d]/g,'')) || 0;
+    const real = parseFloat(cells[2]?.textContent.replace(/[^\d]/g,'')) || 0;
+    const loja = cells[0]?.textContent.trim() || `Loja ${i+1}`;
+    return { loja: loja.substring(0, 15), meta, real };
+  });
+
+  const maxVal = Math.max(...dados.map(d=>Math.max(d.meta, d.real)));
+  const scale = maxVal > 0 ? 400 / maxVal : 1;
+
+  let svg = `<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">`;
+  svg += `<rect width="800" height="300" fill="#fafafa"/>`;
+
+  dados.forEach((d, i)=>{
+    const x = 50 + i * 110;
+    const h1 = d.meta * scale;
+    const h2 = d.real * scale;
+    svg += `<rect x="${x}" y="${250-h1}" width="40" height="${h1}" fill="#f0cd45" opacity="0.8"/>`;
+    svg += `<rect x="${x+45}" y="${250-h2}" width="40" height="${h2}" fill="#2ecb87" opacity="0.8"/>`;
+    svg += `<text x="${x+45}" y="270" font-size="11" text-anchor="middle" fill="#333">${d.loja}</text>`;
+  });
+
+  svg += `<text x="20" y="20" font-size="12" fill="#999">Meta (ouro) vs Realizado (verde)</text>`;
+  svg += `</svg>`;
+
+  return svg;
+}
+
+function exportarLancPerlojaCSV(){
+  const tb = document.getElementById('tbody-lancperloja');
+  if(!tb || !tb.innerHTML){
+    showToast('Nenhum período lançado!','err');
+    return;
+  }
+
+  let csv = 'LANÇAMENTO POR LOJA\n\n';
+  csv += 'Loja,Período,Meta,Realizado,% Meta,TM,PA,Nº Vendas\n';
+
+  tb.querySelectorAll('tr').forEach(row=>{
+    const cells = row.querySelectorAll('td');
+    if(cells.length >= 9){
+      const loja = cells[0]?.textContent.trim() || '';
+      const periodo = cells[1]?.textContent.trim() || '';
+      const meta = cells[2]?.textContent.replace(/[^\d,.-]/g,'').trim() || '';
+      const real = cells[3]?.textContent.replace(/[^\d,.-]/g,'').trim() || '';
+      const pct = cells[4]?.textContent.replace('%','').trim() || '';
+      const tm = cells[5]?.textContent.replace(/[^\d,.-]/g,'').trim() || '';
+      const pa = cells[6]?.textContent.trim() || '';
+      const nv = cells[7]?.textContent.trim() || '';
+      csv += `"${loja}","${periodo}",${meta},${real},${pct},${tm},${pa},${nv}\n`;
+    }
+  });
+
+  downloadCSV(csv, 'lancamento-por-loja.csv');
+  showToast('CSV exportado!');
+}
+
+function exportarLancPerlojaPDF(){
+  const tb = document.getElementById('tbody-lancperloja');
+  if(!tb || !tb.innerHTML){
+    showToast('Nenhum período lançado!','err');
+    return;
+  }
+
+  const lojaFiltro = document.getElementById('lpl-filtro-loja')?.value || '';
+  const titulo = 'Lançamento por Loja' + (lojaFiltro && lojaFiltro !== '' ? ` — ${lojaFiltro}` : '');
+  const kpis = document.getElementById('lpl-kpis');
+
+  let html = `
+    <div style="font-family:Arial,sans-serif;padding:30px;background:#f5f5f5;min-height:100vh">
+      <div style="background:white;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)">
+        <div style="border-bottom:3px solid #5b8def;padding-bottom:20px;margin-bottom:30px">
+          <h1 style="margin:0;color:#333;font-size:32px">${titulo}</h1>
+          <p style="margin:5px 0 0 0;color:#999;font-size:14px">Histórico de períodos lançados</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:30px">
+          <div style="background:rgba(91,141,239,.1);padding:20px;border-radius:6px;border-left:4px solid #5b8def">
+            <div style="color:#666;font-size:11px">Meta Total</div>
+            <div style="color:#5b8def;font-weight:bold;font-size:18px">${kpis?.children[0]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(46,204,135,.1);padding:20px;border-radius:6px;border-left:4px solid #2ecb87">
+            <div style="color:#666;font-size:11px">Realizado</div>
+            <div style="color:#2ecb87;font-weight:bold;font-size:18px">${kpis?.children[1]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(51,51,51,.1);padding:20px;border-radius:6px;border-left:4px solid #333">
+            <div style="color:#666;font-size:11px">% Meta</div>
+            <div style="color:#333;font-weight:bold;font-size:18px">${kpis?.children[2]?.textContent || '—'}</div>
+          </div>
+          <div style="background:rgba(240,205,69,.1);padding:20px;border-radius:6px;border-left:4px solid #f0cd45">
+            <div style="color:#666;font-size:11px">Nº Vendas</div>
+            <div style="color:#f0cd45;font-weight:bold;font-size:18px">${kpis?.children[4]?.textContent || '—'}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:30px">
+          <h3 style="margin:0 0 15px 0;color:#333;font-size:16px">Períodos Lançados</h3>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead>
+              <tr style="background:#f0f0f0;border-bottom:2px solid #ddd">
+                <th style="padding:10px;text-align:left;font-weight:bold">Loja</th>
+                <th style="padding:10px;text-align:center;font-weight:bold">Período</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">Meta</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">Realizado</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">% Meta</th>
+                <th style="padding:10px;text-align:right;font-weight:bold">PA</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${Array.from(tb.querySelectorAll('tr')).map(row=>{
+                const cells = row.querySelectorAll('td');
+                return `<tr style="border-bottom:1px solid #eee">
+                  <td style="padding:10px;text-align:left">${cells[0]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:center">${cells[1]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right">${cells[2]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right;color:#2ecb87;font-weight:bold">${cells[3]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right">${cells[4]?.textContent.trim()}</td>
+                  <td style="padding:10px;text-align:right;font-weight:bold">${cells[6]?.textContent.trim()}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="border-top:1px solid #ddd;padding-top:20px;margin-top:30px;color:#999;font-size:10px">
+          <p style="margin:0">MonAris Sales Control — Avatim/M.Anjos Perfumarias</p>
+          <p style="margin:5px 0 0 0">Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const opt = {
+    margin: 0,
+    filename: 'lancamento-por-loja.pdf',
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2 },
+    jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+  };
+
+  html2pdf().set(opt).from(html).save();
+  showToast('PDF gerado!');
+}
+
+function downloadCSV(csv, filename){
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 
 </script>
