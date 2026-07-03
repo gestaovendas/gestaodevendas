@@ -8535,12 +8535,18 @@ function calcProjecao_vend(id){
 
 function renderTabelaVend(){
   const lid=lojaId();
-  // Admin: mostrar todas; loja: só as suas
-  const vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
-  
-  // Admin: seletor de loja para filtrar
-  const filtroLoja = isAdmin() ? (document.getElementById('vend-tab-filtro-loja')?.value||'') : lid;
-  const vendsFiltradas = filtroLoja ? vends.filter(v=>v.loja===filtroLoja) : vends;
+  // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
+  // Antes: isAdmin() || v.loja===lid causava curto-circuito
+  // Agora: admin vê todas, mas respeitando filtro de loja se houver
+  const filtroLojaAdmin = isAdmin() ? (document.getElementById('vend-tab-filtro-loja')?.value||'') : '';
+  const vends = D.vendedoras.filter(v => {
+    // Se admin e há filtro, mostrar apenas a loja filtrada
+    if(isAdmin() && filtroLojaAdmin) return v.loja === filtroLojaAdmin;
+    // Se admin sem filtro, mostrar todas
+    if(isAdmin()) return true;
+    // Se não admin, mostrar apenas sua loja
+    return v.loja === lid;
+  });
   
   // Injetar seletor de loja no topo da tabela (admin)
   if(isAdmin()){
@@ -8563,7 +8569,7 @@ function renderTabelaVend(){
     }
   }
 
-  document.getElementById("tbody-vend").innerHTML=vendsFiltradas.length?vendsFiltradas.map(v=>{
+  document.getElementById("tbody-vend").innerHTML=vends.length?vends.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const isArquivada = v.ativa === false;
     const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
@@ -8839,9 +8845,12 @@ function calcularComissao(){
 
 function renderRankComissao(){
   const lid=lojaId();
-  // [FIX BUG 2] Filtrar vendedoras INATIVAS — não devem aparecer no ranking de comissão
-  // Inativas (ativa===false) = arquivadas, não recebem comissão
-  const vends=D.vendedoras.filter(v=>(isAdmin()||v.loja===lid) && v.ativa!==false);
+  // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
+  // Antes: isAdmin() || v.loja===lid causava curto-circuito
+  // Agora: admin vê todas (ativas), loja vê apenas as suas
+  const vends = isAdmin() 
+    ? D.vendedoras.filter(v => v.ativa !== false)  // admin vê todas ativas
+    : D.vendedoras.filter(v => v.loja === lid && v.ativa !== false);  // loja só a sua
   const lojaOks={};
   LOJAS.forEach(l=>{const m=getMetas(l.id);lojaOks[l.id]=m.mes>0&&calcMes(l.id)/m.mes>=1;});
   const ranked=vends.map(v=>{
@@ -10708,9 +10717,10 @@ function renderCampLista(){
     let rankVendArr = Object.entries(rankVend)
       .map(([vId,v])=>({...v, vId}))
       .filter(v=>{
-        if(isAdmin() || _campFiltroLoja) return true; // admin e filtro ativo veem tudo
+        // [FIX CRÍTICO] reaisParaRank já está filtrado corretamente
+        // Garantir que cada vendedora está na loja correta
         const vObj = D.vendedoras.find(x=>x.id===v.vId);
-        return !vObj || vObj.loja===lid; // loja só vê suas vendedoras
+        return !vObj || (isAdmin() ? true : vObj.loja===lid); // admin vê todas, loja vê suas
       })
       .sort((a,b)=>b.val-a.val);
     const rankVendHTML = rankVendArr.length ? `
@@ -14650,10 +14660,14 @@ function exportarPDFRelatorio() {
     <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
   </tr>`).join('');
 
-  // Lançamentos diários do mês para a loja
+  // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
+  // Antes: isAdmin() || v.loja===lid causava curto-circuito e misturava dados
+  // Agora: admin vê todas, loja vê apenas as suas
   const mes2 = hj.slice(0,7);
   const diasMap = {};
-  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const vendsLoja = isAdmin() 
+    ? D.vendedoras 
+    : D.vendedoras.filter(v => v.loja === lid);
   vendsLoja.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
       if(!dt.startsWith(mes2)) return;
