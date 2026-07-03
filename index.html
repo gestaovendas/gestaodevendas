@@ -543,7 +543,7 @@ try{
                       _savedAt:     _lTs || _rTs
                     };
                   }
-                } else base.vendedoras.push(normalizarVendedora(rv));
+                } else base.vendedoras.push(rv);
               });
             }
             if(pedaco.metasLoja){
@@ -666,7 +666,7 @@ try{
                         _savedAt:     _lTs2 || _rTs2
                       };
                     }
-                  } else base.vendedoras.push(normalizarVendedora(rv));
+                  } else base.vendedoras.push(rv);
                 });
               }
               if(pedaco.metasLoja && pedaco.metasLoja[lid]){
@@ -1198,12 +1198,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <button class="btn-lg" onclick="login()">Entrar</button>
   <div class="lerr" id="lerr"></div>
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--borda);text-align:center">
-    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados atrasados? Recarregue:</div>
-    <button onclick="recarregarDadosFirebase()" style="background:none;border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer;margin-right:4px">
-      🔄 Recarregar dados
-    </button>
-    <br/>
-    <div style="font-size:10px;color:var(--muted);margin-top:8px;margin-bottom:8px">Dados apareando errados? Clique abaixo:</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados aparecendo errados? Clique abaixo:</div>
     <button onclick="resetEmergencia()" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer">
       🔄 Limpar dados corrompidos
     </button>
@@ -4806,7 +4801,7 @@ async function loadFromFirestore(){
                 };
               }
             } else {
-              D.vendedoras.push(normalizarVendedora(rv));
+              D.vendedoras.push(rv);
             }
           });
         }
@@ -4908,18 +4903,7 @@ async function loadFromFirestore(){
         });
       }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      
-      // [FIX CRÍTICO] Normalizar D.vendedoras após carregar
-      // Garantir que v.loja SEMPRE é lowercase (pode vir do Firebase com dados antigos)
-      if(D.vendedoras && D.vendedoras.length){
-        D.vendedoras.forEach(v => {
-          if(v.loja && typeof v.loja === 'string'){
-            v.loja = v.loja.toLowerCase().trim();
-          }
-        });
-      }
-      
-      console.log("[Avatim] ✅ Dados carregados do Firestore! vendedoras:", D.vendedoras?.length||0, "| campRealizados:", D.campRealizados?.length||0);
+      console.log("[Avatim] ✅ Dados carregados do Firestore! campRealizados:", D.campRealizados?.length||0);
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -5126,23 +5110,7 @@ function diasPassadosNoMes(){
 
 // ── Helper: vendedoras REAIS (exclui placeholders com nome de loja e cargo VRLL)
 function vendsReais(lid){
-  // [FIX CRÍTICO] Remover filtro errado de _lojaNames que excluia se nome era igual a loja
-  // Apenas filtrar por v.loja===lid e cargo!=='VRLL'
-  // Validar que v.loja é lowercase (pode vir do Firebase com dados antigos)
-  return D.vendedoras.filter(v=>{
-    const vendLojaLower = (v.loja||'').toLowerCase().trim();
-    const lojaIdLower = (lid||'').toLowerCase().trim();
-    return vendLojaLower === lojaIdLower && v.cargo!=='VRLL';
-  });
-}
-
-// [FIX CRÍTICO] Função auxiliar para normalizar vendedora após carregar do Firebase
-function normalizarVendedora(v){
-  if(!v) return v;
-  return {
-    ...v,
-    loja: (v.loja||'').toLowerCase().trim()  // SEMPRE lowercase
-  };
+  return D.vendedoras.filter(v=>v.loja===lid && v.cargo!=='VRLL');
 }
 
 // ── Helper: vendedoras ATIVAS (reais + não arquivadas)
@@ -5152,50 +5120,6 @@ function vendsAtivas(lid){
 }
 
 // [FIX CRÍTICO SINCRONIZAÇÃO] Função para forçar reload completo dos dados
-async function recarregarDadosFirebase(){
-  showToast("🔄 Recarregando dados...", "info");
-  console.log("[Avatim] recarregarDadosFirebase: iniciando");
-  
-  try {
-    // Limpar dados locais (forçar re-carregamento do Firebase)
-    D = {
-      metasLoja: {},
-      vendas: {},
-      vendasVend: {},
-      vendedoras: [],
-      historicoLojas: {},
-      historicoMeses: {},
-      fluxo: [],
-      campRealizados: [],
-      campObjetivos: {},
-      arquivos: [],
-      saldosOverride: {},
-      produtosExtras: [],
-      configCom: {},
-      _vendsExcluidas: [],
-      _campExcluidos: {},
-      _vendasVendExcluidas: {}
-    };
-    
-    // Carregar tudo do Firebase
-    const sincronizado = await loadFromFirestore();
-    console.log("[Avatim] recarregarDadosFirebase: sincronizado =", sincronizado);
-    
-    // Re-renderizar TUDO
-    carregarVendsForm();
-    preencherSelectVends();
-    carregarDash();
-    renderTabelaVend();
-    renderVendRanking(_tabVend||{});
-    renderMetasLojas();
-    
-    showToast("✅ Dados recarregados com sucesso!", "ok");
-    console.log("[Avatim] recarregarDadosFirebase: completo!");
-  } catch(e) {
-    console.error("[Avatim] recarregarDadosFirebase: erro =", e);
-    showToast("❌ Erro ao recarregar dados: " + (e.message||e), "err");
-  }
-}
 
 // ── Arquivar / reativar vendedora
 function arquivarVendedora(vid, arquivar){
@@ -8188,9 +8112,7 @@ function salvarVend(){
     });
   }
   // Cadastrar nova vendedora já com a meta proporcional
-  // [FIX CRÍTICO] Normalizar lid para lowercase antes de salvar
-  const lidNormalizado = (lid||'').toLowerCase().trim();
-  D.vendedoras.push({id:"v"+Date.now(),nome,loja:lidNormalizado,metaMes:metaMesAuto,superMetaMes:superMetaMesAuto,cargo});
+  D.vendedoras.push({id:"v"+Date.now(),nome,loja:lid,metaMes:metaMesAuto,superMetaMes:superMetaMesAuto,cargo});
   save();
   const msg=metaMesAuto>0
     ? "✅ "+nome+" cadastrada! Meta: "+fmt(metaMesAuto)+" ("+novoTotal+"x vendedoras)"
@@ -8610,18 +8532,12 @@ function calcProjecao_vend(id){
 
 function renderTabelaVend(){
   const lid=lojaId();
-  // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
-  // Antes: isAdmin() || v.loja===lid causava curto-circuito
-  // Agora: admin vê todas, mas respeitando filtro de loja se houver
-  const filtroLojaAdmin = isAdmin() ? (document.getElementById('vend-tab-filtro-loja')?.value||'') : '';
-  const vends = D.vendedoras.filter(v => {
-    // Se admin e há filtro, mostrar apenas a loja filtrada
-    if(isAdmin() && filtroLojaAdmin) return v.loja === filtroLojaAdmin;
-    // Se admin sem filtro, mostrar todas
-    if(isAdmin()) return true;
-    // Se não admin, mostrar apenas sua loja
-    return v.loja === lid;
-  });
+  // Admin: mostrar todas; loja: só as suas
+  const vends=D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  
+  // Admin: seletor de loja para filtrar
+  const filtroLoja = isAdmin() ? (document.getElementById('vend-tab-filtro-loja')?.value||'') : lid;
+  const vendsFiltradas = filtroLoja ? vends.filter(v=>v.loja===filtroLoja) : vends;
   
   // Injetar seletor de loja no topo da tabela (admin)
   if(isAdmin()){
@@ -8644,7 +8560,7 @@ function renderTabelaVend(){
     }
   }
 
-  document.getElementById("tbody-vend").innerHTML=vends.length?vends.map(v=>{
+  document.getElementById("tbody-vend").innerHTML=vendsFiltradas.length?vendsFiltradas.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const isArquivada = v.ativa === false;
     const cargoBadge={VRLL:'<span class="sbadge gold">VRLL</span>',VR:'<span class="sbadge gold">VR</span>',ESP:'<span class="sbadge ok">ESP</span>',VS:'<span class="sbadge azul">VS</span>',VP:'<span class="sbadge warn">VP</span>',VD:'<span class="sbadge zero">VD</span>'}[v.cargo||'ESP']||'';
@@ -10792,10 +10708,9 @@ function renderCampLista(){
     let rankVendArr = Object.entries(rankVend)
       .map(([vId,v])=>({...v, vId}))
       .filter(v=>{
-        // [FIX CRÍTICO] reaisParaRank já está filtrado corretamente
-        // Garantir que cada vendedora está na loja correta
+        if(isAdmin() || _campFiltroLoja) return true; // admin e filtro ativo veem tudo
         const vObj = D.vendedoras.find(x=>x.id===v.vId);
-        return !vObj || (isAdmin() ? true : vObj.loja===lid); // admin vê todas, loja vê suas
+        return !vObj || vObj.loja===lid; // loja só vê suas vendedoras
       })
       .sort((a,b)=>b.val-a.val);
     const rankVendHTML = rankVendArr.length ? `
@@ -13019,7 +12934,7 @@ function iniciarAutoRefresh(){
                       _savedAt:     _lTsSA3 || _rTsSA3
                     };
                   }
-                } else D.vendedoras.push(normalizarVendedora(rv));
+                } else D.vendedoras.push(rv);
               });
             }
           }
@@ -13124,7 +13039,7 @@ async function forceSyncAdmin(){
                 _savedAt: _lTsFSA || _rTsFSA
               };
             }
-          } else D.vendedoras.push(normalizarVendedora(rv));
+          } else D.vendedoras.push(rv);
         });
       }
     }
@@ -14735,14 +14650,10 @@ function exportarPDFRelatorio() {
     <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
   </tr>`).join('');
 
-  // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
-  // Antes: isAdmin() || v.loja===lid causava curto-circuito e misturava dados
-  // Agora: admin vê todas, loja vê apenas as suas
+  // Lançamentos diários do mês para a loja
   const mes2 = hj.slice(0,7);
   const diasMap = {};
-  const vendsLoja = isAdmin() 
-    ? D.vendedoras 
-    : D.vendedoras.filter(v => v.loja === lid);
+  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
   vendsLoja.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
       if(!dt.startsWith(mes2)) return;
