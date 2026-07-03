@@ -1399,7 +1399,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
         <input type="date" id="l-data" value="">
       </div>
-      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
+      <div class="ig" id="l-loja-container" style="display:none"><label>Loja <span style="color:var(--verm)">*</span></label>
         <select id="l-loja" onchange="carregarVendsForm()">
           <option value="">Selecione uma loja...</option>
           <option value="mooca" selected>Mooca Plaza</option>
@@ -6863,6 +6863,25 @@ function carregarVendsForm(lidOverride){
     return;
   }
   
+  // [FIX SEGURANÇA] Mostrar/esconder select de loja baseado em perfil
+  // Admin: pode selecionar qualquer loja
+  // Não-admin (meninas): NÃO pode selecionar loja — só pode lançar em sua loja
+  const lojaContainer = document.getElementById('l-loja-container');
+  if(lojaContainer){
+    if(isAdmin()){
+      lojaContainer.style.display = ''; // mostra para admin
+    } else {
+      lojaContainer.style.display = 'none'; // esconde para não-admin
+    }
+  }
+  
+  // [FIX SEGURANÇA] Forçar select de loja para não-admin
+  // Não-admin não pode mudar de loja
+  if(!isAdmin() && selLoja){
+    selLoja.value = lojaId();  // força seu lojaId
+    console.log("[Avatim] carregarVendsForm: forçado l-loja para", lojaId());
+  }
+  
   // [FIX CRÍTICO] Atualizar select "l-vend" com vendedoras da loja selecionada
   const selLoja = document.getElementById('l-loja');
   const selVend = document.getElementById('l-vend');
@@ -7179,6 +7198,13 @@ function adicionarVenda(){
     return;
   }
 
+  // [FIX SEGURANÇA] Não-admin NUNCA pode lançar venda em loja diferente da sua
+  if(!isAdmin() && lojaVal !== lojaId()){
+    showToast('❌ Você só pode lançar vendas em sua loja!','err');
+    console.warn('[Avatim] TENTATIVA DE FRAUDE: não-admin tentou lançar em loja diferente', {lojaVal, lojaId: lojaId()});
+    return;
+  }
+
   // Adicionar à tabela
   const tb = document.getElementById('tabvendas');
   const vend = D.vendedoras.find(v=>v.id === vendVal);
@@ -7229,6 +7255,12 @@ async function salvarLanc(){
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
+  
+  // [FIX SEGURANÇA] Não-admin NUNCA pode salvar de loja diferente
+  if(!isAdmin() && lid !== lojaId()){
+    return _abortar('❌ Você só pode salvar vendas de sua loja!');
+  }
+  
   // [FIX Bug1a] lojaId() pode retornar null se _userLoja nao estiver definido
   if(!lid){ _abortar("\u26a0\ufe0f Sessao de loja invalida. Saia e entre novamente."); return; }
 
