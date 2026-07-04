@@ -1404,11 +1404,95 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
         <input type="date" id="l-data" value="">
       </div>
+      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
+        <select id="l-loja" onchange="carregarVendsForm()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
+          <option value="">Selecione uma loja...</option>
+          <option value="mooca">Mooca Plaza</option>
+          <option value="leopoldina">Vila Leopoldina</option>
+          <option value="perdizes">Perdizes</option>
+          <option value="santana">Santana</option>
+          <option value="jarpaul">Jardim Paulista</option>
+          <option value="pinheiros">Alto de Pinheiros</option>
+          <option value="ibirapuera">Shopping Ibirapuera</option>
+        </select>
+      </div>
+      <div class="ig"><label>Vendedora <span style="color:var(--verm)">*</span></label>
+        <select id="l-vend" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
+          <option value="">Selecione uma vendedora...</option>
+        </select>
+      </div>
+      <div class="ig"><label>Faturamento (R$) <span style="color:var(--verm)">*</span></label>
+        <input type="number" id="l-fat" placeholder="0,00" min="0" step="0.01">
+      </div>
+      <div class="ig"><label>Nº de Atendimentos</label>
+        <input type="number" id="l-atend" placeholder="0" min="0" step="1">
+      </div>
+      <div class="ig"><label>Obs (Opcional)</label>
+        <textarea id="l-obs" placeholder="Notas sobre a venda..." style="resize:vertical;min-height:50px"></textarea>
+      </div>
     </div>
-  </div>  <!-- CARDS VENDEDORAS DO DIA -->
+    <div class="btn-r">
+      <button class="btn-p" onclick="adicionarVenda()">➕ Adicionar Venda</button>
+      <button class="btn-s" onclick="limparCamposLanc()">🗑️ Limpar</button>
+    </div>
+  </div>
+
+  <!-- TABELA DE VENDAS DO DIA -->
   <div class="sc">
-    <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Lançar Vendas</div>
+    <div class="st">Vendas do Dia</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead>
+          <tr>
+            <th>Loja</th>
+            <th>Vendedora</th>
+            <th>Faturamento</th>
+            <th>Atend.</th>
+            <th>TM</th>
+            <th>Hora</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tabvendas"></tbody>
+      </table>
+    </div>
+    <div id="tab-vendas-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
+      Nenhuma venda lançada hoje.
+    </div>
+  </div>
+
+  <div id="lanc-metas-box" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
+    <div style="background:var(--card2);border:1px solid rgba(201,168,76,.25);border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta do Dia</div>
+      <div style="font-size:20px;font-weight:700;color:var(--ouro)" id="lanc-meta-dia">—</div>
+    </div>
+    <div style="background:var(--card2);border:1px solid rgba(46,204,135,.2);border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta da Semana</div>
+      <div style="font-size:20px;font-weight:700;color:var(--verde)" id="lanc-meta-sem">—</div>
+    </div>
+    <div style="background:var(--card2);border:1px solid rgba(100,100,255,.2);border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta do Mês</div>
+      <div style="font-size:20px;font-weight:700;color:var(--azul)" id="lanc-meta-mes">—</div>
+    </div>
+  </div>
+
+  <!-- CARDS VENDEDORAS DO DIA -->
+  <div class="sc">
+    <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Realizado</div>
     <div id="vend-lanc-grid"></div>
+  </div>
+
+  <!-- BARRA DE SALVAR -->
+  <div id="lanc-salvar-bar" style="display:none;background:var(--card2);border:1px solid rgba(201,168,76,.3);border-radius:12px;padding:14px 18px;margin-top:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Total do dia</div>
+      <div style="font-size:24px;font-weight:700;color:var(--ouro)" id="lanc-soma-total">R$ 0,00</div>
+      <div style="font-size:10px;color:var(--muted)" id="lanc-data-ref"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="limparCamposLanc()" style="font-size:12px">🗑️ Limpar</button>
+      <button class="btn-p" onclick="salvarLanc()" style="font-size:14px;padding:10px 28px;font-weight:700">💾 Salvar Lançamento</button>
+    </div>
   </div>
 
   <!-- CONSOLIDADO DIA / SEMANA / MÊS + TM -->
@@ -5536,20 +5620,17 @@ function showApp(){
   }
 
   // [CRÍTICO] Sincronizar com Firebase ANTES de renderizar qualquer coisa
-  console.log("[Avatim] showApp: carregando dados do Firebase...");
+  console.log("[Avatim] showApp: iniciando carregamento de dados...");
   loadFromFirestore().then(sincronizado => {
-    console.log("[Avatim] showApp: loadFromFirestore completo, sincronizado=" + sincronizado);
-    console.log("[Avatim] D.vendedoras:", D.vendedoras?.length || 0, "| D.metasLoja keys:", Object.keys(D.metasLoja || {}).length);
-    
-    // Agora sim, renderizar as telas COM os dados do Firebase
+    console.log("[Avatim] showApp: dados carregados");
     carregarVendsForm();
+    preencherSelectVends();
     carregarDash();
-    console.log("[Avatim] showApp: renderização completa");
-    
+    console.log("[Avatim] showApp: telas renderizadas");
   }).catch(e => {
-    console.error("[Avatim] showApp: erro ao carregar Firebase:", e.message);
-    // Em caso de erro, renderizar com localStorage
+    console.error("[Avatim] showApp: erro ao carregar", e.message);
     carregarVendsForm();
+    preencherSelectVends();
     carregarDash();
   });
   // [DIAGNÓSTICO SIMPLES] Log de carregamento
@@ -5562,6 +5643,8 @@ function showApp(){
     if(sb) sb.style.display="block";
     if(cb&&COSMOS_OK) cb.style.display="block";
   }
+  renderProdutos("","");
+  iniciarAutoRefresh();
 }
 // ── SHA-256 puro JS — fallback para file:// e HTTP sem HTTPS ──────────
 // Fonte: algoritmo SHA-256 padrão, sem dependências externas
@@ -6810,6 +6893,15 @@ function carregarVendsForm(lidOverride){
   } else {
     lid = lojaId();
   }
+  
+  // [FIX SEGURANÇA] Forçar select l-loja para a loja correta (não-admin)
+  if(!isAdmin()){
+    const selLoja = document.getElementById('l-loja');
+    if(selLoja && selLoja.value !== lid){
+      selLoja.value = lid;
+    }
+  }
+  
   const hj=hoje();
   const vends=vendsAtivas(lid);
   const grid=document.getElementById("vend-lanc-grid");
