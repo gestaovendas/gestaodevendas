@@ -1198,7 +1198,12 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <button class="btn-lg" onclick="login()">Entrar</button>
   <div class="lerr" id="lerr"></div>
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--borda);text-align:center">
-    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados aparecendo errados? Clique abaixo:</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Dados não aparecem? Clique para sincronizar:</div>
+    <button onclick="forcarSincronizacao()" style="background:none;border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer;margin-right:4px">
+      🔄 Sincronizar Dados
+    </button>
+    <br/>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;margin-bottom:8px">Dados aparecendo errados? Clique abaixo:</div>
     <button onclick="resetEmergencia()" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer">
       🔄 Limpar dados corrompidos
     </button>
@@ -4620,14 +4625,18 @@ function _mergeVendasSeguro(remoto){
 async function loadFromFirestore(){
   const ok = await waitForFirebase(3000);
   if(!ok){
-    console.warn("[Avatim] Firebase não disponível — usando localStorage");
+    console.error("[Avatim] Firebase não disponível (timeout 3s) — usando localStorage");
     return false;
   }
   try{
-    console.log("[Avatim] Buscando dados no Firestore...");
+    console.log("[Avatim] loadFromFirestore: Buscando dados no Firestore...");
     const dadosJSON = await window.fsCarregar();
-    if(dadosJSON){
-      const remoto = JSON.parse(dadosJSON);
+    if(!dadosJSON){
+      console.warn("[Avatim] loadFromFirestore: fsCarregar() retornou vazio");
+      return false;
+    }
+    console.log("[Avatim] loadFromFirestore: dados recebidos, processando...");
+    const remoto = JSON.parse(dadosJSON);
       // [FIX] Merge seguro: campos de configuracao sobrescrevem (vem do admin)
       // Campos de vendas fazem MERGE para nao perder dados locais
       // [FIX CRÍTICO] metasLoja: MERGE por loja+mês — nunca sobrescrever
@@ -5040,6 +5049,27 @@ function vendsAtivas(lid){
 // [FIX CRÍTICO SINCRONIZAÇÃO] Função para forçar reload completo dos dados
 
 // ── Arquivar / reativar vendedora
+function forcarSincronizacao(){
+  showToast("🔄 Sincronizando com Firebase...", "info");
+  console.log("[Avatim] forcarSincronizacao: iniciado");
+  
+  loadFromFirestore().then(sucesso => {
+    if(sucesso){
+      console.log("[Avatim] ✅ Sincronização completa!");
+      carregarVendsForm();
+      carregarDash();
+      const lid = lojaId();
+      const vends = vendsAtivas(lid);
+      showToast(`✅ Sincronizado! ${vends.length} vendedoras carregadas.`, "ok");
+    } else {
+      console.warn("[Avatim] ⚠️  Firebase não respondeu, usando localStorage");
+      showToast("⚠️  Firebase não respondeu, usando dados locais", "warn");
+    }
+  }).catch(e => {
+    console.error("[Avatim] Erro na sincronização:", e);
+    showToast("❌ Erro ao sincronizar: " + e.message, "err");
+  });
+}
 function arquivarVendedora(vid, arquivar){
   const idx = D.vendedoras.findIndex(v=>v.id===vid);
   if(idx<0){ showToast("Vendedora não encontrada","err"); return; }
@@ -5505,20 +5535,20 @@ function showApp(){
     })();
   }
 
-  // [FIX CRÍTICO METAS] Carregar dados do Firestore e renderizar APÓS carregar
-  // Isso garante que D.metasLoja está preenchido quando carregarVendsForm() é chamado
-  loadFromFirestore().then(sincronizado=>{
-    console.log("[Avatim] showApp: loadFromFirestore completo, sincronizado =", sincronizado, "| D.metasLoja keys:", Object.keys(D.metasLoja||{}).join(","));
-    // SEMPRE renderizar após carregar (mesmo se sincronizado=false, pois pode ter dados locais)
-    // Isso garante que se as metas vieram do Firebase, elas apareçam
+  // [CRÍTICO] Sincronizar com Firebase ANTES de renderizar qualquer coisa
+  console.log("[Avatim] showApp: carregando dados do Firebase...");
+  loadFromFirestore().then(sincronizado => {
+    console.log("[Avatim] showApp: loadFromFirestore completo, sincronizado=" + sincronizado);
+    console.log("[Avatim] D.vendedoras:", D.vendedoras?.length || 0, "| D.metasLoja keys:", Object.keys(D.metasLoja || {}).length);
+    
+    // Agora sim, renderizar as telas COM os dados do Firebase
     carregarVendsForm();
     carregarDash();
-    if(!sincronizado){
-      console.warn("[Avatim] showApp: Firestore não retornou dados atualizados, usando localStorage");
-    }
-  }).catch(e=>{
-    console.warn("[Avatim] showApp: Firestore load falhou, renderizando com dados locais:", e?.message||e);
-    // Em caso de erro, renderizar com o que temos no localStorage
+    console.log("[Avatim] showApp: renderização completa");
+    
+  }).catch(e => {
+    console.error("[Avatim] showApp: erro ao carregar Firebase:", e.message);
+    // Em caso de erro, renderizar com localStorage
     carregarVendsForm();
     carregarDash();
   });
