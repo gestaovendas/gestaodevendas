@@ -4662,6 +4662,10 @@ async function loadFromFirestore(){
       if(remoto.realProd)      D.realProd      = remoto.realProd;
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
+        console.log("[Avatim] Firebase tem", remoto.vendedoras.length, "vendedoras");
+        remoto.vendedoras.forEach(v => {
+          console.log("  - ", v.nome, "loja:", v.loja, "ativa:", v.ativa);
+        });
         // Atualizar tombstone local com o do remoto
         if(remoto._vendsExcluidas?.length){
           if(!D._vendsExcluidas) D._vendsExcluidas=[];
@@ -4820,7 +4824,17 @@ async function loadFromFirestore(){
         });
       }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      console.log("[Avatim] ✅ Dados carregados do Firestore! campRealizados:", D.campRealizados?.length||0);
+      
+      // [BUG CHECK CRÍTICO] Verificar se há vendedoras com v.loja undefined ou maiúscula
+      const vendsBugadas = D.vendedoras.filter(v => !v.loja || v.loja !== v.loja.toLowerCase());
+      if(vendsBugadas.length > 0){
+        console.error("[Avatim] ⚠️  VENDEDORAS COM v.loja INCORRETO (vai causar mistura de lojas):");
+        vendsBugadas.forEach(v => {
+          console.error("  -", v.nome, "v.loja=" + JSON.stringify(v.loja));
+        });
+      }
+      
+      console.log("[Avatim] ✅ Dados carregados do Firestore! vendedoras:", D.vendedoras?.length||0, "| metas:", Object.keys(D.metasLoja||{}).length);
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -5511,33 +5525,41 @@ function showApp(){
     // SEMPRE renderizar após carregar (mesmo se sincronizado=false, pois pode ter dados locais)
     // Isso garante que se as metas vieram do Firebase, elas apareçam
     carregarVendsForm();
-    preencherSelectVends();
     carregarDash();
     if(!sincronizado){
       console.warn("[Avatim] showApp: Firestore não retornou dados atualizados, usando localStorage");
     }
-    // [FIX CRÍTICO FORMULÁRIO] Garantir que selects l-loja e l-vend são populados
-    const selLoja = document.getElementById('l-loja');
-    if(selLoja && !selLoja.value){
-      selLoja.value = 'mooca'; // pré-selecionar primeira loja
-    }
-    // Chamar carregarVendsForm novamente para garantir que l-vend é preenchido
-    carregarVendsForm();
   }).catch(e=>{
     console.warn("[Avatim] showApp: Firestore load falhou, renderizando com dados locais:", e?.message||e);
     // Em caso de erro, renderizar com o que temos no localStorage
     carregarVendsForm();
-    preencherSelectVends();
     carregarDash();
-    // Garantir inicialização dos selects
-    const selLoja = document.getElementById('l-loja');
-    if(selLoja && !selLoja.value){
-      selLoja.value = 'mooca';
-    }
-    carregarVendsForm();
   });
-  renderProdutos("","");
-  iniciarAutoRefresh();
+  // [DIAGNÓSTICO] Adicionar informações de debug no console para a menina ver
+  setTimeout(()=>{
+    const lid = lojaId();
+    const allVends = D.vendedoras || [];
+    const myVends = vendsAtivas(lid);
+    console.log("\n" + "="*80);
+    console.log("🔍 DIAGNÓSTICO MONARIS");
+    console.log("="*80);
+    console.log("Você:", lojaNome(), "(" + lid + ")");
+    console.log("Total de vendedoras no sistema:", allVends.length);
+    console.log("Vendedoras da sua loja:", myVends.length);
+    console.log("  →", myVends.map(v=>v.nome).join(", ") || "(nenhuma)");
+    console.log("D.metasLoja['" + lid + "']:", JSON.stringify(D.metasLoja?.[lid], null, 2)||"(vazio)");
+    console.log("="*80 + "\n");
+    
+    // [BUG CHECK] Se não tem vendedoras, avisar
+    if(myVends.length === 0){
+      showToast("⚠️  Nenhuma vendedora cadastrada para sua loja! Avise a Moni.", "warn");
+      console.error("[Avatim] BUG: Nenhuma vendedora para", lid);
+    }
+    if(allVends.length === 0){
+      showToast("❌ Nenhum dado carregado do Firebase! Recarregue a página.", "err");
+      console.error("[Avatim] CRÍTICO: D.vendedoras vazio!");
+    }
+  }, 500);
   restaurarConfigCosmos();
   CosmosDB.init();
   if(adminMode){
@@ -6779,6 +6801,12 @@ function carregarVendsForm(lidOverride){
     console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando no lançamento");
     return;
   }
+  
+  // [DEBUG ISOLAMENTO] Log para verificar se está isolando corretamente
+  const lid = lojaId();
+  const allVends = D.vendedoras || [];
+  const myVends = vendsAtivas(lid);
+  console.log("[carregarVendsForm] lid=" + lid + " | allVends=" + allVends.length + " | myVends=" + myVends.length + " | nomes=" + myVends.map(v=>v.nome).join(","));
   
   // Admin sem override: usar a primeira loja real (nunca "admin")
   let lid;
