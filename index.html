@@ -4662,10 +4662,7 @@ async function loadFromFirestore(){
       if(remoto.realProd)      D.realProd      = remoto.realProd;
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
-        console.log("[Avatim] Firebase tem", remoto.vendedoras.length, "vendedoras");
-        remoto.vendedoras.forEach(v => {
-          console.log("  - ", v.nome, "loja:", v.loja, "ativa:", v.ativa);
-        });
+        console.log("[Avatim] loadFromFirestore: vendedoras encontradas", remoto.vendedoras.length);
         // Atualizar tombstone local com o do remoto
         if(remoto._vendsExcluidas?.length){
           if(!D._vendsExcluidas) D._vendsExcluidas=[];
@@ -4824,17 +4821,7 @@ async function loadFromFirestore(){
         });
       }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
-      
-      // [BUG CHECK CRÍTICO] Verificar se há vendedoras com v.loja undefined ou maiúscula
-      const vendsBugadas = D.vendedoras.filter(v => !v.loja || v.loja !== v.loja.toLowerCase());
-      if(vendsBugadas.length > 0){
-        console.error("[Avatim] ⚠️  VENDEDORAS COM v.loja INCORRETO (vai causar mistura de lojas):");
-        vendsBugadas.forEach(v => {
-          console.error("  -", v.nome, "v.loja=" + JSON.stringify(v.loja));
-        });
-      }
-      
-      console.log("[Avatim] ✅ Dados carregados do Firestore! vendedoras:", D.vendedoras?.length||0, "| metas:", Object.keys(D.metasLoja||{}).length);
+      console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -5535,31 +5522,9 @@ function showApp(){
     carregarVendsForm();
     carregarDash();
   });
-  // [DIAGNÓSTICO] Adicionar informações de debug no console para a menina ver
-  setTimeout(()=>{
-    const lid = lojaId();
-    const allVends = D.vendedoras || [];
-    const myVends = vendsAtivas(lid);
-    console.log("\n" + "="*80);
-    console.log("🔍 DIAGNÓSTICO MONARIS");
-    console.log("="*80);
-    console.log("Você:", lojaNome(), "(" + lid + ")");
-    console.log("Total de vendedoras no sistema:", allVends.length);
-    console.log("Vendedoras da sua loja:", myVends.length);
-    console.log("  →", myVends.map(v=>v.nome).join(", ") || "(nenhuma)");
-    console.log("D.metasLoja['" + lid + "']:", JSON.stringify(D.metasLoja?.[lid], null, 2)||"(vazio)");
-    console.log("="*80 + "\n");
-    
-    // [BUG CHECK] Se não tem vendedoras, avisar
-    if(myVends.length === 0){
-      showToast("⚠️  Nenhuma vendedora cadastrada para sua loja! Avise a Moni.", "warn");
-      console.error("[Avatim] BUG: Nenhuma vendedora para", lid);
-    }
-    if(allVends.length === 0){
-      showToast("❌ Nenhum dado carregado do Firebase! Recarregue a página.", "err");
-      console.error("[Avatim] CRÍTICO: D.vendedoras vazio!");
-    }
-  }, 500);
+  // [DIAGNÓSTICO SIMPLES] Log de carregamento
+  console.log("[Avatim] showApp: inicializado para", isAdmin() ? "ADMIN" : lojaId());
+
   restaurarConfigCosmos();
   CosmosDB.init();
   if(adminMode){
@@ -6798,15 +6763,9 @@ function carregarVendsForm(lidOverride){
   const focusedEl = document.activeElement;
   const lancForm  = document.getElementById('form-lanc') || document.getElementById('lanc-fat');
   if(focusedEl && lancForm && lancForm.contains(focusedEl)){
-    console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando no lançamento");
+    console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando");
     return;
   }
-  
-  // [DEBUG ISOLAMENTO] Log para verificar se está isolando corretamente
-  const lid = lojaId();
-  const allVends = D.vendedoras || [];
-  const myVends = vendsAtivas(lid);
-  console.log("[carregarVendsForm] lid=" + lid + " | allVends=" + allVends.length + " | myVends=" + myVends.length + " | nomes=" + myVends.map(v=>v.nome).join(","));
   
   // Admin sem override: usar a primeira loja real (nunca "admin")
   let lid;
