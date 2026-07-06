@@ -742,24 +742,32 @@ try{
   // onAuthStateChanged — só age se NÃO for login local
   const runAuth = ()=>onAuthStateChanged(auth, user=>{
     if(window._localLogin) return;
-    window._currentUser = user;
     if(user){
-      try {
-        // [FIX Bug1b] Restaurar _userLoja ao re-autenticar via Firebase (ex: reload, sessao persistida)
-        const uData = (window.USUARIOS||{})[user.email];
-        if(uData){
-          window._userLoja = uData;
-          console.log("[Avatim] onAuthStateChanged: _userLoja restaurado para:", uData.id);
-        } else {
-          window._userLoja = {id:"desconhecido", nome:user.email};
-          console.warn("[Avatim] onAuthStateChanged: email nao encontrado em USUARIOS:", user.email);
-        }
-      } catch(eU) {
-        window._userLoja = {id:"desconhecido",nome:user.email};
-        console.warn("[Avatim] Erro ao carregar USUARIOS:", eU.message);
+      // [FIX BOOT] Sessão ANÔNIMA persistida (serve só para as rules do Firestore)
+      // ou e-mail fora do cadastro NÃO pode auto-abrir o app — antes entrava como
+      // "desconhecido" com tela quebrada na guia habitual. Vai para o login.
+      if(user.isAnonymous || !user.email){
+        console.log("[Avatim] Sessão anônima persistida — exigindo login normal");
+        window._currentUser = null;
+        window._userLoja = null;
+        if(typeof showLogin==="function") showLogin();
+        return;
       }
+      const uData = (window.USUARIOS||{})[user.email];
+      if(!uData){
+        console.warn("[Avatim] Sessão persistida de e-mail não cadastrado:", user.email, "— exigindo login");
+        window._currentUser = null;
+        window._userLoja = null;
+        try{ signOut(auth); }catch(eSO){}
+        if(typeof showLogin==="function") showLogin();
+        return;
+      }
+      window._currentUser = user;
+      window._userLoja = uData;
+      console.log("[Avatim] onAuthStateChanged: _userLoja restaurado para:", uData.id);
       if(typeof showApp==="function") showApp();
     } else {
+      window._currentUser = null;
       window._userLoja = null;
       if(typeof showLogin==="function") showLogin();
     }
@@ -4274,7 +4282,38 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // ESTADO
 // ============================================================
-let D=JSON.parse(localStorage.getItem("avatim_v5")||"{}");
+// [FIX BOOT] Gravação protegida no localStorage — quota cheia ou erro não pode
+// derrubar o script. Se faltar espaço, libera o avatim_pending (regravável,
+// é só uma cópia de segurança) e tenta 1x de novo.
+function _lsSet(key, val){
+  try{ localStorage.setItem(key, val); return true; }
+  catch(e){
+    try{
+      localStorage.removeItem("avatim_pending");
+      localStorage.setItem(key, val);
+      console.warn("[Avatim] localStorage cheio — avatim_pending liberado para salvar", key);
+      return true;
+    }catch(e2){
+      console.error("[Avatim] localStorage sem espaço para", key, ":", e2.message);
+      return false;
+    }
+  }
+}
+// [FIX BOOT CRÍTICO] Antes: JSON.parse direto no nível raiz — se o avatim_v5
+// estivesse corrompido (gravação interrompida / quota), a exceção MATAVA o
+// script inteiro: tela de login aparecia mas o botão Entrar não respondia.
+// Guia anônima funcionava porque o storage está vazio. Agora: cache local
+// corrompido é descartado e o Firebase (fonte da verdade) repõe tudo no login.
+let D;
+try{
+  D = JSON.parse(localStorage.getItem("avatim_v5") || "{}");
+  if(typeof D !== "object" || D === null || Array.isArray(D)) throw new Error("formato inválido");
+}catch(eBoot){
+  console.error("[Avatim] ⚠️ avatim_v5 corrompido — cache local descartado:", eBoot.message);
+  D = {};
+  try{ localStorage.removeItem("avatim_v5"); }catch(_e){}
+  try{ localStorage.removeItem("avatim_pending"); }catch(_e){}
+}
 if(!D.metasLoja)  D.metasLoja={};
 if(!D.vendas)     D.vendas={};
 // [FIX CRÍTICO BUG ressurreição] NÃO popular automaticamente com VENDEDORAS_PADRAO
@@ -4320,7 +4359,7 @@ if(!D.vendedoras) D.vendedoras=[];
     idsParaTombstonar.forEach(id=>{
       if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
     });
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _lsSet("avatim_v5", JSON.stringify(D));
     console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedoras fantasmas (padrão antigo). Tombstones criados.");
   }
 })();
@@ -4360,7 +4399,7 @@ if(!D.vendedoras) D.vendedoras=[];
     }
   });
   if(corrigidas > 0){
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _lsSet("avatim_v5", JSON.stringify(D));
     console.warn("[Avatim MIGRAÇÃO META] Total corrigido: "+corrigidas+" vendedoras");
   }
 })();
@@ -4442,7 +4481,7 @@ function limparTombstonesAntigos(){
     // });
   });
   if(corrompidas > 0){
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _lsSet("avatim_v5", JSON.stringify(D));
     console.warn("[Avatim] "+corrompidas+" meta(s) em formato antigo migrada(s).");
   }
 })();
@@ -4584,7 +4623,7 @@ function _atendLancamento(r){
 let _savePending = false;
 
 function save(){
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   if(_savePending) return;
   _savePending = true;
   // [FIX Race Condition] Guardar snapshot dos dados no momento do save
@@ -4635,7 +4674,7 @@ function save(){
         window._pendingLocalDataTs = null; // [FIX CONEXÃO] limpar o par junto
         // [FIX CONEXÃO] Persistir pendência — sobrevive a fechar a aba;
         // showApp() e o listener de 'online' reenviam automaticamente
-        localStorage.setItem("avatim_pending", JSON.stringify(D));
+        _lsSet("avatim_pending", JSON.stringify(D));
         showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
         // Retry após 10s
         setTimeout(async ()=>{
@@ -4658,7 +4697,7 @@ function save(){
       window._pendingLocalData   = null;
       window._pendingLocalDataTs = null; // [FIX CONEXÃO]
       // [FIX CONEXÃO] Persistir pendência para reenvio automático
-      localStorage.setItem("avatim_pending", JSON.stringify(D));
+      _lsSet("avatim_pending", JSON.stringify(D));
       showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
       const retryOk = await waitForFirebase(30000);
       if(retryOk && window.fsGravar){
@@ -4986,7 +5025,7 @@ async function loadFromFirestore(){
           if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
         });
       }
-      localStorage.setItem("avatim_v5", JSON.stringify(D));
+      _lsSet("avatim_v5", JSON.stringify(D));
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
       return true;
     // [FIX CRÍTICO SYNTAX] Havia uma "}" extra aqui que fechava o try{} antes do
@@ -5237,7 +5276,7 @@ function arquivarVendedora(vid, arquivar){
   const nome = D.vendedoras[idx].nome;
   // [FIX CRÍTICO] Gravar imediatamente no localStorage e Firebase
   // bypass do save() que pode ter guards bloqueando admin
-  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  _lsSet('avatim_v5', JSON.stringify(D));
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   showToast(arquivar ? "📦 "+nome+" arquivada" : "✅ "+nome+" reativada");
@@ -5884,7 +5923,7 @@ function nav(pg){
                   const i=D.campRealizados.findIndex(x=>x.id===r.id);
                   if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
                 });
-                localStorage.setItem('avatim_v5',JSON.stringify(D));
+                _lsSet('avatim_v5',JSON.stringify(D));
               }
             }
           }catch(e){ console.warn('[Avatim] sync campanhas:', e.message); }
@@ -5907,7 +5946,7 @@ function nav(pg){
                   const i=D.campRealizados.findIndex(x=>x.id===r.id);
                   if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
                 });
-                localStorage.setItem('avatim_v5',JSON.stringify(D));
+                _lsSet('avatim_v5',JSON.stringify(D));
               }
             }
           }catch(e){ console.warn('[Avatim] sync campanhas loja:', e.message); }
@@ -7416,9 +7455,9 @@ async function salvarLanc(){
 
     // [FIX Race Condition] Gravar no Firebase ANTES de recarregar a tela
     // para evitar que loadFromFirestore apague o dado recém-lançado
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _lsSet("avatim_v5", JSON.stringify(D));
     // Salvar snapshot TAMBÉM no localStorage para sobreviver a recargas
-    localStorage.setItem("avatim_pending", JSON.stringify(D));
+    _lsSet("avatim_pending", JSON.stringify(D));
     window._pendingLocalData = JSON.parse(JSON.stringify(D));
 
     showToast("✅ Lançamento salvo! Total: "+fmt(fat));
@@ -7541,7 +7580,7 @@ async function deletarLanc(lid, data){
   });
   // [FIX Race Condition] Exclusão tem prioridade — cancela qualquer save() pendente
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   // Snapshot da exclusão para proteger tombstones
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast("🗑️ Lançamento de "+data+" excluído.");
@@ -8247,7 +8286,7 @@ async function lancarVendaVend(){
   const tmV = trans>0 ? parseFloat((val/trans).toFixed(2)) : 0;
   D.vendasVend[id][data]={val, trans, cli:trans, aniv:0, inativ:0, tm:tmV, ts:Date.now()};
   // [FIX Race Condition] Snapshot antes de gravar
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast("\u2705 Venda lan\u00e7ada!");
   renderVendRanking(_tabVend);
@@ -8340,7 +8379,7 @@ async function excluirLancVend(vendId, data, btn){
   if(D.vendasVend[vendId]) delete D.vendasVend[vendId][data];
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast('🗑️ Lançamento de '+dFmt+' excluído.', 'ok');
   btn?.closest('tr')?.remove();
@@ -8380,7 +8419,7 @@ async function excluirLancDia(lid, data, btn){
   });
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast('🗑️ Lançamentos de '+dFmt+' excluídos.', 'ok');
   btn?.closest('tr')?.remove();
@@ -9424,7 +9463,7 @@ function toggleRelCamp(){
               const i=D.campRealizados.findIndex(x=>x.id===r.id);
               if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
             });
-            localStorage.setItem('avatim_v5',JSON.stringify(D));
+            _lsSet('avatim_v5',JSON.stringify(D));
           }
         }
       }catch(e){ console.warn('[Avatim] sync rel campanhas:', e.message); }
@@ -10622,7 +10661,7 @@ async function salvarCampReal(){
   }
 
     // [FIX Race Condition] Snapshot antes de gravar campanha
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   // Gravar Firebase diretamente
   const _okCamp = await waitForFirebase(4000);
@@ -11235,7 +11274,7 @@ function salvarMetasVendedoras(lid){
     // Senão: meta da loja já está definida, preservar
   }
   // [FIX 5 CRÍTICO] Gravar direto no Firebase sem passar por save() com guards
-  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  _lsSet('avatim_v5', JSON.stringify(D));
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   showToast(n + " vendedoras salvas! Sincronizando...");
@@ -11407,7 +11446,7 @@ function salvarMetaLoja(lid){
   }
   // [FIX CRÍTICO] Gravar localmente IMEDIATAMENTE e enviar ao Firestore direto
   // Bypass do save() que pode ter guards bloqueando admin
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   // [FIX Race Condition] Snapshot antes de gravar — evita que D seja alterado durante o await
@@ -11467,7 +11506,7 @@ function resetEmergencia(){
   if(!confirm("Isso vai APAGAR todas as metas salvas e manter apenas os lançamentos de vendas.\n\nUse somente se os valores estiverem aparecendo errados (ex: R$ 6,00 em vez de R$ 6.000,00).\n\nContinuar?")) return;
   // Manter vendas e vendedoras, limpar só metas corrompidas
   LOJAS.forEach(l=>{ D.metasLoja[l.id]={}; });
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _lsSet("avatim_v5", JSON.stringify(D));
   alert("Metas limpas! Faça login e redefina as metas em Metas por Loja.");
   location.reload();
 }
@@ -11837,7 +11876,7 @@ async function tabRankPer(per, el, ctx) {
               });
             });
           }
-          localStorage.setItem('avatim_v5', JSON.stringify(D));
+          _lsSet('avatim_v5', JSON.stringify(D));
         }
       }catch(e){ console.warn('[Avatim] tabRankPer ano Firebase:', e.message); }
     }
@@ -12198,7 +12237,7 @@ function tabRankPerLoja(per, el){
                 if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
               });
               });
-              localStorage.setItem('avatim_v5', JSON.stringify(D));
+              _lsSet('avatim_v5', JSON.stringify(D));
             }
           }catch(e){}
           renderRankingLoja();
@@ -12813,7 +12852,7 @@ async function sbUpsert(table,data){return await sbRequest(table,'POST',Array.is
 
 // Salvar com sync — Supabase e/ou Firebase
 async function saveWithSync(opts={}){
-  localStorage.setItem('avatim_v5',JSON.stringify(D));
+  _lsSet('avatim_v5',JSON.stringify(D));
   const hoje_ts = new Date().toISOString();
   if(opts.lancamento){
     const {lid,data,dados}=opts.lancamento;
@@ -12931,7 +12970,7 @@ function iniciarAutoRefresh(){
             if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _lsSet('avatim_v5', JSON.stringify(D));
         const pg=document.querySelector('.page.active')?.id?.replace('page-','');
         if(pg==='dash') carregarDash();
         else if(pg==='metas') renderMetas();
@@ -13043,7 +13082,7 @@ function iniciarAutoRefresh(){
               });
             }
           }
-          localStorage.setItem('avatim_v5', JSON.stringify(D));
+          _lsSet('avatim_v5', JSON.stringify(D));
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
         }
       }
@@ -13190,7 +13229,7 @@ async function forceSyncAdmin(){
       if(!D.fluxo) D.fluxo=[];
       remoto.fluxo.forEach(r=>{ if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r); });
     }
-    localStorage.setItem('avatim_v5', JSON.stringify(D));
+    _lsSet('avatim_v5', JSON.stringify(D));
     const ts = new Date().toLocaleTimeString('pt-BR');
     if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
     showToast('✅ Dados sincronizados!');
@@ -15377,7 +15416,7 @@ async function buscarHistoricoLoja(){
               });
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _lsSet('avatim_v5', JSON.stringify(D));
         console.log('[Avatim] buscarHistoricoLoja: dados do Firebase carregados');
       }
     }catch(e){ console.warn('[Avatim] buscarHistoricoLoja Firebase:', e.message); }
@@ -15608,7 +15647,7 @@ async function buscarHistoricoVend(){
               });
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _lsSet('avatim_v5', JSON.stringify(D));
       }
     }catch(e){ console.warn('[Avatim] buscarHistoricoVend Firebase:', e.message); }
   }
