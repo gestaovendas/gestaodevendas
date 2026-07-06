@@ -30,19 +30,28 @@ const firebaseConfig = {
   appId:"1:994718145517:web:a98c6aab126150c976a5e4"
 };
 
-// Senhas reais para autenticação Firebase (mesmo usuário do SHA-256)
-// Credenciais ofuscadas — não editar manualmente
-const _k = 0x5A;
-const _d = s => atob(s).split("").map(c=>String.fromCharCode(c.charCodeAt(0)^_k)).join("");
-const FB_SENHAS = {
-  "admin\u0040avatim.com":      _d("FxosMz47a2Jqaw=="),
-  "mooca\u0040avatim.com":      _d("FxpoamtiPQ=="),
-  "leopoldina\u0040avatim.com": _d("DRpoamtiPQ=="),
-  "perdizes\u0040avatim.com":   _d("ChpoamtiPQ=="),
-  "santana\u0040avatim.com":    _d("CRo0Lmhqa2I9"),
-  "pinheiros\u0040avatim.com":  _d("GhYOaGprYj0="),
-  "ibirapuera\u0040avatim.com": _d("CTIaKmhqa2I9"),
-  "jarpaul\u0040avatim.com":    _d("FhpoamtiPQ==")
+// [FIX SEGURANÇA] As senhas NÃO ficam mais embutidas no arquivo (o mapa FB_SENHAS
+// antigo era reversível: qualquer pessoa com o HTML recuperava TODAS as senhas).
+// Como a senha do Firebase é a MESMA senha do app (verificado), a senha digitada
+// no login é reutilizada para autenticar no Firebase e guardada apenas na sessão
+// desta aba (sessionStorage) — some ao fechar a aba.
+window._setFbCred = function(email, senha){
+  window._fbPass = senha;
+  try{ sessionStorage.setItem("avatim_fbc", btoa(unescape(encodeURIComponent(email+"\n"+senha)))); }catch(e){}
+};
+window._getFbCred = function(email){
+  if(window._fbPass) return window._fbPass;
+  try{
+    const raw = sessionStorage.getItem("avatim_fbc");
+    if(!raw) return null;
+    const [em, pw] = decodeURIComponent(escape(atob(raw))).split("\n");
+    if(!email || em === (email||"").toLowerCase()){ window._fbPass = pw; return pw; }
+  }catch(e){}
+  return null;
+};
+window._clearFbCred = function(){
+  window._fbPass = null;
+  try{ sessionStorage.removeItem("avatim_fbc"); }catch(e){}
 };
 
 /* ═══ REGRAS FIRESTORE — configure no console Firebase ═══
@@ -71,11 +80,17 @@ try{
 
   // Garantir auth Firebase: tenta SDK primeiro, fallback para REST API
   // A REST API não verifica domínio autorizado — funciona em qualquer host
-  window.fbLogin = async function(email){
+  window.fbLogin = async function(email, senhaOpt){
     try{
       if(auth.currentUser) return true;
-      const senha = FB_SENHAS[email];
-      if(!senha){ console.warn("[Avatim] Sem senha FB para:", email); return false; }
+      // [FIX SEGURANÇA] senha vem do login digitado (parâmetro) ou da sessão da aba
+      const senha = senhaOpt || window._getFbCred(email);
+      if(!senha){
+        console.warn("[Avatim] Sem credencial de sessão para:", email, "— tentando auth anônima");
+        // Fallback: auth anônima mantém request.auth != null nas rules
+        try{ await signInAnonymously(auth); console.log("[Avatim] ✅ Auth anônima OK"); return true; }
+        catch(eAn){ console.warn("[Avatim] Auth anônima falhou:", eAn.code); return false; }
+      }
       try{
         await signInWithEmailAndPassword(auth, email, senha);
         console.log("[Avatim] ✅ Firebase auth SDK OK:", email);
@@ -149,10 +164,11 @@ try{
         }
       }catch(e){ console.warn("[Avatim] Renovar token falhou:", e.message); }
     }
-    // Tentar re-autenticar
+    // Tentar re-autenticar com a credencial da sessão
     const email = window._currentUser?.email;
-    if(email && FB_SENHAS[email]){
-      const ok = await window.fbLoginREST(email, FB_SENHAS[email]);
+    const _pw = email ? window._getFbCred(email) : null;
+    if(email && _pw){
+      const ok = await window.fbLoginREST(email, _pw);
       if(ok) return window._fbIdToken;
     }
     return auth.currentUser ? await auth.currentUser.getIdToken() : null;
@@ -4604,6 +4620,7 @@ function save(){
         // [FIX Race Condition] Dados gravados — limpar snapshot pendente
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
+        localStorage.removeItem("avatim_pending"); // [FIX CONEXÃO] pendência resolvida
         // [FIX] Feedback de sync para TODOS os perfis (nao so admin)
         const syncEl = document.getElementById('sync-badge');
         if(syncEl){
@@ -4614,18 +4631,23 @@ function save(){
       }catch(e){
         console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
         // [FIX A] SEMPRE zerar _pendingLocalData ao falhar — nunca deixar syncAdmin bloqueado
-        window._pendingLocalData = null;
+        window._pendingLocalData   = null;
+        window._pendingLocalDataTs = null; // [FIX CONEXÃO] limpar o par junto
+        // [FIX CONEXÃO] Persistir pendência — sobrevive a fechar a aba;
+        // showApp() e o listener de 'online' reenviam automaticamente
+        localStorage.setItem("avatim_pending", JSON.stringify(D));
         showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
         // Retry após 10s
         setTimeout(async ()=>{
           if(window.fsGravar){
             try{
               await window.fsGravar(JSON.stringify(D));
+              localStorage.removeItem("avatim_pending"); // [FIX CONEXÃO]
               showToast('✅ Sincronizado com sucesso!', 'ok');
             }
             catch(e2){
               console.warn("[Avatim] Retry save falhou:", e2.message);
-              showToast('❌ Dado salvo so localmente. Verifique conexao e faca login novamente.', 'err');
+              showToast('❌ Dado salvo so localmente. Sera reenviado quando a conexao voltar.', 'err');
             }
           }
         }, 10000);
@@ -4633,20 +4655,24 @@ function save(){
     } else {
       console.warn("[Avatim] Firebase indisponivel - dado salvo so no localStorage");
       // [FIX A] Zerar _pendingLocalData para não bloquear syncAdmin
-      window._pendingLocalData = null;
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null; // [FIX CONEXÃO]
+      // [FIX CONEXÃO] Persistir pendência para reenvio automático
+      localStorage.setItem("avatim_pending", JSON.stringify(D));
       showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
       const retryOk = await waitForFirebase(30000);
       if(retryOk && window.fsGravar){
         try{
           await window.fsGravar(JSON.stringify(D));
+          localStorage.removeItem("avatim_pending"); // [FIX CONEXÃO]
           showToast('✅ Reconectado e sincronizado com sucesso!', 'ok');
         }
         catch(e){
           console.warn("[Avatim] save() retry falhou:", e.message);
-          showToast('❌ Nao foi possivel sincronizar. Dado salvo localmente.', 'err');
+          showToast('❌ Nao foi possivel sincronizar. Sera reenviado quando a conexao voltar.', 'err');
         }
       } else {
-        showToast('❌ Sem conexao com Firebase. Dado salvo localmente.', 'err');
+        showToast('❌ Sem conexao com Firebase. Dado salvo localmente — reenvio automatico ao reconectar.', 'err');
       }
     }
   }, 1500);
@@ -4666,6 +4692,53 @@ async function waitForFirebase(timeout=5000){
     }, 100);
   });
 }
+
+// ══════════════════════════════════════════════════════════════
+// [FIX CONEXÃO] Reenvio automático de pendências + sync ao voltar
+// Antes: se o Firebase falhava, o dado só voltava a tentar no próximo
+// save() ou ao reabrir o app. Agora:
+//  - 'online'          → internet voltou: reenvia pendência e força sync
+//  - 'visibilitychange'→ aba/app volta ao foco (celular trava timers em
+//                        segundo plano): força sync imediato
+// ══════════════════════════════════════════════════════════════
+let _flushandoPendente = false;
+async function _flushPendente(origem){
+  if(!window._currentUser || _flushandoPendente) return;
+  const pend = localStorage.getItem("avatim_pending");
+  if(!pend) return;
+  _flushandoPendente = true;
+  try{
+    const ok = await waitForFirebase(8000);
+    if(ok && window.fsGravar){
+      await window.fsGravar(pend);
+      localStorage.removeItem("avatim_pending");
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
+      if(typeof showToast === "function") showToast("✅ Dados pendentes sincronizados ("+origem+")");
+      console.log("[Avatim] 🔄 Pendência reenviada com sucesso:", origem);
+    }
+  }catch(e){
+    console.warn("[Avatim] Reenvio de pendência falhou ("+origem+"):", e.code||e.message);
+  }finally{
+    _flushandoPendente = false;
+  }
+}
+window.addEventListener("online", ()=>{
+  console.log("[Avatim] 🌐 Conexão restaurada");
+  _flushPendente("reconexão");
+  // Reinicia o auto-refresh (dispara um sync imediato)
+  if(window._currentUser && typeof iniciarAutoRefresh === "function"){
+    try{ iniciarAutoRefresh(); }catch(e){}
+  }
+});
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState !== "visible" || !window._currentUser) return;
+  _flushPendente("retorno à aba");
+  // Celular: timers ficam congelados em segundo plano — forçar sync ao voltar
+  if(typeof iniciarAutoRefresh === "function"){
+    try{ iniciarAutoRefresh(); }catch(e){}
+  }
+});
 
 
 // ══════════════════════════════════════════════════════════════
@@ -4916,9 +4989,11 @@ async function loadFromFirestore(){
       localStorage.setItem("avatim_v5", JSON.stringify(D));
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
       return true;
-    }
-    console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
-    return false;
+    // [FIX CRÍTICO SYNTAX] Havia uma "}" extra aqui que fechava o try{} antes do
+    // catch — SyntaxError "Missing catch or finally after try" derrubava o
+    // <script> principal INTEIRO (o app não abria / nada sincronizava).
+    // As duas linhas mortas abaixo do "}" ("Nenhum dado remoto") também foram
+    // removidas: eram inalcançáveis (o guard if(!dadosJSON) no topo já trata isso).
   }catch(e){
     console.warn("[Avatim] loadFromFirestore erro:", e.message);
     // Feedback visual se for erro de rede/offline
@@ -5743,12 +5818,14 @@ async function login(){
     window._localLogin  = true;
     window._currentUser = {email};
     window._userLoja    = u;
+    // [FIX SEGURANÇA] Guardar credencial nesta sessão (para reautenticação de token/REST)
+    if(window._setFbCred) window._setFbCred(email, senha);
     // Firebase auth com timeout de 4s — nunca trava o login
     // Se Firebase não carregou (_fbOk===false), pula direto para o app
     if(window.fbLogin && window._fbOk !== false){
       try{
         await Promise.race([
-          window.fbLogin(email),
+          window.fbLogin(email, senha),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),4000))
         ]);
       }catch(eFb){
@@ -5768,6 +5845,8 @@ function logout(){
   window._localLogin = false;
   window._currentUser = null;
   window._userLoja = null;
+  // [FIX SEGURANÇA] Limpar credencial de sessão
+  if(window._clearFbCred) window._clearFbCred();
   // SignOut Firebase
   if(window.fbLogout) window.fbLogout();
   showLogin();
@@ -10931,8 +11010,12 @@ function editarCampReal(id){
   setTimeout(()=>{
     const sel = document.getElementById('camp-sel-real');
     if(sel){ sel.value = r.campId; atualizarObjetivoCamp(); }
+    // [FIX BUG 5] Preencher a DATA do lançamento original — sem isso a data caía
+    // em hoje() e salvarCampReal criava um registro NOVO em vez de editar
+    const dtEl = document.getElementById('camp-real-data');
+    if(dtEl && r.data){ dtEl.value = r.data; }
     const fat = document.getElementById('camp-real-fat');
-    if(fat){ fat.value = r.fat.toFixed(2).replace('.',','); }
+    if(fat){ fat.value = Number(r.fat||0).toFixed(2).replace('.',','); }
     const atend = document.getElementById('camp-real-atend');
     if(atend){ atend.value = r.atend||''; }
     const per = document.getElementById('camp-real-per');
@@ -10940,9 +11023,10 @@ function editarCampReal(id){
     const obs = document.getElementById('camp-real-obs');
     if(obs){ obs.value = r.obs||''; }
     calcTMCampReal();
-    // Marcar que é edição
-    window._editandoCampRealId = id;
-    // Remover o antigo ao salvar (salvarCampReal já faz findIndex por campId+lojaId)
+    // [FIX BUG 5] Marcar edição no global CORRETO — salvarCampReal lê
+    // window._editandoLancCampId (antes gravava em _editandoCampRealId, que
+    // ninguém lia → a edição virava lançamento duplicado)
+    window._editandoLancCampId = id;
   },120);
 }
 
@@ -14398,7 +14482,7 @@ function exportarPDFGeral(){
       D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
         if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
       }));
-      const totM=LOJAS.reduce((s,l)=>{const mm=getMetas(l.id,mStr);return s+(mm.mes||0);},0);
+      const totM=LOJAS.reduce((s,l)=>{const mm=getMetas(l.id,mStr,true);return s+(mm.mes||0);},0); // [FIX BUG 1] strict
       const pct2=totM>0?fat2/totM*100:0;
       historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:totM,pct:pct2});
     } else {
@@ -14406,7 +14490,7 @@ function exportarPDFGeral(){
       vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
         if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
       }));
-      const mm=getMetas(lid,mStr);
+      const mm=getMetas(lid,mStr,true); // [FIX BUG 1] strict
       historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:mm.mes||0,pct:mm.mes>0?fat2/(mm.mes||1)*100:0});
     }
   }
@@ -15936,7 +16020,7 @@ function renderMesAnterior(){
       if(titulo) titulo.textContent = 'Loja não encontrada';
       return;
     }
-    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX BUG 1] strict: sem herança em histórico
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -15980,7 +16064,7 @@ function renderMesAnterior(){
   } else {
     // Modo: consolidado todas as lojas
     const dados = LOJAS.map(loja=>{
-      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX BUG 1] strict: sem herança em histórico
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -16055,7 +16139,7 @@ function renderHistoricoAnual(){
     // Consolidado de todas as 7 lojas
     let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
     LOJAS.forEach(loja=>{
-      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX BUG 1] strict: sem herança em histórico
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       totMeta += meta;
@@ -16065,9 +16149,18 @@ function renderHistoricoAnual(){
     
     // Buscar Qtd Itens de D.historicoMeses se disponível
     const historicoKey = mesRef; // "YYYY-MM"
-    const qtdItensHistorico = D.historicoMeses?.[historicoKey]?.qtditens || 0;
+    const histM = D.historicoMeses?.[historicoKey];
+    const qtdItensHistorico = histM?.qtditens || 0;
     totQtdItens = qtdItensHistorico > 0 ? qtdItensHistorico : 0;
-    
+
+    // [FIX] Meses sem lançamentos diários (ex: anos anteriores) usam o
+    // Lançamento Histórico manual — antes esses meses apareciam zerados
+    if(totFat === 0 && histM && Number(histM.real||0) > 0){
+      totFat = Number(histM.real||0);
+      if(totMeta === 0)   totMeta   = Number(histM.meta||0);
+      if(totVendas === 0) totVendas = Number(histM.nvendas||0);
+    }
+
     const tm = totVendas > 0 ? totFat / totVendas : 0;
     const pa = totVendas > 0 ? Math.round((totQtdItens / totVendas) * 100) / 100 : 0;
     const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
@@ -16121,37 +16214,57 @@ function renderHistoricoAnual(){
 // ════════════════════════════════════════════════════════════════════
 // Helpers para cálculos históricos
 // ════════════════════════════════════════════════════════════════════
-function getMetas(lid, mesRef){
-  if(!mesRef) mesRef = mesAtual();
-  return D.metasLoja?.[lid]?.[mesRef] || {};
-}
+// [FIX BUG 1] getMetas duplicada REMOVIDA daqui — a versão completa (com herança,
+// cálculo automático e strictMode) está declarada no topo do script e agora é a única.
+// Os callers históricos passam strictMode=true para não herdar meta de outro mês.
+// [FIX BUG 4] mesAtual duplicada também removida (já declarada no topo).
+
+// [FIX BUG 2] calcMesRef/countVendasRef liam estrutura ERRADA e sempre retornavam 0.
+// Estrutura real: D.vendasVend[vendId][data] = {val, trans, ...} (fonte primária)
+//                 D.vendas[lid][data]        = {fat, trans, ...} (consolidado da loja)
 function calcMesRef(lid, mesRef){
   if(!mesRef) mesRef = mesAtual();
   let soma = 0;
-  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
-    if(dt.startsWith(mesRef)){
-      Object.values(vendas).forEach(v=>{
-        soma += Number(v?.val||0);
-      });
-    }
+  // 1) Fonte primária: vendas por vendedora (mesma base que calcMes)
+  const vends = (typeof vendsReais === 'function') ? vendsReais(lid)
+              : (D.vendedoras||[]).filter(v=>v.loja===lid);
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)) soma += Number(vd?.val||0);
+    });
   });
+  // 2) Fallback: consolidado da loja (campo correto é .fat, não .val)
+  if(soma === 0){
+    Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)) soma += Number(vd?.fat||0);
+    });
+  }
   return soma;
 }
 function countVendasRef(lid, mesRef){
   if(!mesRef) mesRef = mesAtual();
   let count = 0;
-  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
-    if(dt.startsWith(mesRef)){
-      Object.values(vendas).forEach(v=>{
-        if(Number(v?.val||0) > 0) count++;
-      });
-    }
+  // 1) Fonte primária: transações por vendedora (fallback: 1 por dia com val>0)
+  const vends = (typeof vendsReais === 'function') ? vendsReais(lid)
+              : (D.vendedoras||[]).filter(v=>v.loja===lid);
+  vends.forEach(v=>{
+    Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const trans = Number(vd?.trans||0);
+        count += trans > 0 ? trans : (Number(vd?.val||0) > 0 ? 1 : 0);
+      }
+    });
   });
+  // 2) Fallback: consolidado da loja
+  if(count === 0){
+    Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const trans = Number(vd?.trans||0);
+        count += trans > 0 ? trans : (Number(vd?.fat||0) > 0 ? 1 : 0);
+      }
+    });
+  }
   return count;
-}
-function mesAtual(){
-  const hj = hoje();
-  return hj.slice(0, 7);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -16232,14 +16345,22 @@ function renderMesAnteriorDashboard(){
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
-    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX BUG 1] strict: sem herança em histórico
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     totMeta += meta;
     totFat += fat;
     totVendas += nVendas;
   });
-  
+
+  // [FIX] Sem dados diários do mês anterior → usar Lançamento Histórico manual
+  const _histMA = D.historicoMeses?.[mesRef];
+  if(totFat === 0 && _histMA && Number(_histMA.real||0) > 0){
+    totFat = Number(_histMA.real||0);
+    if(totMeta === 0)   totMeta   = Number(_histMA.meta||0);
+    if(totVendas === 0) totVendas = Number(_histMA.nvendas||0);
+  }
+
   const tm = totVendas > 0 ? totFat / totVendas : 0;
   const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
   const historicoKey = mesRef;
@@ -16798,7 +16919,7 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
       qtditens = periodoMatch.qtditens || 0;
     } else {
       // Se não tem lançamento, tentar usar vendas do período
-      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7))?.mes || 0;
+      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7), true)?.mes || 0; // [FIX BUG 1] strict
       realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
       nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
       tm = nvendas > 0 ? realizado / nvendas : 0;
