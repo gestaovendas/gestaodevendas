@@ -4876,16 +4876,32 @@ async function loadFromFirestore(){
       // [FIX TOMBSTONE] Remover tombstones que já foram substituídos por novos lançamentos
       // Um tombstone SÓ apaga dados que foram explicitamente excluídos nesta sessão
       // NÃO deve apagar lançamentos feitos após a exclusão
+      // [PROTEÇÃO] Não aplicar tombstones muito antigos (> 30 dias)
+      const _hoje = new Date();
+      const _cutoff = new Date(_hoje.getTime() - 30*24*60*60*1000).toISOString().split('T')[0];
       if(D._vendasExcluidas){
         Object.entries(D._vendasExcluidas).forEach(([lid,datas])=>{
           if(!D._vendasExcluidas[lid]) return;
           // Só apagar se não há dado local para este dia (o dado foi realmente excluído)
           D._vendasExcluidas[lid] = D._vendasExcluidas[lid].filter(dt => {
+            // [PROTEÇÃO] Não aplicar tombstones de datas muito antigas (evita deletar dados recentes)
+            if(dt < _cutoff){
+              console.log("[Avatim] Ignorando tombstone antigo:", lid, dt, "(mais de 30 dias)");
+              return false;  // Remove tombstone antigo
+            }
+            
             const temDadoLocal = D.vendas?.[lid]?.[dt];
             if(temDadoLocal){
               // Dado local existe: tombstone foi sobrescrito por novo lançamento, remover tombstone
+              console.log("[Avatim] Removendo tombstone (há dado local):", lid, dt);
               return false;
             }
+            
+            // [LOG CRÍTICO] Antes de deletar, logar especialmente para Perdizes
+            if(lid === 'perdizes'){
+              console.warn("[Avatim] ⚠️  CRÍTICO: Aplicando tombstone em Perdizes! data=" + dt + " | temDadoLocal=" + (temDadoLocal ? 'sim' : 'NÃO'));
+            }
+            
             if(D.vendas[lid]) delete D.vendas[lid][dt];
             return true;
           });
@@ -4895,6 +4911,12 @@ async function loadFromFirestore(){
         Object.entries(D._vendasVendExcluidas).forEach(([vid,datas])=>{
           if(!D._vendasVendExcluidas[vid]) return;
           D._vendasVendExcluidas[vid] = D._vendasVendExcluidas[vid].filter(dt => {
+            // [PROTEÇÃO] Não aplicar tombstones de datas muito antigas
+            if(dt < _cutoff){
+              console.log("[Avatim] Ignorando tombstone antigo em vendasVendExcluidas:", vid, dt);
+              return false;
+            }
+            
             const temDadoLocal = D.vendasVend?.[vid]?.[dt];
             if(temDadoLocal){
               return false;
@@ -4913,6 +4935,16 @@ async function loadFromFirestore(){
           if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
         });
       }
+      
+      // [DIAGNÓSTICO CRÍTICO] Verificar integridade de dados antes de salvar
+      // Especialmente para Perdizes que tem problemas
+      const _vendPerdizes = Object.keys(D.vendas?.perdizes || {}).length;
+      const _vendVendPerdizes = Object.values(D.vendasVend || {}).filter(d => Object.keys(d).length > 0).length;
+      console.log("[Avatim] loadFromFirestore: Perdizes tem", _vendPerdizes, "dias com vendas");
+      if(_vendPerdizes === 0){
+        console.warn("[Avatim] ⚠️  ALERTA: Perdizes sem dados de vendas!");
+      }
+      
       localStorage.setItem("avatim_v5", JSON.stringify(D));
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
       return true;
@@ -7235,6 +7267,7 @@ function atualizaTotal(){
 async function salvarLanc(){
   if(window._salvandoLanc){ showToast("Salvamento em andamento...","warn"); return; }
   window._salvandoLanc = true;
+  window._bloqueioSync = true;  // [FIX] Bloqueia sincronização automática enquanto salva
 
   // Resetar flag em qualquer saída antecipada
   function _abortar(msg){ window._salvandoLanc=false; showToast(msg,"err"); }
@@ -7278,6 +7311,17 @@ async function salvarLanc(){
   if(btnSalvar){ btnSalvar.disabled=true; btnSalvar.textContent="⏳ Salvando..."; }
 
   try{
+    // [BACKUP CRÍTICO] Fazer backup dos dados ANTES de qualquer operação
+    // Se algo der errado, conseguimos recuperar
+    const backupVendas = JSON.parse(JSON.stringify(D.vendas[lid] || {}));
+    const backupVendasVend = {};
+    vendasParaSalvar.forEach(({v}) => {
+      if(D.vendasVend[v.id]) {
+        backupVendasVend[v.id] = JSON.parse(JSON.stringify(D.vendasVend[v.id]));
+      }
+    });
+    console.log("[Avatim] salvarLanc: BACKUP realizado para " + lid);
+    
     // Salvar lançamento consolidado da loja
     if(!D.vendas[lid]) D.vendas[lid]={};
     const obs = document.getElementById("l-obs")?.value||"";
@@ -7343,6 +7387,27 @@ async function salvarLanc(){
     window._pendingLocalData = JSON.parse(JSON.stringify(D));
 
     showToast("✅ Lançamento salvo! Total: "+fmt(fat));
+    
+    // [VALIDAÇÃO CRÍTICA] Garantir que os dados NÃO desaparecem
+    // Se Perdizes tem problemas, este log vai detectar
+    setTimeout(() => {
+      const verificacao = D.vendas[lid]?.[data];
+      if(!verificacao){
+        console.error("[Avatim] ⚠️  CRÍTICO: Dados desapareceram após salvarLanc!");
+        console.error("[Avatim] lid="+lid+" | data="+data);
+        console.error("[Avatim] D.vendas[lid]:", JSON.stringify(D.vendas[lid]||{}));
+        // Recuperar do backup
+        if(backupVendas[data]){
+          console.log("[Avatim] Recuperando do BACKUP...");
+          D.vendas[lid][data] = JSON.parse(JSON.stringify(backupVendas[data]));
+          localStorage.setItem("avatim_v5", JSON.stringify(D));
+          showToast("⚠️  Dados recuperados do backup!", "warn");
+        }
+      } else {
+        console.log("[Avatim] ✅ Dados validados após salvar");
+      }
+    }, 100);
+    
     carregarDash();
     renderHistoricoLanc();
     renderConsolidadoLanc(lid);
@@ -7380,6 +7445,7 @@ async function salvarLanc(){
     console.error("[Avatim] salvarLanc erro:", e);
   } finally {
     window._salvandoLanc = false;
+    window._bloqueioSync = false;  // [FIX] Desbloquia sincronização automática
     if(btnSalvar){ btnSalvar.disabled=false; btnSalvar.textContent="💾 Salvar Lançamento"; }
   }
 }
@@ -12760,6 +12826,11 @@ function iniciarAutoRefresh(){
   // Sync para LOJA: busca dados do Firebase a cada 60s
   if(!isAdmin()){
     async function syncLoja(){
+      // [FIX CRÍTICO] Não sincronizar enquanto está salvando (pode perder dados)
+      if(window._bloqueioSync || window._salvandoLanc){
+        console.log("[Avatim] syncLoja: bloqueado (salvamento em andamento)");
+        return;
+      }
       try{
         const ok = await waitForFirebase(3000);
         if(!ok || !window.fsCarregar) return;
