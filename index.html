@@ -9,6 +9,28 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <script>
+
+// ============================================================
+// FUNÇÕES CRÍTICAS
+// ============================================================
+
+const lojaId  =()=>{
+  const id = window._userLoja?.id;
+  if(!id || id==="desconhecido"){
+    console.warn("[Avatim] lojaId(): _userLoja nao definido ou invalido — bloqueando operacao");
+    return null;
+  }
+  return id;
+};
+
+const lojaIdStrict = ()=>{ 
+  const id=lojaId(); 
+  if(!id) throw new Error("[Avatim] lojaIdStrict: sem loja"); 
+  return id; 
+};
+
+const isAdmin =()=>window._userLoja?.admin===true;
+
 // Firebase carregado via dynamic import — funciona em GitHub Pages, file://, etc.
 (async function initFirebase(){
   try{
@@ -770,9 +792,6 @@ try{
     else document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
   }
 })();
-</script>
-
-<script>
 // ============================================================
 // CONFIG PAGE — TABS E AZURE
 // ============================================================
@@ -1001,9 +1020,1184 @@ function selecionarProdCamp(cod, nome){
 }
 function sincronizarCosmosParaLocal(){
   // Stub — Cosmos desabilitado nesta versão
-  console.log('[Avatim] sincronizarCosmosParaLocal: Cosmos não configurado');
 }
 </script>
+
+<style>
+:root{
+  --ouro:#C9A84C;--ouro2:#E8C97A;--preto:#0A0A0A;
+  --fundo:#0D0D1A;--card:#131328;--card2:#1A1A35;
+  --cinza:#2D2D44;--texto:#E8E8F0;--muted:#8A8AB0;
+  --borda:rgba(201,168,76,0.15);
+  --verde:#2ECC87;--verm:#FF4757;--azul:#5B8DEF;--roxo:#8B5CF6;--laranja:#FF8C42;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto);min-height:100vh;overflow-x:hidden}
+
+/* LOGIN */
+#loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 30% 50%,#1a1040,var(--fundo) 60%)}
+.lcard{background:var(--card);border:1px solid var(--borda);border-radius:24px;padding:48px 40px;width:440px;max-width:95vw;box-shadow:0 40px 80px rgba(0,0,0,.6)}
+.lbrand{text-align:center;margin-bottom:32px}
+.lbrand .bn{font-family:"Playfair Display",serif;font-size:36px;font-weight:900;letter-spacing:6px;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.lbrand .sub{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.ldiv{height:1px;background:linear-gradient(90deg,transparent,var(--ouro),transparent);margin:24px 0;opacity:.4}
+.fg{margin-bottom:16px}.fg label{display:block;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.fg input{width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.2);border-radius:10px;padding:13px 16px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:15px;outline:none;transition:all .3s}
+.fg input:focus{border-color:var(--ouro);box-shadow:0 0 0 3px rgba(201,168,76,.1)}
+.btn-lg{width:100%;background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:10px;padding:16px;color:var(--preto);font-family:"DM Sans",sans-serif;font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all .3s;margin-top:8px}
+.btn-lg:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(201,168,76,.3)}
+.lerr{color:var(--verm);font-size:12px;text-align:center;margin-top:10px;padding:8px;background:rgba(255,71,87,.08);border-radius:8px;display:none}
+.demo-box{margin-top:14px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);border-radius:9px;padding:12px;font-size:11px}
+.demo-box .dt{color:var(--ouro);font-weight:600;margin-bottom:7px}
+.demo-grid{display:grid;grid-template-columns:1fr auto;gap:3px 12px}
+.demo-grid span:nth-child(odd){color:var(--muted)}.demo-grid span:nth-child(even){color:var(--texto);font-weight:500}
+
+/* LAYOUT */
+#appScreen{display:none}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:232px;background:var(--card);border-right:1px solid var(--borda);z-index:100;display:flex;flex-direction:column;overflow-y:auto}
+.sb-brand{padding:20px;border-bottom:1px solid var(--borda)}
+.sb-brand .bn{font-family:"Playfair Display",serif;font-size:20px;font-weight:900;letter-spacing:4px;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sb-brand .lnome{font-size:11px;color:var(--muted);margin-top:2px}
+.sb-sec{padding:10px 10px 2px}.sb-lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);padding:0 8px;margin-bottom:4px}
+.ni{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:all .2s;font-size:12px;color:var(--muted);font-weight:400;border:none;background:none;width:100%;text-align:left}
+.ni:hover{background:var(--card2);color:var(--texto)}.ni.active{background:rgba(201,168,76,.12);color:var(--ouro);font-weight:600}
+.ni .ic{font-size:14px;width:18px;text-align:center}
+.sb-foot{margin-top:auto;padding:12px;border-top:1px solid var(--borda)}
+.sb-user{font-size:10px;color:var(--muted);padding:0 4px;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-out{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:12px;background:none;border:none;width:100%;transition:all .2s}
+.btn-out:hover{color:var(--verm);background:rgba(255,71,87,.08)}
+
+/* MAIN */
+.main{margin-left:232px;padding:26px;min-height:100vh}
+.page{display:none}.page.active{display:block}
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
+.pt{font-family:"Playfair Display",serif;font-size:24px;font-weight:700}
+.pt span{background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.ps{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* KPI CARDS */
+.kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.kcard{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:18px;position:relative;overflow:hidden;transition:transform .2s}
+.kcard:hover{transform:translateY(-2px)}
+.kcard::before{content:"";position:absolute;top:0;left:0;right:0;height:2px}
+.kcard.ouro::before{background:linear-gradient(90deg,var(--ouro),var(--ouro2))}
+.kcard.verde::before{background:var(--verde)}.kcard.azul::before{background:var(--azul)}
+.kcard.roxo::before{background:var(--roxo)}.kcard.verm::before{background:var(--verm)}
+.kcard.laranja::before{background:var(--laranja)}.kcard.ciano::before{background:#00CEC9}
+.kl{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.kv{font-family:"Playfair Display",serif;font-size:24px;font-weight:700;line-height:1}
+.ks{font-size:10px;color:var(--muted);margin-top:5px}
+.kbadge{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:3px 7px;border-radius:20px;margin-top:5px;font-weight:600}
+.kbadge.up{background:rgba(46,204,135,.12);color:var(--verde)}.kbadge.dn{background:rgba(255,71,87,.12);color:var(--verm)}
+.kbadge.warn{background:rgba(255,140,66,.12);color:var(--laranja)}
+
+/* ALERTAS DE RITMO */
+.alerta-box{border-radius:12px;padding:14px 18px;margin-bottom:14px;display:flex;align-items:flex-start;gap:12px;border:1px solid}
+.alerta-box.verde{background:rgba(46,204,135,.06);border-color:rgba(46,204,135,.25)}
+.alerta-box.amarelo{background:rgba(255,140,66,.06);border-color:rgba(255,140,66,.25)}
+.alerta-box.vermelho{background:rgba(255,71,87,.06);border-color:rgba(255,71,87,.25)}
+.alerta-icon{font-size:22px;flex-shrink:0}
+.alerta-txt{font-size:12px;line-height:1.7}
+.alerta-txt strong{font-weight:700}
+.alerta-proj{display:inline-block;margin-top:5px;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600}
+
+/* PROGRESS */
+.pw{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:18px;margin-bottom:12px}
+.ph2{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px}
+.plbl{font-size:12px;font-weight:500;display:flex;align-items:center;gap:8px}
+.ppct{font-family:"Playfair Display",serif;font-size:20px;font-weight:700}
+.pbar{height:8px;background:var(--cinza);border-radius:20px;overflow:hidden;margin-bottom:6px;position:relative}
+.pfill{height:100%;border-radius:20px;background:linear-gradient(90deg,var(--ouro),var(--ouro2));transition:width .8s ease;position:relative}
+.pfill.g{background:linear-gradient(90deg,#1a9e62,var(--verde))}.pfill.r{background:linear-gradient(90deg,#a00,var(--verm))}
+.pfill.roxo{background:linear-gradient(90deg,#6d28d9,var(--roxo))}
+.pvals{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+/* Super meta marcador */
+.super-mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--roxo);border-radius:2px}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+
+/* SECTION */
+.sc{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:20px;margin-bottom:12px}
+
+/* BOTÃO PERÍODO (histórico) */
+.btn-periodo{background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 12px;color:var(--muted);font-size:11px;cursor:pointer;transition:all .15s;font-family:"DM Sans",sans-serif}
+.btn-periodo:hover{border-color:var(--ouro);color:var(--ouro)}
+.btn-periodo.ativo{background:rgba(201,168,76,.12);border-color:var(--ouro);color:var(--ouro);font-weight:600}
+.st{font-size:12px;font-weight:600;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--borda);display:flex;align-items:center;gap:6px}
+
+/* FORM */
+.igrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}
+.ig label{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.ig input,.ig select,.ig textarea{width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.15);border-radius:8px;padding:9px 12px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:13px;outline:none;transition:all .2s}
+.ig input:focus,.ig select:focus{border-color:var(--ouro);box-shadow:0 0 0 2px rgba(201,168,76,.1)}
+.ig select option{background:var(--card2)}.ig textarea{resize:vertical;min-height:60px}
+.btn-p{background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:8px;padding:10px 22px;color:var(--preto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s}
+.btn-p:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(201,168,76,.3)}
+.btn-s{background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px 18px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s}
+.btn-s:hover{border-color:var(--ouro);color:var(--ouro)}
+.btn-r{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center}
+
+/* TABS */
+.tabs{display:flex;gap:3px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:4px;margin-bottom:18px;width:fit-content;flex-wrap:wrap}
+.tab{padding:7px 16px;border-radius:7px;font-size:11px;font-weight:500;cursor:pointer;color:var(--muted);background:none;border:none;transition:all .2s}
+.tab.active{background:linear-gradient(135deg,var(--ouro),var(--ouro2));color:var(--preto);font-weight:700}
+
+/* TABLE */
+.dtable{width:100%;border-collapse:collapse}
+.dtable th{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:500;padding:8px 12px;text-align:left;border-bottom:1px solid var(--borda)}
+.dtable td{padding:10px 12px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.03)}
+.dtable tr:hover td{background:rgba(255,255,255,.02)}
+.sbadge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+.sbadge.ok{background:rgba(46,204,135,.12);color:var(--verde)}.sbadge.warn{background:rgba(255,140,66,.12);color:var(--laranja)}
+.sbadge.bad{background:rgba(255,71,87,.12);color:var(--verm)}.sbadge.gold{background:rgba(201,168,76,.12);color:var(--ouro)}
+.sbadge.zero{background:rgba(100,100,120,.15);color:var(--muted)}.sbadge.roxo{background:rgba(139,92,246,.12);color:var(--roxo)}
+
+/* RANKING CARDS */
+.rcard{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:20px}
+.ritem{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.ritem:last-child{border-bottom:none}
+.rpos{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.r1{background:rgba(201,168,76,.2);color:var(--ouro)}.r2{background:rgba(180,180,200,.12);color:#b4b4c8}
+.r3{background:rgba(205,127,50,.12);color:#cd7f32}.rx{background:var(--cinza);color:var(--muted)}
+.rinfo{flex:1}.rn{font-size:12px;font-weight:600}.rv{font-size:10px;color:var(--muted)}
+.rbar{width:70px}.rbarb{height:5px;background:var(--cinza);border-radius:4px;overflow:hidden}
+.rbarf{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--ouro),var(--ouro2))}
+.rpct{font-size:10px;font-weight:600;color:var(--ouro);text-align:right;margin-top:2px}
+
+/* DICAS */
+.dicas{background:linear-gradient(135deg,rgba(201,168,76,.05),rgba(91,141,239,.05));border:1px solid rgba(201,168,76,.2);border-radius:12px;padding:18px}
+.dh{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.dh h3{font-size:13px;font-weight:600}.dbadge2{background:rgba(201,168,76,.15);color:var(--ouro);font-size:9px;padding:2px 7px;border-radius:20px;letter-spacing:1px}
+.di{display:flex;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.di:last-child{border-bottom:none;padding-bottom:0}
+.dot{width:5px;height:5px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.dtxt{font-size:11px;line-height:1.6}
+
+/* SEMANA DIAS */
+.sdias{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:16px}
+.diac{background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:9px 4px;text-align:center}
+.diac.hoje{border-color:var(--ouro);background:rgba(201,168,76,.05)}
+.dnome{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+.dnum{font-family:"Playfair Display",serif;font-size:18px;font-weight:700;margin:2px 0}.dval{font-size:10px;font-weight:600}
+
+/* COMISSAO */
+.com-faixa{background:var(--card2);border-radius:10px;padding:14px;margin-bottom:8px;border-left:3px solid var(--borda);transition:border-color .2s}
+.com-faixa.ativa{border-left-color:var(--verde)}
+.com-faixa.super{border-left-color:var(--roxo)}
+
+/* UPLOAD */
+.upload-zone{border:2px dashed rgba(201,168,76,.3);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all .3s;background:rgba(201,168,76,.02)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--ouro);background:rgba(201,168,76,.05)}
+.upload-zone input{display:none}
+.sugest-item{padding:8px 12px;border-radius:7px;cursor:pointer;font-size:12px;border:1px solid var(--borda);background:var(--card2);margin-bottom:3px;transition:all .2s}
+.sugest-item:hover{border-color:var(--ouro)}
+.search-bar{background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 14px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:12px;outline:none;transition:all .2s;width:100%}
+.search-bar:focus{border-color:var(--ouro)}
+.ml-inp{width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.15);border-radius:7px;padding:8px 10px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:13px;font-weight:600;outline:none;transition:all .2s}
+.ml-inp:focus{border-color:var(--ouro)}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:12px 18px;font-size:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);transform:translateY(80px);opacity:0;transition:all .3s;z-index:9999;max-width:300px}
+.toast.show{transform:translateY(0);opacity:1}.toast.ok{border-color:var(--verde)}.toast.err{border-color:var(--verm)}
+
+@media(max-width:900px){.g2,.g3{grid-template-columns:1fr 1fr}.sidebar{width:200px}.main{margin-left:200px;padding:14px}}
+@media(max-width:620px){.sidebar{transform:translateX(-100%);transition:transform .3s}.sidebar.open{transform:none}.main{margin-left:0}.kgrid{grid-template-columns:1fr 1fr}.g2,.g3{grid-template-columns:1fr}}
+</style>
+<script>
+// JavaScript simples para testar
+console.log("✅ Sistema carregado!");
+
+// Firebase carregado via dynamic import — funciona em GitHub Pages, file://, etc.
+(async function initFirebase(){
+  try{
+    const [appMod, authMod, storeMod] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"),
+      import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js")
+    ]);
+    const { initializeApp } = appMod;
+    const { getAuth, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged } = authMod;
+    const { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } = storeMod;
+
+const firebaseConfig = {
+  apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
+  authDomain:"gestao-f53b3.firebaseapp.com",
+  projectId:"gestao-f53b3",
+  storageBucket:"gestao-f53b3.firebasestorage.app",
+  messagingSenderId:"994718145517",
+  appId:"1:994718145517:web:a98c6aab126150c976a5e4"
+};
+
+// Senhas reais para autenticação Firebase (mesmo usuário do SHA-256)
+// Credenciais ofuscadas — não editar manualmente
+const _k = 0x5A;
+const _d = s => atob(s).split("").map(c=>String.fromCharCode(c.charCodeAt(0)^_k)).join("");
+const FB_SENHAS = {
+  "admin\u0040avatim.com":      _d("FxosMz47a2Jqaw=="),
+  "mooca\u0040avatim.com":      _d("FxpoamtiPQ=="),
+  "leopoldina\u0040avatim.com": _d("DRpoamtiPQ=="),
+  "perdizes\u0040avatim.com":   _d("ChpoamtiPQ=="),
+  "santana\u0040avatim.com":    _d("CRo0Lmhqa2I9"),
+  "pinheiros\u0040avatim.com":  _d("GhYOaGprYj0="),
+  "ibirapuera\u0040avatim.com": _d("CTIaKmhqa2I9"),
+  "jarpaul\u0040avatim.com":    _d("FhpoamtiPQ==")
+};
+
+/* ═══ REGRAS FIRESTORE — configure no console Firebase ═══
+   Substitua "allow read, write: if true" por:
+
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /avatim/{doc} {
+         allow read, write: if request.auth != null;
+       }
+     }
+   }
+
+   Isso exige autenticação Firebase para qualquer leitura/escrita.
+   ════════════════════════════════════════════════════════════ */
+try{
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  window._fbOk   = true;
+  window._fbDb   = db;     // exposto para debugMeta() conseguir ler direto do Firestore
+  window._auth   = auth;
+  window._authFn = {signInWithEmailAndPassword, signOut};
+
+  // Garantir auth Firebase: tenta SDK primeiro, fallback para REST API
+  // A REST API não verifica domínio autorizado — funciona em qualquer host
+  window.fbLogin = async function(email){
+    try{
+      if(auth.currentUser) return true;
+      const senha = FB_SENHAS[email];
+      if(!senha){ console.warn("[Avatim] Sem senha FB para:", email); return false; }
+      try{
+        await signInWithEmailAndPassword(auth, email, senha);
+        console.log("[Avatim] ✅ Firebase auth SDK OK:", email);
+        return true;
+      }catch(eSdk){
+        // Se falhou por domínio não autorizado, usar signInAnonymously
+        // signInAnonymously funciona em qualquer domínio e autentica o SDK
+        if(eSdk.code==='auth/unauthorized-domain' || eSdk.code==='auth/operation-not-allowed'){
+          console.warn("[Avatim] SDK auth bloqueado por domínio, usando signInAnonymously...");
+          try{
+            await signInAnonymously(auth);
+            console.log("[Avatim] ✅ signInAnonymously OK — auth.currentUser setado");
+            return true;
+          }catch(eAnon){
+            console.warn("[Avatim] signInAnonymously falhou:", eAnon.code);
+            // Último recurso: REST API para obter token
+            return await window.fbLoginREST(email, senha);
+          }
+        }
+        throw eSdk;
+      }
+    }catch(e){
+      console.warn("[Avatim] ❌ Firebase auth falhou:", e.code||e.message);
+      return false;
+    }
+  };
+
+  // Login via Firebase Auth REST API — não verifica domínio autorizado
+  window.fbLoginREST = async function(email, senha){
+    try{
+      const apiKey = firebaseConfig.apiKey;
+      const url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="+apiKey;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({email, password:senha, returnSecureToken:true})
+      });
+      const data = await resp.json();
+      if(data.idToken){
+        window._fbIdToken   = data.idToken;
+        window._fbRefreshToken = data.refreshToken;
+        window._fbTokenExp  = Date.now() + (parseInt(data.expiresIn||3600)*1000);
+        console.log("[Avatim] ✅ Firebase REST auth OK:", email);
+        return true;
+      }
+      console.warn("[Avatim] ❌ Firebase REST auth falhou:", data.error?.message);
+      return false;
+    }catch(e){
+      console.warn("[Avatim] ❌ Firebase REST auth erro:", e.message);
+      return false;
+    }
+  };
+
+  // Renovar token se expirado
+  window.fbGetToken = async function(){
+    if(window._fbIdToken && window._fbTokenExp && Date.now() < window._fbTokenExp - 60000){
+      return window._fbIdToken;
+    }
+    if(window._fbRefreshToken){
+      try{
+        const apiKey = firebaseConfig.apiKey;
+        const resp = await fetch("https://securetoken.googleapis.com/v1/token?key="+apiKey, {
+          method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"},
+          body:"grant_type=refresh_token&refresh_token="+window._fbRefreshToken
+        });
+        const data = await resp.json();
+        if(data.id_token){
+          window._fbIdToken  = data.id_token;
+          window._fbTokenExp = Date.now() + (parseInt(data.expires_in||3600)*1000);
+          return window._fbIdToken;
+        }
+      }catch(e){ console.warn("[Avatim] Renovar token falhou:", e.message); }
+    }
+    // Tentar re-autenticar
+    const email = window._currentUser?.email;
+    if(email && FB_SENHAS[email]){
+      const ok = await window.fbLoginREST(email, FB_SENHAS[email]);
+      if(ok) return window._fbIdToken;
+    }
+    return auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  };
+
+  window.fbLogout = async function(){
+    try{ await signOut(auth); }catch(e){}
+  };
+
+  // Gravar no Firestore — garante auth antes
+  // ── ARQUITETURA CORRETA: cada loja salva no SEU documento ──────────
+  // doc "principal" = admin (metas, vendedoras, campanhas)
+  // doc "loja_mooca", "loja_leopoldina" etc = vendas de cada loja
+  // Ao carregar: admin lê TODOS e faz merge. Loja lê só o dela + principal.
+
+  window.fsGravar = async function(dadosJSON){
+    try{
+      console.log("[Avatim] fsGravar INICIO | email:", window._currentUser?.email,
+        "| vendas keys:", Object.keys(JSON.parse(dadosJSON).vendas||{}).join(","),
+        "| vendasVend keys:", Object.keys(JSON.parse(dadosJSON).vendasVend||{}).length + " vends");
+      // Tentar autenticar (melhora segurança), mas NÃO bloquear se falhar
+      // As Firestore Rules estão como "if true" — permite gravação sem auth
+      if(!auth.currentUser){
+        const emailAuth = window._currentUser?.email;
+        if(emailAuth){
+          try{
+            await window.fbLogin(emailAuth);
+          }catch(eAuth){
+            // Auth falhou mas continuamos — rules permitem gravação sem auth
+            console.warn("[Avatim] Auth falhou, gravando sem auth:", eAuth.code||eAuth.message);
+          }
+        }
+      }
+      console.log("[Avatim] fsGravar: auth.currentUser=", !!auth.currentUser, "| prosseguindo...");
+
+      const D2 = JSON.parse(dadosJSON);
+      const email = window._currentUser?.email||"";
+      const isAdm = email === "admin\u0040avatim.com";
+
+      if(isAdm){
+        // Admin: merge preventivo com campRealizados do Firestore
+        try {
+          const snapAtual = await getDoc(doc(db,"avatim","principal"));
+          if(snapAtual.exists()){
+            const atual = JSON.parse(snapAtual.data().dados||"{}");
+            if(atual.campRealizados && atual.campRealizados.length){
+              if(!D2.campRealizados) D2.campRealizados = [];
+              atual.campRealizados.forEach(r=>{
+                const ja = D2.campRealizados.findIndex(x=>x.id===r.id);
+                if(ja<0) D2.campRealizados.push(r);
+              });
+            }
+          }
+        } catch(eMerge){
+          // Merge preventivo falhou — continua sem ele (não é crítico)
+          console.warn("[Avatim] merge preventivo admin ignorado:", eMerge.code||eMerge.message);
+        }
+        // [FIX CRÍTICO] Admin grava no principal APENAS config e metadados
+        // Vendas ficam EXCLUSIVAMENTE nos docs loja_* para evitar sobrescrever dados das lojas
+        const D2_principal = {
+          metasLoja:     D2.metasLoja     || {},
+          vendedoras:    D2.vendedoras    || [],
+          campanhas:     D2.campanhas     || [],
+          campObjetivos: D2.campObjetivos || [],
+          campRealizados:D2.campRealizados|| [],
+          arquivos:      D2.arquivos      || [],
+          metasProd:     D2.metasProd     || [],
+          realProd:      D2.realProd      || {},
+          configCom:     D2.configCom     || {},
+          fluxo:         D2.fluxo         || [],
+          saldosOverride:D2.saldosOverride|| {},
+          produtosExtras:D2.produtosExtras|| [],
+          _vendasExcluidas:    D2._vendasExcluidas     || {},
+          _vendasVendExcluidas:D2._vendasVendExcluidas || {},
+          _campExcluidos:      D2._campExcluidos       || [],
+          _vendsExcluidas:     D2._vendsExcluidas      || []
+          // INTENCIONALMENTE sem: vendas, vendasVend
+          // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
+        };
+        await setDoc(doc(db,"avatim","principal"), {
+          dados: JSON.stringify(D2_principal),
+          ts: Date.now(),
+          por: email
+        });
+        console.log("[Avatim] ✅ Admin: principal salvo (config only — vendas nos docs das lojas)");
+
+      } else {
+        // Loja: gravar no doc da loja
+        const lojaMap = {
+          "mooca\u0040avatim.com":      "mooca",
+          "leopoldina\u0040avatim.com": "leopoldina",
+          "perdizes\u0040avatim.com":   "perdizes",
+          "santana\u0040avatim.com":    "santana",
+          "jarpaul\u0040avatim.com":    "jarpaul",
+          "pinheiros\u0040avatim.com":  "pinheiros",
+          "ibirapuera\u0040avatim.com": "ibirapuera"
+        };
+        const lid = lojaMap[email];
+        if(!lid){
+          console.warn("[Avatim] fsGravar: email nao mapeado para loja:", email);
+          if(typeof showToast==="function") showToast("\u26a0\ufe0f Erro: loja nao identificada para este usuario. Contate o administrador.", "err");
+          return;
+        }
+
+        const docId = "loja_"+lid;
+        const excDias  = D2._vendasExcluidas?.[lid] || [];
+        const excCamp  = D2._campExcluidos || [];
+
+        // ── Montar payload: vendas consolidadas da loja ──────────
+        // [FIX TOMBSTONE] Incluir TODOS os dias presentes em D2.vendas
+        // O tombstone foi removido do D antes de chegar aqui (salvarLanc faz isso)
+        // Não filtrar por excDias aqui — se o dado está em D2.vendas, é porque foi salvo intencionalmente
+        const vendasLoja = {};
+        Object.entries(D2.vendas?.[lid] || {}).forEach(([dt, dados]) => {
+          vendasLoja[dt] = dados; // incluir sempre — confia no D local
+        });
+
+        // ── vendasVend: TODOS os vids de vendedoras desta loja ───
+        // Usa D2.vendedoras para descobrir quem é da loja,
+        // MAS também inclui qualquer vid que já existia no doc remoto
+        // para não perder dados históricos de vendedoras removidas.
+        const vendasVendLoja = {};
+        const vidsLoja = new Set(
+          (D2.vendedoras||[]).filter(v=>v.loja===lid).map(v=>v.id)
+        );
+        Object.entries(D2.vendasVend||{}).forEach(([vid, dias]) => {
+          if(!vidsLoja.has(vid)) return;
+          // [FIX TOMBSTONE] Incluir todos os dias presentes — confia no D local
+          const diasFiltrados = {};
+          Object.entries(dias||{}).forEach(([dt, d]) => {
+            diasFiltrados[dt] = d; // incluir sempre
+          });
+          if(Object.keys(diasFiltrados).length > 0) vendasVendLoja[vid] = diasFiltrados;
+        });
+
+        // [FIX BUG 2] Usar _isCampExcluido (suporta array legado E objeto com timestamp)
+        // Antes: excCamp.includes(r.id) só funcionava com array legado, falhava com objeto
+        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !_isCampExcluido(r.id));
+        const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid);
+
+        // ── Merge com Firebase: preservar histórico não presente localmente ──
+        try{
+          const snapExist = await getDoc(doc(db,"avatim",docId));
+          if(snapExist.exists()){
+            const existing = JSON.parse(snapExist.data().dados||"{}");
+            // Vendas: adicionar dias do Firebase que não existem localmente
+            Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
+              if(!(dt in vendasLoja) && !excDias.includes(dt)) vendasLoja[dt] = dados;
+            });
+            // vendasVend: adicionar dias do Firebase que não existem localmente
+            Object.entries(existing.vendasVend||{}).forEach(([vid,dias]) => {
+              const excDiasV = D2._vendasVendExcluidas?.[vid] || [];
+              if(!vendasVendLoja[vid]) vendasVendLoja[vid] = {};
+              Object.entries(dias||{}).forEach(([dt,d]) => {
+                if(!(dt in vendasVendLoja[vid]) && !excDiasV.includes(dt)) vendasVendLoja[vid][dt] = d;
+              });
+            });
+            // campRealizados: merge por id
+            if(existing.campRealizados?.length){
+              existing.campRealizados.forEach(r => {
+                if(!excCamp.includes(r.id) && !campLoja.find(x=>x.id===r.id)) campLoja.push(r);
+              });
+            }
+            // fluxo: merge por id
+            if(existing.fluxo?.length){
+              existing.fluxo.forEach(r => {
+                if(!fluxoLoja.find(x=>x.id===r.id)) fluxoLoja.push(r);
+              });
+            }
+          }
+        }catch(e2){
+          console.warn("[Avatim] merge preventivo ignorado:", e2.code||e2.message);
+        }
+
+        // [FIX CRÍTICO] Incluir vendedoras e metasLoja no doc da loja
+        // Antes só salvava vendas — metas editadas pela loja nunca chegavam ao Firebase
+        // e eram perdidas na próxima carga (loadFromFirestore restaurava do principal)
+        const payload = {
+          dados: JSON.stringify({
+            vendas:         { [lid]: vendasLoja },
+            vendasVend:     vendasVendLoja,
+            campRealizados: campLoja,
+            fluxo:          fluxoLoja,
+            // [FIX] Filtrar vendedoras tombstoneadas — excluídas não voltam
+            // Antes: loja ainda gravava Maria, e na próxima carga admin via Maria voltar
+            vendedoras:     (D2.vendedoras||[]).filter(v=>
+              v.loja===lid &&
+              !(Array.isArray(D2._vendsExcluidas) && D2._vendsExcluidas.includes(v.id))
+            ),
+            metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} },
+            // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
+            _vendsExcluidas:      D2._vendsExcluidas      || [],
+            _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
+            _vendasVendExcluidas: D2._vendasVendExcluidas  || {},
+            _campExcluidos:       D2._campExcluidos       || []
+          }),
+          lojaId: lid,
+          ts:     Date.now(),
+          por:    email
+        };
+
+        try{
+          await setDoc(doc(db,"avatim",docId), payload);
+        }catch(eSdkWrite){
+          // Se SDK write falha (ex: auth insuficiente), tentar via REST API com idToken
+          if(window._fbIdToken){
+            console.warn("[Avatim] setDoc falhou, tentando REST:", eSdkWrite.code);
+            const token = await window.fbGetToken();
+            if(token){
+              const restUrl = "https://firestore.googleapis.com/v1/projects/gestao-f53b3/databases/(default)/documents/avatim/"+docId;
+              const dadosStr = typeof payload.dados === 'object' ? payload.dados.stringValue || payload.dados : payload.dados;
+              const restBody = {fields:{
+                dados:  {stringValue: typeof dadosStr === 'string' ? dadosStr : JSON.stringify(dadosStr)},
+                lojaId: {stringValue: lid},
+                ts:     {integerValue: String(payload.ts||Date.now())},
+                por:    {stringValue: payload.por||email}
+              }};
+              const restResp = await fetch(restUrl+"?updateMask.fieldPaths=dados&updateMask.fieldPaths=lojaId&updateMask.fieldPaths=ts&updateMask.fieldPaths=por", {
+                method:"PATCH",
+                headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},
+                body: JSON.stringify(restBody)
+              });
+              if(!restResp.ok){
+                const errText = await restResp.text();
+                throw new Error("REST write falhou: "+restResp.status+" "+errText.substring(0,200));
+              }
+              console.log("[Avatim] ✅ Loja", lid, "salva via REST API");
+            } else {
+              throw eSdkWrite;
+            }
+          } else {
+            throw eSdkWrite;
+          }
+        }
+        console.log("[Avatim] ✅ Loja", lid,
+          "| vendas:", Object.keys(vendasLoja).length, "dias",
+          "| vendasVend:", Object.keys(vendasVendLoja).length, "vends",
+          "| camp:", campLoja.length);
+      }
+    }catch(e){
+      console.error("[Avatim] ❌ fsGravar erro:", e.code||"?", e.message);
+      throw e; // propaga para o save() mostrar o toast de erro
+    }
+  };
+
+  // Carregar do Firestore — merge de todos os docs de loja
+  window.fsCarregar = async function(){
+    try{
+      // Tentar autenticar mas não bloquear — rules permitem leitura sem auth
+      if(!auth.currentUser){
+        const emailAuth = window._currentUser?.email;
+        if(emailAuth){
+          try{ await window.fbLogin(emailAuth); }
+          catch(e){ console.warn("[Avatim] fsCarregar: auth falhou, lendo sem auth:", e.code); }
+        }
+      }
+      const email = window._currentUser?.email||"";
+      const isAdm = email === "admin\u0040avatim.com";
+
+      // Sempre lê o doc principal (tem metas, vendedoras, campanhas)
+      const snapPrincipal = await getDoc(doc(db,"avatim","principal"));
+      let base = snapPrincipal.exists() ? JSON.parse(snapPrincipal.data().dados) : null;
+
+      if(!base){
+        console.log("[Avatim] Nenhum dado no Firestore ainda");
+        return null;
+      }
+
+      if(isAdm){
+        // Admin lê TODOS os docs de loja em PARALELO (muito mais rápido que sequencial)
+        const LOJAS_IDS = ["mooca","leopoldina","perdizes","santana","jarpaul","pinheiros","ibirapuera"];
+        const snaps = await Promise.allSettled(
+          LOJAS_IDS.map(lid => getDoc(doc(db,"avatim","loja_"+lid)))
+        );
+        snaps.forEach((result, idx) => {
+          const lid = LOJAS_IDS[idx];
+          if(result.status !== 'fulfilled'){ console.warn("[Avatim] Erro loja "+lid+":", result.reason?.message); return; }
+          const snap = result.value;
+          if(!snap.exists()){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
+          try{
+            const pedaco = JSON.parse(snap.data().dados||"{}");
+            // Merge vendas da loja
+            if(!base.vendas) base.vendas={};
+            Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
+              if(!base.vendas[l]) base.vendas[l]={};
+              // [FIX cross-device] Merge timestamp-aware
+              const _excFSC = base._vendasExcluidas?.[l]||[];
+              Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                if(_excFSC.includes(_dt)) return;
+                const _lv = base.vendas[l][_dt];
+                const _lT = (_lv && _lv._savedAt) || 0;
+                const _rT = (_val && _val._savedAt) || 0;
+                if(!_lv || _rT > _lT) base.vendas[l][_dt]=_val;
+              });
+            });
+            if(!base.vendasVend) base.vendasVend={};
+            Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
+              if(!base.vendasVend[vid]) base.vendasVend[vid]={};
+              // [FIX cross-device] Merge seguro vendasVend timestamp-aware
+              const _excVVL = base._vendasVendExcluidas?.[vid]||[];
+              Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                if(_excVVL.includes(_dt)) return;
+                const _lvv = base.vendasVend[vid][_dt];
+                const _lTv = (_lvv && _lvv._savedAt) || 0;
+                const _rTv = (_val && _val._savedAt) || 0;
+                if(!_lvv || _rTv > _lTv) base.vendasVend[vid][_dt]=_val;
+              });
+            });
+            // Merge campRealizados desta loja
+            if(pedaco.campRealizados && pedaco.campRealizados.length){
+              if(!base.campRealizados) base.campRealizados=[];
+              pedaco.campRealizados.forEach(r=>{
+                const idx2 = base.campRealizados.findIndex(x=>x.id===r.id);
+                if(idx2>=0) base.campRealizados[idx2]=r;
+                else base.campRealizados.push(r);
+              });
+            }
+            // Merge fluxo desta loja
+            if(pedaco.fluxo && pedaco.fluxo.length){
+              if(!base.fluxo) base.fluxo=[];
+              pedaco.fluxo.forEach(r=>{
+                if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+              });
+            }
+            // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
+            // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
+            // Lojas também podem ter exclusões registradas que o admin precisa respeitar
+            if(pedaco._vendsExcluidas?.length){
+              if(!base._vendsExcluidas) base._vendsExcluidas=[];
+              pedaco._vendsExcluidas.forEach(vid=>{
+                if(!base._vendsExcluidas.includes(vid)) base._vendsExcluidas.push(vid);
+              });
+            }
+            if(pedaco._campExcluidos){
+              if(!base._campExcluidos) base._campExcluidos = Array.isArray(pedaco._campExcluidos)?[]:{};
+              if(Array.isArray(pedaco._campExcluidos)){
+                if(Array.isArray(base._campExcluidos)){
+                  pedaco._campExcluidos.forEach(id=>{
+                    if(!base._campExcluidos.includes(id)) base._campExcluidos.push(id);
+                  });
+                }
+              } else {
+                Object.entries(pedaco._campExcluidos).forEach(([id,ts])=>{
+                  if(typeof base._campExcluidos === 'object' && !Array.isArray(base._campExcluidos)){
+                    base._campExcluidos[id] = base._campExcluidos[id] || ts;
+                  }
+                });
+              }
+            }
+            if(pedaco._vendasVendExcluidas){
+              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
+              Object.entries(pedaco._vendasVendExcluidas).forEach(([vid,dias])=>{
+                if(!base._vendasVendExcluidas[vid]) base._vendasVendExcluidas[vid]=[];
+                (dias||[]).forEach(dt=>{
+                  if(!base._vendasVendExcluidas[vid].includes(dt))
+                    base._vendasVendExcluidas[vid].push(dt);
+                });
+              });
+            }
+            if(pedaco.vendedoras && pedaco.vendedoras.length){
+              if(!base.vendedoras) base.vendedoras=[];
+              // Respeitar tombstone _vendsExcluidas do principal
+              const _excBase = base._vendsExcluidas||[];
+              pedaco.vendedoras.forEach(rv=>{
+                if(_excBase.includes(rv.id)) return; // excluída — não restaurar
+                const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
+                if(vi>=0){
+                  // [FIX cross-device] Comparar _savedAt: aceitar a versão mais RECENTE
+                  // [FIX BUG 2] SEMPRE preservar campo 'ativa' local — arquivamento NUNCA reverte
+                  const bvi = base.vendedoras[vi];
+                  const _lTs = bvi._savedAt || 0;
+                  const _rTs = rv._savedAt  || 0;
+                  if(_rTs > _lTs){
+                    const _ativaPreserv = bvi.ativa;
+                    base.vendedoras[vi] = {...rv, ativa: _ativaPreserv}; // preserva arquivamento
+                  } else {
+                    // local mais recente OU iguais → preservar campos editáveis locais
+                    // [FIX BUG META] mas APENAS se remoto NÃO tiver timestamp maior — comparar pré-merge
+                    // Se _rTs > _lTs, esse else NÃO executa (vai pro if acima)
+                    // Aqui local é mais recente, então preserva local
+                    base.vendedoras[vi]={...rv,
+                      metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
+                      superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
+                      ticketAlvo:   bvi.ticketAlvo   !== undefined ? bvi.ticketAlvo   : rv.ticketAlvo,
+                      metaAniv:     bvi.metaAniv     !== undefined ? bvi.metaAniv     : rv.metaAniv,
+                      metaInativ:   bvi.metaInativ   !== undefined ? bvi.metaInativ   : rv.metaInativ,
+                      ativa:        bvi.ativa        !== undefined ? bvi.ativa        : rv.ativa,
+                      _savedAt:     _lTs || _rTs
+                    };
+                  }
+                } else base.vendedoras.push(rv);
+              });
+            }
+            if(pedaco.metasLoja){
+              if(!base.metasLoja) base.metasLoja={};
+              Object.entries(pedaco.metasLoja).forEach(([lid2,meses])=>{
+                if(!base.metasLoja[lid2]) base.metasLoja[lid2]={};
+                Object.entries(meses||{}).forEach(([mr,m])=>{
+                  // [FIX BUG 1] Comparar _savedAt — meta mais recente vence
+                  // Antes: loja_* sobrescrevia meta do principal (admin) porque lia por último
+                  const _bMeta = base.metasLoja[lid2]?.[mr];
+                  const _rTsM  = m?._savedAt      || 0;
+                  const _lTsM  = _bMeta?._savedAt || 0;
+                  if(!_bMeta || !_bMeta.mes || _rTsM > _lTsM)
+                    base.metasLoja[lid2][mr] = m;
+                }); 
+              });
+            }
+            console.log("[Avatim] Merge loja:", lid, "| vendas:", Object.keys(pedaco.vendas||{}).length ? Object.keys(pedaco.vendas[lid]||{}).length+" dias" : "0 dias");
+          }catch(e3){ console.warn("[Avatim] Parse erro loja "+lid+":", e3.message); }
+        });
+        // [FIX BUG ressurreição] Aplicar tombstone FINAL após merge de todos os loja_*
+        // Garante que vendedoras excluídas por qualquer admin/loja não voltem
+        if(base._vendsExcluidas?.length && base.vendedoras){
+          const _exFinal = base._vendsExcluidas;
+          base.vendedoras = base.vendedoras.filter(v=>!_exFinal.includes(v.id));
+        }
+        console.log("[Avatim] ✅ Admin: todos os dados carregados em paralelo");
+      } else {
+        // Loja carrega só seus dados e faz merge sobre o base
+        const lojaMap = {
+          "mooca\u0040avatim.com":      "mooca",
+          "leopoldina\u0040avatim.com": "leopoldina",
+          "perdizes\u0040avatim.com":   "perdizes",
+          "santana\u0040avatim.com":    "santana",
+          "jarpaul\u0040avatim.com":    "jarpaul",
+          "pinheiros\u0040avatim.com":  "pinheiros",
+          "ibirapuera\u0040avatim.com": "ibirapuera"
+        };
+        const lid = lojaMap[email];
+        if(lid){
+          try{
+            const snap = await getDoc(doc(db,"avatim","loja_"+lid));
+            if(snap.exists()){
+              const pedaco = JSON.parse(snap.data().dados);
+              // Copiar vendas do doc loja_* para o base (objeto retornado ao loadFromFirestore)
+              if(!base.vendas) base.vendas={};
+              Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
+                if(!base.vendas[l]) base.vendas[l]={};
+                Object.entries(dias||{}).forEach(([_dt2,_val2])=>{
+                  // [FIX cross-device] Merge timestamp-aware
+                  const _lvL = base.vendas[l][_dt2];
+                  const _lTL = (_lvL && _lvL._savedAt) || 0;
+                  const _rTL = (_val2 && _val2._savedAt) || 0;
+                  if(!_lvL || _rTL > _lTL) base.vendas[l][_dt2]=_val2;
+                });
+              });
+              if(!base.vendasVend) base.vendasVend={};
+              Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
+                if(!base.vendasVend[vid]) base.vendasVend[vid]={};
+                // [FIX cross-device] Merge seguro vendasVend timestamp-aware
+                const _excVV = base._vendasVendExcluidas?.[vid]||[];
+                Object.entries(dias||{}).forEach(([_dt,_val])=>{
+                  if(_excVV.includes(_dt)) return;
+                  const _lvvL = base.vendasVend[vid][_dt];
+                  const _lTvL = (_lvvL && _lvvL._savedAt) || 0;
+                  const _rTvL = (_val && _val._savedAt) || 0;
+                  if(!_lvvL || _rTvL > _lTvL) base.vendasVend[vid][_dt]=_val;
+                });
+              });
+              // Merge campRealizados desta loja ao base (respeitando tombstones)
+              if(pedaco.campRealizados && pedaco.campRealizados.length){
+                if(!base.campRealizados) base.campRealizados=[];
+                pedaco.campRealizados.forEach(r=>{
+                  // [FIX BUG 2] _isCampExcluido suporta array legado E objeto com timestamp
+                  if(_isCampExcluido(r.id)) return; // não trazer de volta excluídos
+                  const rIdx = base.campRealizados.findIndex(x=>x.id===r.id);
+                  if(rIdx>=0) base.campRealizados[rIdx]=r;
+                  else base.campRealizados.push(r);
+                });
+              }
+              // Merge fluxo desta loja ao base
+              if(pedaco.fluxo && pedaco.fluxo.length){
+                if(!base.fluxo) base.fluxo=[];
+                pedaco.fluxo.forEach(r=>{
+                  if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+                });
+              }
+              // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
+              if(pedaco._vendsExcluidas?.length){
+                if(!base._vendsExcluidas) base._vendsExcluidas=[];
+                pedaco._vendsExcluidas.forEach(vid=>{
+                  if(!base._vendsExcluidas.includes(vid)) base._vendsExcluidas.push(vid);
+                });
+              }
+              // [FIX CRITICO] vendedoras e metasLoja do loja_* sobrepõem o principal
+              // A loja edita metas localmente → salva no loja_* → ao recarregar deve LER do loja_*
+              if(pedaco.vendedoras && pedaco.vendedoras.length){
+                if(!base.vendedoras) base.vendedoras=[];
+                const _excLj = base._vendsExcluidas||[];
+                pedaco.vendedoras.forEach(rv=>{
+                  if(_excLj.includes(rv.id)) return; // excluída — não restaurar
+                  const vi=base.vendedoras.findIndex(lv=>lv.id===rv.id);
+                  if(vi>=0){
+                    // [FIX cross-device] Timestamp-aware merge
+                    // [FIX BUG arquivamento] preservar campo ativa ao aceitar remoto
+                    const bvi2 = base.vendedoras[vi];
+                    const _lTs2 = bvi2._savedAt || 0;
+                    const _rTs2 = rv._savedAt  || 0;
+                    if(_rTs2 > _lTs2){
+                      const _ativaPreserv2 = bvi2.ativa;
+                      base.vendedoras[vi] = {...rv, ativa: _ativaPreserv2};
+                    } else {
+                      base.vendedoras[vi]={...rv,
+                        metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
+                        superMetaMes: bvi2.superMetaMes !== undefined ? bvi2.superMetaMes : rv.superMetaMes,
+                        ticketAlvo:   bvi2.ticketAlvo   !== undefined ? bvi2.ticketAlvo   : rv.ticketAlvo,
+                        metaAniv:     bvi2.metaAniv     !== undefined ? bvi2.metaAniv     : rv.metaAniv,
+                        metaInativ:   bvi2.metaInativ   !== undefined ? bvi2.metaInativ   : rv.metaInativ,
+                        ativa:        bvi2.ativa        !== undefined ? bvi2.ativa        : rv.ativa,
+                        _savedAt:     _lTs2 || _rTs2
+                      };
+                    }
+                  } else base.vendedoras.push(rv);
+                });
+              }
+              if(pedaco.metasLoja && pedaco.metasLoja[lid]){
+                if(!base.metasLoja) base.metasLoja={};
+                if(!base.metasLoja[lid]) base.metasLoja[lid]={};
+                Object.entries(pedaco.metasLoja[lid]).forEach(([mr,m])=>{
+                  // [FIX CRÍTICO] Comparar _savedAt — meta mais recente vence
+                  // (vale para principal vs loja_* — quem tem timestamp maior ganha)
+                  // Antes: só preenchia meses ausentes → admin atualizava no principal
+                  // mas loja_* continuava com meta antiga e nunca era atualizada
+                  const _bMetaL = base.metasLoja[lid][mr];
+                  const _rTsML  = m?._savedAt       || 0;
+                  const _lTsML  = _bMetaL?._savedAt || 0;
+                  if(!_bMetaL || !_bMetaL.mes || _rTsML > _lTsML)
+                    base.metasLoja[lid][mr] = m;
+                });
+              }
+              console.log("[Avatim] Loja "+lid+" carregada (vendas+metas+vendedoras)");
+            }
+          }catch(e2){ console.warn("[Avatim] Erro carregar loja:", e2.message); }
+        }
+        // [FIX CRÍTICO Bug 1] Loja só vê SUAS vendedoras (filtrar outras lojas)
+        // base.vendedoras vem do principal com TODAS as vendedoras
+        // → filtrar para retornar apenas as da própria loja
+        // [FIX BUG ressurreição] + filtrar tombstoneadas (_vendsExcluidas)
+        if(lid && base.vendedoras){
+          const _exLojaFinal = base._vendsExcluidas||[];
+          base.vendedoras = base.vendedoras.filter(v => v.loja === lid && !_exLojaFinal.includes(v.id));
+        }
+        // [FIX CRÍTICO Bug 1] metasLoja: loja só vê SUA própria
+        if(lid && base.metasLoja){
+          const _minhaMeta = base.metasLoja[lid] || {};
+          base.metasLoja = { [lid]: _minhaMeta };
+        }
+        // [FIX] vendasVend: filtrar apenas das vendedoras da própria loja
+        if(lid && base.vendasVend){
+          const _idsLoja = new Set(base.vendedoras.map(v => v.id));
+          const _vvFiltrado = {};
+          Object.entries(base.vendasVend).forEach(([vid, dias])=>{
+            if(_idsLoja.has(vid)) _vvFiltrado[vid] = dias;
+          });
+          base.vendasVend = _vvFiltrado;
+        }
+        // [FIX] vendas: filtrar apenas da própria loja
+        if(lid && base.vendas){
+          base.vendas = { [lid]: base.vendas[lid] || {} };
+        }
+      }
+
+      return JSON.stringify(base);
+    }catch(e){
+      console.warn("[Avatim] ❌ Erro ao carregar:", e.code, e.message);
+      return null;
+    }
+  };
+
+  // onAuthStateChanged — só age se NÃO for login local
+  const runAuth = ()=>onAuthStateChanged(auth, user=>{
+    if(window._localLogin) return;
+    window._currentUser = user;
+    if(user){
+      try {
+        // [FIX Bug1b] Restaurar _userLoja ao re-autenticar via Firebase (ex: reload, sessao persistida)
+        const uData = (window.USUARIOS||{})[user.email];
+        if(uData){
+          window._userLoja = uData;
+          console.log("[Avatim] onAuthStateChanged: _userLoja restaurado para:", uData.id);
+        } else {
+          window._userLoja = {id:"desconhecido", nome:user.email};
+          console.warn("[Avatim] onAuthStateChanged: email nao encontrado em USUARIOS:", user.email);
+        }
+      } catch(eU) {
+        window._userLoja = {id:"desconhecido",nome:user.email};
+        console.warn("[Avatim] Erro ao carregar USUARIOS:", eU.message);
+      }
+      if(typeof showApp==="function") showApp();
+    } else {
+      window._userLoja = null;
+      if(typeof showLogin==="function") showLogin();
+    }
+  });
+  if(document.readyState==="loading"){
+    document.addEventListener("DOMContentLoaded", runAuth);
+  } else {
+    runAuth();
+  }
+
+}catch(e){
+  console.error("[Avatim] Firebase init erro:", e.message);
+  window._fbOk = false;
+  document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
+}
+
+  }catch(e){
+    console.warn("[Avatim] Firebase não disponível (", e.message, ") — modo offline ativo");
+    window._fbOk   = false;
+    window.fbLogin = async ()=>false; // noop — login local funciona sem Firebase
+    window.fsGravar  = async ()=>false;
+    window.fsCarregar= async ()=>null;
+    if(typeof showLogin === "function") showLogin();
+    else document.addEventListener("DOMContentLoaded", ()=>{ if(typeof showLogin==="function") showLogin(); });
+  }
+})();
+// ============================================================
+// CONFIG PAGE — TABS E AZURE
+// ============================================================
+function tabCfg(tab, el){
+  document.querySelectorAll('#page-config > .tabs .tab').forEach(e=>e.classList.remove('active'));
+  el.classList.add('active');
+  ['lojas','supabase','firebase','deploy','sql','cosmos'].forEach(t=>{
+    const d=document.getElementById('cfg-tab-'+t);
+    if(d) d.style.display = t===tab?'block':'none';
+  });
+  if(tab==='firebase') { if(typeof preencherFBForm==='function') preencherFBForm(); }
+  if(tab==='supabase') { if(typeof preencherFormSB==='function') preencherFormSB(); }
+  if(tab==='cosmos') preencherFormCosmos();
+  if(tab==='sql')    preencherFormSQL();
+}
+
+function salvarAzureConfig(){
+  const cfg = {
+    sql:{
+      server: document.getElementById('sql-server')?.value||'',
+      db:     document.getElementById('sql-db')?.value||'avatim',
+      user:   document.getElementById('sql-user')?.value||'',
+      pass:   document.getElementById('sql-pass')?.value||''
+    },
+    cosmos:{
+      endpoint: document.getElementById('cosmos-endpoint')?.value||'',
+      key:      document.getElementById('cosmos-key')?.value||'',
+      dbid:     document.getElementById('cosmos-dbid')?.value||'avatim'
+    }
+  };
+  localStorage.setItem('avatim_azure_cfg', JSON.stringify(cfg));
+  // Atualiza COSMOS_CONFIG em memória
+  if(cfg.cosmos.endpoint && cfg.cosmos.key){
+    COSMOS_CONFIG.endpoint = cfg.cosmos.endpoint;
+    COSMOS_CONFIG.key      = cfg.cosmos.key;
+    COSMOS_CONFIG.database = cfg.cosmos.dbid;
+    const ci=document.getElementById('cosmos-sync-info');
+    const cb=document.getElementById('cosmos-badge');
+    if(ci) ci.style.display='block';
+    if(cb) cb.style.display='block';
+  }
+}
+
+function preencherFormCosmos(){
+  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
+  const c = cfg.cosmos||{};
+  const el = id => document.getElementById(id);
+  if(el('cosmos-endpoint')) el('cosmos-endpoint').value = c.endpoint||COSMOS_CONFIG.endpoint!=='SUA_COSMOS_ENDPOINT'?COSMOS_CONFIG.endpoint:'';
+  if(el('cosmos-key'))      el('cosmos-key').value      = c.key     ||COSMOS_CONFIG.key!=='SUA_COSMOS_KEY'?COSMOS_CONFIG.key:'';
+  if(el('cosmos-dbid'))     el('cosmos-dbid').value     = c.dbid    ||'avatim';
+  const ativo = COSMOS_OK||(c.endpoint&&c.key);
+  const ci=document.getElementById('cosmos-sync-info');
+  if(ci) ci.style.display = ativo?'block':'none';
+}
+
+function preencherFormSQL(){
+  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
+  const s = cfg.sql||{};
+  const el = id => document.getElementById(id);
+  if(el('sql-server')) el('sql-server').value = s.server||'';
+  if(el('sql-db'))     el('sql-db').value     = s.db||'avatim';
+  if(el('sql-user'))   el('sql-user').value   = s.user||'';
+}
+
+async function testarCosmos(){
+  const st = document.getElementById('cosmos-status');
+  if(!st) return;
+  st.style.display='block';
+  st.style.color='var(--ouro)';
+  st.textContent='⏳ Testando conexao com Cosmos DB...';
+  if(!COSMOS_OK && !(document.getElementById('cosmos-endpoint')?.value)){
+    st.style.color='var(--verm)';
+    st.textContent='❌ Preencha o Endpoint e a Primary Key primeiro.';
+    return;
+  }
+  try {
+    const r = await cosmosQuery('vendas', 'SELECT TOP 1 c.id FROM c');
+    st.style.color='var(--verde)';
+    st.textContent='✅ Conexao OK! Cosmos DB respondeu com sucesso.';
+    const ls=document.getElementById('cosmos-last-sync');
+    if(ls) ls.textContent=new Date().toLocaleTimeString('pt-BR');
+  } catch(e) {
+    st.style.color='var(--verm)';
+    st.textContent='❌ Erro: '+e.message+'. Verifique endpoint, key e CORS no portal Azure.';
+  }
+}
+
+function testarConexaoSQL(){
+  const st = document.getElementById('sql-status');
+  if(!st) return;
+  st.style.display='block';
+  st.style.color='var(--ouro)';
+  st.innerHTML='⏳ Azure SQL nao pode ser conectado diretamente do browser por segurança.<br>'
+    +'Use o <strong>Azure Query Editor</strong> no portal ou <strong>Azure Data Studio</strong> para executar o script SQL.<br>'
+    +'Connection string salva localmente para referencia.';
+}
+
+function copiarConnString(){
+  const s = document.getElementById('sql-server')?.value||'seu-servidor';
+  const d = document.getElementById('sql-db')?.value||'avatim';
+  const u = document.getElementById('sql-user')?.value||'usuario';
+  const cs = `Server=tcp:${s},1433;Initial Catalog=${d};Persist Security Info=False;User ID=${u};Password={sua_senha};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;`;
+  navigator.clipboard?.writeText(cs).then(()=>showToast('Connection string copiada!')).catch(()=>{
+    const t=document.createElement('textarea');t.value=cs;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);showToast('Copiado!');
+  });
+}
+
+function limparAzureConfig(){
+  localStorage.removeItem('avatim_azure_cfg');
+  ['cosmos-endpoint','cosmos-key','cosmos-dbid','sql-server','sql-user','sql-pass'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  document.getElementById('sql-db')?.setAttribute('value','avatim');
+  document.getElementById('cosmos-dbid')?.setAttribute('value','avatim');
+  const ci=document.getElementById('cosmos-sync-info');
+  if(ci) ci.style.display='none';
+  showToast('Configuracoes Azure limpas.');
+}
+
+// ============================================================
+// AZURE COSMOS DB — Configuracao
+// Preencha apos criar o banco no portal.azure.com
+// Guia completo: ver arquivo avatim_cosmos_db.md
+// ============================================================
+const COSMOS_CONFIG = {
+  endpoint:   "",           // Ex: https://avatim-cosmos.documents.azure.com:443/
+  key:        "",           // Primary Key (em Keys no portal Azure)
+  database:   "avatimdb",
+  containers: {             // Mapeamento de alias → nome real do container
+    vendas:       "vendas",
+    vendasVend:   "vendas_vendedora",
+    metasLoja:    "metas_loja",
+    vendedoras:   "vendedoras",
+    campRealizados:"camp_realizados"
+  }
+};
+
+// Carregar config salva ao iniciar (após COSMOS_CONFIG estar definido)
+(function carregarAzureSalvo(){
+  const cfg = JSON.parse(localStorage.getItem('avatim_azure_cfg')||'{}');
+  if(cfg.cosmos?.endpoint && cfg.cosmos?.key){
+    COSMOS_CONFIG.endpoint = cfg.cosmos.endpoint;
+    COSMOS_CONFIG.key      = cfg.cosmos.key;
+    COSMOS_CONFIG.database = cfg.cosmos.dbid||'avatim';
+  }
+})();
+
+// ============================================================
+// COSMOS DB CLIENT — conecta direto via REST API
+// ============================================================
+const CosmosDB = {
+  _base:null, _key:null, _db:null, _ativo:false,
+  init(){
+    if(!COSMOS_CONFIG.endpoint||!COSMOS_CONFIG.key){console.log("Cosmos: offline (localStorage)");return;}
+    this._base=COSMOS_CONFIG.endpoint.replace(/\/$/,"");
+    this._key=COSMOS_CONFIG.key; this._db=COSMOS_CONFIG.database; this._ativo=true;
+    console.log("Cosmos DB: conectado -",this._base);
+  },
+  async _auth(method,resourceType,resourceId,date){
+    const text=method.toLowerCase()+"\n"+resourceType.toLowerCase()+"\n"+resourceId+"\n"+date.toLowerCase()+"\n\n";
+    const keyBuf=Uint8Array.from(atob(this._key),c=>c.charCodeAt(0));
+    const msgBuf=new TextEncoder().encode(text);
+    const k=await crypto.subtle.importKey("raw",keyBuf,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+    const sig=await crypto.subtle.sign("HMAC",k,msgBuf);
+    return encodeURIComponent("type=master&ver=1.0&sig="+btoa(String.fromCharCode(...new Uint8Array(sig))));
+  },
+  async _req(method,path,resourceType,resourceId,body=null){
+    if(!this._ativo)return null;
+    const date=new Date().toUTCString(), auth=await this._auth(method,resourceType,resourceId,date);
+    try{
+      const r=await fetch(this._base+"/"+path,{method,headers:{"Authorization":auth,"x-ms-date":date,"x-ms-version":"2018-12-31","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+      return r.ok?await r.json():null;
+    }catch(e){console.error("Cosmos err:",e);return null;}
+  },
+  _col(c){return "dbs/"+this._db+"/colls/"+c;},
+  async upsert(container,doc){
+    if(!this._ativo)return;
+    await this._req("POST",this._col(container)+"/docs","docs",this._col(container),{...doc,ttl:-1});
+  },
+  async query(container,sql,pk=null){
+    if(!this._ativo)return[];
+    const date=new Date().toUTCString(), auth=await this._auth("POST","docs",this._col(container),date);
+    const hdrs={"Authorization":auth,"x-ms-date":date,"x-ms-version":"2018-12-31","Content-Type":"application/query+json","x-ms-documentdb-isquery":"true","x-ms-documentdb-query-enablecrosspartition":pk?"false":"true"};
+    if(pk)hdrs["x-ms-documentdb-partitionkey"]=JSON.stringify([pk]);
+    try{
+      const r=await fetch(this._base+"/"+this._col(container)+"/docs",{method:"POST",headers:hdrs,body:JSON.stringify({query:sql,parameters:[]})});
+      return r.ok?(await r.json()).Documents||[]:[];
+    }catch(e){return[];}
+  },
+  async salvarLancamento(lid,data,payload){
+    await this.upsert("lancamentos",{id:lid+"_"+data,loja_id:lid,data_venda:data,mes_ref:data.slice(0,7),...payload,ts:Date.now()});
+    await this.upsert("log_lancamentos",{id:"log_"+Date.now()+"_"+lid,loja_id:lid,acao:"LANC_DIA",usuario:payload.lancado_por||"",data_venda:data,valor_novo:payload.faturamento,ts:Date.now()});
+  },
+  async salvarVendaVend(vendId,lojaId,data,val,trans,lancadoPor){
+    await this.upsert("vendas_vend",{id:vendId+"_"+data,vendedora_id:vendId,loja_id:lojaId,data_venda:data,mes_ref:data.slice(0,7),valor_vendido:val,num_transacoes:trans,lancado_por:lancadoPor,ts:Date.now()});
+  },
+  async getLancamentosHoje(){
+    const d_=new Date();const h=d_.getFullYear()+"-"+String(d_.getMonth()+1).padStart(2,"0")+"-"+String(d_.getDate()).padStart(2,"0");
+    return await this.query("lancamentos","SELECT * FROM c WHERE c.data_venda = \""+h+"\" ORDER BY c.faturamento DESC");
+  },
+  async getLancamentosMes(lid,mes){
+    return await this.query("lancamentos","SELECT * FROM c WHERE c.loja_id = \""+lid+"\" AND c.mes_ref = \""+mes+"\"",lid);
+  },
+  async getVendasVendMes(lid,mes){
+    return await this.query("vendas_vend","SELECT * FROM c WHERE c.loja_id = \""+lid+"\" AND c.mes_ref = \""+mes+"\"",lid);
+  },
+  async testarConexao(){
+    if(!this._ativo)return false;
+    try{const r=await this._req("GET","dbs/"+this._db,"dbs","dbs/"+this._db);return!!r;}catch(e){return false;}
+  }
+};
+
+// ── Funções auxiliares ────────────────────────────────────────
+function maskBR(el){
+  let v = el.value.replace(/\D/g,'');
+  if(!v){ el.value=''; return; }
+  v = (parseInt(v)/100).toFixed(2);
+  el.value = v.replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+function selecionarProdCamp(cod, nome){
+  const el = document.getElementById('camp-prod-sel');
+  if(el) el.value = cod + ' — ' + nome;
+  const elHid = document.getElementById('camp-prod-cod');
+  if(elHid) elHid.value = cod;
+  showToast('Produto selecionado: '+nome);
+}
+function sincronizarCosmosParaLocal(){
+  // Stub — Cosmos desabilitado nesta versão
+}
+
 
 <style>
 :root{
@@ -3622,7 +4816,7 @@ service cloud.firestore {
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
-<script>
+
 // ============================================================
 // CONSTANTES
 // ============================================================
@@ -17222,6 +18416,9 @@ function downloadCSV(csv, filename){
 }
 
 
+
+</body>
+</html>
 </script>
 </body>
 </html>
