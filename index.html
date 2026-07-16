@@ -1262,11 +1262,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni admin-only" onclick="nav('mesant')" id="nav-mesant" style="display:none"><span class="ic">📈</span>Mês Anterior</button>
-    <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
+    <button class="ni admin-only" onclick="nav('analise')" id="nav-analise" style="display:none"><span class="ic">📈</span>Análise Comparativa</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
-    <button class="ni admin-only" onclick="nav('lancperloja')" id="nav-lancperloja" style="display:none"><span class="ic">🏪</span>Lançamento por Loja</button>
-    <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
     <button class="ni admin-only" onclick="nav('historico')" id="nav-historico" style="display:none"><span class="ic">📅</span>Histórico</button>
@@ -1309,6 +1306,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="kcard"><div class="kl">Ideal Hoje</div><div class="kv" id="k-ideal">R$ 0</div><div class="ks" id="k-gap" style="font-weight:600">--</div><div class="ks" id="k-gap-s" style="font-size:9px">gap do dia</div></div>
     <div class="kcard laranja"><div class="kl">TM (Itens/Venda)</div><div class="kv" id="k-tm">0</div><div class="ks" id="k-tm-s">meta: 3</div></div>
     <div class="kcard ciano" style="--ciano:#00CEC9"><div class="kl">Clientes</div><div class="kv" id="k-cli">0</div><div class="ks" id="k-cli-s">0 novos</div></div>
+    <div class="kcard roxo"><div class="kl">Média Clientes/Dia</div><div class="kv" id="k-mediacli">--</div><div class="ks" id="k-mediacli-s">mês atual</div></div>
   </div>
   <div class="g2">
     <div>
@@ -2063,19 +2061,20 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 
 <!-- MÊS ANTERIOR — performance do mês passado -->
-<div class="page" id="page-mesant">
+<!-- ANÁLISE COMPARATIVA — cruzamento automático MoM / YoY / mesma época -->
+<div class="page" id="page-analise">
   <div class="ph">
     <div>
-      <h1 class="pt">Mês <span>Anterior</span></h1>
-      <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
+      <h1 class="pt">Análise <span>Comparativa</span></h1>
+      <div class="ps">Mesma época, mês a mês e ano a ano — TM, PA e média de clientes calculados automaticamente dos lançamentos</div>
     </div>
+    <button class="btn-p" onclick="exportarAnaliseCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
   </div>
 
-  <!-- Filtro de loja -->
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
     <label style="font-size:12px;font-weight:600">Loja:</label>
-    <select id="mesant-loja" onchange="renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="">📊 Todas as Lojas</option>
+    <select id="an-loja" onchange="renderAnalise()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="">📊 Toda a Rede</option>
       <option value="mooca">🏪 Mooca Plaza</option>
       <option value="leopoldina">🏪 Vila Leopoldina</option>
       <option value="perdizes">🏪 Perdizes</option>
@@ -2084,76 +2083,34 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <option value="pinheiros">🏪 Alto de Pinheiros</option>
       <option value="ibirapuera">🏪 Shopping Ibirapuera</option>
     </select>
+    <label style="font-size:12px;font-weight:600">Mês de referência:</label>
+    <input type="month" id="an-mes" onchange="renderAnalise()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
   </div>
 
-  <!-- Filtro de período customizado -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Período:</label>
-    <input type="date" id="mesant-periodo-ini" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
-    <span style="color:var(--muted)">até</span>
-    <input type="date" id="mesant-periodo-fim" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
-    <button class="btn-s" onclick="buscarMesAnteriorPeriodo()" style="font-size:11px;padding:6px 12px">Buscar</button>
-  </div>
-  <div class="kgrid" id="mesant-kpis" style="margin-bottom:16px"></div>
-
-  <!-- Tabela por loja -->
   <div class="sc">
-    <div class="st">📊 Performance por Loja</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
-        <tbody id="tbody-mesant"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-
-<!-- HISTÓRICO ANUAL — 2021 até agora, mês a mês -->
-<div class="page" id="page-historicoanu">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Histórico <span>Anual</span></h1>
-      <div class="ps">Performance mês a mês desde 2021 — consolidado das 7 lojas</div>
-    </div>
+    <div class="st">⏱️ Mesma Época — corte: <span id="an-corte" style="color:var(--ouro)">—</span></div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:12px">Compara o mês de referência com o mês anterior e com o mesmo mês do ano passado, sempre até o mesmo dia — crescimento real, sem distorção de mês incompleto.</div>
+    <div class="kgrid" id="an-kpis"></div>
   </div>
 
-  <!-- Filtro de ano -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Ano:</label>
-    <select id="hanu-ano" onchange="renderHistoricoAnual()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="2021">2021</option>
-      <option value="2022">2022</option>
-      <option value="2023">2023</option>
-      <option value="2024">2024</option>
-      <option value="2025">2025</option>
-      <option value="2026" selected>2026</option>
-    </select>
-  </div>
-
-  <!-- Tabela histórico -->
-  <div class="sc">
-    <div class="st">📋 Mês a Mês</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Mês</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
-        <tbody id="tbody-historicoanu"></tbody>
-      </table>
-    </div>
-    <div id="historicoanu-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
-      Sem dados para este período.
-    </div>
-  </div>
-
-  <!-- Gráfico de evolução -->
   <div class="sc" style="margin-top:16px">
-    <div class="st">📈 Evolução Meta vs Realizado</div>
-    <div id="historicoanu-chart" style="height:250px;display:flex;align-items:flex-end;gap:4px;padding:16px;background:rgba(91,141,239,.05);border-radius:8px">--</div>
+    <div class="st">📅 Mês a Mês — últimos 13 meses</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr><th>Mês</th><th>Faturamento</th><th>Meta</th><th>% Meta</th><th>TM</th><th>PA</th><th>Atend.</th><th>Média Cli/Dia</th><th>MoM</th><th>YoY</th></tr></thead>
+        <tbody id="an-tbody"></tbody>
+      </table>
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-top:8px">TM = faturamento ÷ atendimentos · PA = peças ÷ atendimentos · Média Cli/Dia = atendimentos ÷ dias com venda · (manual) = mês do Lançar Histórico</div>
+  </div>
+
+  <div class="sc" style="margin-top:16px">
+    <div class="st">📈 Ano a Ano — mesmo mês, últimos 5 anos</div>
+    <div id="an-yoy" style="height:300px;display:flex;align-items:stretch;gap:8px;padding:16px;background:rgba(46,204,135,.05);border-radius:8px">--</div>
   </div>
 </div>
 
 
-<!-- LANÇAMENTO HISTÓRICO — entrada de dados de meses/anos anteriores -->
 <div class="page" id="page-lanchistorico">
   <div class="ph">
     <div>
@@ -2236,155 +2193,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc" style="margin-top:16px">
     <div class="st">📈 Crescimento YoY (Mesmo mês, anos consecutivos)</div>
     <div id="lanchistorico-yoy" style="height:300px;display:flex;align-items:flex-end;gap:8px;padding:16px;background:rgba(46,204,135,.05);border-radius:8px;font-size:9px">--</div>
-  </div>
-</div>
-
-
-<!-- LANÇAMENTO POR LOJA — entrada de dados por período de cada loja -->
-<div class="page" id="page-lancperloja">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Lançamento <span>por Loja</span></h1>
-      <div class="ps">Registre período, meta, realizado e TM para cada loja</div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-p" onclick="exportarLancPerlojaCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
-      <button class="btn-p" onclick="exportarLancPerlojaPDF()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
-    </div>
-  </div>
-
-  <!-- Formulário -->
-  <div class="sc">
-    <div class="st">Registrar Período de Loja</div>
-    <div class="gr">
-      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
-        <select id="lpl-loja" onchange="atualizaVendedorasLoja()">
-          <option value="">Selecione uma loja...</option>
-          <option value="mooca">Mooca Plaza</option>
-          <option value="leopoldina">Vila Leopoldina</option>
-          <option value="perdizes">Perdizes</option>
-          <option value="santana">Santana</option>
-          <option value="jarpaul">Jardim Paulista</option>
-          <option value="pinheiros">Alto de Pinheiros</option>
-          <option value="ibirapuera">Shopping Ibirapuera</option>
-        </select>
-      </div>
-      <div class="ig"><label>Data Início <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="lpl-data-ini" />
-      </div>
-      <div class="ig"><label>Data Fim <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="lpl-data-fim" />
-      </div>
-      <div class="ig"><label>Meta (R$) <span style="color:var(--verm)">*</span></label>
-        <input type="number" id="lpl-meta" placeholder="176600" min="0" step="100">
-      </div>
-      <div class="ig"><label>Realizado (R$) <span style="color:var(--verm)">*</span></label>
-        <input type="number" id="lpl-real" placeholder="125691" min="0" step="100">
-      </div>
-      <div class="ig"><label>TM — Ticket Médio (R$)</label>
-        <input type="number" id="lpl-tm" placeholder="511" min="0" step="1">
-      </div>
-      <div class="ig"><label>Quantidade de Itens</label>
-        <input type="number" id="lpl-qtditens" placeholder="510" min="0" step="1" oninput="atualizaPAPreviewLoja()">
-      </div>
-      <div class="ig"><label>Nº de Vendas</label>
-        <input type="number" id="lpl-nvendas" placeholder="246" min="0" step="1" oninput="atualizaPAPreviewLoja()">
-      </div>
-    </div>
-    <div style="background:rgba(91,141,239,.08);border-left:3px solid var(--azul);padding:12px;border-radius:4px;margin-bottom:16px">
-      <div style="font-size:11px;color:var(--texto)"><strong>PA (Produto por Atendimento):</strong> <span id="lpl-pa-preview">—</span></div>
-      <div style="font-size:9px;color:var(--muted);margin-top:4px">= Quantidade de Itens ÷ Nº de Vendas</div>
-    </div>
-    <div class="btn-r">
-      <button class="btn-p" onclick="salvarLancamentoPerloja()">Salvar</button>
-      <button class="btn-s" onclick="limparFormLancPerloja()">Limpar</button>
-    </div>
-  </div>
-
-  <!-- Filtro de loja para visualizar -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;margin-top:16px">
-    <label style="font-size:12px;font-weight:600">Visualizar Loja:</label>
-    <select id="lpl-filtro-loja" onchange="renderHistoricoLoja()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="">📊 Todas as Lojas</option>
-      <option value="mooca">🏪 Mooca Plaza</option>
-      <option value="leopoldina">🏪 Vila Leopoldina</option>
-      <option value="perdizes">🏪 Perdizes</option>
-      <option value="santana">🏪 Santana</option>
-      <option value="jarpaul">🏪 Jardim Paulista</option>
-      <option value="pinheiros">🏪 Alto de Pinheiros</option>
-      <option value="ibirapuera">🏪 Shopping Ibirapuera</option>
-    </select>
-  </div>
-
-  <!-- KPIs -->
-  <div class="kgrid" id="lpl-kpis" style="margin-bottom:16px"></div>
-
-  <!-- Tabela com histórico -->
-  <div class="sc">
-    <div class="st">📋 Períodos Lançados</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Loja</th><th>Período</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th></th></tr></thead>
-        <tbody id="tbody-lancperloja"></tbody>
-      </table>
-    </div>
-    <div id="lancperloja-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
-      Nenhum período lançado.
-    </div>
-  </div>
-</div>
-
-
-<!-- ACOMPANHAMENTO META GERAL — consolidado da rede com filtro de período -->
-<div class="page" id="page-acompgeral">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Acompanh. <span>Meta Geral</span></h1>
-      <div class="ps">Consolidado da rede por período — lojas e vendedoras</div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-p" onclick="exportarAcompGeralCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
-      <button class="btn-p" onclick="exportarAcompGeralPDF()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
-    </div>
-  </div>
-
-  <!-- Filtro de período -->
-  <div class="sc">
-    <div class="st">Selecionar Período</div>
-    <div class="gr">
-      <div class="ig"><label>Data Início <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="ag-data-ini" />
-      </div>
-      <div class="ig"><label>Data Fim <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="ag-data-fim" />
-      </div>
-    </div>
-    <div class="btn-r">
-      <button class="btn-p" onclick="buscarAcompanhamentoGeral()">Buscar Período</button>
-    </div>
-  </div>
-
-  <!-- KPIs consolidados -->
-  <div class="kgrid" id="ag-kpis" style="margin-bottom:16px"></div>
-
-  <!-- Tabela por loja -->
-  <div class="sc">
-    <div class="st">📊 Performance por Loja</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th>Vendedoras</th></tr></thead>
-        <tbody id="tbody-ag-lojas"></tbody>
-      </table>
-    </div>
-    <div id="ag-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
-      Selecione um período para visualizar.
-    </div>
-  </div>
-
-  <!-- Expandível: vendedoras por loja -->
-  <div class="sc" style="margin-top:16px">
-    <div class="st">👥 Ranking de Vendedoras</div>
-    <div id="ag-vendedoras-container">--</div>
   </div>
 </div>
 
@@ -5897,7 +5705,7 @@ function logout(){
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','mesant','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
+  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','analise','lanchistorico','historico'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
@@ -5971,35 +5779,15 @@ function nav(pg){
       preencherSelectProspec();
       renderProspec();
     },
-    mesant:()=>{
-      // [NEW] Mês Anterior
-      renderMesAnterior();
-    },
-    historicoanu:()=>{
-      // [NEW] Histórico Anual
-      const selAno = document.getElementById('hanu-ano');
-      if(selAno && !selAno.value) selAno.value = '2026';
-      renderHistoricoAnual();
+    analise:()=>{
+      // [ANÁLISE COMPARATIVA] MoM, YoY, mesma época — tudo automático
+      const mEl = document.getElementById('an-mes');
+      if(mEl && !mEl.value) mEl.value = mesAtual();
+      renderAnalise();
     },
     lanchistorico:()=>{
       // [NEW] Lançar Histórico
       renderHistoricoMes();
-    },
-    lancperloja:()=>{
-      // [NEW] Lançamento por Loja
-      const dIniEl = document.getElementById('lpl-data-ini');
-      const dFimEl = document.getElementById('lpl-data-fim');
-      if(dIniEl && !dIniEl.value) dIniEl.value = hoje();
-      if(dFimEl && !dFimEl.value) dFimEl.value = hoje();
-      renderHistoricoLoja();
-    },
-    acompgeral:()=>{
-      // [NEW] Acompanhamento Meta Geral
-      const dIniEl = document.getElementById('ag-data-ini');
-      const dFimEl = document.getElementById('ag-data-fim');
-      if(dIniEl && !dIniEl.value) dIniEl.value = hoje();
-      if(dFimEl && !dFimEl.value) dFimEl.value = hoje();
-      // Não chama buscarAcompanhamentoGeral() automaticamente, espera usuário clicar
     },
     lanc:()=>{
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
@@ -6710,6 +6498,20 @@ function carregarDash(){
   document.getElementById("k-cli").textContent=cliHj||0;
   document.getElementById("k-cli-s").textContent=(metaCli>0?"meta: "+metaCli+" · ":"")+(clinovHj||0)+" novos"+(pctCli?" · "+pctCli:"");
 
+  // [NEW] Média de clientes/dia do mês + PA automático — visível para o TIME
+  try{
+    const _stM = statsMesRef(isAdmin()?null:lid, mesAtual(), null);
+    const elMC = document.getElementById("k-mediacli");
+    if(elMC) elMC.textContent = _stM.mediaCliDia>0 ? _stM.mediaCliDia.toFixed(1) : "--";
+    const elMCs = document.getElementById("k-mediacli-s");
+    if(elMCs) elMCs.textContent = _stM.dias>0 ? ("média do mês · "+_stM.dias+" dias lançados") : "lance atendimentos no Painel do Dia";
+    // PA automático no card TM (Itens/Venda): peças ÷ atendimentos do mês
+    if(_stM.pa>0){
+      document.getElementById("k-tm").textContent=_stM.pa.toFixed(2);
+      document.getElementById("k-tm-s").textContent="PA do mês (peças/atend) · meta: 3";
+    }
+  }catch(ePA){ console.warn("[Avatim] PA/média clientes:", ePA.message); }
+
   // Barras
   const pD=metaDiaRef>0?Math.min(200,fatHj/metaDiaRef*100):0;
   const pS=metaSemRef>0?Math.min(200,realSem/metaSemRef*100):0;
@@ -7094,6 +6896,7 @@ function carregarVendsForm(lidOverride){
       const dadosHj   = D.vendasVend[v.id]?.[hj]||{};
       const valAtual  = Number(dadosHj.val)||0;
       const atendAtual= Number(dadosHj.trans)||0;
+      const itensAtual= Number(dadosHj.itens)||0; // [PA AUTO] peças já lançadas hoje
       const mes       = hj.slice(0,7);
       let acumMes=0, acumSem=0;
       const inicioSem = hj.slice(0,8)+String((_sw-1)*7+1).padStart(2,'0');
@@ -7180,7 +6983,7 @@ function carregarVendsForm(lidOverride){
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:1px">➕ Adicionar venda</div>
             ${valAtual>0?`<div style="font-size:11px;font-weight:700;color:var(--ouro)">Acumulado: ${fmt(valAtual)}</div>`:''}
           </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
+          <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:end">
             <input type="text" inputmode="decimal" id="vlanc_${v.id}"
               value="${valFmt}" placeholder="0,00"
               style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:16px;font-weight:700;outline:none;transition:border .2s;box-sizing:border-box"
@@ -7191,6 +6994,12 @@ function carregarVendsForm(lidOverride){
               <input type="number" id="vatend_${v.id}" min="0" value="${atendAtual||''}"
                 placeholder="0" oninput="atualizarSomaDia()"
                 style="width:54px;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:10px 6px;color:var(--azul);font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
+            </div>
+            <div>
+              <div style="font-size:9px;color:var(--muted);margin-bottom:4px;text-align:center">Peças</div>
+              <input type="number" id="vitens_${v.id}" min="0" value="${itensAtual||''}"
+                placeholder="0" title="Quantidade de itens vendidos — alimenta o PA automático"
+                style="width:54px;background:var(--cinza);border:1px solid rgba(255,159,67,.35);border-radius:8px;padding:10px 6px;color:var(--laranja);font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
             </div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
@@ -7381,12 +7190,15 @@ async function salvarLanc(){
   const vendasParaSalvar = [];
   let totalAtend = 0;
 
+  let totalItens = 0; // [PA AUTO]
   vends.forEach(v=>{
     const vval   = parseBR(document.getElementById("vlanc_"+v.id)?.value)||0;
     const vatend = parseInt(document.getElementById("vatend_"+v.id)?.value)||0;
+    const vitens = parseInt(document.getElementById("vitens_"+v.id)?.value)||0; // [PA AUTO]
     fat += vval;
-    if(vval > 0) vendasParaSalvar.push({v, vval, vatend});
+    if(vval > 0) vendasParaSalvar.push({v, vval, vatend, vitens});
     totalAtend += vatend;
+    totalItens += vitens;
   });
 
   if(fat === 0){ _abortar("Preencha o valor de pelo menos uma vendedora!"); return; }
@@ -7403,7 +7215,7 @@ async function salvarLanc(){
     const tm = transCount>0 ? parseFloat((fat/transCount).toFixed(2)) : 0;
     // [FIX cross-device] _savedAt no payload → merge timestamp-aware ao sincronizar
     const _nowTs = Date.now();
-    const dadosLanc = {fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, obs, ts:_nowTs, _savedAt:_nowTs};
+    const dadosLanc = {fat, trans:transCount, cli:transCount, clinov:0, visit:0, tm, itens:totalItens, obs, ts:_nowTs, _savedAt:_nowTs};
 
     // [FIX TOMBSTONE] Remover tombstone desta data antes de salvar
     // Evita que exclusões anteriores bloqueiem novos lançamentos
@@ -7416,18 +7228,20 @@ async function salvarLanc(){
     // Salvar vendas de cada vendedora em D — SOMANDO ao existente
     // Conceito: cada "Salvar" é um ticket/venda adicional no dia, não uma substituição
     // Para zerar, usar o botão ✕ (limparVend) no card da vendedora
-    let fatTotal = 0, transTotal2 = 0;
-    vendasParaSalvar.forEach(({v, vval, vatend})=>{
+    let fatTotal = 0, transTotal2 = 0, itensTotal = 0;
+    vendasParaSalvar.forEach(({v, vval, vatend, vitens})=>{
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       // Pegar o registro existente do dia (se houver)
-      const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0};
+      const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0};
       const novoVal   = (Number(regExist.val)||0)   + vval;
       const novoTrans = (Number(regExist.trans)||0) + (vatend||0);
+      const novoItens = (Number(regExist.itens)||0) + (vitens||0); // [PA AUTO]
       const novoTM    = novoTrans>0 ? parseFloat((novoVal/novoTrans).toFixed(2)) : 0;
       D.vendasVend[v.id][data] = {
         val:   novoVal,
         trans: novoTrans,
         cli:   novoTrans,
+        itens: novoItens, // [PA AUTO] alimenta PA = itens/atendimentos
         aniv:  regExist.aniv||0,
         inativ:regExist.inativ||0,
         tm:    novoTM,
@@ -7435,6 +7249,7 @@ async function salvarLanc(){
       };
       fatTotal   += novoVal;
       transTotal2+= novoTrans;
+      itensTotal += novoItens;
       // [FIX TOMBSTONE] Remover tombstone desta vendedora/data
       if(D._vendasVendExcluidas?.[v.id]){
         D._vendasVendExcluidas[v.id] = D._vendasVendExcluidas[v.id].filter(dt => dt !== data);
@@ -7445,7 +7260,7 @@ async function salvarLanc(){
     dadosLanc.fat   = fatTotal;
     dadosLanc.trans = transTotal2;
     dadosLanc.tm    = tmTotal;
-    D.vendas[lid][data] = {...dadosLanc, fat:fatTotal, trans:transTotal2, tm:tmTotal, _savedAt:_nowTs};
+    D.vendas[lid][data] = {...dadosLanc, fat:fatTotal, trans:transTotal2, tm:tmTotal, itens:itensTotal, _savedAt:_nowTs};
 
     // [DIAGNÓSTICO] Confirmar o que vai ser gravado
     console.log("[Avatim] salvarLanc: lid="+lid+" | data="+data+" | fat="+fat);
@@ -16305,6 +16120,171 @@ function countVendasRef(lid, mesRef){
   }
   return count;
 }
+
+// ============================================================
+// [ANÁLISE COMPARATIVA] Motor de cruzamento automático
+// Uma única fonte de cálculo: lançamentos diários (vendasVend →
+// fallback D.vendas → fallback Lançar Histórico para a rede).
+// TM, PA e média de clientes/dia saem daqui — nada manual.
+// ============================================================
+function statsMesRef(lid, mesRef, diaCorte){
+  // lid vazio/null = toda a rede · diaCorte = limita até o dia N (mesma época)
+  const lojasAlvo = lid ? [lid] : LOJAS.map(l=>l.id);
+  let fat=0, atend=0, itens=0; const dias=new Set(); let fonte='diario';
+  lojasAlvo.forEach(id=>{
+    let fatL=0, atendL=0, itensL=0; const diasL=new Set();
+    const vends=(typeof vendsReais==='function')?vendsReais(id):(D.vendedoras||[]).filter(v=>v.loja===id);
+    vends.forEach(v=>{
+      Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt,vd])=>{
+        if(!dt.startsWith(mesRef)) return;
+        if(diaCorte && Number(dt.slice(8,10))>diaCorte) return;
+        const val=Number(vd?.val||0);
+        if(val>0){ fatL+=val; diasL.add(dt); }
+        atendL+=Number(vd?.trans||0);
+        itensL+=Number(vd?.itens||0);
+      });
+    });
+    if(fatL===0){ // fallback: consolidado da loja
+      Object.entries(D.vendas?.[id]||{}).forEach(([dt,vd])=>{
+        if(!dt.startsWith(mesRef)) return;
+        if(diaCorte && Number(dt.slice(8,10))>diaCorte) return;
+        const f=Number(vd?.fat||0);
+        if(f>0){ fatL+=f; diasL.add(dt); }
+        atendL+=Number(vd?.trans||0);
+        itensL+=Number(vd?.itens||0);
+      });
+    }
+    fat+=fatL; atend+=atendL; itens+=itensL; diasL.forEach(d=>dias.add(d));
+  });
+  // fallback: mês manual do Lançar Histórico (só rede, mês inteiro)
+  if(fat===0 && !diaCorte && !lid){
+    const h=D.historicoMeses?.[mesRef];
+    if(h && Number(h.real||0)>0){
+      fat=Number(h.real||0); atend=Number(h.nvendas||0); itens=Number(h.qtditens||0);
+      fonte='historico';
+    }
+  }
+  const nd=dias.size;
+  return { fat, atend, itens, dias:nd, fonte,
+    tm: atend>0 ? fat/atend : 0,
+    pa: (atend>0 && itens>0) ? itens/atend : (fonte==='historico' && Number(D.historicoMeses?.[mesRef]?.pa||0)>0 ? Number(D.historicoMeses[mesRef].pa) : 0),
+    mediaCliDia: nd>0 ? atend/nd : 0 };
+}
+function _mesOffset(mesRef, delta){
+  const [y,m]=mesRef.split('-').map(Number);
+  const d=new Date(y, m-1+delta, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function _pctVar(atual, base){ return base>0 ? ((atual-base)/base*100) : null; }
+function _badgeVar(p){
+  if(p===null || p===undefined || !isFinite(p)) return '<span style="color:var(--muted)">—</span>';
+  const up=p>=0;
+  return '<span style="color:'+(up?'var(--verde)':'var(--verm)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(p).toFixed(1)+'%</span>';
+}
+function _metaMesAn(lid, m){
+  if(lid) return getMetas(lid, m, true)?.mes || 0;
+  const somaLojas = LOJAS.reduce((s,l)=>s+(getMetas(l.id, m, true)?.mes||0),0);
+  return somaLojas > 0 ? somaLojas : Number(D.historicoMeses?.[m]?.meta||0);
+}
+
+function renderAnalise(){
+  const lid = document.getElementById('an-loja')?.value || '';
+  const mesRef = document.getElementById('an-mes')?.value || mesAtual();
+  const ehMesAtual = mesRef===mesAtual();
+  const diaCorte = ehMesAtual ? Number(hoje().slice(8,10)) : null;
+  const corteEl=document.getElementById('an-corte');
+  if(corteEl) corteEl.textContent = diaCorte
+    ? 'até dia '+String(diaCorte).padStart(2,'0')+' de cada mês comparado'
+    : 'mês fechado (completo)';
+
+  const mAnt=_mesOffset(mesRef,-1), mAno=_mesOffset(mesRef,-12);
+  const ref=statsMesRef(lid||null, mesRef, diaCorte);
+  const ant=statsMesRef(lid||null, mAnt,  diaCorte);
+  const ano=statsMesRef(lid||null, mAno,  diaCorte);
+  const vMoM=_pctVar(ref.fat,ant.fat), vYoY=_pctVar(ref.fat,ano.fat);
+
+  const kp=document.getElementById('an-kpis');
+  if(kp) kp.innerHTML =
+    '<div class="kcard ouro"><div class="kl">Faturamento</div><div class="kv">'+fmt(ref.fat)+'</div><div class="ks">'+ref.atend+' atendimentos · '+ref.dias+' dias</div></div>'+
+    '<div class="kcard '+((vMoM===null||vMoM>=0)?'verde':'verm')+'"><div class="kl">vs Mês Anterior ('+mAnt.slice(5,7)+'/'+mAnt.slice(0,4)+')</div><div class="kv" style="font-size:18px">'+_badgeVar(vMoM)+'</div><div class="ks">'+fmt(ant.fat)+' na mesma época</div></div>'+
+    '<div class="kcard '+((vYoY===null||vYoY>=0)?'verde':'verm')+'"><div class="kl">vs Ano Passado ('+mAno.slice(5,7)+'/'+mAno.slice(0,4)+')</div><div class="kv" style="font-size:18px">'+_badgeVar(vYoY)+'</div><div class="ks">'+fmt(ano.fat)+' na mesma época</div></div>'+
+    '<div class="kcard azul"><div class="kl">Ticket Médio (auto)</div><div class="kv">'+(ref.tm>0?fmt(ref.tm):'—')+'</div><div class="ks">antes: '+(ant.tm>0?fmt(ant.tm):'—')+' · '+_badgeVar(_pctVar(ref.tm,ant.tm))+'</div></div>'+
+    '<div class="kcard laranja"><div class="kl">PA (auto)</div><div class="kv">'+(ref.pa>0?ref.pa.toFixed(2):'—')+'</div><div class="ks">'+(ref.pa>0?('itens/atend · antes: '+(ant.pa>0?ant.pa.toFixed(2):'—')):'lance Peças no Painel do Dia')+'</div></div>'+
+    '<div class="kcard ciano" style="--ciano:#00CEC9"><div class="kl">Média Clientes/Dia</div><div class="kv">'+(ref.mediaCliDia>0?ref.mediaCliDia.toFixed(1):'—')+'</div><div class="ks">antes: '+(ant.mediaCliDia>0?ant.mediaCliDia.toFixed(1):'—')+' · '+_badgeVar(_pctVar(ref.mediaCliDia,ant.mediaCliDia))+'</div></div>';
+
+  // Tabela mês a mês (13 meses, mês inteiro)
+  const tb=document.getElementById('an-tbody');
+  window._anDados=[];
+  let rows='';
+  for(let i=0;i<13;i++){
+    const m=_mesOffset(mesRef,-i);
+    const s=statsMesRef(lid||null,m,null);
+    const sAnt=statsMesRef(lid||null,_mesOffset(m,-1),null);
+    const sAno=statsMesRef(lid||null,_mesOffset(m,-12),null);
+    const meta=_metaMesAn(lid||null,m);
+    const pM=(meta>0 && s.fat>0)?(s.fat/meta*100):null;
+    const mom=s.fat>0?_pctVar(s.fat,sAnt.fat):null;
+    const yoy=s.fat>0?_pctVar(s.fat,sAno.fat):null;
+    window._anDados.push({m,s,meta,mom,yoy});
+    rows+='<tr>'+
+      '<td style="font-weight:600">'+m.slice(5,7)+'/'+m.slice(0,4)+(s.fonte==='historico'?' <span style="font-size:8px;color:var(--muted)">(manual)</span>':'')+'</td>'+
+      '<td>'+(s.fat>0?fmt(s.fat):'—')+'</td>'+
+      '<td>'+(meta>0?fmt(meta):'—')+'</td>'+
+      '<td style="font-weight:700;color:'+(pM===null?'var(--muted)':(pM>=100?'var(--verde)':(pM>=80?'var(--laranja)':'var(--verm)')))+'">'+(pM!==null?pM.toFixed(0)+'%':'—')+'</td>'+
+      '<td>'+(s.tm>0?fmt(s.tm):'—')+'</td>'+
+      '<td>'+(s.pa>0?s.pa.toFixed(2):'—')+'</td>'+
+      '<td>'+(s.atend||'—')+'</td>'+
+      '<td>'+(s.mediaCliDia>0?s.mediaCliDia.toFixed(1):'—')+'</td>'+
+      '<td>'+_badgeVar(mom)+'</td>'+
+      '<td>'+_badgeVar(yoy)+'</td>'+
+    '</tr>';
+  }
+  if(tb) tb.innerHTML=rows;
+
+  // Barras YoY: mesmo mês nos últimos 5 anos
+  const yEl=document.getElementById('an-yoy');
+  if(yEl){
+    const yy=Number(mesRef.slice(0,4)), mm=mesRef.slice(5,7);
+    const serie=[]; let maxV=0;
+    for(let a=yy-4;a<=yy;a++){
+      const s=statsMesRef(lid||null, a+'-'+mm, null);
+      serie.push({a,fat:s.fat}); if(s.fat>maxV)maxV=s.fat;
+    }
+    yEl.innerHTML = serie.map((p,ix)=>{
+      const h=maxV>0?Math.max(4,Math.round(p.fat/maxV*200)):4;
+      const prev=serie[ix-1];
+      const v=(prev&&prev.fat>0&&p.fat>0)?_pctVar(p.fat,prev.fat):null;
+      return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px">'+
+        '<div style="font-size:9px;font-weight:700">'+(p.fat>0?fmt(p.fat):'')+'</div>'+
+        '<div style="width:70%;height:'+h+'px;background:'+(p.fat>0?'linear-gradient(180deg,var(--verde),rgba(46,204,135,.5))':'rgba(255,255,255,.06)')+';border-radius:6px 6px 0 0"></div>'+
+        '<div style="font-size:10px;color:var(--muted);font-weight:600">'+mm+'/'+p.a+'</div>'+
+        '<div style="font-size:9px;height:12px">'+(v!==null?_badgeVar(v):'')+'</div>'+
+      '</div>';
+    }).join('');
+  }
+}
+
+function exportarAnaliseCSV(){
+  const d=window._anDados||[];
+  if(!d.length){ showToast('Abra a análise primeiro','warn'); return; }
+  const num=n=>Number(n||0).toFixed(2).replace('.',',');
+  let csv='Mes;Faturamento;Meta;%Meta;TM;PA;Atendimentos;MediaClientesDia;MoM%;YoY%;Fonte\n';
+  d.forEach(r=>{
+    csv+=[r.m, num(r.s.fat), num(r.meta),
+      (r.meta>0&&r.s.fat>0)?(r.s.fat/r.meta*100).toFixed(1).replace('.',','):'',
+      num(r.s.tm), num(r.s.pa), r.s.atend, Number(r.s.mediaCliDia||0).toFixed(1).replace('.',','),
+      r.mom!==null?r.mom.toFixed(1).replace('.',','):'',
+      r.yoy!==null?r.yoy.toFixed(1).replace('.',','):'',
+      r.s.fonte].join(';')+'\n';
+  });
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='analise_comparativa_'+(document.getElementById('an-mes')?.value||mesAtual())+'.csv';
+  a.click();
+}
+
+
 
 // ════════════════════════════════════════════════════════════════════
 // LANÇAMENTO HISTÓRICO — entrada manual de dados de meses anteriores
