@@ -30,13 +30,23 @@ const firebaseConfig = {
   appId:"1:994718145517:web:a98c6aab126150c976a5e4"
 };
 
-// ⚠️  SEGURANÇA CRÍTICA (Jan 2026)
-// Senhas NUNCA devem ser armazenadas no client, mesmo ofuscadas
-// Use Firebase Authentication direto (signInWithEmailAndPassword)
-// Todas as senhas foram removidas por questões de segurança
+// Senhas reais para autenticação Firebase (mesmo usuário do SHA-256)
+// Credenciais ofuscadas — não editar manualmente
+const _k = 0x5A;
+const _d = s => atob(s).split("").map(c=>String.fromCharCode(c.charCodeAt(0)^_k)).join("");
+const FB_SENHAS = {
+  "admin\u0040avatim.com":      _d("FxosMz47a2Jqaw=="),
+  "mooca\u0040avatim.com":      _d("FxpoamtiPQ=="),
+  "leopoldina\u0040avatim.com": _d("DRpoamtiPQ=="),
+  "perdizes\u0040avatim.com":   _d("ChpoamtiPQ=="),
+  "santana\u0040avatim.com":    _d("CRo0Lmhqa2I9"),
+  "pinheiros\u0040avatim.com":  _d("GhYOaGprYj0="),
+  "ibirapuera\u0040avatim.com": _d("CTIaKmhqa2I9"),
+  "jarpaul\u0040avatim.com":    _d("FhpoamtiPQ==")
+};
 
 /* ═══ REGRAS FIRESTORE — configure no console Firebase ═══
-   Substitua por:
+   Substitua "allow read, write: if true" por:
 
    rules_version = '2';
    service cloud.firestore {
@@ -3230,7 +3240,7 @@ create policy "acesso_total" on metas_loja for all using (true) with check (true
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if request.auth != null; // SEGURANÇA: requer autenticação // ajuste p/ produção
+      allow read, write: if true; // ajuste p/ produção
     }
   }
 }</pre>
@@ -3299,7 +3309,7 @@ service cloud.firestore {
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if request.auth != null; // SEGURANÇA: requer autenticação
+      allow read, write: if true;
     }
   }
 }</pre>
@@ -4573,7 +4583,7 @@ function save(){
     const temVendVend  = Object.keys(D.vendasVend||{}).some(vid=>Object.keys(D.vendasVend[vid]||{}).length>0);
     const temMetas     = D.metasLoja && Object.keys(D.metasLoja).some(lid=>Object.keys(D.metasLoja[lid]||{}).length>0);
     const temCamp      = D.campRealizados && D.campRealizados.length>0;
-    const temCampObj   = D.campObjetivos && D.campObjetivos.length>0; // ✅ FIX: Verificar objetivos também
+    const temCampObj   = D.campObjetivos && D.campObjetivos.length>0; // ✅ VERIFICAR OBJETIVOS
     const temFluxo     = D.fluxo && D.fluxo.length>0;
     const temVendedoras = D.vendedoras && D.vendedoras.length > 0;
     const temMetasLoja  = D.metasLoja && Object.keys(D.metasLoja).some(lid =>
@@ -10930,8 +10940,8 @@ function editarCampReal(id){
     const obs = document.getElementById('camp-real-obs');
     if(obs){ obs.value = r.obs||''; }
     calcTMCampReal();
-    // Marcar que é edição (usar mesma variável que editarLancCamp)
-    window._editandoLancCampId = id;
+    // Marcar que é edição
+    window._editandoCampRealId = id;
     // Remover o antigo ao salvar (salvarCampReal já faz findIndex por campId+lojaId)
   },120);
 }
@@ -10989,7 +10999,7 @@ function renderMetasLojas(){
 
   const lojasVisiveis = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
   document.getElementById("metas-lojas-cards").innerHTML=lojasVisiveis.map(loja=>{
-    const m=getMetaSalva(loja.id, _mesMeta, true); // strictMode: não herda mês anterior nos campos
+    const m=getMetas(loja.id, _mesMeta, true); // strictMode: não herda mês anterior nos campos
     const rM = ehMesAtual ? calcMes(loja.id) : 0;
     const rS = ehMesAtual ? calcSem(loja.id) : 0;
     const rD = ehMesAtual ? (D.vendas[loja.id]?.[hoje()]?.fat||0) : 0;
@@ -12387,7 +12397,7 @@ function renderRankingAdmin() {
   const hj   = hoje();
 
   document.getElementById('rank-admin-grid').innerHTML = LOJAS.map(loja => {
-    const m    = getMetaSalva(loja.id);
+    const m    = getMetas(loja.id);
     const vL   = per==='hoje' ? calcDia(loja.id) : per==='semana' ? calcSem(loja.id) : per==='ano' ? calcAno(loja.id) : calcMes(loja.id);
     const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(loja.id) : m.mes;
     const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(loja.id)*1.2 : m.superMes;
@@ -15926,7 +15936,7 @@ function renderMesAnterior(){
       if(titulo) titulo.textContent = 'Loja não encontrada';
       return;
     }
-    const meta = getMetaSalva(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef)?.mes || 0;
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -15970,7 +15980,7 @@ function renderMesAnterior(){
   } else {
     // Modo: consolidado todas as lojas
     const dados = LOJAS.map(loja=>{
-      const meta = getMetaSalva(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef)?.mes || 0;
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -16045,7 +16055,7 @@ function renderHistoricoAnual(){
     // Consolidado de todas as 7 lojas
     let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
     LOJAS.forEach(loja=>{
-      const meta = getMetaSalva(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef)?.mes || 0;
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       totMeta += meta;
@@ -16111,7 +16121,7 @@ function renderHistoricoAnual(){
 // ════════════════════════════════════════════════════════════════════
 // Helpers para cálculos históricos
 // ════════════════════════════════════════════════════════════════════
-function getMetaSalva(lid, mesRef){
+function getMetas(lid, mesRef){
   if(!mesRef) mesRef = mesAtual();
   return D.metasLoja?.[lid]?.[mesRef] || {};
 }
@@ -16120,7 +16130,9 @@ function calcMesRef(lid, mesRef){
   let soma = 0;
   Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
     if(dt.startsWith(mesRef)){
-      soma += Number(vendas?.fat||0);
+      Object.values(vendas).forEach(v=>{
+        soma += Number(v?.val||0);
+      });
     }
   });
   return soma;
@@ -16130,10 +16142,16 @@ function countVendasRef(lid, mesRef){
   let count = 0;
   Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
     if(dt.startsWith(mesRef)){
-      count += Number(vendas?.trans||0);
+      Object.values(vendas).forEach(v=>{
+        if(Number(v?.val||0) > 0) count++;
+      });
     }
   });
   return count;
+}
+function mesAtual(){
+  const hj = hoje();
+  return hj.slice(0, 7);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -16214,7 +16232,7 @@ function renderMesAnteriorDashboard(){
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
-    const meta = getMetaSalva(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef)?.mes || 0;
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     totMeta += meta;
@@ -16780,7 +16798,7 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
       qtditens = periodoMatch.qtditens || 0;
     } else {
       // Se não tem lançamento, tentar usar vendas do período
-      metaPeriodo = getMetaSalva(loja.id, dataIni.slice(0, 7))?.mes || 0;
+      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7))?.mes || 0;
       realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
       nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
       tm = nvendas > 0 ? realizado / nvendas : 0;
