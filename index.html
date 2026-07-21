@@ -4258,7 +4258,10 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // ESTADO
 // ============================================================
-let D=JSON.parse(localStorage.getItem("avatim_v5")||"{}");
+// [FIX 20/07] guarda: localStorage corrompido não pode matar o app inteiro
+let D;
+try{ D = JSON.parse(localStorage.getItem("avatim_v5")||"{}"); }
+catch(_eD){ console.error("[Avatim] avatim_v5 corrompido — reiniciando estado local:", _eD.message); D = {}; }
 if(!D.metasLoja)  D.metasLoja={};
 if(!D.vendas)     D.vendas={};
 // [FIX CRÍTICO BUG ressurreição] NÃO popular automaticamente com VENDEDORAS_PADRAO
@@ -4722,6 +4725,7 @@ async function loadFromFirestore(){
     }
     console.log("[Avatim] loadFromFirestore: dados recebidos, processando...");
     const remoto = JSON.parse(dadosJSON);
+    if(remoto){
       // [FIX] Merge seguro: campos de configuracao sobrescrevem (vem do admin)
       // Campos de vendas fazem MERGE para nao perder dados locais
       // [FIX CRÍTICO] metasLoja: MERGE por loja+mês — nunca sobrescrever
@@ -4929,6 +4933,7 @@ async function loadFromFirestore(){
     }
     return false;
   }
+}
 
 // ============================================================
 // UTILITARIOS
@@ -5038,11 +5043,13 @@ function metaDiaLojaProgressiva(lid, dataRef){
   const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : superDiaBase;
   return {dia, superDia, diasRestantes, acumulado, restante};
 }
-// Vendas acumuladas da loja até (exclusive) uma data
+// Vendas acumuladas da loja até uma data (INCLUSIVE — meta do dia recalcula conforme se vende)
 function calcMesAte(lid, dataRef){
   dataRef = dataRef || hoje();
   const mes = dataRef.slice(0,7);
-  const vends = D.vendedoras.filter(v=>v.loja===lid);
+  // [FIX 20/07] vendsReais: mesma base de calcMes (exclui placeholders VRLL)
+  // antes incluía placeholders → acumulado podia divergir do total do mês
+  const vends = vendsReais(lid);
   let total = 0;
   // Somar por vendedora (mesma lógica do calcMes)
   vends.forEach(v=>{
@@ -5050,8 +5057,8 @@ function calcMesAte(lid, dataRef){
       if(dt.startsWith(mes) && dt <= dataRef) total += Number(vd.val||0);
     });
   });
-  // Fallback: D.vendas direto
-  if(total===0 && vends.length===0){
+  // Fallback: D.vendas direto — [FIX 20/07] mesma condição de calcMes (total===0)
+  if(total===0){
     Object.entries(D.vendas[lid]||{}).forEach(([dt,vd])=>{
       if(dt.startsWith(mes) && dt <= dataRef) total += Number(vd.fat||0);
     });
@@ -5503,7 +5510,9 @@ function calcVendPer(id,per){
     return t;
   }
   if(per==='ano') return calcVendAno(id);
-  const mes=hoje().slice(0,7);
+  // [FIX 20/07] aceitar mesRef "YYYY-MM" — antes um mês histórico caía no default
+  // e somava o MÊS ATUAL (histórico por vendedora compilado errado)
+  const mes = /^\d{4}-\d{2}$/.test(per||'') ? per : hoje().slice(0,7);
   return Object.entries(vd).filter(([d])=>d.startsWith(mes)).reduce((s,[,v])=>s+Number(v.val||0),0);
 }
 
@@ -9392,7 +9401,7 @@ function renderRelCamp(){
 
   // ── KPIs ───────────────────────────────────────────────────
   const totalFat  = reaisAll.reduce((s,r)=>s+_fatLancamento(r),0);
-  const totalAtend= reaisAll.reduce((s,r)=>s+r.atend,0);
+  const totalAtend= reaisAll.reduce((s,r)=>s+_atendLancamento(r),0); // [FIX 20/07] antes: s+r.atend (NaN se undefined)
   const tmMedio   = totalAtend>0 ? totalFat/totalAtend : 0;
   const metaTotal = objs.reduce((s,o)=>{
     if(isAdmin()) return s+(o.metaRede||0);
@@ -9441,8 +9450,10 @@ function renderRelCamp(){
     lojasRank.forEach(l=>{ porLoja[l.id]={lojaId:l.id,nome:l.nome,fat:0,atend:0,meta:0}; });
     reaisAll.forEach(r=>{
       if(!porLoja[r.lojaId]) return; // ignorar lojas fora do filtro
-      porLoja[r.lojaId].fat   += r.fat;
-      porLoja[r.lojaId].atend += (r.atend||0);
+      // [FIX 20/07] mesma base dos KPIs (_fatLancamento/_atendLancamento)
+      // antes somava r.fat cru → ranking divergia do faturamento total
+      porLoja[r.lojaId].fat   += _fatLancamento(r);
+      porLoja[r.lojaId].atend += _atendLancamento(r);
     });
     objs.forEach(o=>{
       LOJAS.forEach(l=>{
@@ -10165,9 +10176,13 @@ function atualizarObjetivoCamp(){
   const metaTexto = metaEstaLoja > 0 ? fmt(metaEstaLoja) : (obj.metaRede>0 ? 'Rede: '+fmt(obj.metaRede) : 'não definida');
   // Calcular total já realizado pela rede e pelas outras lojas
   const reais = (D.campRealizados||[]).filter(r=>r.campId===id);
-  const totalRede = reais.reduce((s,r)=>s+r.fat, 0);
-  const meuReal   = reais.find(r=>r.lojaId===lid);
-  const pctMeta   = metaEstaLoja>0 && meuReal ? (meuReal.fat/metaEstaLoja*100).toFixed(0)+'%' : '--';
+  // [FIX 20/07] usar _fatLancamento (soma por vendedora) e somar TODOS os dias da loja
+  // antes: totalRede somava r.fat cru e "meu realizado" pegava só o 1º dia (find)
+  const totalRede = reais.reduce((s,r)=>s+_fatLancamento(r), 0);
+  const meusLancs = reais.filter(r=>r.lojaId===lid);
+  const meuFat    = meusLancs.reduce((s,r)=>s+_fatLancamento(r), 0);
+  const meuReal   = meusLancs.length ? {fat: meuFat} : null;
+  const pctMeta   = metaEstaLoja>0 && meuReal ? (meuFat/metaEstaLoja*100).toFixed(0)+'%' : '--';
   const pctRede   = obj.metaRede>0 ? (totalRede/obj.metaRede*100).toFixed(0)+'%' : '--';
   textoEl.innerHTML =
     '<div style="display:flex;flex-wrap:wrap;gap:14px">'
@@ -10939,10 +10954,14 @@ function editarCampReal(id){
     if(per){ per.value = r.per||''; }
     const obs = document.getElementById('camp-real-obs');
     if(obs){ obs.value = r.obs||''; }
+    // [FIX 20/07] restaurar a DATA do lançamento — sem isso, salvar com a data
+    // de hoje criava um registro duplicado em vez de atualizar o original
+    const dataEl = document.getElementById('camp-real-data');
+    if(dataEl){ dataEl.value = r.data||hoje(); }
     calcTMCampReal();
-    // Marcar que é edição
-    window._editandoCampRealId = id;
-    // Remover o antigo ao salvar (salvarCampReal já faz findIndex por campId+lojaId)
+    // [FIX 20/07] flag correta: salvarCampReal lê _editandoLancCampId
+    // (antes gravava em _editandoCampRealId, que ninguém lia → duplicação ao editar)
+    window._editandoLancCampId = id;
   },120);
 }
 
@@ -15936,7 +15955,7 @@ function renderMesAnterior(){
       if(titulo) titulo.textContent = 'Loja não encontrada';
       return;
     }
-    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -15980,7 +15999,7 @@ function renderMesAnterior(){
   } else {
     // Modo: consolidado todas as lojas
     const dados = LOJAS.map(loja=>{
-      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       const tm = nVendas > 0 ? fat / nVendas : 0;
@@ -16055,7 +16074,7 @@ function renderHistoricoAnual(){
     // Consolidado de todas as 7 lojas
     let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
     LOJAS.forEach(loja=>{
-      const meta = getMetas(loja.id, mesRef)?.mes || 0;
+      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
       const fat = calcMesRef(loja.id, mesRef) || 0;
       const nVendas = countVendasRef(loja.id, mesRef);
       totMeta += meta;
@@ -16121,37 +16140,52 @@ function renderHistoricoAnual(){
 // ════════════════════════════════════════════════════════════════════
 // Helpers para cálculos históricos
 // ════════════════════════════════════════════════════════════════════
-function getMetas(lid, mesRef){
-  if(!mesRef) mesRef = mesAtual();
-  return D.metasLoja?.[lid]?.[mesRef] || {};
-}
+// [FIX 20/07] getMetas e mesAtual duplicados REMOVIDOS daqui.
+// As definições duplicadas sobrescreviam as versões corretas (com herança de
+// metas e strictMode) definidas no topo do arquivo — quebrando metas em todo o app.
+// [FIX 20/07] calcMesRef/countVendasRef corrigidos: liam D.vendas[lid][data]
+// como coleção de vendas com .val — a estrutura real é {fat, trans}.
+// Agora usam a MESMA base de calcMes()/calcNAtend(): soma por vendedoras (vendasVend),
+// com fallback no consolidado da loja (D.vendas[lid][data].fat).
 function calcMesRef(lid, mesRef){
   if(!mesRef) mesRef = mesAtual();
   let soma = 0;
-  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
-    if(dt.startsWith(mesRef)){
-      Object.values(vendas).forEach(v=>{
-        soma += Number(v?.val||0);
-      });
-    }
+  // Fonte primária: lançamentos por vendedora (mesmo critério de calcMes)
+  vendsReais(lid).forEach(v=>{
+    Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)) soma += Number(vd?.val||0);
+    });
   });
+  // Fallback: consolidado da loja
+  if(soma === 0){
+    Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)) soma += Number(vd?.fat||0);
+    });
+  }
   return soma;
 }
 function countVendasRef(lid, mesRef){
   if(!mesRef) mesRef = mesAtual();
-  let count = 0;
-  Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vendas])=>{
-    if(dt.startsWith(mesRef)){
-      Object.values(vendas).forEach(v=>{
-        if(Number(v?.val||0) > 0) count++;
-      });
-    }
+  let n = 0;
+  // Mesma lógica de calcNAtend(mês): soma trans; fallback 1 por registro com val>0
+  vendsReais(lid).forEach(v=>{
+    Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const trans = Number(vd?.trans||0);
+        n += trans>0 ? trans : ((Number(vd?.val||0))>0 ? 1 : 0);
+      }
+    });
   });
-  return count;
-}
-function mesAtual(){
-  const hj = hoje();
-  return hj.slice(0, 7);
+  // Fallback: consolidado da loja
+  if(n === 0){
+    Object.entries(D.vendas?.[lid]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const trans = Number(vd?.trans||0);
+        n += trans>0 ? trans : ((Number(vd?.fat||0))>0 ? 1 : 0);
+      }
+    });
+  }
+  return n;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -16232,7 +16266,7 @@ function renderMesAnteriorDashboard(){
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
-    const meta = getMetas(loja.id, mesRef)?.mes || 0;
+    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
     const fat = calcMesRef(loja.id, mesRef) || 0;
     const nVendas = countVendasRef(loja.id, mesRef);
     totMeta += meta;
@@ -16798,7 +16832,7 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
       qtditens = periodoMatch.qtditens || 0;
     } else {
       // Se não tem lançamento, tentar usar vendas do período
-      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7))?.mes || 0;
+      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7), true)?.mes || 0; // [FIX 20/07] strict
       realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
       nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
       tm = nvendas > 0 ? realizado / nvendas : 0;
