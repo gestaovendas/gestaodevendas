@@ -1224,8 +1224,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
     <button class="ni active" onclick="nav('dash')" id="nav-dash"><span class="ic">&#9672;</span>Dashboard</button>
-    <button class="ni admin-only" onclick="nav('lanc')" id="nav-lanc" style="display:none"><span class="ic">📊</span>Painel do Dia</button>
-    <button class="ni loja-only" onclick="nav('performance')" id="nav-performance" style="display:none"><span class="ic">🚀</span>Minha Performance</button>
+    <button class="ni" onclick="nav('lanc')" id="nav-lanc"><span class="ic">📊</span>Painel do Dia</button>
+    <button class="ni" onclick="nav('performance')" id="nav-performance"><span class="ic">🚀</span>Minha Performance</button>
     <button class="ni" onclick="nav('metas')" id="nav-metas"><span class="ic">&#9676;</span>Metas &amp; KPIs</button>
   </div>
   <div class="sb-sec">
@@ -1544,7 +1544,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="ph">
     <div>
       <h1 class="pt">Minha <span>Performance</span></h1>
-      <div class="ps">O que fazer hoje para vender mais</div>
+      <div class="ps" id="perf-sub">O que fazer hoje para vender mais</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn-s" onclick="renderPerformance()" style="font-size:12px">🔄 Atualizar</button>
@@ -5801,11 +5801,8 @@ function logout(){
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  // [21/07] 'lanc' (Painel do Dia) passou a ser exclusivo do admin
-  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','mesant','lancperloja','acompgeral','lanchistorico','historicoanu','historico','lanc'];
-  if(pgsAdmin.includes(pg) && !isAdmin()){ nav('performance'); return; }
-  // 'performance' é a visão de ação da equipe de vendas — admin usa o Painel Gestão
-  if(pg==='performance' && isAdmin()){ nav('dash'); return; }
+  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','mesant','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
+  if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
@@ -17446,17 +17443,35 @@ function perfPlanoDoDia(lid, vendId){
 function renderPerformance(){
   const el = document.getElementById('perf-conteudo');
   if(!el) return;
-  const lid = lojaId();
+  // Admin escolhe a loja; loja usa sempre a própria
+  let lid;
+  if(isAdmin()){
+    if(!window._perfLojaSel) window._perfLojaSel = LOJAS[0]?.id || null;
+    lid = window._perfLojaSel;
+  } else {
+    lid = lojaId();
+  }
   if(!lid){ el.innerHTML = '<div class="sc"><div style="padding:20px;color:var(--muted)">Sessão de loja inválida. Saia e entre novamente.</div></div>'; return; }
 
+  // Se a vendedora selecionada não pertence à loja atual, limpar seleção
+  if(window._perfVendSel && !D.vendedoras?.some(v=>v.id===window._perfVendSel && v.loja===lid)){
+    window._perfVendSel = null;
+  }
   const vendId = window._perfVendSel || null; // null = loja inteira
   const plano  = perfPlanoDoDia(lid, vendId);
   const comp   = perfComparativos(lid, vendId);
 
-  // ── Seletor de vendedora ────────────────────────────────────────
+  // ── Seletores ───────────────────────────────────────────────────
   const vends = vendsAtivas(lid);
+  const seletorLoja = isAdmin() ? `
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Loja</span>
+      <select id="perf-loja-sel" onchange="window._perfLojaSel=this.value;window._perfVendSel=null;renderPerformance()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        ${LOJAS.map(l=>`<option value="${l.id}" ${lid===l.id?'selected':''}>${l.nome}</option>`).join('')}
+      </select>` : '';
   const seletor = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      ${seletorLoja}
       <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Ver como</span>
       <select id="perf-vend-sel" onchange="window._perfVendSel=this.value||null;renderPerformance()"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
@@ -17626,6 +17641,12 @@ function renderPerformance(){
       </div>
     </div>`;
 
+  const subEl = document.getElementById('perf-sub');
+  if(subEl){
+    const nomeLoja = LOJAS.find(l=>l.id===lid)?.nome || lid;
+    const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
+    subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
+  }
   el.innerHTML = seletor + blocoFoco + blocoTM + blocoComp + blocoAlertas;
 }
 
