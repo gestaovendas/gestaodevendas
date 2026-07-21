@@ -1188,7 +1188,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </head>
 <body>
 
-<!-- LOGIN -->
+<!-- [FIX BUG #1] PAINÉIS DE INTELIGÊNCIA -->
+    <div id="vendedora-inteligencia" style="margin-bottom:20px;display:none"></div>
+    <div id="equipe-inteligencia" style="margin-bottom:20px;display:none"></div>
+    <!-- LOGIN -->
 <div id="loginScreen">
 <div class="lcard">
   <div class="lbrand"><div class="bn" style="font-size:13px;letter-spacing:2px;line-height:1.2">MonAris<br><span style="font-size:8px;font-weight:400;letter-spacing:3px;color:var(--ouro);opacity:.8">SALES CONTROL</span></div><div class="sub">Gestao Comercial &middot; 7 Lojas</div></div>
@@ -6664,6 +6667,7 @@ function carregarDash(){
   // Mostrar/esconder Ranking Lojas vs Loja
   const btnAdm=document.getElementById("btn-alllojas");
   if(btnAdm) btnAdm.style.display=isAdmin()?"inline-flex":"none";
+  renderInteligencia();
 }
 
 function setBar(id,pct,real,meta,superMeta){
@@ -6877,6 +6881,7 @@ function renderPainelDia(){
   // Atualizar consolidado com a loja correta
   renderConsolidadoLanc(lid);
   renderHistoricoLanc();
+  renderInteligencia();
 }
 
 function carregarVendsForm(lidOverride){
@@ -7542,6 +7547,7 @@ function renderHistoricoLanc(){
   el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
     +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
     +"<tbody>"+rows+"</tbody></table></div>";
+  renderInteligencia();
 }
 function editarLanc(lid, data){
   // Preenche o formulário com os dados do dia para correção
@@ -7816,6 +7822,7 @@ function renderMetas(){
         </div>${rows}`;
     }
   }
+  renderInteligencia();
 }
 // ============================================================
 // ORIGEM DO FLUXO
@@ -7982,6 +7989,7 @@ function renderFluxo(){
       <td><button onclick="excluirFluxo('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:2px 6px" title="Excluir">✕</button></td>
     </tr>`;
   }).join("");
+  renderInteligencia();
 }
 
 function exportarPDFFluxo(){
@@ -8548,6 +8556,7 @@ function renderVendRanking(per){
       <div style="font-size:9px;color:var(--muted);margin-top:2px">Meta: ${fmt(v.metaPerV)} | Super: ${fmt(v.superPerV||0)}</div>
     </div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px'>Sem vendedoras.</div>";
+  renderInteligencia();
 }
 
 function calcProjecao_vend(id){
@@ -8716,6 +8725,7 @@ function calcComissaoVend(v, vendas, lojaAtingiu){
 function renderComissao(){
   preencherSelectVends();
   renderRankComissao();
+  renderInteligencia();
 }
 
 function toggleComCustom(){
@@ -9092,6 +9102,7 @@ function renderSemana(){
       </div>`;
     }).join('');
   }
+  renderInteligencia();
 }
 
 
@@ -9177,6 +9188,7 @@ function renderLojas(per="hoje"){
     const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
+  renderInteligencia();
 }
 
 // ============================================================
@@ -17257,6 +17269,318 @@ function downloadCSV(csv, filename){
 }
 
 
+
+
+// ════════════════════════════════════════════════════════════════════
+// PAINEL DE INTELIGÊNCIA v2 — BUGS CORRIGIDOS
+// ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+// CORREÇÕES DE BUGS — PAINEL DE INTELIGÊNCIA v2
+// ════════════════════════════════════════════════════════════════════
+
+// [FIX BUG #6] Mostrar "-" quando não tem comparação (não "0%")
+function variacaoPercentualSeguro(atual, anterior){
+  if(!anterior || anterior === 0) {
+    // Sem dado anterior, não mostrar percentual fake
+    return {valor: null, exibir: '-'};
+  }
+  const pct = parseFloat((((atual - anterior) / anterior) * 100).toFixed(1));
+  return {valor: pct, exibir: pct > 0 ? '+'+pct+'%' : pct+'%'};
+}
+
+// [FIX BUG #5] Melhorar seletor de vendedora - checar se há dados
+function obterVendedoraAtual(lid){
+  // 1. Tentar window._userVend (se vendedora fez login)
+  if(window._userVend?.id && D.vendasVend[window._userVend.id]){
+    return window._userVend.id;
+  }
+  
+  // 2. Se não, pega vendedoras da loja
+  const vendsLoja = D.vendedoras?.filter(v=>v.loja===lid && v.ativa!==false) || [];
+  if(vendsLoja.length === 0){
+    console.warn('[Avatim] Nenhuma vendedora ativa encontrada para loja:', lid);
+    return null;
+  }
+  
+  // 3. Retorna a primeira com dados de hoje
+  const hj = hoje();
+  const vendComDados = vendsLoja.find(v=>D.vendasVend[v.id]?.[hj]);
+  return vendComDados?.id || vendsLoja[0]?.id || null;
+}
+
+// [FIX BUG #7] Média do mês anterior - calcular APENAS os dias com venda
+function médiaDoMêsAnteriorCorreto(vendId, lid){
+  const hj = new Date();
+  const mesAnterior = hj.getMonth() === 0 ? 11 : hj.getMonth() - 1;
+  const anoAnterior = hj.getMonth() === 0 ? hj.getFullYear()-1 : hj.getFullYear();
+  const mesRef = anoAnterior + '-' + String(mesAnterior+1).padStart(2,'0');
+  
+  if(vendId){
+    // Vendedora: soma ÷ DIAS COM VENDA (não todos os dias do mês)
+    let soma = 0, diasComVenda = 0;
+    Object.entries(D.vendasVend[vendId]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const val = Number(vd.val||0);
+        if(val > 0){
+          soma += val;
+          diasComVenda++;
+        }
+      }
+    });
+    const média = diasComVenda > 0 ? soma / diasComVenda : 0;
+    return {média: parseFloat(média.toFixed(2)), soma, diasComVenda};
+  } else {
+    // Loja: mesma lógica
+    let soma = 0, diasComVenda = 0;
+    Object.entries(D.vendas[lid]||{}).forEach(([dt, vd])=>{
+      if(dt.startsWith(mesRef)){
+        const fat = Number(vd.fat||0);
+        if(fat > 0){
+          soma += fat;
+          diasComVenda++;
+        }
+      }
+    });
+    const média = diasComVenda > 0 ? soma / diasComVenda : 0;
+    return {média: parseFloat(média.toFixed(2)), soma, diasComVenda};
+  }
+}
+
+// [FIX BUG #8] Rankings filtram APENAS vendedoras ATIVAS
+function rankingVendedorasDoDiaSeguro(lid){
+  const hj = hoje();
+  // [FIX] Filtrar apenas ativas (ativa !== false)
+  const vends = vendsReais(lid).filter(v=>v.ativa !== false);
+  
+  if(vends.length === 0){
+    console.warn('[Avatim] Nenhuma vendedora ativa para ranking:', lid);
+    return [];
+  }
+  
+  return vends
+    .map(v=>{
+      const venda = D.vendasVend[v.id]?.[hj] || {};
+      return {
+        id: v.id,
+        nome: v.nome,
+        fat: Number(venda.val||0),
+        atend: Number(venda.trans||0),
+        tm: Number(venda.trans||0) > 0 ? (Number(venda.val||0) / Number(venda.trans||0)) : 0
+      };
+    })
+    .sort((a,b)=>b.fat - a.fat)
+    .map((v,idx)=>({...v, pos: idx+1}));
+}
+
+// [FIX BUG #4] renderPainelVendedoraIntelligencia COM PROTEÇÃO
+function renderPainelVendedoraIntelligenciaSegura(){
+  if(isAdmin()) return; // só loja
+  const lid = lojaId();
+  const hj = hoje();
+  const el = document.getElementById('vendedora-inteligencia');
+  
+  // [FIX BUG #4] Checar se elemento existe
+  if(!el){
+    console.warn('[Avatim] Elemento #vendedora-inteligencia não encontrado no DOM');
+    return;
+  }
+  
+  // [FIX BUG #5] Obter vendedora com segurança
+  const vendId = obterVendedoraAtual(lid);
+  if(!vendId){
+    el.innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center;background:var(--card);border-radius:10px">ℹ️ Nenhuma vendedora com dados para exibir hoje</div>';
+    return;
+  }
+  
+  const venda = D.vendasVend[vendId]?.[hj] || {};
+  const fatHoje = Number(venda.val||0);
+  const atendHoje = Number(venda.trans||0);
+  
+  // Cálculos
+  const clientes = clientesAAtenderHoje(vendId, lid);
+  const tm = tmIdealDoDia(vendId, lid);
+  const comparacao7 = dadosMesmoDiaSemanaPassada(vendId, lid);
+  const médiaMês = médiaDoMêsAnteriorCorreto(vendId, lid);
+  const ranking = rankingVendedorasDoDiaSeguro(lid);
+  const posição = ranking.findIndex(r=>r.id===vendId) + 1;
+  
+  // [FIX BUG #6] Variações seguras
+  const var7Obj = comparacao7 ? variacaoPercentualSeguro(fatHoje, comparacao7.fat) : {valor: null, exibir: '-'};
+  const varMédiaObj = variacaoPercentualSeguro(fatHoje, médiaMês.média);
+  
+  const cor7 = var7Obj.valor === null ? 'var(--muted)' : var7Obj.valor >= 0 ? 'var(--verde)' : 'var(--verm)';
+  const corMedia = varMédiaObj.valor === null ? 'var(--muted)' : varMédiaObj.valor >= 0 ? 'var(--verde)' : 'var(--verm)';
+  const corPos = posição === 1 ? 'var(--verde)' : posição <= 3 ? 'var(--ouro)' : 'var(--azul)';
+  
+  const metaTexto = clientes.clientesFaltam > 0 
+    ? `<span style="color:var(--verm)">⚠️ Faltam ${clientes.clientesFaltam} clientes</span>`
+    : `<span style="color:var(--verde)">✓ Meta atingida!</span>`;
+  
+  el.innerHTML = `
+    <div style="background:var(--card);border-radius:10px;padding:20px;margin-bottom:20px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;text-transform:uppercase;font-weight:600">MEU DIA</div>
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px">
+        <div>
+          <div style="font-size:11px;color:var(--muted)">Faturamento até agora</div>
+          <div style="font-size:24px;font-weight:800;color:var(--verde)">${fmt(fatHoje)}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted)">Atendimentos</div>
+          <div style="font-size:24px;font-weight:800;color:var(--azul)">${atendHoje}</div>
+        </div>
+      </div>
+      
+      <div style="background:rgba(46,204,135,.1);border-left:3px solid var(--verde);padding:12px;border-radius:4px;margin-bottom:20px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">FOCO DO DIA</div>
+        <div style="font-size:16px;font-weight:700;color:var(--texto)">
+          ${metaTexto}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">
+          Meta: ${fmt(clientes.metaDia)} | TM: ${fmt(clientes.tmMeta)} | Clientes: ${clientes.clientesPreciso}
+        </div>
+      </div>
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px">
+        <div style="background:rgba(0,0,0,.1);padding:12px;border-radius:6px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">VS SEMANA PASSADA</div>
+          <div style="font-size:18px;font-weight:700;color:${cor7}">${var7Obj.exibir}</div>
+          ${comparacao7 ? `<div style="font-size:9px;color:var(--muted)">Antes: ${fmt(comparacao7.fat)}</div>` : '<div style="font-size:9px;color:var(--muted)">Sem dado</div>'}
+        </div>
+        <div style="background:rgba(0,0,0,.1);padding:12px;border-radius:6px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">VS MÉDIA MÊS ANTERIOR</div>
+          <div style="font-size:18px;font-weight:700;color:${corMedia}">${varMédiaObj.exibir}</div>
+          <div style="font-size:9px;color:var(--muted)">Média: ${fmt(médiaMês.média)}</div>
+        </div>
+      </div>
+      
+      <div style="background:rgba(0,0,0,.1);padding:12px;border-radius:6px">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px">RANKING HOJE</div>
+        <div style="font-size:16px;font-weight:700;color:${corPos}">
+          ${posição}º de ${ranking.length}
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:4px">
+          ${posição === 1 ? '🏆 Top vendedora!' : posição <= 3 ? '⭐ Nos top 3!' : `1º: ${ranking[0]?.nome || '-'} (${fmt(ranking[0]?.fat || 0)})`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// [FIX BUG #4 + #3] renderPainelEquipeIntelligencia COM PROTEÇÃO E LOG
+function renderPainelEquipeIntelligenciaSegura(){
+  if(!isAdmin()) return; // só admin
+  const el = document.getElementById('equipe-inteligencia');
+  
+  // [FIX BUG #4] Checar elemento
+  if(!el){
+    console.warn('[Avatim] Elemento #equipe-inteligencia não encontrado no DOM');
+    return;
+  }
+  
+  const hj = hoje();
+  let vendedorasTotal = [];
+  
+  // [FIX BUG #8] Filtrar APENAS ativas
+  D.vendedoras.forEach(v=>{
+    if(v.ativa === false) return; // [FIX] Pular arquivadas
+    
+    const venda = D.vendasVend[v.id]?.[hj] || {};
+    const fatHoje = Number(venda.val||0);
+    const atendHoje = Number(venda.trans||0);
+    
+    const comparacao7 = dadosMesmoDiaSemanaPassada(v.id, v.loja);
+    const var7Obj = comparacao7 ? variacaoPercentualSeguro(fatHoje, comparacao7.fat) : {valor: null, exibir: '-'};
+    
+    vendedorasTotal.push({
+      id: v.id,
+      nome: v.nome,
+      loja: LOJAS.find(l=>l.id===v.loja)?.nome || v.loja,
+      fat: fatHoje,
+      atend: atendHoje,
+      tm: atendHoje > 0 ? fatHoje / atendHoje : 0,
+      var7: var7Obj.valor || 0,
+      var7Exibir: var7Obj.exibir
+    });
+  });
+  
+  vendedorasTotal.sort((a,b)=>b.fat - a.fat);
+  
+  // [FIX BUG #3] Log do Firebase status
+  console.log('[Avatim] [ADMIN] Equipe renderizada:', {
+    totalVendedoras: vendedorasTotal.length,
+    firestoreOk: typeof window.fsCarregar !== 'undefined' && typeof window.fsGravar !== 'undefined',
+    dataSync: new Date().toISOString()
+  });
+  
+  const totalFat = vendedorasTotal.reduce((s,v)=>s+v.fat, 0);
+  const totalAtend = vendedorasTotal.reduce((s,v)=>s+v.atend, 0);
+  const médiaFat = vendedorasTotal.length > 0 ? totalFat / vendedorasTotal.length : 0;
+  const ativas = vendedorasTotal.length;
+  
+  el.innerHTML = `
+    <div style="background:var(--card);border-radius:10px;padding:20px;margin-bottom:20px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;text-transform:uppercase;font-weight:600">📊 EQUIPE HOJE</div>
+      
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+        <div style="background:rgba(46,204,135,.1);padding:12px;border-radius:6px;border-left:3px solid var(--verde)">
+          <div style="font-size:9px;color:var(--muted)">FATURAMENTO</div>
+          <div style="font-size:18px;font-weight:800;color:var(--verde)">${fmt(totalFat)}</div>
+        </div>
+        <div style="background:rgba(66,135,245,.1);padding:12px;border-radius:6px;border-left:3px solid var(--azul)">
+          <div style="font-size:9px;color:var(--muted)">ATENDIMENTOS</div>
+          <div style="font-size:18px;font-weight:800;color:var(--azul)">${totalAtend}</div>
+        </div>
+        <div style="background:rgba(201,168,76,.1);padding:12px;border-radius:6px;border-left:3px solid var(--ouro)">
+          <div style="font-size:9px;color:var(--muted)">MÉDIA/VEND</div>
+          <div style="font-size:18px;font-weight:800;color:var(--ouro)">${fmt(médiaFat)}</div>
+        </div>
+        <div style="background:rgba(0,0,0,.1);padding:12px;border-radius:6px">
+          <div style="font-size:9px;color:var(--muted)">VENDEDORAS</div>
+          <div style="font-size:18px;font-weight:800">${ativas}</div>
+        </div>
+      </div>
+      
+      <div style="margin-top:20px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;text-transform:uppercase;font-weight:600">🏆 RANKING</div>
+        <div style="max-height:300px;overflow-y:auto">
+          ${vendedorasTotal.slice(0,10).map((v,idx)=>`
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid rgba(255,255,255,.05);gap:12px">
+              <div style="display:flex;align-items:center;gap:12px;flex:1">
+                <div style="font-weight:800;color:var(--ouro);min-width:24px;text-align:center">${idx+1}</div>
+                <div>
+                  <div style="font-size:12px;font-weight:600">${v.nome}</div>
+                  <div style="font-size:9px;color:var(--muted)">${v.loja}</div>
+                </div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:12px;font-weight:700;color:var(--verde)">${fmt(v.fat)}</div>
+                <div style="font-size:9px;color:var(--muted)">${v.atend} atendimentos</div>
+                <div style="font-size:10px;color:${v.var7>=0?'var(--verde)':'var(--verm)'};font-weight:600">${v.var7Exibir}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// [FIX BUG #2] renderInteligencia CORRIGIDA
+function renderInteligencia(){
+  try{
+    renderPainelVendedoraIntelligenciaSegura();
+    renderPainelEquipeIntelligenciaSegura();
+    console.log('[Avatim] [INTELIGENCIA] Painéis renderizados com sucesso');
+  }catch(e){
+    console.error('[Avatim] [INTELIGENCIA] Erro ao renderizar painéis:', e.message);
+  }
+}
+
 </script>
+</script>
+
+
+
 </body>
 </html>
