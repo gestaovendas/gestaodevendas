@@ -1377,10 +1377,20 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Mês Anterior (widget no Dashboard) -->
       <div class="rcard" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">📈 Mês Anterior</div>
-          <button onclick="nav('mesant')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver análise</button>
+          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Mês Anterior</span></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <!-- [NEW 22/07] navegação entre meses (antes era fixo no mês passado) -->
+            <button onclick="mesAntNavegar(-1)" class="btn-s" title="Mês anterior"
+              style="padding:4px 9px;font-size:12px;line-height:1">‹</button>
+            <select id="mesant-sel" onchange="mesAntSelecionar(this.value)"
+              style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px"></select>
+            <button onclick="mesAntNavegar(1)" class="btn-s" title="Mês seguinte"
+              style="padding:4px 9px;font-size:12px;line-height:1">›</button>
+            <button onclick="nav('mesant')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver análise</button>
+          </div>
         </div>
         <div id="mesant-dash-widget" style="display:grid;gap:8px;grid-template-columns:repeat(2,1fr)">--</div>
+        <div id="mesant-origem" style="font-size:10px;color:var(--muted);margin-top:8px"></div>
       </div>
 
     </div>
@@ -7548,7 +7558,14 @@ async function salvarLanc(){
     const vatend = parseInt(document.getElementById("vatend_"+v.id)?.value)||0;
     const vitens = parseInt(document.getElementById("vitens_"+v.id)?.value)||0;
     fat += vval;
-    if(vval > 0) vendasParaSalvar.push({v, vval, vatend, vitens});
+    // [FIX 22/07] Antes só entrava quem tinha vval>0. Quem fosse zerado no
+    // formulário mantinha o valor antigo gravado — não dava para corrigir
+    // um lançamento errado para baixo. Agora entra quem tem valor OU já
+    // possui registro no dia (para poder ser zerado/removido).
+    const _jaTemRegistro = !!(D.vendasVend?.[v.id]?.[data]);
+    if(vval > 0 || vatend > 0 || vitens > 0 || _jaTemRegistro){
+      vendasParaSalvar.push({v, vval, vatend, vitens});
+    }
     totalAtend += vatend;
     totalItens += vitens;
   });
@@ -7586,9 +7603,12 @@ async function salvarLanc(){
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       // Pegar o registro existente do dia (se houver)
       const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0};
-      const novoVal   = (Number(regExist.val)||0)   + vval;
-      const novoTrans = (Number(regExist.trans)||0) + (vatend||0);
-      const novoItens = (Number(regExist.itens)||0) + (vitens||0); // [NEW 21/07]
+      // [FIX 22/07] SUBSTITUI em vez de somar. O formulário já vem preenchido
+      // com o que está gravado, então somar fazia cada "Salvar" DOBRAR o dia
+      // (1.000 -> 2.000 -> 4.000). O valor do form é a verdade do dia.
+      const novoVal   = vval;
+      const novoTrans = vatend||0;
+      const novoItens = vitens||0;
       const novoTM    = novoTrans>0 ? parseFloat((novoVal/novoTrans).toFixed(2)) : 0;
       const novoPA    = novoTrans>0 ? parseFloat((novoItens/novoTrans).toFixed(2)) : 0; // PA = peças ÷ atendimentos
       D.vendasVend[v.id][data] = {
@@ -16260,7 +16280,7 @@ function renderMesAnterior(){
     const tm = nVendas > 0 ? fat / nVendas : 0;
     const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
     const historicoKey = mesRef;
-    const paHistorico = histMesGet(loja.id, historicoKey)?.pa ?? null; // [FIX 21/07] por loja
+    const paHistorico = paDoMes(loja.id, historicoKey) || null; // [FIX 22/07] cruza diário + histórico
     
     if(titulo) titulo.textContent = `${loja.nome} — ${mesNome}/${anoAnterior}`;
     
@@ -16304,7 +16324,7 @@ function renderMesAnterior(){
       const tm = nVendas > 0 ? fat / nVendas : 0;
       const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
       const historicoKey = mesRef;
-      const paHistorico = histMesGet(loja.id, historicoKey)?.pa ?? null; // [FIX 21/07] por loja
+      const paHistorico = paDoMes(loja.id, historicoKey) || null; // [FIX 22/07] cruza diário + histórico
       return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
     });
     
@@ -16574,21 +16594,59 @@ function atualizaPAPreview(){
   preview.textContent = pa.toFixed(2) + ' itens/atendimento';
 }
 
+// [NEW 22/07] Meses que existem na base (histórico manual + lançamento diário)
+function mesesDisponiveis(){
+  const set = new Set();
+  Object.values(D.historicoMeses||{}).forEach(meses=>{
+    Object.keys(meses||{}).forEach(k=>{ if(/^\d{4}-\d{2}$/.test(k)) set.add(k); });
+  });
+  Object.values(D.vendas||{}).forEach(dias=>{
+    Object.keys(dias||{}).forEach(d=>{ if(/^\d{4}-\d{2}-\d{2}$/.test(d)) set.add(d.slice(0,7)); });
+  });
+  Object.values(D.vendasVend||{}).forEach(dias=>{
+    Object.keys(dias||{}).forEach(d=>{ if(/^\d{4}-\d{2}-\d{2}$/.test(d)) set.add(d.slice(0,7)); });
+  });
+  // garantir o mês anterior mesmo sem dado, para o widget nunca ficar vazio
+  set.add(mesAnteriorRef());
+  return [...set].sort().reverse();
+}
+function mesAnteriorRef(){
+  const [y,m] = hoje().split('-');
+  const n = parseInt(m);
+  return n===1 ? (parseInt(y)-1)+'-12' : y+'-'+String(n-1).padStart(2,'0');
+}
+function mesAntSelecionar(ref){
+  window._mesAntRef = ref;
+  renderMesAnteriorDashboard();
+}
+function mesAntNavegar(delta){
+  const lista = mesesDisponiveis();          // mais recente primeiro
+  const atual = window._mesAntRef || mesAnteriorRef();
+  let i = lista.indexOf(atual);
+  if(i < 0) i = 0;
+  // delta -1 = mês mais antigo (avança no array), +1 = mais recente
+  const novo = lista[Math.min(lista.length-1, Math.max(0, i - delta))];
+  if(novo) mesAntSelecionar(novo);
+}
+
 function renderMesAnteriorDashboard(){
-  // Renderiza widget de Mês Anterior no Dashboard
-  const hj = hoje();
-  const [yyyy, mm, dd] = hj.split('-');
-  let mesAnterior, anoAnterior;
-  const mesNum = parseInt(mm);
-  if(mesNum === 1){
-    anoAnterior = parseInt(yyyy) - 1;
-    mesAnterior = '12';
-  } else {
-    anoAnterior = parseInt(yyyy);
-    mesAnterior = String(mesNum - 1).padStart(2, '0');
+  // [FIX 22/07] antes era fixo no mês anterior; agora respeita a seleção
+  const mesRef = window._mesAntRef || mesAnteriorRef();
+  const [anoSel, mesSel] = mesRef.split('-');
+  const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(mesSel)];
+
+  // preencher seletor e título
+  const _sel = document.getElementById('mesant-sel');
+  if(_sel){
+    const lista = mesesDisponiveis();
+    const nomes = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    _sel.innerHTML = lista.map(k=>{
+      const [a,m]=k.split('-');
+      return `<option value="${k}" ${k===mesRef?'selected':''}>${nomes[parseInt(m)]}/${a}</option>`;
+    }).join('');
   }
-  const mesRef = anoAnterior + '-' + mesAnterior;
-  const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(mesAnterior)];
+  const _tit = document.getElementById('mesant-widget-titulo');
+  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Mês Anterior' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
   
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
@@ -16609,7 +16667,23 @@ function renderMesAnteriorDashboard(){
   const tm = totVendas > 0 ? totFat / totVendas : 0;
   const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
   const historicoKey = mesRef;
-  const paHistorico = histMesPARede(historicoKey) || 0; // [FIX 21/07] agrega a rede
+  const paHistorico = histMesPARede(historicoKey) || 0;
+
+  // [NEW 22/07] deixar claro de onde vieram os números e por que o P.A. falta
+  const _origEl = document.getElementById('mesant-origem');
+  if(_origEl){
+    let _itensTot = 0;
+    LOJAS.forEach(l=>{ _itensTot += _itensAtendDoMes(l.id, mesRef).itens; });
+    const _l = histMesLegado(mesRef);
+    if(_l) _itensTot += Number(_l.qtditens||0);
+    if(totFat === 0){
+      _origEl.textContent = 'Sem lançamentos para este mês.';
+    } else if(_itensTot === 0){
+      _origEl.innerHTML = '⚠️ P.A. indisponível: nenhuma <strong>peça</strong> lançada neste mês. Informe a Qtd. de Itens em Lançar Histórico (ou o campo Peças no Painel do Dia).';
+    } else {
+      _origEl.textContent = _itensTot.toLocaleString('pt-BR')+' peças ÷ '+totVendas.toLocaleString('pt-BR')+' atendimentos';
+    }
+  }
   
   const widget = document.getElementById('mesant-dash-widget');
   if(!widget) return;
@@ -16920,9 +16994,10 @@ function renderHistoricoLoja(){
     });
     const pctMeta = totMeta > 0 ? (totReal / totMeta * 100) : 0;
     const totTm = totVendas > 0 ? totReal / totVendas : 0;
-    const mediaPa = todosOsPeriodos.length > 0 
-      ? todosOsPeriodos.reduce((s,p)=>s+(p.pa||0), 0) / todosOsPeriodos.length 
-      : 0;
+    // [FIX 22/07] P.A. = TOTAL de peças ÷ TOTAL de atendimentos.
+    // Antes era média das médias, que ignora o peso de cada período.
+    const _totItens = todosOsPeriodos.reduce((s,p)=>s+(Number(p.qtditens)||0), 0);
+    const mediaPa = totVendas > 0 ? _totItens / totVendas : 0;
 
     kpis.innerHTML = `
       <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
@@ -17117,7 +17192,9 @@ function renderMesAnteriorPeriodo(dataIni, dataFim){
       const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
       const totTm = totVendas > 0 ? totFat / totVendas : 0;
       const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-      const mediaPa = dados.length > 0 ? dados.reduce((s,d)=>s+d.pa, 0) / dados.length : 0;
+      // [FIX 22/07] P.A. ponderado: soma peças ÷ soma atendimentos
+      const _totItens2 = dados.reduce((s,d)=>s+(Number(d.qtditens)||0), 0);
+      const mediaPa = totVendas > 0 ? _totItens2 / totVendas : 0;
 
       kpis.innerHTML = `
         <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
@@ -17239,7 +17316,9 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
   const totReal = dados.reduce((s,l)=>s+l.realizado, 0);
   const totVendas = dados.reduce((s,l)=>s+l.nvendas, 0);
   const totTm = totVendas > 0 ? totReal / totVendas : 0;
-  const totPa = dados.length > 0 ? dados.reduce((s,l)=>s+l.pa, 0) / dados.length : 0;
+  // [FIX 22/07] P.A. ponderado: soma peças ÷ soma atendimentos
+  const _totItens3 = dados.reduce((s,l)=>s+(Number(l.qtditens)||0), 0);
+  const totPa = totVendas > 0 ? _totItens3 / totVendas : 0;
   const pctMetaRede = totMeta > 0 ? (totReal / totMeta * 100) : 0;
 
   const kpis = document.getElementById('ag-kpis');
