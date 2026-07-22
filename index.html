@@ -1274,16 +1274,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
     </div>
   </div>
+  <!-- [NEW 21/07] Período do dashboard: Dia / Semana / Mês -->
+  <div class="tabs" style="margin:0 0 14px">
+    <button class="tab active" id="dtab-dia"    onclick="tabDash('dia',this)">Hoje</button>
+    <button class="tab"        id="dtab-semana" onclick="tabDash('semana',this)">Semana</button>
+    <button class="tab"        id="dtab-mes"    onclick="tabDash('mes',this)">Mês</button>
+  </div>
   <!-- Alerta de Ritmo -->
   <div id="alerta-ritmo" style="margin-bottom:16px"></div>
   <!-- KPIs -->
   <div class="kgrid" id="kgrid-dash">
-    <div class="kcard ouro"><div class="kl">Vendas Hoje</div><div class="kv" id="k-hoje">R$ 0</div><div class="kbadge up" id="k-hoje-b">0%</div></div>
-    <div class="kcard verde"><div class="kl">Meta Diaria</div><div class="kv" id="k-meta">R$ 0</div><div class="ks" id="k-meta-s">--</div></div>
-    <div class="kcard roxo"><div class="kl">Super Meta Diaria</div><div class="kv" id="k-smeta">R$ 0</div><div class="ks" id="k-smeta-s">--</div></div>
+    <div class="kcard ouro"><div class="kl" id="k-hoje-l">Vendas Hoje</div><div class="kv" id="k-hoje">R$ 0</div><div class="kbadge up" id="k-hoje-b">0%</div></div>
+    <div class="kcard verde"><div class="kl" id="k-meta-l">Meta Diaria</div><div class="kv" id="k-meta">R$ 0</div><div class="ks" id="k-meta-s">--</div></div>
+    <div class="kcard roxo"><div class="kl" id="k-smeta-l">Super Meta Diaria</div><div class="kv" id="k-smeta">R$ 0</div><div class="ks" id="k-smeta-s">--</div></div>
     <div class="kcard azul"><div class="kl">Ticket Medio</div><div class="kv" id="k-ticket">R$ 0</div><div class="ks" id="k-ticket-s">0 transacoes</div></div>
     <div class="kcard"><div class="kl">Ideal Hoje</div><div class="kv" id="k-ideal">R$ 0</div><div class="ks" id="k-gap" style="font-weight:600">--</div><div class="ks" id="k-gap-s" style="font-size:9px">gap do dia</div></div>
-    <div class="kcard laranja"><div class="kl">TM (Itens/Venda)</div><div class="kv" id="k-tm">0</div><div class="ks" id="k-tm-s">meta: 3</div></div>
+    <div class="kcard laranja"><div class="kl">P.A. (Peças/Atend.)</div><div class="kv" id="k-tm">0</div><div class="ks" id="k-tm-s">peças ÷ atendimentos</div></div>
     <div class="kcard ciano" style="--ciano:#00CEC9"><div class="kl">Clientes</div><div class="kv" id="k-cli">0</div><div class="ks" id="k-cli-s">0 novos</div></div>
   </div>
   <div class="g2">
@@ -1533,9 +1539,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="hist-lanc-box"></div>
   </div>
 
-  <!-- campos ocultos para compatibilidade -->
-  <input type="hidden" id="l-data">
-  <input type="hidden" id="l-obs">
+  <!-- [FIX 21/07] removidos inputs ocultos com id duplicado (l-data/l-obs).
+       Havia dois elementos com o mesmo id na mesma página — getElementById
+       retorna só o primeiro, deixando o segundo como armadilha silenciosa. -->
   <div id="soma-vend-box" style="display:none"><div id="soma-vend"></div><div id="soma-pct-meta"></div></div>
 </div>
 
@@ -2171,6 +2177,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <option value="12">Dezembro</option>
         </select>
       </div>
+      <!-- [FIX 21/07] sem este campo o histórico era gravado global e uma
+           loja sobrescrevia a outra -->
+      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
+        <select id="lh-loja"></select>
+      </div>
       <div class="ig"><label>Ano <span style="color:var(--verm)">*</span></label>
         <select id="lh-ano">
           <option value="2021">2021</option>
@@ -2212,7 +2223,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📊 Histórico Lançado — com Análise YoY</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Mês/Ano</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th><th>Qtd Itens</th><th>YoY %</th><th></th></tr></thead>
+        <thead><tr><th>Mês/Ano</th><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th><th>Qtd Itens</th><th>YoY %</th><th></th></tr></thead>
         <tbody id="tbody-lanchistorico"></tbody>
       </table>
     </div>
@@ -4375,7 +4386,69 @@ if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
-if(!D.historicoMeses) D.historicoMeses={}; // [NEW] Histórico de meses — meta/realizado/TM lançado manualmente
+if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.historicoMeses[lojaId][mesRef]
+// [FIX 21/07] MIGRAÇÃO: a estrutura antiga era global (D.historicoMeses["2026-06"]),
+// então com 7 lojas cada lançamento sobrescrevia o das outras. Agora é por loja.
+(function _migrarHistoricoMeses(){
+  const chavesMes = Object.keys(D.historicoMeses).filter(k=>/^\d{4}-\d{2}$/.test(k));
+  if(!chavesMes.length) return;
+  const destino = (typeof window!=='undefined' && window._userLoja?.id && window._userLoja.id!=='admin')
+    ? window._userLoja.id : '_legado';
+  if(!D.historicoMeses[destino]) D.historicoMeses[destino] = {};
+  chavesMes.forEach(k=>{
+    if(!D.historicoMeses[destino][k]) D.historicoMeses[destino][k] = D.historicoMeses[k];
+    delete D.historicoMeses[k];
+  });
+  console.log('[Avatim] historicoMeses migrado para estrutura por loja ->', destino, chavesMes.length, 'meses');
+})();
+// Helpers de acesso — usar SEMPRE estes em vez de indexar direto
+function histMesGet(lid, mesRef){
+  if(!lid || !mesRef) return null;
+  return D.historicoMeses?.[lid]?.[mesRef] || D.historicoMeses?.['_legado']?.[mesRef] || null;
+}
+// [FIX 21/07] Fonte ÚNICA da meta de um mês — cruza as duas origens.
+// Antes: telas históricas liam só D.metasLoja e mostravam meta 0 quando ela
+// tinha sido lançada em "Lançar Histórico" (e vice-versa).
+function metaDoMes(lid, mesRef){
+  if(!lid || !mesRef) return {valor:0, origem:null};
+  const cad = D.metasLoja?.[lid]?.[mesRef];
+  if(cad && Number(cad.mes||0) > 0) return {valor:Number(cad.mes), origem:'cadastro'};
+  const hist = histMesGet(lid, mesRef);
+  if(hist && Number(hist.meta||0) > 0) return {valor:Number(hist.meta), origem:'historico'};
+  return {valor:0, origem:null};
+}
+// Realizado do mês cruzando lançamento diário e histórico manual
+function realizadoDoMes(lid, mesRef){
+  const diario = calcMesRef(lid, mesRef) || 0;
+  if(diario > 0) return {valor:diario, origem:'diario'};
+  const hist = histMesGet(lid, mesRef);
+  if(hist && Number(hist.realizado||0) > 0) return {valor:Number(hist.realizado), origem:'historico'};
+  return {valor:0, origem:null};
+}
+// Nº de vendas cruzando as duas origens
+function vendasDoMes(lid, mesRef){
+  const diario = countVendasRef(lid, mesRef) || 0;
+  if(diario > 0) return diario;
+  return Number(histMesGet(lid, mesRef)?.nvendas || 0);
+}
+
+// PA consolidado da REDE em um mês: soma peças de todas as lojas / soma atendimentos
+function histMesPARede(mesRef){
+  let itens=0, atend=0;
+  Object.entries(D.historicoMeses||{}).forEach(([lid, meses])=>{
+    const h = meses?.[mesRef];
+    if(!h) return;
+    itens += Number(h.qtditens||0);
+    atend += Number(h.nvendas||0);
+  });
+  return atend>0 ? Math.round((itens/atend)*100)/100 : null;
+}
+function histMesSet(lid, mesRef, obj){
+  if(!lid || !mesRef) return;
+  if(!D.historicoMeses) D.historicoMeses = {};
+  if(!D.historicoMeses[lid]) D.historicoMeses[lid] = {};
+  D.historicoMeses[lid][mesRef] = obj;
+}
 if(!D.historicoLojas) D.historicoLojas={}; // [NEW] Histórico POR LOJA — lançamento em períodos
 // ============================================================
 // LIMPEZA AUTOMÁTICA DE DADOS CORROMPIDOS
@@ -4605,7 +4678,10 @@ function save(){
     const temMetasLoja  = D.metasLoja && Object.keys(D.metasLoja).some(lid =>
       Object.keys(D.metasLoja[lid]||{}).some(mr => (D.metasLoja[lid][mr]?.mes||0) > 0)
     );
-    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temVendedoras || temMetasLoja;
+    // [FIX 21/07] histórico contava como "sem dados" e o save era bloqueado
+    const temHistMes   = D.historicoMeses && Object.keys(D.historicoMeses).some(l=>Object.keys(D.historicoMeses[l]||{}).length>0);
+    const temHistLoja  = D.historicoLojas && Object.keys(D.historicoLojas).some(l=>(D.historicoLojas[l]||[]).length>0);
+    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temVendedoras || temMetasLoja || temHistMes || temHistLoja;
 
     // Bloquear SOMENTE se não há absolutamente nenhum dado E não é admin
     // (admin sempre pode salvar metas, vendedoras, etc.)
@@ -4768,6 +4844,35 @@ async function loadFromFirestore(){
       }
       if(remoto.campanhas)     D.campanhas     = remoto.campanhas;
       if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+      // [FIX 21/07] histórico NUNCA era mesclado do remoto — em outro
+      // dispositivo, ou após limpar cache, os meses lançados sumiam.
+      if(remoto.historicoMeses){
+        if(!D.historicoMeses) D.historicoMeses = {};
+        Object.entries(remoto.historicoMeses).forEach(([lidH, meses])=>{
+          if(/^\d{4}-\d{2}$/.test(lidH)){ // formato antigo vindo do remoto
+            if(!D.historicoMeses['_legado']) D.historicoMeses['_legado'] = {};
+            if(!D.historicoMeses['_legado'][lidH]) D.historicoMeses['_legado'][lidH] = meses;
+            return;
+          }
+          if(!D.historicoMeses[lidH]) D.historicoMeses[lidH] = {};
+          Object.entries(meses||{}).forEach(([mr,obj])=>{
+            const loc = D.historicoMeses[lidH][mr];
+            if(!loc || (obj?.ts||0) > (loc?.ts||0)) D.historicoMeses[lidH][mr] = obj;
+          });
+        });
+      }
+      if(remoto.historicoLojas){
+        if(!D.historicoLojas) D.historicoLojas = {};
+        Object.entries(remoto.historicoLojas).forEach(([lidH, periodos])=>{
+          if(!Array.isArray(periodos)) return;
+          if(!D.historicoLojas[lidH]) D.historicoLojas[lidH] = [];
+          periodos.forEach(p=>{
+            const i = D.historicoLojas[lidH].findIndex(x=>x.chave===p.chave);
+            if(i<0) D.historicoLojas[lidH].push(p);
+            else if((p?.ts||0) > (D.historicoLojas[lidH][i]?.ts||0)) D.historicoLojas[lidH][i] = p;
+          });
+        });
+      }
       if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
       if(remoto.metasProd)     D.metasProd     = remoto.metasProd;
       if(remoto.realProd)      D.realProd      = remoto.realProd;
@@ -5496,6 +5601,41 @@ function calcNAtend(lid, periodo){
 }
 // Manter calcNVendas como alias para compatibilidade
 function calcNVendas(lid, periodo){ return calcNAtend(lid, periodo); }
+
+// [NEW 21/07] Soma de PEÇAS vendidas no período (base do P.A.)
+function calcNItens(lid, periodo){
+  const vends = vendsReais(lid);
+  let n=0;
+  if(periodo==="dia"){
+    const hj=hoje();
+    vends.forEach(v=>{ n += Number(D.vendasVend[v.id]?.[hj]?.itens||0); });
+  } else if(periodo==="semana"){
+    const hoje_d=new Date(); hoje_d.setHours(0,0,0,0);
+    const diff=hoje_d.getDay()===0?6:hoje_d.getDay()-1;
+    const seg=new Date(hoje_d); seg.setDate(hoje_d.getDate()-diff);
+    const dias=[];
+    for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hoje_d)dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
+    vends.forEach(v=>{ dias.forEach(d=>{ n += Number(D.vendasVend[v.id]?.[d]?.itens||0); }); });
+  } else {
+    const mes=hoje().slice(0,7);
+    vends.forEach(v=>{ Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
+      if(d.startsWith(mes)) n += Number(vd.itens||0);
+    }); });
+  }
+  return n;
+}
+
+// [NEW 21/07] P.A. = Peças ÷ Atendimentos (cupons). Ex: 96 peças / 32 atend = 3,0
+function calcPA(lid, periodo){
+  const itens = calcNItens(lid, periodo);
+  const atend = calcNAtend(lid, periodo);
+  return atend>0 ? itens/atend : 0;
+}
+function calcPARede(periodo){
+  const itens = LOJAS.reduce((s,l)=>s+calcNItens(l.id,periodo),0);
+  const atend = LOJAS.reduce((s,l)=>s+calcNAtend(l.id,periodo),0);
+  return atend>0 ? itens/atend : 0;
+}
 function calcTMLoja(lid, periodo){
   const fat = periodo==="dia"?calcDia(lid):periodo==="semana"?calcSem(lid):calcMes(lid);
   const n = calcNAtend(lid, periodo);
@@ -5809,6 +5949,7 @@ function nav(pg){
   document.getElementById("nav-"+pg)?.classList.add("active");
   ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     performance:renderPerformance,
+    lanchistorico:()=>{ popularSelectLojaHistorico(); renderHistoricoMes(); },
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
     estoque:()=>{
@@ -6511,6 +6652,14 @@ function gerarDiagnostico(){
 
 
 
+// [NEW 21/07] alterna o período do dashboard
+function tabDash(per, btn){
+  window._tabDash = per;
+  document.querySelectorAll('#dtab-dia,#dtab-semana,#dtab-mes').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  carregarDash();
+}
+
 function carregarDash(){
   // Garantir que D está inicializado
   if(!D.metasLoja) D.metasLoja={};
@@ -6563,16 +6712,28 @@ function carregarDash(){
   // m = metas da loja (para uso em projeção e dicas)
   const m = isAdmin() ? {mes:metaMesRef,superMes:superMesRef,dia:metaDiaRef,superDia:superDiaRef,sem:metaSemRef,superSem:superSemRef,ticket:150} : (getMetas(lid)||{});
 
+  // [NEW 21/07] Período selecionado no dashboard (dia | semana | mes)
+  const _per = window._tabDash || 'dia';
+  let _fatPer = fatHj, _metaPer = metaDiaRef, _superPer = superDiaRef, _rotulo = 'Hoje';
+  if(_per === 'semana'){
+    _fatPer = realSem; _metaPer = metaSemRef; _superPer = superSemRef; _rotulo = 'Semana';
+  } else if(_per === 'mes'){
+    _fatPer = realMes; _metaPer = metaMesRef; _superPer = superMesRef; _rotulo = 'Mês';
+  }
+  const _lh = document.getElementById("k-hoje-l");   if(_lh) _lh.textContent = 'Vendas '+_rotulo;
+  const _lm = document.getElementById("k-meta-l");   if(_lm) _lm.textContent = 'Meta '+_rotulo;
+  const _ls = document.getElementById("k-smeta-l");  if(_ls) _ls.textContent = 'Super Meta '+_rotulo;
+
   // KPIs
-  document.getElementById("k-hoje").textContent=fmt(fatHj);
-  document.getElementById("k-meta").textContent=fmt(metaDiaRef);
-  const falta=Math.max(0,metaDiaRef-fatHj);
+  document.getElementById("k-hoje").textContent=fmt(_fatPer);
+  document.getElementById("k-meta").textContent=fmt(_metaPer);
+  const falta=Math.max(0,_metaPer-_fatPer);
   document.getElementById("k-meta-s").textContent=falta>0?"Faltam "+fmt(falta):"✓ Meta!";
   // Subtítulo explicativo da meta diária progressiva
   const _kmetaL = document.getElementById("k-meta");
   if(_kmetaL) _kmetaL.title = "Progressiva: (Meta - Realizado) ÷ Dias úteis restantes";
-  document.getElementById("k-smeta").textContent=fmt(superDiaRef);
-  const sfalta=Math.max(0,superDiaRef-fatHj);
+  document.getElementById("k-smeta").textContent=fmt(_superPer);
+  const sfalta=Math.max(0,_superPer-_fatPer);
   document.getElementById("k-smeta-s").textContent=sfalta>0?"Faltam "+fmt(sfalta):"✓ Super!";
 
   // Valor ideal do dia e gap
@@ -6596,8 +6757,20 @@ function carregarDash(){
     : calcNVendas(lid,"dia");
   document.getElementById("k-ticket").textContent=fmt(tk);
   document.getElementById("k-ticket-s").textContent=nVendasHj+" vendas hoje";
-  document.getElementById("k-tm").textContent=nVendasHj>0?nVendasHj+"":"--";
-  document.getElementById("k-tm-s").textContent="vendas registradas hoje";
+  // [FIX 21/07] o card "P.A." mostrava o Nº de vendas, não o Produto por
+  // Atendimento. P.A. = Peças ÷ Atendimentos. Respeita a aba (dia/semana/mês).
+  const _perPA = window._tabDash || 'dia';
+  const _paVal   = isAdmin() ? calcPARede(_perPA) : calcPA(lid, _perPA);
+  const _itensQt = isAdmin()
+    ? LOJAS.reduce((s,l)=>s+calcNItens(l.id,_perPA),0)
+    : calcNItens(lid,_perPA);
+  const _atendQt = isAdmin()
+    ? LOJAS.reduce((s,l)=>s+calcNAtend(l.id,_perPA),0)
+    : calcNAtend(lid,_perPA);
+  document.getElementById("k-tm").textContent = _paVal>0 ? _paVal.toFixed(2) : "--";
+  document.getElementById("k-tm-s").textContent = _itensQt>0
+    ? `${_itensQt} peças ÷ ${_atendQt} atend.`
+    : "sem peças lançadas";
   // Clientes — soma do dia (usa atendimentos reais se disponível)
   const lojasBase2 = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid);
   let cliHj=0, clinovHj=0;
@@ -6710,7 +6883,9 @@ function gerarDicas(v,m,pD){
   else if(pProjMes>=70)  ds.push({c:"var(--ouro)",t:`<strong>Atencao:</strong> precisa de ${fmt(proj?Math.ceil((m.mes-calcMes(lojaId()))/proj.dr):0)}/dia para bater a meta.`});
   else                   ds.push({c:"var(--verm)",t:`<strong>Ritmo critico!</strong> Requer acao imediata para atingir a meta mensal.`});
   if(tk>0&&tk<(m.ticket||150)) ds.push({c:"var(--azul)",t:`<strong>Ticket medio baixo (${fmt(tk)}).</strong> Sugira combos e kits. Meta: ${fmt(m.ticket||150)}`});
-  if(tm>0&&tm<3) ds.push({c:"var(--laranja)",t:`<strong>TM baixo (${tm.toFixed(1)} itens/venda).</strong> Oferte pelo menos 3 itens por atendimento.`});
+  // [FIX 21/07] P.A. real (peças ÷ atendimentos) em vez do campo tm ambíguo
+  const _paDash = isAdmin()?calcPARede("dia"):calcPA(lid2,"dia");
+  if(_paDash>0&&_paDash<3) ds.push({c:"var(--laranja)",t:`<strong>P.A. em ${_paDash.toFixed(2)} peças/atendimento.</strong> Ofereça a linha completa e um item complementar para chegar a 3.`});
   const camp=D.campanhas.filter(c=>c.ativa!==false);
   if(camp.length) ds.push({c:"var(--ouro)",t:`<strong>${camp.length} campanha(s) ativa(s):</strong> ${camp.slice(0,2).map(c=>c.prod).join(", ")}`});
   document.getElementById("dicas-dash").innerHTML=ds.map(d=>`<div class="di"><div class="dot" style="background:${d.c}"></div><div class="dtxt" style="color:var(--texto)">${d.t}</div></div>`).join("");
@@ -6946,6 +7121,9 @@ function carregarVendsForm(lidOverride){
     } else {
       document.getElementById("lanc-loja-sel").value=lid;
     }
+    // [FIX 21/07] espelhar no seletor visível para não haver divergência
+    const _sv = document.getElementById("l-loja");
+    if(_sv && _sv.value !== lid) _sv.value = lid;
   } else {
     // Loja: remove seletor se existir (segurança)
     const oldWrap=document.getElementById("lanc-loja-sel-wrap");
@@ -7176,8 +7354,10 @@ function limparVend(vendId){
   }
   const el = document.getElementById("vlanc_"+vendId);
   const at = document.getElementById("vatend_"+vendId);
+  const it = document.getElementById("vitens_"+vendId); // [FIX 21/07] peças
   if(el){ el.value=''; }
   if(at){ at.value=''; }
+  if(it){ it.value=''; }
   atualizarSomaDia();
   atualizarCardVend(vendId, 0, 0);
   // Atualizar o "Acumulado" no card
@@ -7194,8 +7374,10 @@ function limparCamposLanc(){
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
     const el = document.getElementById("vlanc_"+v.id);
     const at = document.getElementById("vatend_"+v.id);
+    const it = document.getElementById("vitens_"+v.id); // [FIX 21/07] peças
     if(el) el.value='';
     if(at) at.value='';
+    if(it) it.value='';
   });
   atualizarSomaDia();
   // Limpar também o formulário novo
@@ -7269,10 +7451,15 @@ async function salvarLanc(){
   // Resetar flag em qualquer saída antecipada
   function _abortar(msg){ window._salvandoLanc=false; showToast(msg,"err"); }
 
-  const selLoja = document.getElementById("lanc-loja-sel");
-  // Nunca usar "admin" como lid — sempre resolver para uma loja real
+  // [FIX 21/07] Havia DOIS seletores de loja no form e salvarLanc lia só o
+  // dinâmico ('lanc-loja-sel'), ignorando o visível ('l-loja') — o admin
+  // escolhia uma loja e a venda era gravada em outra.
+  // Agora o visível manda; o dinâmico é fallback.
+  const selVisivel = document.getElementById("l-loja");
+  const selLoja    = document.getElementById("lanc-loja-sel");
+  const _pick = el => (el && el.value && el.value !== 'admin') ? el.value : null;
   const lid = isAdmin()
-    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    ? (_pick(selVisivel) || _pick(selLoja) || LOJAS[0].id)
     : lojaId();
   
   // [FIX SEGURANÇA] Não-admin NUNCA pode salvar de loja diferente
@@ -7553,18 +7740,20 @@ function renderHistoricoLanc(){
   let rows='';
   dias.forEach(function(item){
     const d=item[0], fat=item[1];
-    let natDia=0;
+    let natDia=0, itensDia=0;
     D.vendedoras.filter(function(v){return v.loja===lid;}).forEach(function(v){
       const reg=D.vendasVend[v.id]?D.vendasVend[v.id][d]:null;
-      if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); }
+      if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); itensDia += Number(reg.itens||0); }
     });
     const tm=natDia>0?fat/natDia:0;
+    const paDia=natDia>0?itensDia/natDia:0; // [NEW 21/07] P.A. = peças ÷ atendimentos
     const dFmt=d.split("-").reverse().join("/");
     const isHoje=d===hoje();
     rows+="<tr style='"+(isHoje?"background:rgba(201,168,76,.05)":"")+"'>"
       +"<td style='font-weight:"+(isHoje?700:400)+";color:"+(isHoje?"var(--ouro)":"var(--texto)")+"'>"+dFmt+(isHoje?" <span style='font-size:9px;color:var(--ouro)'>HOJE</span>":"")+"</td>"
       +"<td style='font-weight:700;color:var(--verde)'>"+fmt(fat)+"</td>"
       +"<td style='color:var(--azul)'>"+fmt(tm)+"</td>"
+      +"<td style='color:#b07cd6;font-weight:600'>"+(paDia>0?paDia.toFixed(2):"--")+"</td>"
       +"<td style='color:var(--muted)'>"+natDia+"</td>"
       +"<td style='display:flex;gap:4px'>"
         +"<button onclick='editarLanc(&quot;"+lid+"&quot;,&quot;"+d+"&quot;)' style='background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:var(--ouro);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer'>✏️</button>"
@@ -7573,7 +7762,7 @@ function renderHistoricoLanc(){
       +"</tr>";
   });
   el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
-    +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
+    +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>P.A.</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
     +"<tbody>"+rows+"</tbody></table></div>";
 }
 function editarLanc(lid, data){
@@ -7585,9 +7774,12 @@ function editarLanc(lid, data){
     const reg = D.vendasVend[v.id]?.[data];
     const valEl = document.getElementById("vlanc_"+v.id);
     const transEl = document.getElementById("vatend_"+v.id);
+    const itensEl = document.getElementById("vitens_"+v.id); // [FIX 21/07] peças
     const valFmtEdit = (reg?.val||0)>0 ? (reg.val).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}) : "";
     if(valEl && reg) valEl.value = valFmtEdit;
     if(transEl && reg) transEl.value = reg.trans||reg.cli||0;
+    // [FIX 21/07] sem isto, editar um dia zerava as peças e o P.A. sumia
+    if(itensEl && reg) itensEl.value = reg.itens||0;
     // Atualizar percentual visual
     const pct = document.getElementById("vlpct_"+v.id);
     if(pct && reg && v.metaMes>0) pct.textContent = ((reg.val||0)/v.metaMes*100).toFixed(0)+"%";
@@ -16000,13 +16192,13 @@ function renderMesAnterior(){
       if(titulo) titulo.textContent = 'Loja não encontrada';
       return;
     }
-    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
-    const fat = calcMesRef(loja.id, mesRef) || 0;
-    const nVendas = countVendasRef(loja.id, mesRef);
+    const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
+    const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
+    const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
     const tm = nVendas > 0 ? fat / nVendas : 0;
     const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
     const historicoKey = mesRef;
-    const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+    const paHistorico = histMesGet(loja.id, historicoKey)?.pa ?? null; // [FIX 21/07] por loja
     
     if(titulo) titulo.textContent = `${loja.nome} — ${mesNome}/${anoAnterior}`;
     
@@ -16044,13 +16236,13 @@ function renderMesAnterior(){
   } else {
     // Modo: consolidado todas as lojas
     const dados = LOJAS.map(loja=>{
-      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
-      const fat = calcMesRef(loja.id, mesRef) || 0;
-      const nVendas = countVendasRef(loja.id, mesRef);
+      const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
+      const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
+      const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
       const tm = nVendas > 0 ? fat / nVendas : 0;
       const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
       const historicoKey = mesRef;
-      const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+      const paHistorico = histMesGet(loja.id, historicoKey)?.pa ?? null; // [FIX 21/07] por loja
       return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
     });
     
@@ -16064,9 +16256,10 @@ function renderMesAnterior(){
       const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
       const totTm = totVendas > 0 ? totFat / totVendas : 0;
       const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-      // PA consolidado
+      // PA consolidado — [FIX 21/07] 'loja' não existe neste escopo (o .map já
+      // fechou). Antes lia D.historicoMeses[mes] global; agora agrega a rede.
       const historicoKey = mesRef;
-      const paHistorico = D.historicoMeses?.[historicoKey]?.pa || null;
+      const paHistorico = histMesPARede(historicoKey);
       kpis.innerHTML = `
         <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
         <div class="kbox" style="border-color:rgba(46,204,135,.3)">
@@ -16119,9 +16312,9 @@ function renderHistoricoAnual(){
     // Consolidado de todas as 7 lojas
     let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
     LOJAS.forEach(loja=>{
-      const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
-      const fat = calcMesRef(loja.id, mesRef) || 0;
-      const nVendas = countVendasRef(loja.id, mesRef);
+      const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
+      const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
+      const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
       totMeta += meta;
       totFat += fat;
       totVendas += nVendas;
@@ -16129,7 +16322,7 @@ function renderHistoricoAnual(){
     
     // Buscar Qtd Itens de D.historicoMeses se disponível
     const historicoKey = mesRef; // "YYYY-MM"
-    const qtdItensHistorico = D.historicoMeses?.[historicoKey]?.qtditens || 0;
+    const qtdItensHistorico = histMesGet(loja.id, historicoKey)?.qtditens || 0; // [FIX 21/07] por loja
     totQtdItens = qtdItensHistorico > 0 ? qtdItensHistorico : 0;
     
     const tm = totVendas > 0 ? totFat / totVendas : 0;
@@ -16249,26 +16442,53 @@ function salvarHistoricoMes(){
   if(meta <= 0){ showToast('Meta deve ser maior que 0!','err'); return; }
   if(real < 0){ showToast('Realizado não pode ser negativo!','err'); return; }
 
+  // [FIX 21/07] histórico agora é gravado POR LOJA
+  const lidHist = document.getElementById('lh-loja')?.value
+                  || (isAdmin() ? null : lojaId());
+  if(!lidHist){ showToast('Selecione a loja!','err'); return; }
+
   const key = ano + '-' + mes; // ex: "2026-06"
   if(!D.historicoMeses) D.historicoMeses = {};
-  
+
   // Calcular PA = Qtd Itens / Nº Vendas
   const pa = nvendas > 0 ? Math.round((qtditens / nvendas) * 100) / 100 : 0;
-  
-  D.historicoMeses[key] = {
+
+  histMesSet(lidHist, key, {
     meta: Math.round(meta),
     realizado: Math.round(real),
     tm: tm > 0 ? Math.round(tm * 100) / 100 : 0,
     nvendas: nvendas,
     qtditens: qtditens,
     pa: pa,
+    loja: lidHist,
     ts: Date.now()
-  };
+  });
 
   save();
-  showToast('Dados do mês salvo!');
+  showToast('Histórico de '+(LOJAS.find(l=>l.id===lidHist)?.nome||lidHist)+' salvo!');
   limparFormHistorico();
   renderHistoricoMes();
+}
+
+// [FIX 21/07] popular o seletor de loja do histórico
+function popularSelectLojaHistorico(){
+  const sel = document.getElementById('lh-loja');
+  if(!sel) return;
+  const atual = sel.value;
+  if(isAdmin()){
+    sel.disabled = false;
+    sel.innerHTML = LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
+    if(atual && LOJAS.some(l=>l.id===atual)) sel.value = atual;
+  } else {
+    const lid = lojaId();
+    const nome = LOJAS.find(l=>l.id===lid)?.nome || lojaNome();
+    sel.innerHTML = `<option value="${lid}">${nome}</option>`;
+    sel.disabled = true; // loja lança só o próprio histórico
+  }
+  if(!sel.dataset.bound){
+    sel.dataset.bound = '1';
+    sel.addEventListener('change', ()=>renderHistoricoMes());
+  }
 }
 
 function limparFormHistorico(){
@@ -16311,9 +16531,9 @@ function renderMesAnteriorDashboard(){
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
-    const meta = getMetas(loja.id, mesRef, true)?.mes || 0; // [FIX 20/07] strict: sem herança em histórico
-    const fat = calcMesRef(loja.id, mesRef) || 0;
-    const nVendas = countVendasRef(loja.id, mesRef);
+    const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
+    const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
+    const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
     totMeta += meta;
     totFat += fat;
     totVendas += nVendas;
@@ -16322,7 +16542,7 @@ function renderMesAnteriorDashboard(){
   const tm = totVendas > 0 ? totFat / totVendas : 0;
   const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
   const historicoKey = mesRef;
-  const paHistorico = D.historicoMeses?.[historicoKey]?.pa || 0;
+  const paHistorico = histMesPARede(historicoKey) || 0; // [FIX 21/07] agrega a rede
   
   const widget = document.getElementById('mesant-dash-widget');
   if(!widget) return;
@@ -16357,12 +16577,25 @@ function renderMesAnteriorDashboard(){
 
 function renderHistoricoMes(){
   // Listar todos os históricos lançados e calcular YoY
-  const historicoArray = Object.entries(D.historicoMeses||{}).map(([key, data])=>{
-    const [ano, mes] = key.split('-');
-    return {key, ano: parseInt(ano), mes: parseInt(mes), ...data};
-  }).sort((a,b)=>{
+  // [FIX 21/07] percorre a estrutura por loja; loja só vê a sua
+  const _lidFiltro = isAdmin() ? (document.getElementById('lh-loja')?.value || null) : lojaId();
+  const historicoArray = [];
+  Object.entries(D.historicoMeses||{}).forEach(([lidH, meses])=>{
+    if(_lidFiltro && lidH !== _lidFiltro && lidH !== '_legado') return;
+    Object.entries(meses||{}).forEach(([key, data])=>{
+      if(!/^\d{4}-\d{2}$/.test(key)) return;
+      const [ano, mes] = key.split('-');
+      historicoArray.push({
+        key, lojaId: lidH,
+        lojaNome: LOJAS.find(l=>l.id===lidH)?.nome || (lidH==='_legado'?'(antigo)':lidH),
+        ano: parseInt(ano), mes: parseInt(mes), ...data
+      });
+    });
+  });
+  historicoArray.sort((a,b)=>{
     if(a.ano !== b.ano) return a.ano - b.ano;
-    return a.mes - b.mes;
+    if(a.mes !== b.mes) return a.mes - b.mes;
+    return String(a.lojaNome).localeCompare(String(b.lojaNome));
   });
 
   const tb = document.getElementById('tbody-lanchistorico');
@@ -16376,18 +16609,18 @@ function renderHistoricoMes(){
   if(empty) empty.style.display = 'none';
 
   // Calcular YoY para cada mês: (realizado_ano - realizado_anoAnterior) / realizado_anoAnterior
-  const calcYoY = (ano, mes) => {
-    const anoAtual = historicoArray.find(h=>h.ano === ano && h.mes === mes);
-    const anoAnterior = historicoArray.find(h=>h.ano === ano-1 && h.mes === mes);
-    if(!anoAtual || !anoAnterior || anoAnterior.realizado === 0) return null;
-    const yoy = ((anoAtual.realizado - anoAnterior.realizado) / anoAnterior.realizado) * 100;
-    return yoy;
+  // [FIX 21/07] YoY precisa comparar a MESMA loja — antes cruzava lojas diferentes
+  const calcYoY = (ano, mes, lojaRef) => {
+    const atual = historicoArray.find(h=>h.ano===ano   && h.mes===mes && h.lojaId===lojaRef);
+    const ant   = historicoArray.find(h=>h.ano===ano-1 && h.mes===mes && h.lojaId===lojaRef);
+    if(!atual || !ant || !ant.realizado) return null;
+    return ((atual.realizado - ant.realizado) / ant.realizado) * 100;
   };
 
   if(tb){
     tb.innerHTML = historicoArray.map(h=>{
       const pctMeta = h.meta > 0 ? (h.realizado / h.meta * 100) : 0;
-      const yoy = calcYoY(h.ano, h.mes);
+      const yoy = calcYoY(h.ano, h.mes, h.lojaId);
       const yoyBadge = yoy === null 
         ? '<span style="color:var(--muted)">—</span>'
         : `<span style="color:${yoy>=0?'var(--verde)':'var(--verm)'};font-weight:600">${yoy>=0?'+':''}${yoy.toFixed(1)}%</span>`;
@@ -16395,6 +16628,7 @@ function renderHistoricoMes(){
       return `
         <tr>
           <td><strong>${String(h.mes).padStart(2,'0')}/${h.ano}</strong></td>
+          <td style="font-size:11px;color:var(--muted)">${h.lojaNome}</td>
           <td>${fmt(h.meta)}</td>
           <td style="color:var(--verde);font-weight:600">${fmt(h.realizado)}</td>
           <td>${pctMeta.toFixed(1)}%</td>
@@ -16403,7 +16637,7 @@ function renderHistoricoMes(){
           <td><strong>${(h.pa||0).toFixed(2)}</strong></td>
           <td>${h.qtditens||'—'}</td>
           <td>${yoyBadge}</td>
-          <td><button onclick="excluirHistoricoMes('${h.key}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
+          <td><button onclick="excluirHistoricoMes('${h.lojaId}','${h.key}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
         </tr>
       `;
     }).join('');
@@ -16413,17 +16647,31 @@ function renderHistoricoMes(){
   renderYoYChart();
 }
 
-function excluirHistoricoMes(key){
+function excluirHistoricoMes(lid, key){
+  // [FIX 21/07] assinatura mudou: exclui o mês da LOJA certa
+  if(arguments.length===1){ key = lid; lid = isAdmin() ? null : lojaId(); } // retrocompat
   if(!confirm('Excluir este mês?')) return;
-  delete D.historicoMeses[key];
+  if(lid && D.historicoMeses?.[lid]) delete D.historicoMeses[lid][key];
+  else Object.keys(D.historicoMeses||{}).forEach(l=>{ if(D.historicoMeses[l]?.[key]) delete D.historicoMeses[l][key]; });
   save();
   renderHistoricoMes();
   showToast('Mês excluído');
 }
 
 function renderYoYChart(){
-  // Agrupar por mês, mostrar evolução entre anos
-  const historicoArray = Object.entries(D.historicoMeses||{}).map(([key, data])=>{
+  // [FIX 21/07] percorre estrutura por loja e soma a rede por mês
+  const _agg = {};
+  Object.entries(D.historicoMeses||{}).forEach(([lidH, meses])=>{
+    Object.entries(meses||{}).forEach(([k, data])=>{
+      if(!/^\d{4}-\d{2}$/.test(k)) return;
+      if(!_agg[k]) _agg[k] = {meta:0, realizado:0, nvendas:0, qtditens:0};
+      _agg[k].meta      += Number(data.meta||0);
+      _agg[k].realizado += Number(data.realizado||0);
+      _agg[k].nvendas   += Number(data.nvendas||0);
+      _agg[k].qtditens  += Number(data.qtditens||0);
+    });
+  });
+  const historicoArray = Object.entries(_agg).map(([key, data])=>{
     const [ano, mes] = key.split('-');
     return {key, ano: parseInt(ano), mes: parseInt(mes), ...data};
   });
@@ -16877,7 +17125,7 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
       qtditens = periodoMatch.qtditens || 0;
     } else {
       // Se não tem lançamento, tentar usar vendas do período
-      metaPeriodo = getMetas(loja.id, dataIni.slice(0, 7), true)?.mes || 0; // [FIX 20/07] strict
+      metaPeriodo = metaDoMes(loja.id, dataIni.slice(0, 7)).valor; // [FIX 21/07] cruza cadastro + histórico
       realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
       nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
       tm = nvendas > 0 ? realizado / nvendas : 0;
@@ -17358,6 +17606,22 @@ function _perfSegundaDe(d){
   return x;
 }
 
+// [FIX 21/07] Converte um mês do histórico manual no mesmo formato do agregador
+function _perfDoHistorico(lid, mesRef){
+  const h = (typeof histMesGet === 'function') ? histMesGet(lid, mesRef) : null;
+  if(!h) return null;
+  const fat   = Number(h.realizado||0);
+  const atend = Number(h.nvendas||0);
+  const itens = Number(h.qtditens||0);
+  if(fat<=0 && atend<=0) return null;
+  return {
+    fat, atend, itens, dias: 0,
+    tm: Number(h.tm||0) > 0 ? Number(h.tm) : (atend>0 ? fat/atend : 0),
+    pa: Number(h.pa||0) > 0 ? Number(h.pa) : (atend>0 ? itens/atend : 0),
+    _origem: 'historico'
+  };
+}
+
 // ── Comparativos: semana / mês / ano ──────────────────────────────
 function perfComparativos(lid, vendId){
   const hojeD = new Date(); hojeD.setHours(0,0,0,0);
@@ -17379,11 +17643,15 @@ function perfComparativos(lid, vendId){
   const ultDiaMesAnt = new Date(dAnt.getFullYear(), dAnt.getMonth()+1, 0).getDate();
   const diaCorteAnt = Math.min(diaHoje, ultDiaMesAnt);
   const mesAtualAg = _perfAgrega(lid, vendId, dt=>dt.startsWith(mesRefAtual));
-  const mesAntAg   = _perfAgrega(lid, vendId, dt=>dt.startsWith(mesRefAnt) && Number(dt.slice(8,10))<=diaCorteAnt);
+  let   mesAntAg   = _perfAgrega(lid, vendId, dt=>dt.startsWith(mesRefAnt) && Number(dt.slice(8,10))<=diaCorteAnt);
+  // [FIX 21/07] meses antigos costumam existir só no histórico manual.
+  // Sem isto o comparativo mostrava "sem base" mesmo com o mês lançado.
+  if(!vendId && mesAntAg.fat===0) mesAntAg = _perfDoHistorico(lid, mesRefAnt) || mesAntAg;
 
   // ANO: mesmo mês do ano passado (completo) — e acumulado do ano
   const mesRefAnoPass = (hojeD.getFullYear()-1)+'-'+String(hojeD.getMonth()+1).padStart(2,'0');
-  const mesAnoPassAg = _perfAgrega(lid, vendId, dt=>dt.startsWith(mesRefAnoPass) && Number(dt.slice(8,10))<=diaHoje);
+  let mesAnoPassAg = _perfAgrega(lid, vendId, dt=>dt.startsWith(mesRefAnoPass) && Number(dt.slice(8,10))<=diaHoje);
+  if(!vendId && mesAnoPassAg.fat===0) mesAnoPassAg = _perfDoHistorico(lid, mesRefAnoPass) || mesAnoPassAg;
   const anoAtualAg   = _perfAgrega(lid, vendId, dt=>dt.startsWith(String(hojeD.getFullYear())));
   const anoPassAg    = _perfAgrega(lid, vendId, dt=>dt.startsWith(String(hojeD.getFullYear()-1)) && dt<=_perfISO(new Date(hojeD.getFullYear()-1, hojeD.getMonth(), diaHoje)));
 
@@ -17555,6 +17823,51 @@ function renderPerformance(){
       ${diagTM}
     </div>`;
 
+  // ── 2b. P.A. — PRODUTO POR ATENDIMENTO ──────────────────────────
+  const paRef = 3; // referência: 3 produtos por atendimento
+  const paMostrar = plano.paHoje>0 ? plano.paHoje : plano.paMes;
+  const pecasHoje = plano.itensHoje||0;
+  const atendPA   = plano.atendHoje||0;
+
+  let diagPA, corPA;
+  if(atendPA<=0 || pecasHoje<=0){
+    corPA = 'var(--muted)';
+    diagPA = `<div style="font-size:13px;color:var(--muted)">
+        Lance as <strong>peças vendidas</strong> junto com os atendimentos no Painel do Dia — o P.A. é calculado a partir desses dois números.
+      </div>`;
+  } else {
+    corPA = paMostrar>=paRef ? 'var(--verde)' : paMostrar>=2 ? 'var(--ouro)' : 'var(--verm)';
+    const pecasPara3 = Math.max(0, Math.ceil(paRef*atendPA) - pecasHoje);
+    diagPA = `
+      <div style="font-size:14px;margin-bottom:6px">
+        <strong style="color:${corPA};font-size:20px">${paMostrar.toFixed(2)}</strong>
+        <span style="color:var(--muted);font-size:12px"> produtos por atendimento</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">${pecasHoje} peças ÷ ${atendPA} atendimentos</div>
+      ${paMostrar < paRef ? `<div style="font-size:13px;margin-top:10px;color:var(--texto)">
+        Para chegar a <strong>${paRef},0</strong> nos mesmos ${atendPA} atendimentos, faltam <strong style="color:var(--ouro)">${pecasPara3} peças</strong>.
+      </div>` : `<div style="font-size:13px;margin-top:10px;color:var(--verde)">✅ Acima da referência de ${paRef},0 produtos por atendimento.</div>`}`;
+  }
+
+  const blocoPA = `
+    <div class="sc" style="border-left:4px solid ${corPA}">
+      <div class="st">🛍️ P.A. — Produto por Atendimento</div>
+      ${diagPA}
+      <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.6">
+        P.A. = quantidade de produtos vendidos ÷ número de atendimentos (cupons). Um P.A. maior amplia a compra do cliente e aumenta o faturamento <strong>sem depender de mais clientes entrando na loja</strong>.
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Como aumentar</div>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9">
+          <li>Apresente sempre uma <strong style="color:var(--texto)">linha completa</strong> de produtos.</li>
+          <li>Sugira itens que <strong style="color:var(--texto)">se complementam</strong> (venda consultiva).</li>
+          <li>Monte <strong style="color:var(--texto)">kits e combinações</strong>.</li>
+          <li>Explique os <strong style="color:var(--texto)">benefícios de usar os produtos em conjunto</strong>.</li>
+          <li>Nunca encerre o atendimento sem perguntar: <em style="color:var(--ouro)">"Posso mostrar um produto que complementa essa escolha?"</em></li>
+        </ul>
+      </div>
+    </div>`;
+
   // ── 3. ESTOU CAINDO OU CRESCENDO? ───────────────────────────────
   function linhaComp(titulo, dados){
     const vFat   = perfVar(dados.atual.fat,   dados.anterior.fat);
@@ -17615,7 +17928,7 @@ function renderPerformance(){
   const vSemAt  = perfVar(comp.semana.atual.atend, comp.semana.anterior.atend);
 
   if(vSemFat.pct!==null && vSemFat.pct < -10)
-    alertas.push({t:'🔻 Semana abaixo da anterior', d:`Faturamento ${vSemFat.txt} vs semana passada. ${vSemAt.pct!==null&&vSemAt.pct<0?'O número de atendimentos caiu — é volume de gente na loja.':'O volume se manteve — a queda está no valor de cada venda.'}`, c:'var(--verm)'});
+    alertas.push({t:'🔻 Semana abaixo da anterior', d:`Faturamento ${vSemFat.txt} vs semana passada. ${vSemAt.pct!==null&&vSemAt.pct<0?'Menos atendimentos concluídos — foco em melhorar a conversão de quem entra na loja.':'O número de atendimentos se manteve — a queda está no valor de cada venda; reforce complemento e kit.'}`, c:'var(--verm)'});
   if(vMesFat.pct!==null && vMesFat.pct < -10)
     alertas.push({t:'🔻 Mês abaixo do anterior', d:`${vMesFat.txt} no mesmo intervalo do mês passado. Vale revisar o mix oferecido e a conversão.`, c:'var(--verm)'});
   if(vAnoFat.pct!==null && vAnoFat.pct < -10)
@@ -17647,7 +17960,7 @@ function renderPerformance(){
     const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
     subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
   }
-  el.innerHTML = seletor + blocoFoco + blocoTM + blocoComp + blocoAlertas;
+  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoComp + blocoAlertas;
 }
 
 </script>
