@@ -4404,7 +4404,14 @@ if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.hi
 // Helpers de acesso — usar SEMPRE estes em vez de indexar direto
 function histMesGet(lid, mesRef){
   if(!lid || !mesRef) return null;
-  return D.historicoMeses?.[lid]?.[mesRef] || D.historicoMeses?.['_legado']?.[mesRef] || null;
+  // [FIX 22/07] NÃO usar '_legado' como fallback por loja: ele devolvia o mesmo
+  // registro para todas as 7 lojas e os laços somavam o valor 7x (realizado
+  // aparecia como 415% da meta). O legado só é lido quando pedido por nome.
+  return D.historicoMeses?.[lid]?.[mesRef] || null;
+}
+// Total do legado no mês — conta UMA vez, fora do laço por loja
+function histMesLegado(mesRef){
+  return D.historicoMeses?.['_legado']?.[mesRef] || null;
 }
 // [FIX 21/07] Fonte ÚNICA da meta de um mês — cruza as duas origens.
 // Antes: telas históricas liam só D.metasLoja e mostravam meta 0 quando ela
@@ -4432,16 +4439,53 @@ function vendasDoMes(lid, mesRef){
   return Number(histMesGet(lid, mesRef)?.nvendas || 0);
 }
 
-// PA consolidado da REDE em um mês: soma peças de todas as lojas / soma atendimentos
+// [FIX 22/07] P.A. da REDE num mês, cruzando as DUAS origens:
+//   1) lançamento diário  (D.vendasVend[].itens / .trans)
+//   2) histórico manual   (D.historicoMeses[loja][mes].qtditens / .nvendas)
+// Antes lia só (2) e o card ficava "—" quando o mês vinha do lançamento diário.
 function histMesPARede(mesRef){
   let itens=0, atend=0;
-  Object.entries(D.historicoMeses||{}).forEach(([lid, meses])=>{
-    const h = meses?.[mesRef];
-    if(!h) return;
-    itens += Number(h.qtditens||0);
-    atend += Number(h.nvendas||0);
+  LOJAS.forEach(l=>{
+    const d = _itensAtendDoMes(l.id, mesRef);
+    itens += d.itens; atend += d.atend;
   });
+  // legado entra uma única vez (não pertence a nenhuma loja)
+  const leg = histMesLegado(mesRef);
+  if(leg){ itens += Number(leg.qtditens||0); atend += Number(leg.nvendas||0); }
   return atend>0 ? Math.round((itens/atend)*100)/100 : null;
+}
+
+// Peças e atendimentos de UMA loja num mês — diário primeiro, histórico depois
+function _itensAtendDoMes(lid, mesRef){
+  let itens=0, atend=0;
+  vendsReais(lid).forEach(v=>{
+    Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt,vd])=>{
+      if(!dt.startsWith(mesRef)) return;
+      itens += Number(vd?.itens||0);
+      const t = Number(vd?.trans||0);
+      atend += t>0 ? t : ((Number(vd?.val||0))>0 ? 1 : 0);
+    });
+  });
+  if(itens===0 && atend===0){
+    Object.entries(D.vendas?.[lid]||{}).forEach(([dt,vd])=>{
+      if(!dt.startsWith(mesRef)) return;
+      itens += Number(vd?.itens||0);
+      atend += Number(vd?.trans||0);
+    });
+  }
+  if(itens===0){
+    const h = histMesGet(lid, mesRef);
+    if(h){ itens = Number(h.qtditens||0); if(atend===0) atend = Number(h.nvendas||0); }
+  }
+  return {itens, atend};
+}
+
+// P.A. de UMA loja num mês
+function paDoMes(lid, mesRef){
+  const h = histMesGet(lid, mesRef);
+  if(h && Number(h.pa||0) > 0) return Number(h.pa);
+  const d = _itensAtendDoMes(lid, mesRef);
+  return d.atend>0 ? Math.round((d.itens/d.atend)*100)/100 : 0;
 }
 function histMesSet(lid, mesRef, obj){
   if(!lid || !mesRef) return;
@@ -6834,8 +6878,26 @@ function carregarDash(){
   renderRankHoje();
   renderRankVendHoje();
 
-  // Painel clientes
-  const atend = v.cli||0, conv = v.trans||0, novos = v.clinov||0;
+  // Painel clientes — [FIX 22/07] admin somava D.vendas["admin"], que não existe.
+  // Agora o admin agrega as 7 lojas; a loja segue lendo a sua.
+  let atend, conv, novos;
+  if(isAdmin()){
+    atend = 0; conv = 0; novos = 0;
+    LOJAS.forEach(l=>{
+      const r = (D.vendas[l.id]||{})[hj]||{};
+      atend += Number(r.cli||0);
+      conv  += Number(r.trans||0);
+      novos += Number(r.clinov||0);
+    });
+    // sem consolidado gravado, cai nos lançamentos por vendedora
+    if(atend===0 && conv===0){
+      conv  = LOJAS.reduce((s,l)=>s+calcNAtend(l.id,"dia"),0);
+      atend = conv;
+    }
+  } else {
+    atend = v.cli||0; conv = v.trans||0; novos = v.clinov||0;
+    if(atend===0 && conv===0){ conv = calcNAtend(lid,"dia"); atend = conv; }
+  }
   const convPct = atend>0 ? (conv/atend*100).toFixed(0) : 0;
   const pcA=document.getElementById("pc-atend");
   const pcC=document.getElementById("pc-conv");
@@ -7417,9 +7479,9 @@ function adicionarVenda(){
     <tr>
       <td>${loja?.nome || lojaVal}</td>
       <td>${vend?.nome || vendVal}</td>
-      <td>R$ ${fmt(faturamento)}</td>
+      <td>${fmt(faturamento)}</td>
       <td>${atendimentos}</td>
-      <td>R$ ${fmt(tm)}</td>
+      <td>${fmt(tm)}</td>
       <td>${hora}</td>
       <td><button onclick="this.closest('tr').remove();atualizaTotal()" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">✕</button></td>
     </tr>
@@ -7913,8 +7975,8 @@ function renderMetas(){
   const drLabel = proj?.dr>0 ? ` · ${proj.dr} dias úteis restantes` : "";
   if(pProj>=125) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">🏆</div><div class="alerta-txt"><strong>Ritmo de Super Meta! Projeção: ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
   else if(pProj>=100) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">✅</div><div class="alerta-txt"><strong>No ritmo certo! Projeção: ${fmt(proj?.projecao||0)} de ${fmt(meta)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
-  else if(pProj>=70) alertaEl.innerHTML=`<div class="alerta-box amarelo"><div class="alerta-icon">⚠️</div><div class="alerta-txt"><strong>Atenção: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário R$ ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
-  else if(real>0) alertaEl.innerHTML=`<div class="alerta-box vermelho"><div class="alerta-icon">🔴</div><div class="alerta-txt"><strong>Ritmo crítico: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário R$ ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
+  else if(pProj>=70) alertaEl.innerHTML=`<div class="alerta-box amarelo"><div class="alerta-icon">⚠️</div><div class="alerta-txt"><strong>Atenção: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
+  else if(real>0) alertaEl.innerHTML=`<div class="alerta-box vermelho"><div class="alerta-icon">🔴</div><div class="alerta-txt"><strong>Ritmo crítico: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
   else alertaEl.innerHTML="";
 
   // ── PAINEL DE ACOMPANHAMENTO: Hoje / Semana / Mês
@@ -16206,13 +16268,13 @@ function renderMesAnterior(){
     const kpis = document.getElementById('mesant-kpis');
     if(kpis){
       kpis.innerHTML = `
-        <div class="kbox"><div class="kn">R$ ${fmt(meta)}</div><div class="kl">Meta</div></div>
+        <div class="kbox"><div class="kn">${fmt(meta)}</div><div class="kl">Meta</div></div>
         <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">R$ ${fmt(fat)}</div>
+          <div class="kn" style="color:var(--verde)">${fmt(fat)}</div>
           <div class="kl">Realizado</div>
         </div>
         <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">R$ ${fmt(tm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${fmt(tm)}</div><div class="kl">TM</div></div>
         <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
         <div class="kbox"><div class="kn">${paHistorico !== null ? paHistorico.toFixed(2) : '—'}</div><div class="kl">PA</div></div>
       `;
@@ -16224,10 +16286,10 @@ function renderMesAnterior(){
       tb.innerHTML = `
         <tr>
           <td><strong>${loja.nome}</strong></td>
-          <td>R$ ${fmt(meta)}</td>
-          <td style="color:var(--verde);font-weight:600">R$ ${fmt(fat)}</td>
+          <td>${fmt(meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(fat)}</td>
           <td>${pctMeta.toFixed(1)}%</td>
-          <td>R$ ${fmt(tm)}</td>
+          <td>${fmt(tm)}</td>
           <td>${nVendas}</td>
           <td>${paHistorico !== null ? paHistorico.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
         </tr>
@@ -16261,13 +16323,13 @@ function renderMesAnterior(){
       const historicoKey = mesRef;
       const paHistorico = histMesPARede(historicoKey);
       kpis.innerHTML = `
-        <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+        <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
         <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
+          <div class="kn" style="color:var(--verde)">${fmt(totFat)}</div>
           <div class="kl">Realizado</div>
         </div>
         <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM</div></div>
         <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
         <div class="kbox"><div class="kn">${paHistorico !== null ? paHistorico.toFixed(2) : '—'}</div><div class="kl">PA</div></div>
       `;
@@ -16279,10 +16341,10 @@ function renderMesAnterior(){
       tb.innerHTML = dados.map(d=>`
         <tr>
           <td><strong>${d.loja}</strong></td>
-          <td>R$ ${fmt(d.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
+          <td>${fmt(d.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(d.fat)}</td>
           <td>${d.pctMeta.toFixed(1)}%</td>
-          <td>R$ ${fmt(d.tm)}</td>
+          <td>${fmt(d.tm)}</td>
           <td>${d.nVendas}</td>
           <td>${d.pa !== null ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
         </tr>
@@ -16345,10 +16407,10 @@ function renderHistoricoAnual(){
     tb.innerHTML = dados.map(d=>`
       <tr>
         <td><strong>${d.mesNome}/${ano}</strong></td>
-        <td>R$ ${fmt(d.totMeta)}</td>
-        <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.totFat)}</td>
+        <td>${fmt(d.totMeta)}</td>
+        <td style="color:var(--verde);font-weight:600">${fmt(d.totFat)}</td>
         <td>${d.pctMeta.toFixed(1)}%</td>
-        <td>R$ ${fmt(d.tm)}</td>
+        <td>${fmt(d.tm)}</td>
         <td>${d.totVendas}</td>
         <td>${d.pa > 0 ? d.pa.toFixed(2) : '<span style="color:var(--muted)">—</span>'}</td>
       </tr>
@@ -16365,8 +16427,8 @@ function renderHistoricoAnual(){
       return `
         <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
           <div style="display:flex;gap:2px;height:100%;align-items:flex-end">
-            <div style="width:40%;background:rgba(201,168,76,.4);height:${altMeta};border-radius:2px" title="Meta: R$ ${fmt(d.totMeta)}"></div>
-            <div style="width:40%;background:rgba(46,204,135,.6);height:${altFat};border-radius:2px" title="Real: R$ ${fmt(d.totFat)}"></div>
+            <div style="width:40%;background:rgba(201,168,76,.4);height:${altMeta};border-radius:2px" title="Meta: ${fmt(d.totMeta)}"></div>
+            <div style="width:40%;background:rgba(46,204,135,.6);height:${altFat};border-radius:2px" title="Real: ${fmt(d.totFat)}"></div>
           </div>
           <div style="font-size:9px;font-weight:600;margin-top:4px">${d.mesNome}</div>
         </div>
@@ -16531,13 +16593,18 @@ function renderMesAnteriorDashboard(){
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
-    const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
-    const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
-    const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
-    totMeta += meta;
-    totFat += fat;
-    totVendas += nVendas;
+    totMeta   += metaDoMes(loja.id, mesRef).valor;
+    totFat    += realizadoDoMes(loja.id, mesRef).valor;
+    totVendas += vendasDoMes(loja.id, mesRef);
   });
+  // [FIX 22/07] registro migrado da estrutura antiga (sem loja) entra UMA vez.
+  // Antes ele era devolvido para cada uma das 7 lojas e somado 7x.
+  const _leg = histMesLegado(mesRef);
+  if(_leg){
+    totMeta   += Number(_leg.meta||0);
+    totFat    += Number(_leg.realizado||0);
+    totVendas += Number(_leg.nvendas||0);
+  }
   
   const tm = totVendas > 0 ? totFat / totVendas : 0;
   const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
@@ -16550,11 +16617,11 @@ function renderMesAnteriorDashboard(){
   widget.innerHTML = `
     <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--ouro)">
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">META</div>
-      <div style="font-size:14px;font-weight:700">R$ ${fmt(totMeta)}</div>
+      <div style="font-size:14px;font-weight:700">${fmt(totMeta)}</div>
     </div>
     <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--verde)">
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">REALIZADO</div>
-      <div style="font-size:14px;font-weight:700;color:var(--verde)">R$ ${fmt(totFat)}</div>
+      <div style="font-size:14px;font-weight:700;color:var(--verde)">${fmt(totFat)}</div>
     </div>
     <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--azul)">
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">% META</div>
@@ -16562,7 +16629,7 @@ function renderMesAnteriorDashboard(){
     </div>
     <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--roxo)">
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">TM</div>
-      <div style="font-size:14px;font-weight:700">R$ ${fmt(tm)}</div>
+      <div style="font-size:14px;font-weight:700">${fmt(tm)}</div>
     </div>
     <div style="background:var(--card2);border-radius:8px;padding:10px;border-left:3px solid var(--ciano)">
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">NÚM. VENDAS</div>
@@ -16858,13 +16925,13 @@ function renderHistoricoLoja(){
       : 0;
 
     kpis.innerHTML = `
-      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+      <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
       <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-        <div class="kn" style="color:var(--verde)">R$ ${fmt(totReal)}</div>
+        <div class="kn" style="color:var(--verde)">${fmt(totReal)}</div>
         <div class="kl">Realizado</div>
       </div>
       <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM Médio</div></div>
+      <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM Médio</div></div>
       <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
       <div class="kbox"><div class="kn">${mediaPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
     `;
@@ -16889,10 +16956,10 @@ function renderHistoricoLoja(){
         <tr>
           <td><strong>${p.lojaNome}</strong></td>
           <td style="font-size:11px">${periodo}</td>
-          <td>R$ ${fmt(p.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">R$ ${fmt(p.realizado)}</td>
+          <td>${fmt(p.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(p.realizado)}</td>
           <td>${pctMeta.toFixed(1)}%</td>
-          <td>R$ ${fmt(p.tm||0)}</td>
+          <td>${fmt(p.tm||0)}</td>
           <td><strong>${(p.pa||0).toFixed(2)}</strong></td>
           <td>${p.nvendas||'—'}</td>
           <td><button onclick="excluirLancamentoPerloja('${p.lojaId}','${p.chave}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
@@ -16993,13 +17060,13 @@ function renderMesAnteriorPeriodo(dataIni, dataFim){
     const kpis = document.getElementById('mesant-kpis');
     if(kpis){
       kpis.innerHTML = `
-        <div class="kbox"><div class="kn">R$ ${fmt(meta)}</div><div class="kl">Meta</div></div>
+        <div class="kbox"><div class="kn">${fmt(meta)}</div><div class="kl">Meta</div></div>
         <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">R$ ${fmt(fat)}</div>
+          <div class="kn" style="color:var(--verde)">${fmt(fat)}</div>
           <div class="kl">Realizado</div>
         </div>
         <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">R$ ${fmt(tm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${fmt(tm)}</div><div class="kl">TM</div></div>
         <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
         <div class="kbox"><div class="kn">${pa.toFixed(2)}</div><div class="kl">PA</div></div>
       `;
@@ -17010,10 +17077,10 @@ function renderMesAnteriorPeriodo(dataIni, dataFim){
       tb.innerHTML = `
         <tr>
           <td><strong>${loja.nome}</strong></td>
-          <td>R$ ${fmt(meta)}</td>
-          <td style="color:var(--verde);font-weight:600">R$ ${fmt(fat)}</td>
+          <td>${fmt(meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(fat)}</td>
           <td>${pctMeta.toFixed(1)}%</td>
-          <td>R$ ${fmt(tm)}</td>
+          <td>${fmt(tm)}</td>
           <td>${nVendas}</td>
           <td>${pa.toFixed(2)}</td>
         </tr>
@@ -17053,13 +17120,13 @@ function renderMesAnteriorPeriodo(dataIni, dataFim){
       const mediaPa = dados.length > 0 ? dados.reduce((s,d)=>s+d.pa, 0) / dados.length : 0;
 
       kpis.innerHTML = `
-        <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+        <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
         <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">R$ ${fmt(totFat)}</div>
+          <div class="kn" style="color:var(--verde)">${fmt(totFat)}</div>
           <div class="kl">Realizado</div>
         </div>
         <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM</div></div>
+        <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM</div></div>
         <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
         <div class="kbox"><div class="kn">${mediaPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
       `;
@@ -17070,10 +17137,10 @@ function renderMesAnteriorPeriodo(dataIni, dataFim){
       tb.innerHTML = dados.map(d=>`
         <tr>
           <td><strong>${d.loja}</strong></td>
-          <td>R$ ${fmt(d.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">R$ ${fmt(d.fat)}</td>
+          <td>${fmt(d.meta)}</td>
+          <td style="color:var(--verde);font-weight:600">${fmt(d.fat)}</td>
           <td>${d.pctMeta.toFixed(1)}%</td>
-          <td>R$ ${fmt(d.tm)}</td>
+          <td>${fmt(d.tm)}</td>
           <td>${d.nVendas}</td>
           <td>${d.pa.toFixed(2)}</td>
         </tr>
@@ -17180,13 +17247,13 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
     const periodo = brData(dataIni) + ' a ' + brData(dataFim);
     kpis.innerHTML = `
       <div class="kbox"><div class="kn">${periodo}</div><div class="kl">Período</div></div>
-      <div class="kbox"><div class="kn">R$ ${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
+      <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
       <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-        <div class="kn" style="color:var(--verde)">R$ ${fmt(totReal)}</div>
+        <div class="kn" style="color:var(--verde)">${fmt(totReal)}</div>
         <div class="kl">Realizado</div>
       </div>
       <div class="kbox"><div class="kn">${pctMetaRede.toFixed(1)}%</div><div class="kl">% Meta Rede</div></div>
-      <div class="kbox"><div class="kn">R$ ${fmt(totTm)}</div><div class="kl">TM Consolidado</div></div>
+      <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM Consolidado</div></div>
       <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
       <div class="kbox"><div class="kn">${totPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
     `;
@@ -17207,10 +17274,10 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
     tb.innerHTML = dados.map(l=>`
       <tr>
         <td><strong>${l.nome}</strong></td>
-        <td>R$ ${fmt(l.meta)}</td>
-        <td style="color:var(--verde);font-weight:600">R$ ${fmt(l.realizado)}</td>
+        <td>${fmt(l.meta)}</td>
+        <td style="color:var(--verde);font-weight:600">${fmt(l.realizado)}</td>
         <td>${l.pctMeta.toFixed(1)}%</td>
-        <td>R$ ${fmt(l.tm)}</td>
+        <td>${fmt(l.tm)}</td>
         <td>${l.pa.toFixed(2)}</td>
         <td>${l.nvendas}</td>
         <td><span style="font-size:10px;color:var(--muted)">${l.vendedoras.length} vends</span></td>
@@ -17238,7 +17305,7 @@ function renderVendedorasAcompGeral(dados){
       html += `
         <div style="font-size:11px;padding:8px;background:var(--card);border-radius:6px">
           <div style="font-weight:600">${v.nome}</div>
-          <div>R$ ${fmt(v.realizado)} / R$ ${fmt(v.meta)}</div>
+          <div>${fmt(v.realizado)} / ${fmt(v.meta)}</div>
           <div style="color:var(--verde);font-size:10px">${v.pct.toFixed(1)}%</div>
         </div>
       `;
