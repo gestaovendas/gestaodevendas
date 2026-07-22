@@ -225,6 +225,9 @@ try{
           fluxo:         D2.fluxo         || [],
           saldosOverride:D2.saldosOverride|| {},
           produtosExtras:D2.produtosExtras|| [],
+          // [FIX 22/07] histórico NUNCA era gravado — só existia em localStorage
+          historicoMeses:D2.historicoMeses|| {},
+          historicoLojas:D2.historicoLojas|| {},
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
           _campExcluidos:      D2._campExcluidos       || [],
@@ -343,6 +346,9 @@ try{
               !(Array.isArray(D2._vendsExcluidas) && D2._vendsExcluidas.includes(v.id))
             ),
             metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} },
+            // [FIX 22/07] histórico da loja também precisa subir
+            historicoMeses: D2.historicoMeses?.[lid] ? { [lid]: D2.historicoMeses[lid] } : {},
+            historicoLojas: D2.historicoLojas?.[lid] ? { [lid]: D2.historicoLojas[lid] } : {},
             // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
             _vendsExcluidas:      D2._vendsExcluidas      || [],
             _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
@@ -1440,8 +1446,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ig"><label>Faturamento (R$) <span style="color:var(--verm)">*</span></label>
         <input type="number" id="l-fat" placeholder="0,00" min="0" step="0.01">
       </div>
-      <div class="ig"><label>Nº de Atendimentos</label>
-        <input type="number" id="l-atend" placeholder="0" min="0" step="1">
+      <div class="ig"><label>Nº de Atendimentos <span style="font-size:9px;color:var(--muted)">(cupons)</span></label>
+        <input type="number" id="l-atend" placeholder="0" min="0" step="1" oninput="calcPAForm()">
+      </div>
+      <!-- [FIX 22/07] sem este campo o P.A. nunca tinha dado -->
+      <div class="ig"><label>Qtd. de Produtos <span style="font-size:9px;color:var(--muted)">(peças vendidas)</span></label>
+        <input type="number" id="l-itens" placeholder="0" min="0" step="1" oninput="calcPAForm()">
+        <div id="l-pa-preview" style="font-size:10px;color:#b07cd6;margin-top:4px;min-height:13px"></div>
       </div>
       <div class="ig"><label>Obs (Opcional)</label>
         <textarea id="l-obs" placeholder="Notas sobre a venda..." style="resize:vertical;min-height:50px"></textarea>
@@ -7455,8 +7466,23 @@ function limparCamposLanc(){
   // Limpar também o formulário novo
   document.getElementById('l-fat').value = '';
   document.getElementById('l-atend').value = '';
+  const _li = document.getElementById('l-itens'); if(_li) _li.value = ''; // [FIX 22/07]
+  const _lp = document.getElementById('l-pa-preview'); if(_lp) _lp.textContent = '';
   document.getElementById('l-obs').value = '';
   atualizaTotal();
+}
+
+// [NEW 22/07] mostra o P.A. em tempo real enquanto a loja preenche
+function calcPAForm(){
+  const at = parseInt(document.getElementById('l-atend')?.value || 0);
+  const it = parseInt(document.getElementById('l-itens')?.value || 0);
+  const el = document.getElementById('l-pa-preview');
+  if(!el) return;
+  if(at > 0 && it > 0){
+    el.textContent = 'P.A. = ' + (it/at).toFixed(2) + ' produtos por atendimento';
+  } else {
+    el.textContent = '';
+  }
 }
 
 function adicionarVenda(){
@@ -7465,6 +7491,7 @@ function adicionarVenda(){
   const vendVal = document.getElementById('l-vend')?.value;
   const faturamento = parseFloat(document.getElementById('l-fat')?.value || 0);
   const atendimentos = parseInt(document.getElementById('l-atend')?.value || 1);
+  const itens = parseInt(document.getElementById('l-itens')?.value || 0); // [FIX 22/07] peças
 
   if(!data || !lojaVal || !vendVal || faturamento <= 0){
     showToast('Preencha os campos obrigatórios!','err');
@@ -7499,8 +7526,23 @@ function adicionarVenda(){
   
   tb.innerHTML += row;
   document.getElementById('tab-vendas-empty').style.display = 'none';
+
+  // [FIX 22/07] Espelhar no card da vendedora — é de lá que salvarLanc lê.
+  // Sem isto a linha aparecia na tabela mas NUNCA era gravada.
+  const _cv = document.getElementById('vlanc_'+vendVal);
+  const _ca = document.getElementById('vatend_'+vendVal);
+  const _ci = document.getElementById('vitens_'+vendVal);
+  if(_cv){
+    const _atual = parseBR(_cv.value) || 0;
+    const _novo  = _atual + faturamento; // somar lançamentos parciais do dia
+    _cv.value = _novo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  if(_ca) _ca.value = (parseInt(_ca.value)||0) + atendimentos;
+  if(_ci) _ci.value = (parseInt(_ci.value)||0) + itens;
+  if(typeof atualizarSomaDia === 'function') atualizarSomaDia();
+
   limparCamposLanc();
-  showToast('Venda adicionada!');
+  showToast(_cv ? 'Venda adicionada ao card da vendedora — clique em Salvar Lançamento' : 'Venda adicionada!');
 }
 
 function atualizaTotal(){
@@ -7512,7 +7554,7 @@ function atualizaTotal(){
   });
   
   const totalEl = document.getElementById('lanc-soma-total');
-  if(totalEl) totalEl.textContent = 'R$ ' + fmt(total);
+  if(totalEl) totalEl.textContent = fmt(total); // [FIX 22/07] fmt já traz "R$"
 }
 
 
@@ -17956,11 +17998,12 @@ function renderPerformance(){
     const itensExtras = paAtual>0 && tmAtual>0 ? (tmGap/(tmAtual/paAtual)) : null;
     diagTM = `<div style="font-size:14px">TM atual <strong style="color:var(--texto)">${fmt(tmAtual)}</strong> · alvo <strong style="color:var(--ouro)">${fmt(plano.tmRef)}</strong> · faltam <strong style="color:var(--verm)">${fmt(tmGap)}</strong> por atendimento</div>
       <ul style="margin:12px 0 0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9">
-        <li><strong style="color:var(--texto)">Suba o PA:</strong> hoje está em ${paAtual>0?paAtual.toFixed(2):'--'} peça(s) por atendimento.${itensExtras!==null&&isFinite(itensExtras)?` Somar ~${itensExtras.toFixed(1)} peça por venda fecha essa diferença.`:''}</li>
-        <li><strong style="color:var(--texto)">Ofereça o complemento:</strong> quem leva perfume leva hidratante da mesma linha — é a venda mais natural de somar.</li>
-        <li><strong style="color:var(--texto)">Apresente o kit:</strong> kit fechado sobe o ticket sem precisar de mais um cliente.</li>
-        <li><strong style="color:var(--texto)">Suba de tamanho:</strong> oferecer o tamanho maior antes de fechar o pedido.</li>
-      </ul>`;
+        <li><strong style="color:var(--texto)">Suba o P.A.:</strong> hoje está em ${paAtual>0?paAtual.toFixed(2):'--'} produto(s) por atendimento.${itensExtras!==null&&isFinite(itensExtras)?` Somar ~${itensExtras.toFixed(1)} produto por venda fecha essa diferença.`:''}</li>
+        <li><strong style="color:var(--texto)">Ofereça o complemento:</strong> quem leva perfume leva o hidratante da mesma linha — é a venda mais natural de somar.</li>
+        <li><strong style="color:var(--texto)">Apresente o kit:</strong> o kit fechado sobe o ticket dentro do mesmo atendimento.</li>
+        <li><strong style="color:var(--texto)">Suba de tamanho:</strong> mostre o tamanho maior antes de fechar o pedido.</li>
+      </ul>
+      ${blocoTecnica('tm', `Faltam ${fmt(tmGap)} por atendimento para o ticket alvo.`, 'var(--ouro)')}`;
   }
 
   const blocoTM = `
@@ -18005,13 +18048,14 @@ function renderPerformance(){
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)">
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Como aumentar</div>
         <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9">
-          <li>Apresente sempre uma <strong style="color:var(--texto)">linha completa</strong> de produtos.</li>
-          <li>Sugira itens que <strong style="color:var(--texto)">se complementam</strong> (venda consultiva).</li>
-          <li>Monte <strong style="color:var(--texto)">kits e combinações</strong>.</li>
-          <li>Explique os <strong style="color:var(--texto)">benefícios de usar os produtos em conjunto</strong>.</li>
-          <li>Nunca encerre o atendimento sem perguntar: <em style="color:var(--ouro)">"Posso mostrar um produto que complementa essa escolha?"</em></li>
+          <li>Apresente a <strong style="color:var(--texto)">linha completa</strong> em cada atendimento.</li>
+          <li>Ofereça o <strong style="color:var(--texto)">item que complementa</strong> — venda consultiva.</li>
+          <li>Mostre <strong style="color:var(--texto)">kits e combinações</strong> prontos.</li>
+          <li>Explique o <strong style="color:var(--texto)">benefício de usar os produtos em conjunto</strong>.</li>
+          <li>Encerre todo atendimento apresentando o complemento: <em style="color:var(--ouro)">"Vou te mostrar um creme de mãos que é dois em um."</em></li>
         </ul>
       </div>
+      ${paMostrar > 0 && paMostrar < paRef ? blocoTecnica('pa', `P.A. em ${paMostrar.toFixed(2)} — a meta é 3,0 produtos por atendimento.`, 'var(--ouro)') : ''}
     </div>`;
 
   // ── 3. ESTOU CAINDO OU CRESCENDO? ───────────────────────────────
@@ -18088,6 +18132,18 @@ function renderPerformance(){
   if(!alertas.length)
     alertas.push({t:'📊 Sem variação relevante', d:'Os números estão em linha com os períodos anteriores. Foco em manter o ritmo e subir o PA.', c:'var(--azul)'});
 
+  // [NEW 22/07] técnica de conversão quando o volume de atendimentos cai
+  const _vAtSem = perfVar(comp.semana.atual.atend, comp.semana.anterior.atend);
+  const blocoConversao = (_vAtSem.pct !== null && _vAtSem.pct < -5) ? `
+    <div class="sc" style="border-left:4px solid var(--azul)">
+      <div class="st">🎯 Conversão</div>
+      <div style="font-size:13px;color:var(--texto)">
+        Atendimentos <strong style="color:var(--verm)">${_vAtSem.txt}</strong> vs semana passada.
+        Cada visita que vira cupom recupera esse número.
+      </div>
+      ${blocoTecnica('conversao', 'Transforme quem entra em cliente atendido.', 'var(--azul)')}
+    </div>` : '';
+
   const blocoAlertas = `
     <div class="sc">
       <div class="st">🔎 Leitura dos números</div>
@@ -18106,7 +18162,106 @@ function renderPerformance(){
     const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
     subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
   }
-  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoComp + blocoAlertas;
+  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoAlertas;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// [NEW 22/07] TÉCNICAS DE VENDA — linguagem AFIRMATIVA (base PNL)
+// Princípio: o cérebro processa mal a negativa. "Posso mostrar?" convida ao
+// "não". "Vou te mostrar" pressupõe a ação. Toda frase aqui é afirmativa,
+// no presente, e já entrega o benefício.
+// Referências de técnica: pressuposição e comando embutido (Bandler/Grinder),
+// perguntas de implicação (SPIN/Rackham), prova social e coerência (Cialdini),
+// venda consultiva por benefício (Gitomer).
+// Portfólio real Avatim: linhas Açucena, Alira, Bakari, Boníssimo, Bulevar,
+// Cheiros da Bahia, Curumim, Gigi, Íris, Jardim Brasil, mel.terapia, Ozara,
+// Relicário, Reserva, Ritos, Santo Pé, Seleto, Serena, Sublime,
+// Tato & Olfato, Verbena & Bambu | Ambiente: difusores, varetas, velas,
+// sachês, água perfumada para roupas, essências | Corpo: hidratantes, mãos,
+// sabonetes, esfoliantes, óleos, pés e pernas | Perfumaria: deo parfum,
+// deo colônia, body splash.
+// ════════════════════════════════════════════════════════════════════
+
+const TECNICAS_VENDA = {
+
+  // ── P.A. baixo: o cliente leva UM item ────────────────────────────
+  pa: {
+    titulo: 'Elevar o P.A. — leve o segundo produto',
+    principio: 'Pressuposição: a frase afirma a ação, e a escolha fica entre duas opções boas.',
+    falas: [
+      { t: 'Dois em um',
+        f: 'Vou te mostrar um creme de mãos que é dois em um: hidrata e perfuma junto.' },
+      { t: 'Ritual completo',
+        f: 'Esse sabonete tem o hidratante da mesma linha. Juntos o cheiro fica na pele o dia inteiro.' },
+      { t: 'Escolha dirigida',
+        f: 'Levo o seu no tamanho de casa ou no de bolsa? Muita cliente leva os dois e deixa um na nécessaire.' },
+      { t: 'Ancoragem no uso',
+        f: 'Você vai usar no banho e sair com a pele perfumada. O óleo prolonga a fragrância por mais horas.' },
+      { t: 'Ambiente junto do corpo',
+        f: 'Essa mesma fragrância existe em difusor. Sua casa recebe você com o cheiro que você usa.' }
+    ]
+  },
+
+  // ── Ticket médio baixo: o cliente leva o item de menor valor ──────
+  tm: {
+    titulo: 'Elevar o Ticket Médio — subir de tamanho e de linha',
+    principio: 'Ancoragem: apresente primeiro a opção maior. O tamanho grande vira referência.',
+    falas: [
+      { t: 'Ancoragem no maior',
+        f: 'Vou te mostrar o tamanho grande primeiro: ele rende quase o dobro e sai mais em conta por ml.' },
+      { t: 'Kit fechado',
+        f: 'Esse kit já vem com sabonete, hidratante e a vela da mesma fragrância. É o presente pronto.' },
+      { t: 'Custo por uso',
+        f: 'O refil rende três meses. Você renova a essência e mantém o frasco que já é seu.' },
+      { t: 'Deo parfum como upgrade',
+        f: 'A deo parfum tem mais fixação que a colônia. Você aplica de manhã e ela acompanha o dia.' },
+      { t: 'Presente resolvido',
+        f: 'Levo embrulhado para presente. Assim você já sai com a data resolvida.' }
+    ]
+  },
+
+  // ── Conversão baixa: entra gente e sai pouca venda ────────────────
+  conversao: {
+    titulo: 'Elevar a Conversão — transformar visita em cupom',
+    principio: 'Abordagem sensorial: entregue algo na mão do cliente. Quem experimenta, compra mais.',
+    falas: [
+      { t: 'Abertura pelo olfato',
+        f: 'Sinta esse aqui: é a nossa fragrância mais vendida. Estenda a mão que eu borrifo.' },
+      { t: 'Experimentação guiada',
+        f: 'Passa esse hidratante na mão. Em dez segundos você sente a diferença da textura.' },
+      { t: 'Pergunta que abre',
+        f: 'Me conta para quem você está escolhendo — eu te levo direto na fragrância certa.' },
+      { t: 'Fechamento assumido',
+        f: 'Esse é o seu. Vou embalando enquanto você dá uma olhada nas velas.' },
+      { t: 'Reduzir o esforço',
+        f: 'Deixo separado no caixa e você continua vendo com calma.' }
+    ]
+  }
+};
+
+// Bloco visual de técnicas — recebe a chave e um diagnóstico curto
+function blocoTecnica(chave, diagnostico, cor){
+  const t = TECNICAS_VENDA[chave];
+  if(!t) return '';
+  return `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
+        Técnica — ${t.titulo}
+      </div>
+      ${diagnostico ? `<div style="font-size:12px;color:${cor||'var(--texto)'};margin-bottom:10px;font-weight:600">${diagnostico}</div>` : ''}
+      <div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:10px">${t.principio}</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${t.falas.map(x=>`
+          <div style="background:rgba(255,255,255,.03);border-left:2px solid var(--ouro);border-radius:0 6px 6px 0;padding:9px 12px">
+            <div style="font-size:10px;color:var(--ouro);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${x.t}</div>
+            <div style="font-size:13px;color:var(--texto);line-height:1.5">“${x.f}”</div>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.6">
+        Fale sempre na afirmativa e no presente. A frase entrega o benefício antes do preço.
+      </div>
+    </div>`;
 }
 
 </script>
