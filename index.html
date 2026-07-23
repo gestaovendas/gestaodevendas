@@ -1577,6 +1577,19 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="font-size:24px;font-weight:700;color:var(--ouro)" id="lanc-soma-total">R$ 0,00</div>
       <div style="font-size:10px;color:var(--muted)" id="lanc-data-ref"></div>
     </div>
+    <!-- [NEW 23/07] P.A. e TM ao vivo — a equipe vê o indicador se formando -->
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">P.A.</div>
+        <div style="font-size:24px;font-weight:800;color:#b07cd6" id="lanc-pa-vivo">--</div>
+        <div style="font-size:9px;color:var(--muted)" id="lanc-pa-detalhe">peças ÷ atend.</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Ticket Médio</div>
+        <div style="font-size:24px;font-weight:800;color:var(--azul)" id="lanc-tm-vivo">--</div>
+        <div style="font-size:9px;color:var(--muted)" id="lanc-tm-detalhe">total ÷ atend.</div>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-s" onclick="limparCamposLanc()" style="font-size:12px">🗑️ Limpar</button>
       <button class="btn-p" onclick="salvarLanc()" style="font-size:14px;padding:10px 28px;font-weight:700">💾 Salvar Lançamento</button>
@@ -4515,6 +4528,8 @@ function metaDoMes(lid, mesRef){
   if(cad && Number(cad.mes||0) > 0) return {valor:Number(cad.mes), origem:'cadastro'};
   const hist = histMesGet(lid, mesRef);
   if(hist && Number(hist.meta||0) > 0) return {valor:Number(hist.meta), origem:'historico'};
+  const pl = histLojaDoMes(lid, mesRef); // [FIX 23/07] lançamento por período
+  if(pl && Number(pl.meta||0) > 0) return {valor:Number(pl.meta), origem:'periodo'};
   return {valor:0, origem:null};
 }
 // Realizado do mês cruzando lançamento diário e histórico manual
@@ -4523,13 +4538,29 @@ function realizadoDoMes(lid, mesRef){
   if(diario > 0) return {valor:diario, origem:'diario'};
   const hist = histMesGet(lid, mesRef);
   if(hist && Number(hist.realizado||0) > 0) return {valor:Number(hist.realizado), origem:'historico'};
+  const pl = histLojaDoMes(lid, mesRef); // [FIX 23/07]
+  if(pl && Number(pl.realizado||0) > 0) return {valor:Number(pl.realizado), origem:'periodo'};
   return {valor:0, origem:null};
 }
 // Nº de vendas cruzando as duas origens
 function vendasDoMes(lid, mesRef){
   const diario = countVendasRef(lid, mesRef) || 0;
   if(diario > 0) return diario;
-  return Number(histMesGet(lid, mesRef)?.nvendas || 0);
+  const h = Number(histMesGet(lid, mesRef)?.nvendas || 0);
+  if(h > 0) return h;
+  return Number(histLojaDoMes(lid, mesRef)?.nvendas || 0); // [FIX 23/07]
+}
+
+// [NEW 23/07] Ponte: períodos de "Lançamento por Loja" (D.historicoLojas)
+// que cobrem exatamente um mês passam a alimentar as mesmas análises que
+// leem D.historicoMeses. Sem isto, o que foi lançado ali ficaria órfão.
+function histLojaDoMes(lid, mesRef){
+  const periodos = D.historicoLojas?.[lid];
+  if(!Array.isArray(periodos) || !periodos.length) return null;
+  const ultimoDia = new Date(parseInt(mesRef.slice(0,4)), parseInt(mesRef.slice(5,7)), 0).getDate();
+  const ini = mesRef + '-01';
+  const fim = mesRef + '-' + String(ultimoDia).padStart(2,'0');
+  return periodos.find(x => x.dataIni <= ini && x.dataFim >= fim) || null;
 }
 
 // [FIX 22/07] P.A. da REDE num mês, cruzando as DUAS origens:
@@ -4569,6 +4600,10 @@ function _itensAtendDoMes(lid, mesRef){
   if(itens===0){
     const h = histMesGet(lid, mesRef);
     if(h){ itens = Number(h.qtditens||0); if(atend===0) atend = Number(h.nvendas||0); }
+  }
+  if(itens===0){ // [FIX 23/07] lançamento por período
+    const pl = histLojaDoMes(lid, mesRef);
+    if(pl){ itens = Number(pl.qtditens||0); if(atend===0) atend = Number(pl.nvendas||0); }
   }
   return {itens, atend};
 }
@@ -6088,7 +6123,6 @@ function nav(pg){
   ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     performance:renderPerformance,
     controle:renderControle,
-    lanchistorico:()=>{ popularSelectLojaHistorico(); renderHistoricoMes(); },
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
     estoque:()=>{
@@ -6167,7 +6201,9 @@ function nav(pg){
       renderHistoricoAnual();
     },
     lanchistorico:()=>{
-      // [NEW] Lançar Histórico
+      // [FIX 23/07] havia DUAS chaves 'lanchistorico' neste objeto — a última
+      // vencia e o <select> de Loja nunca era preenchido (ficava vazio).
+      popularSelectLojaHistorico();
       renderHistoricoMes();
     },
     lancperloja:()=>{
@@ -7489,6 +7525,48 @@ function atualizarSomaDia(){
   if(somaTotal) somaTotal.textContent=fmt(soma);
   if(dataRef&&dataEl) dataRef.textContent="Data: "+fmtData(dataEl?.value||hoje());
   if(salvarBar) salvarBar.style.display=soma>0?"flex":"none";
+
+  // [NEW 23/07] P.A. e TM ao vivo enquanto a equipe digita.
+  // P.A. = peças vendidas ÷ atendimentos (cupons).
+  (function(){
+    const _lidPA = isAdmin()
+      ? (document.getElementById("l-loja")?.value || document.getElementById("lanc-loja-sel")?.value || LOJAS[0].id)
+      : lojaId();
+    let _pecas = 0, _atend = 0;
+    vendsAtivas(_lidPA).forEach(v=>{
+      _pecas += parseInt(document.getElementById("vitens_"+v.id)?.value) || 0;
+      _atend += parseInt(document.getElementById("vatend_"+v.id)?.value) || 0;
+    });
+    const _paEl  = document.getElementById("lanc-pa-vivo");
+    const _paDet = document.getElementById("lanc-pa-detalhe");
+    const _tmEl  = document.getElementById("lanc-tm-vivo");
+    const _tmDet = document.getElementById("lanc-tm-detalhe");
+    if(_paEl){
+      if(_atend > 0 && _pecas > 0){
+        const _pa = _pecas / _atend;
+        _paEl.textContent = _pa.toFixed(2);
+        _paEl.style.color = _pa >= 3 ? "var(--verde)" : (_pa >= 2 ? "var(--ouro)" : "var(--verm)");
+        if(_paDet) _paDet.textContent = _pecas + " peças ÷ " + _atend + " atend.";
+      } else if(_atend > 0 && _pecas === 0){
+        _paEl.textContent = "--";
+        _paEl.style.color = "var(--muted)";
+        if(_paDet) _paDet.textContent = "preencha as peças";
+      } else {
+        _paEl.textContent = "--";
+        _paEl.style.color = "var(--muted)";
+        if(_paDet) _paDet.textContent = "peças ÷ atend.";
+      }
+    }
+    if(_tmEl){
+      if(_atend > 0 && soma > 0){
+        _tmEl.textContent = fmt(soma/_atend);
+        if(_tmDet) _tmDet.textContent = _atend + " atendimentos";
+      } else {
+        _tmEl.textContent = "--";
+        if(_tmDet) _tmDet.textContent = "total ÷ atend.";
+      }
+    }
+  })();
   // % da meta do dia da loja
   const pctEl=document.getElementById("soma-pct-meta");
   if(pctEl&&soma>0){
@@ -7687,6 +7765,21 @@ async function salvarLanc(){
   });
 
   if(fat === 0){ _abortar("Preencha o valor de pelo menos uma vendedora!"); return; }
+
+  // [NEW 23/07] O P.A. só existe se as peças forem lançadas. Avisa quando há
+  // atendimentos mas nenhuma peça — sem bloquear o salvamento.
+  if(totalAtend > 0 && totalItens === 0 && !window._avisouPecas){
+    window._avisouPecas = true;
+    window._salvandoLanc = false;
+    const _segue = confirm(
+      "As PEÇAS não foram preenchidas.\n\n" +
+      "Sem elas o P.A. (Produto por Atendimento) fica sem dado neste dia — " +
+      "é o número de itens que cada cliente levou.\n\n" +
+      "OK = salvar assim mesmo   |   Cancelar = voltar e preencher"
+    );
+    if(!_segue){ showToast("Preencha o campo Peças de cada vendedora.","warn"); return; }
+    window._salvandoLanc = true;
+  }
 
   // Bloquear botão visualmente
   const btnSalvar = document.querySelector('#lanc-salvar-bar .btn-p');
