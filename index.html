@@ -240,7 +240,65 @@ try{
           ts: Date.now(),
           por: email
         });
-        console.log("[Avatim] ✅ Admin: principal salvo (config only — vendas nos docs das lojas)");
+        console.log("[Avatim] ✅ Admin: principal salvo (config only)");
+
+        // [FIX 23/07] Propagar lançamentos feitos PELO ADMIN para os docs das
+        // lojas. Antes o admin lançava pelo Painel do Dia e o dado morria no
+        // localStorage — nunca subia, nenhum outro aparelho via.
+        try{
+          const lojasComDados = new Set();
+          Object.keys(D2.vendas||{}).forEach(l=>{ if(l && l!=='admin') lojasComDados.add(l); });
+          (D2.vendedoras||[]).forEach(v=>{
+            if(v.loja && D2.vendasVend?.[v.id] && Object.keys(D2.vendasVend[v.id]).length) lojasComDados.add(v.loja);
+          });
+
+          for(const lidA of lojasComDados){
+            const docIdA = "loja_"+lidA;
+            let remotoA = {};
+            try{
+              const snapA = await getDoc(doc(db,"avatim",docIdA));
+              if(snapA.exists()) remotoA = JSON.parse(snapA.data().dados||"{}");
+            }catch(eR){ console.warn("[Avatim] admin: leitura de "+docIdA+" falhou:", eR.code||eR.message); }
+
+            // vendas consolidadas — dia a dia, o mais RECENTE vence
+            const vendasA = Object.assign({}, remotoA.vendas?.[lidA] || {});
+            Object.entries(D2.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
+              const tsLocal  = Number(dados?._savedAt||0);
+              const tsRemoto = Number(vendasA[dt]?._savedAt||0);
+              if(!vendasA[dt] || tsLocal >= tsRemoto) vendasA[dt] = dados;
+            });
+
+            // vendasVend das vendedoras desta loja — mesma regra
+            const vendVendA = Object.assign({}, remotoA.vendasVend || {});
+            (D2.vendedoras||[]).filter(v=>v.loja===lidA).forEach(v=>{
+              const diasLocais = D2.vendasVend?.[v.id];
+              if(!diasLocais) return;
+              if(!vendVendA[v.id]) vendVendA[v.id] = {};
+              Object.entries(diasLocais).forEach(([dt,d])=>{
+                const tsLocal  = Number(d?._savedAt||0);
+                const tsRemoto = Number(vendVendA[v.id][dt]?._savedAt||0);
+                if(!vendVendA[v.id][dt] || tsLocal >= tsRemoto) vendVendA[v.id][dt] = d;
+              });
+            });
+
+            const payloadA = Object.assign({}, remotoA, {
+              vendas:     { [lidA]: vendasA },
+              vendasVend: vendVendA
+            });
+            if(D2.historicoMeses?.[lidA]){
+              payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: D2.historicoMeses[lidA] });
+            }
+            await setDoc(doc(db,"avatim",docIdA), {
+              dados:  JSON.stringify(payloadA),
+              lojaId: lidA,
+              ts:     Date.now(),
+              por:    email + " (admin)"
+            });
+          }
+          console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
+        }catch(eProp){
+          console.error("[Avatim] ❌ Admin: falha ao propagar vendas:", eProp.code||eProp.message);
+        }
 
       } else {
         // Loja: gravar no doc da loja
@@ -1244,10 +1302,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni admin-only" onclick="nav('mesant')" id="nav-mesant" style="display:none"><span class="ic">📈</span>Mês Anterior</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
     <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
-    <button class="ni admin-only" onclick="nav('lancperloja')" id="nav-lancperloja" style="display:none"><span class="ic">🏪</span>Lançamento por Loja</button>
+    <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
+         histórico é feito em "Lançar Histórico". A página segue existindo para
+         não quebrar links antigos, mas sai da navegação. -->
+    <button class="ni" onclick="nav('controle')" id="nav-controle"><span class="ic">🎯</span>Controle Ano a Ano</button>
     <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
@@ -1567,6 +1628,17 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <!-- METAS & KPIs -->
+<div class="page" id="page-controle">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Controle <span>Ano a Ano</span></h1>
+      <div class="ps">Cresci ou caí — e o que causou</div>
+    </div>
+    <button class="btn-s" onclick="renderControle()" style="font-size:12px">🔄 Atualizar</button>
+  </div>
+  <div id="controle-conteudo"></div>
+</div>
+
 <div class="page" id="page-performance">
   <div class="ph">
     <div>
@@ -6006,7 +6078,8 @@ function logout(){
 let _tabLojas="hoje";
 function nav(pg){
   // Bloquear páginas admin para lojas
-  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','mesant','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
+  // [FIX 23/07] 'mesant' saiu da lista — Mês Anterior agora é visível a todos
+  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
@@ -6014,6 +6087,7 @@ function nav(pg){
   document.getElementById("nav-"+pg)?.classList.add("active");
   ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     performance:renderPerformance,
+    controle:renderControle,
     lanchistorico:()=>{ popularSelectLojaHistorico(); renderHistoricoMes(); },
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
     comissao:renderComissao,
@@ -16291,6 +16365,20 @@ if(typeof brData !== 'function'){
 // MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
 // ════════════════════════════════════════════════════════════════════
 function renderMesAnterior(){
+  // [FIX 23/07] Página liberada para todos os perfis. A loja fica travada
+  // na própria loja; só o admin escolhe entre todas.
+  const _selML = document.getElementById('mesant-loja');
+  if(_selML && !isAdmin()){
+    const _meu = lojaId();
+    if(_meu){
+      const _nome = LOJAS.find(l=>l.id===_meu)?.nome || lojaNome();
+      _selML.innerHTML = `<option value="${_meu}">🏪 ${_nome}</option>`;
+      _selML.value = _meu;
+      _selML.disabled = true;
+    }
+  } else if(_selML && isAdmin()){
+    _selML.disabled = false;
+  }
   const hj = hoje();
   const [yyyy, mm, dd] = hj.split('-');
   let mesAnterior, anoAnterior;
@@ -18262,6 +18350,261 @@ function blocoTecnica(chave, diagnostico, cor){
         Fale sempre na afirmativa e no presente. A frase entrega o benefício antes do preço.
       </div>
     </div>`;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// [NEW 23/07] CONTROLE ANO A ANO — a visão da planilha de gestão
+// Responde: cresci ou caí de um ano para o outro? E o que causou —
+// falta de cliente na loja (fluxo) ou equipe que não trabalha os
+// indicadores (TM e P.A.)?
+// ════════════════════════════════════════════════════════════════════
+
+// Mês do mesmo período no ano anterior
+function _mesAnoAnterior(mesRef){
+  const [a, m] = mesRef.split('-');
+  return (parseInt(a) - 1) + '-' + m;
+}
+
+// Variação percentual honesta: null quando não há base de comparação
+function _varYoY(atual, anterior){
+  if(!anterior || anterior <= 0) return null;
+  return ((atual - anterior) / anterior) * 100;
+}
+
+// ── Dados completos de uma loja num mês ───────────────────────────
+function _dadosLojaMes(lid, mesRef){
+  const meta   = metaDoMes(lid, mesRef).valor;
+  const real   = realizadoDoMes(lid, mesRef).valor;
+  const vendas = vendasDoMes(lid, mesRef);          // cupons / atendimentos
+  const ia     = _itensAtendDoMes(lid, mesRef);     // { itens, atend }
+  const itens  = ia.itens;
+  const tm     = vendas > 0 ? real / vendas : 0;
+  const pa     = vendas > 0 ? itens / vendas : 0;   // P.A. = itens ÷ vendas
+  return { meta, real, vendas, itens, tm, pa };
+}
+
+// ── Linhas do controle: ano atual x ano anterior, por loja ────────
+function construirControleYoY(mesRef){
+  if(!mesRef) mesRef = hoje().slice(0, 7);
+  const mesAnt = _mesAnoAnterior(mesRef);
+
+  const linhas = LOJAS.map(loja => {
+    const at = _dadosLojaMes(loja.id, mesRef);
+    const an = _dadosLojaMes(loja.id, mesAnt);
+    return {
+      lojaId:   loja.id,
+      lojaNome: loja.nome,
+      // ano atual
+      meta: at.meta, real: at.real, vendas: at.vendas, itens: at.itens, tm: at.tm, pa: at.pa,
+      // ano anterior
+      metaAnt: an.meta, realAnt: an.real, vendasAnt: an.vendas, itensAnt: an.itens, tmAnt: an.tm, paAnt: an.pa,
+      // variações ano a ano
+      varReal:   _varYoY(at.real,   an.real),
+      varVendas: _varYoY(at.vendas, an.vendas),   // fluxo de clientes
+      varTm:     _varYoY(at.tm,     an.tm),
+      varItens:  _varYoY(at.itens,  an.itens),
+      varPa:     _varYoY(at.pa,     an.pa),
+      // meta
+      pctMeta: at.meta > 0 ? (at.real / at.meta * 100) : null
+    };
+  });
+
+  // Participação de cada loja no total da rede
+  const totalReal = linhas.reduce((s, l) => s + l.real, 0);
+  linhas.forEach(l => { l.partic = totalReal > 0 ? (l.real / totalReal * 100) : 0; });
+
+  return linhas;
+}
+
+// ── Diagnóstico: fluxo x equipe ───────────────────────────────────
+// A pergunta da gestão: a loja caiu por falta de cliente, ou porque a
+// equipe deixou de trabalhar ticket e complemento?
+function diagnosticarLoja(l){
+  const temBase = l.realAnt > 0;
+  if(!temBase) return { classe:'sem-base', titulo:'Sem base', cor:'var(--muted)',
+    texto:'Ano anterior sem dados lançados para comparar.' };
+
+  const caiuFluxo = l.varVendas !== null && l.varVendas < -3;
+  const caiuTm    = l.varTm     !== null && l.varTm     < -3;
+  const caiuPa    = l.varPa     !== null && l.varPa     < -3;
+  const cresceu   = l.varReal   !== null && l.varReal   > 3;
+
+  const fmtP = v => v === null ? '--' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+
+  if(cresceu && !caiuFluxo && !caiuTm){
+    return { classe:'crescendo', titulo:'Crescendo', cor:'var(--verde)',
+      texto:`Faturamento ${fmtP(l.varReal)} com fluxo ${fmtP(l.varVendas)} e ticket ${fmtP(l.varTm)}. O modelo está funcionando — mantenha a rotina.` };
+  }
+  if(caiuFluxo && (caiuTm || caiuPa)){
+    return { classe:'ambos', titulo:'Fluxo e equipe', cor:'var(--verm)',
+      texto:`Entram menos clientes (${fmtP(l.varVendas)}) e quem entra leva menos (ticket ${fmtP(l.varTm)}, P.A. ${fmtP(l.varPa)}). Trate as duas frentes: ação de atração e treino de complemento.` };
+  }
+  if(caiuFluxo){
+    return { classe:'fluxo', titulo:'Falta de clientes', cor:'var(--laranja)',
+      texto:`Atendimentos ${fmtP(l.varVendas)} vs ano passado, mas o ticket segue em ${fmtP(l.varTm)}. A equipe mantém o padrão — o problema é atrair gente para a loja.` };
+  }
+  if(caiuTm || caiuPa){
+    return { classe:'equipe', titulo:'Indicadores da equipe', cor:'var(--ouro)',
+      texto:`O fluxo se manteve (${fmtP(l.varVendas)}), mas o ticket está ${fmtP(l.varTm)} e o P.A. ${fmtP(l.varPa)}. A equipe está deixando de oferecer complemento e tamanho maior.` };
+  }
+  return { classe:'estavel', titulo:'Estável', cor:'var(--azul)',
+    texto:`Faturamento ${fmtP(l.varReal)}, fluxo ${fmtP(l.varVendas)}, ticket ${fmtP(l.varTm)}. Sem variação relevante.` };
+}
+
+// ── Renderização ──────────────────────────────────────────────────
+function renderControle(){
+  const el = document.getElementById('controle-conteudo');
+  if(!el) return;
+
+  const mesRef = window._controleMes || hoje().slice(0, 7);
+  const mesAnt = _mesAnoAnterior(mesRef);
+  const nomes  = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const [aRef, mRef] = mesRef.split('-');
+
+  let linhas = construirControleYoY(mesRef);
+  if(!isAdmin()){
+    const meu = lojaId();
+    linhas = linhas.filter(l => l.lojaId === meu);
+  }
+
+  // Seletor de mês
+  const listaMeses = (typeof mesesDisponiveis === 'function' ? mesesDisponiveis() : [mesRef]);
+  if(!listaMeses.includes(mesRef)) listaMeses.unshift(mesRef);
+  const seletor = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Mês</span>
+      <select onchange="window._controleMes=this.value;renderControle()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 10px;color:var(--texto);font-size:13px">
+        ${listaMeses.map(k=>{
+          const [a,m]=k.split('-');
+          return `<option value="${k}" ${k===mesRef?'selected':''}>${nomes[parseInt(m)]}/${a}</option>`;
+        }).join('')}
+      </select>
+      <span style="font-size:11px;color:var(--muted)">comparando com ${nomes[parseInt(mRef)]}/${parseInt(aRef)-1}</span>
+    </div>`;
+
+  // Totais da rede
+  const T = linhas.reduce((s,l)=>({
+    meta:s.meta+l.meta, real:s.real+l.real, vendas:s.vendas+l.vendas, itens:s.itens+l.itens,
+    realAnt:s.realAnt+l.realAnt, vendasAnt:s.vendasAnt+l.vendasAnt, itensAnt:s.itensAnt+l.itensAnt
+  }), {meta:0,real:0,vendas:0,itens:0,realAnt:0,vendasAnt:0,itensAnt:0});
+  T.tm    = T.vendas>0 ? T.real/T.vendas : 0;
+  T.tmAnt = T.vendasAnt>0 ? T.realAnt/T.vendasAnt : 0;
+  T.pa    = T.vendas>0 ? T.itens/T.vendas : 0;
+  T.paAnt = T.vendasAnt>0 ? T.itensAnt/T.vendasAnt : 0;
+  T.varReal   = _varYoY(T.real,   T.realAnt);
+  T.varVendas = _varYoY(T.vendas, T.vendasAnt);
+  T.varTm     = _varYoY(T.tm,     T.tmAnt);
+  T.varPa     = _varYoY(T.pa,     T.paAnt);
+  T.pctMeta   = T.meta>0 ? T.real/T.meta*100 : null;
+
+  const pill = v => {
+    if(v === null) return `<span style="font-size:10px;color:var(--muted)">sem base</span>`;
+    const c = v >= 0 ? 'var(--verde)' : 'var(--verm)';
+    const s = v >= 0 ? '▲' : '▼';
+    return `<span style="font-size:10px;color:${c};font-weight:700">${s} ${(v>=0?'+':'')}${v.toFixed(1)}%</span>`;
+  };
+  const cel = (valor, variacao) =>
+    `<td style="padding:9px 8px;text-align:right;white-space:nowrap">
+       <div style="font-size:12px;font-weight:600">${valor}</div>
+       <div>${pill(variacao)}</div>
+     </td>`;
+
+  // Resumo da rede
+  const resumo = `
+    <div class="sc">
+      <div class="st">📊 ${isAdmin() ? 'Rede M.Anjos' : (LOJAS.find(l=>l.id===lojaId())?.nome||'')} — ${nomes[parseInt(mRef)]}/${aRef}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">
+        <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">FATURAMENTO</div>
+          <div style="font-size:17px;font-weight:800;color:var(--verde)">${fmt(T.real)}</div>
+          <div>${pill(T.varReal)} <span style="font-size:9px;color:var(--muted)">vs ${parseInt(aRef)-1}</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">FLUXO (CUPONS)</div>
+          <div style="font-size:17px;font-weight:800;color:var(--azul)">${T.vendas.toLocaleString('pt-BR')}</div>
+          <div>${pill(T.varVendas)} <span style="font-size:9px;color:var(--muted)">clientes atendidos</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">TICKET MÉDIO</div>
+          <div style="font-size:17px;font-weight:800;color:var(--ouro)">${fmt(T.tm)}</div>
+          <div>${pill(T.varTm)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">P.A.</div>
+          <div style="font-size:17px;font-weight:800;color:#b07cd6">${T.pa>0?T.pa.toFixed(2):'--'}</div>
+          <div>${T.pa>0?pill(T.varPa):'<span style="font-size:10px;color:var(--muted)">sem peças lançadas</span>'}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:12px">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">REAL x META</div>
+          <div style="font-size:17px;font-weight:800;color:${(T.pctMeta||0)>=100?'var(--verde)':'var(--laranja)'}">${T.pctMeta!==null?T.pctMeta.toFixed(0)+'%':'--'}</div>
+          <div style="font-size:9px;color:var(--muted)">meta ${fmt(T.meta)}</div>
+        </div>
+      </div>
+    </div>`;
+
+  // Tabela por loja
+  const tabela = `
+    <div class="sc">
+      <div class="st">🏪 Por loja — ano contra ano</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:860px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--borda)">
+              ${['LOJA','FATURAMENTO','META','REAL x META','PARTIC.','TICKET MÉDIO','ITENS VENDIDOS','QTDE. VENDAS','P.A.']
+                .map((h,i)=>`<th style="padding:8px;text-align:${i===0?'left':'right'};font-size:10px;color:var(--muted);letter-spacing:1px;white-space:nowrap">${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas.map(l=>`
+              <tr style="border-bottom:1px solid rgba(255,255,255,.05)">
+                <td style="padding:9px 8px;font-size:12px;font-weight:600;white-space:nowrap">${l.lojaNome}</td>
+                ${cel(fmt(l.real), l.varReal)}
+                <td style="padding:9px 8px;text-align:right;font-size:12px;color:var(--muted)">${l.meta>0?fmt(l.meta):'--'}</td>
+                <td style="padding:9px 8px;text-align:right;font-size:12px;font-weight:600;color:${(l.pctMeta||0)>=100?'var(--verde)':'var(--laranja)'}">${l.pctMeta!==null?l.pctMeta.toFixed(0)+'%':'--'}</td>
+                <td style="padding:9px 8px;text-align:right;font-size:12px;color:var(--muted)">${l.partic.toFixed(0)}%</td>
+                ${cel(fmt(l.tm), l.varTm)}
+                ${cel(l.itens>0?l.itens.toLocaleString('pt-BR'):'--', l.varItens)}
+                ${cel(l.vendas.toLocaleString('pt-BR'), l.varVendas)}
+                ${cel(l.pa>0?l.pa.toFixed(2):'--', l.varPa)}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.6">
+        O percentual embaixo de cada número compara com o mesmo mês de ${parseInt(aRef)-1}.
+        P.A. = itens vendidos ÷ qtde. de vendas. "sem base" aparece quando o ano anterior não tem lançamento.
+      </div>
+    </div>`;
+
+  // Diagnóstico por loja — o coração da análise
+  const diagnosticos = linhas.map(l => ({ l, d: diagnosticarLoja(l) }))
+    .sort((a,b) => {
+      const ordem = {ambos:0, fluxo:1, equipe:2, estavel:3, crescendo:4, 'sem-base':5};
+      return ordem[a.d.classe] - ordem[b.d.classe];
+    });
+
+  const blocoDiag = `
+    <div class="sc">
+      <div class="st">🔎 O que está afetando cada loja</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+        A leitura separa <strong style="color:var(--laranja)">falta de clientes</strong> (caiu o número de cupons)
+        de <strong style="color:var(--ouro)">indicadores da equipe</strong> (o fluxo se manteve, mas o ticket e o P.A. caíram).
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${diagnosticos.map(({l,d})=>`
+          <div style="border-left:3px solid ${d.cor};background:rgba(255,255,255,.03);border-radius:0 8px 8px 0;padding:12px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:5px">
+              <div style="font-weight:700;font-size:13px">${l.lojaNome}</div>
+              <div style="font-size:10px;font-weight:700;color:${d.cor};text-transform:uppercase;letter-spacing:.5px">${d.titulo}</div>
+            </div>
+            <div style="font-size:12px;color:var(--muted);line-height:1.6">${d.texto}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  el.innerHTML = seletor + resumo + tabela + blocoDiag;
 }
 
 </script>
