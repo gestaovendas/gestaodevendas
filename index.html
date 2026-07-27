@@ -205,6 +205,35 @@ try{
                 if(ja<0) D2.campRealizados.push(r);
               });
             }
+            // [FIX 25/07] merge preventivo de historicoMeses e historicoLojas.
+            // Se uma loja lançou histórico e o admin gravou antes de sincronizar,
+            // o principal reescrito perdia o lançamento da loja.
+            if(atual.historicoMeses){
+              if(!D2.historicoMeses) D2.historicoMeses = {};
+              Object.entries(atual.historicoMeses).forEach(([_lidH, _meses])=>{
+                if(!D2.historicoMeses[_lidH]) D2.historicoMeses[_lidH] = {};
+                Object.entries(_meses||{}).forEach(([_mr, _obj])=>{
+                  const _loc = D2.historicoMeses[_lidH][_mr];
+                  if(!_loc || (Number(_obj?.ts)||0) > (Number(_loc?.ts)||0)){
+                    D2.historicoMeses[_lidH][_mr] = _obj;
+                  }
+                });
+              });
+            }
+            if(atual.historicoLojas){
+              if(!D2.historicoLojas) D2.historicoLojas = {};
+              Object.entries(atual.historicoLojas).forEach(([_lidH, _periodos])=>{
+                if(!Array.isArray(_periodos)) return;
+                if(!D2.historicoLojas[_lidH]) D2.historicoLojas[_lidH] = [];
+                _periodos.forEach(_p=>{
+                  const _i = D2.historicoLojas[_lidH].findIndex(x=>x.chave===_p.chave);
+                  if(_i < 0) D2.historicoLojas[_lidH].push(_p);
+                  else if((Number(_p?.ts)||0) > (Number(D2.historicoLojas[_lidH][_i]?.ts)||0)){
+                    D2.historicoLojas[_lidH][_i] = _p;
+                  }
+                });
+              });
+            }
           }
         } catch(eMerge){
           // Merge preventivo falhou — continua sem ele (não é crítico)
@@ -532,6 +561,37 @@ try{
                 const idx2 = base.campRealizados.findIndex(x=>x.id===r.id);
                 if(idx2>=0) base.campRealizados[idx2]=r;
                 else base.campRealizados.push(r);
+              });
+            }
+            // [FIX 25/07] mesclar historicoMeses e historicoLojas da loja
+            // Antes: o admin lia só o doc principal (que tem o histórico já
+            // conhecido dele), mas se a LOJA lançasse um mês novo pelo
+            // Lançar Histórico, o dado ficava preso no doc dela — o admin
+            // nunca via, e ao sincronizar o principal reescrevia por cima.
+            if(pedaco.historicoMeses){
+              if(!base.historicoMeses) base.historicoMeses={};
+              Object.entries(pedaco.historicoMeses).forEach(([_lidH, _meses])=>{
+                if(!base.historicoMeses[_lidH]) base.historicoMeses[_lidH] = {};
+                Object.entries(_meses||{}).forEach(([_mr, _obj])=>{
+                  const _loc = base.historicoMeses[_lidH][_mr];
+                  if(!_loc || (Number(_obj?.ts)||0) > (Number(_loc?.ts)||0)){
+                    base.historicoMeses[_lidH][_mr] = _obj;
+                  }
+                });
+              });
+            }
+            if(pedaco.historicoLojas){
+              if(!base.historicoLojas) base.historicoLojas={};
+              Object.entries(pedaco.historicoLojas).forEach(([_lidH, _periodos])=>{
+                if(!Array.isArray(_periodos)) return;
+                if(!base.historicoLojas[_lidH]) base.historicoLojas[_lidH] = [];
+                _periodos.forEach(_p=>{
+                  const _i = base.historicoLojas[_lidH].findIndex(x=>x.chave===_p.chave);
+                  if(_i < 0) base.historicoLojas[_lidH].push(_p);
+                  else if((Number(_p?.ts)||0) > (Number(base.historicoLojas[_lidH][_i]?.ts)||0)){
+                    base.historicoLojas[_lidH][_i] = _p;
+                  }
+                });
               });
             }
             // Merge fluxo desta loja
@@ -10743,17 +10803,21 @@ function atualizarObjetivoCamp(){
   calcTMCampReal();
   atualizarProgrCamp();
   const lid2 = lojaId();
-  if(!isAdmin()){
-    renderHistoricoCamp(id, lid2);
-    renderVendCampForm(id);
-  }
+  // [FIX 25/07 v2] antes só a LOJA renderizava os cards das vendedoras.
+  // Como resultado, a meta por vendedora nunca aparecia para o admin, nem
+  // quando ele estava lançando por uma loja específica. Agora renderiza
+  // sempre, usando _campFormLid() (que resolve a loja atual do form).
+  renderHistoricoCamp(id, lid2 || _campFormLid());
+  renderVendCampForm(id);
 }
 // ── PROGRESSO DA CAMPANHA (barra + falta) ────────────────────
 // ── VENDEDORAS NO FORM DE CAMPANHA ───────────────────────────
 function renderVendCampForm(campId){
   const el = document.getElementById('camp-vend-campos');
   if(!el) return;
-  const lid   = lojaId();
+  // [FIX 25/07 v2] admin não tinha lojaId(); usa _campFormLid() que devolve
+  // a loja escolhida no seletor do form (ou a 1ª, como fallback razoável)
+  const lid   = _campFormLid();
   // vendsAtivas já filtra: nome=loja, cargo VRLL, ativa===false
   const vends = vendsAtivas(lid);
   if(!vends.length){
@@ -18866,30 +18930,43 @@ function renderControle(){
 }
 
 
+
 // ════════════════════════════════════════════════════════════════════
-// [NEW 25/07] META DE CAMPANHA POR VENDEDORA
-// A Moni pediu: "gostaria que aparecesse o valor de meta de campanha
-// para o time além das lojas". A meta da loja é dividida entre as
-// vendedoras ATIVAS por padrão (partes iguais), com override manual
-// em obj.metasPorVendedora[vendId]. O que a vendedora já realizou vem
-// dos lançamentos existentes (r.vendedoras[vendId]).
+// [UPD 25/07 v2] META DE CAMPANHA POR VENDEDORA + POR DIA
+// Mudanças desta revisão:
+//   1) Funciona para ADMIN também (antes só para loja — usava lojaId()).
+//   2) Mostra a divisão POR DIA: meta diária = meta total ÷ dias úteis
+//      restantes da campanha (nunca aumenta o esforço de dias já passados).
 // ════════════════════════════════════════════════════════════════════
+
+// Loja alvo do form. Para o admin, tenta descobrir qual loja está no seletor
+// (l-loja / lanc-loja-sel) ou cai na 1ª loja disponível.
+function _campFormLid(){
+  if(typeof lojaId === 'function'){
+    const meu = lojaId();
+    if(meu && meu !== 'admin') return meu;
+  }
+  const sel = document.getElementById('camp-real-loja')
+           || document.getElementById('l-loja')
+           || document.getElementById('lanc-loja-sel');
+  const v = sel?.value;
+  if(v && v !== 'admin') return v;
+  return LOJAS[0]?.id || null;
+}
 
 // Meta de UMA vendedora nesta campanha
 function metaVendCamp(obj, vendId, lid){
   if(!obj || !vendId || !lid) return 0;
-  // 1) override explícito por vendedora (definido pelo admin)
   const explicita = obj.metasPorVendedora?.[vendId];
   if(explicita > 0) return Number(explicita);
-  // 2) dividir a meta da loja pelas vendedoras ativas dessa loja
   const metaLoja = (obj.metasPorLoja?.[lid]) || obj.metaLoja || 0;
   if(!metaLoja) return 0;
-  const vendsLoja = vendsAtivas(lid);
+  const vendsLoja = (typeof vendsAtivas === 'function' ? vendsAtivas(lid) : []);
   if(!vendsLoja.length) return 0;
   return Math.round((metaLoja / vendsLoja.length) * 100) / 100;
 }
 
-// Realizado da vendedora nesta campanha (soma de todos os lançamentos)
+// Realizado da vendedora nesta campanha
 function realizadoVendCamp(campId, vendId){
   if(!campId || !vendId) return 0;
   return (D.campRealizados || [])
@@ -18897,33 +18974,93 @@ function realizadoVendCamp(campId, vendId){
     .reduce((s, r) => s + (Number(r.vendedoras?.[vendId]) || 0), 0);
 }
 
-// Atualiza o percentual de cada vendedora no card do form
-// (chamado quando muda campanha, ao digitar valor, e após salvar)
+// Dias TOTAIS entre ini e fim (inclusive). Se faltar data, devolve 1.
+function _diasEntre(ini, fim){
+  if(!ini || !fim) return 1;
+  const a = new Date(ini), b = new Date(fim);
+  if(isNaN(a) || isNaN(b) || b < a) return 1;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+// Dias restantes da campanha a partir de hoje (mínimo 1)
+function _diasRestantesCamp(obj){
+  if(!obj?.fim) return 1;
+  const hj = hoje();
+  const fim = new Date(obj.fim);
+  const ini = obj.ini && obj.ini > hj ? new Date(obj.ini) : new Date(hj);
+  if(isNaN(fim) || isNaN(ini) || fim < ini) return 1;
+  return Math.max(1, Math.round((fim - ini) / 86400000) + 1);
+}
+
+// Meta DIÁRIA sugerida = (meta total - já realizado) ÷ dias restantes.
+// Nunca aumenta a meta dos dias que já passaram — pega o que falta e
+// divide pelo tempo que ainda há para bater a campanha.
+function metaDiaVendCamp(obj, vendId, lid, campId){
+  const metaTot = metaVendCamp(obj, vendId, lid);
+  if(!metaTot) return 0;
+  const realJa = realizadoVendCamp(campId, vendId);
+  const falta = Math.max(0, metaTot - realJa);
+  const dias = _diasRestantesCamp(obj);
+  return Math.round((falta / dias) * 100) / 100;
+}
+
+// Realizado da LOJA na campanha (soma de todas as vendedoras + fat "cru")
+function realizadoLojaCamp(campId, lid){
+  return (D.campRealizados || [])
+    .filter(r => r.campId === campId && r.lojaId === lid)
+    .reduce((s, r) => s + (typeof _fatLancamento === 'function' ? _fatLancamento(r) : Number(r.fat)||0), 0);
+}
+
+// Meta diária da LOJA na campanha (mesma lógica)
+function metaDiaLojaCamp(obj, lid, campId){
+  if(!obj || !lid) return 0;
+  const metaTot = (obj.metasPorLoja?.[lid]) || obj.metaLoja || 0;
+  if(!metaTot) return 0;
+  const realJa = realizadoLojaCamp(campId, lid);
+  const falta = Math.max(0, metaTot - realJa);
+  const dias = _diasRestantesCamp(obj);
+  return Math.round((falta / dias) * 100) / 100;
+}
+
+// Atualiza o card de cada vendedora: meta total, realizado, e meta do dia.
+// Funciona para loja E para admin (usa _campFormLid).
 function atualizarMetasVendsCamp(){
   const campId = document.getElementById('camp-sel-real')?.value;
   if(!campId) return;
   const obj = D.campObjetivos?.find(o => o.id === campId);
   if(!obj) return;
-  const lid = lojaId();
-  vendsAtivas(lid).forEach(v => {
+  const lid = _campFormLid();
+  if(!lid) return;
+
+  const diasRest = _diasRestantesCamp(obj);
+
+  (typeof vendsAtivas === 'function' ? vendsAtivas(lid) : []).forEach(v => {
     const el = document.getElementById('camp-vend-pct-' + v.id);
     if(!el) return;
     const meta = metaVendCamp(obj, v.id, lid);
+    if(meta <= 0){ el.textContent = ''; return; }
+
     const realJa = realizadoVendCamp(campId, v.id);
     const noForm = parseBR(document.getElementById('camp-vend-' + v.id)?.value) || 0;
-    const total = realJa + noForm;
-    if(meta <= 0){
-      el.textContent = '';
-      return;
-    }
-    const pct = total / meta * 100;
-    const cor = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : 'var(--muted)';
-    // Ex.: "Meta R$ 1.250,00 · Realizado R$ 800,00 (64%)"
-    el.innerHTML = `Meta ${fmt(meta)} · Realizado <strong style="color:${cor}">${fmt(total)} (${pct.toFixed(0)}%)</strong>`;
+    const total  = realJa + noForm;
+    const pct    = total / meta * 100;
+    const cor    = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : 'var(--muted)';
+
+    const metaDia = metaDiaVendCamp(obj, v.id, lid, campId);
+    const linhaDia = metaDia > 0
+      ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">Meta/dia: <strong style="color:var(--ouro)">${fmt(metaDia)}</strong> · ${diasRest} dia${diasRest>1?'s':''} restante${diasRest>1?'s':''}</div>`
+      : '';
+
+    el.innerHTML =
+      `<div>Meta ${fmt(meta)} · <strong style="color:${cor}">${fmt(total)} (${pct.toFixed(0)}%)</strong></div>` +
+      linhaDia;
     el.style.color = 'var(--muted)';
     el.style.fontSize = '10px';
+    el.style.textAlign = 'right';
+    el.style.lineHeight = '1.4';
   });
 }
+
 
 </script>
 </body>
