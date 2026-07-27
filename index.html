@@ -10785,7 +10785,7 @@ function renderVendCampForm(campId){
           <input type="text" id="camp-vend-${v.id}"
             placeholder="0,00"
             value="${vendVals[v.id]?vendVals[v.id].toFixed(2).replace('.',','):''}"
-            oninput="maskBR(this);calcTotalVendsCamp()"
+            oninput="maskBR(this);calcTotalVendsCamp();atualizarMetasVendsCamp()"
             style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:6px;padding:7px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none">
         </div>
         <div>
@@ -10822,6 +10822,7 @@ function renderVendCampForm(campId){
       </div>
     </div>`).join('');
   calcTotalVendsCamp();
+  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: meta por vendedora
 }
 
 function calcTotalVendsCamp(){
@@ -11165,7 +11166,13 @@ async function salvarCampReal(){
     const elNr = document.getElementById('camp-vend-nr-'+v.id);  if(elNr) elNr.value='';
     const elOb = document.getElementById('camp-vend-obs-'+v.id); if(elOb) elOb.value='';
   });
+  // [FIX 25/07] Bug 1: a barra 'Acumulado' não atualizava após salvar.
+  // atualizarObjetivoCamp e renderHistoricoCamp eram chamadas, mas a
+  // atualizarProgrCamp (que soma os lançamentos + fechamento do dia) NÃO.
+  // Resultado: a loja lançava R$ 500, salvava, e a barra ficava em zero.
   atualizarObjetivoCamp();
+  atualizarProgrCamp();
+  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: atualiza meta/realizado por vendedora
   renderHistoricoCamp(campId, lid);
   renderCampLista();
 }
@@ -17341,22 +17348,125 @@ function atualizaVendedorasLoja(){
 // FASE 3: FILTRO DE PERÍODO EM ABAS EXISTENTES
 // ════════════════════════════════════════════════════════════════════
 
+// [NEW 25/07] Bug 3: cálculo de faturamento entre duas datas quaisquer
+// (o botão "Buscar" do período customizado só mostrava um toast antes).
+function calcFatEntre(lid, dataIni, dataFim){
+  if(!lid || !dataIni || !dataFim) return 0;
+  let fat = 0;
+  vendsReais(lid).forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
+      if(d >= dataIni && d <= dataFim) fat += Number(vd.val || 0);
+    });
+  });
+  // Fallback: consolidado da loja quando não há lançamento por vendedora
+  if(!fat){
+    Object.entries(D.vendas[lid] || {}).forEach(([d, vd]) => {
+      if(d >= dataIni && d <= dataFim) fat += Number(vd.fat || 0);
+    });
+  }
+  return fat;
+}
+function calcNAtendEntre(lid, dataIni, dataFim){
+  if(!lid || !dataIni || !dataFim) return 0;
+  let n = 0;
+  vendsReais(lid).forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
+      if(d >= dataIni && d <= dataFim){
+        const t = Number(vd.trans || 0);
+        n += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
+      }
+    });
+  });
+  return n;
+}
+function calcNItensEntre(lid, dataIni, dataFim){
+  if(!lid || !dataIni || !dataFim) return 0;
+  let n = 0;
+  vendsReais(lid).forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
+      if(d >= dataIni && d <= dataFim) n += Number(vd.itens || 0);
+    });
+  });
+  return n;
+}
+
 function buscarRankingPeriodo(){
-  // Buscar período customizado em Rankings
   const dataIni = document.getElementById('rank-periodo-ini')?.value;
   const dataFim = document.getElementById('rank-periodo-fim')?.value;
 
   if(!dataIni || !dataFim){
-    showToast('Informe período (data início e fim)!','err');
+    showToast('Informe as duas datas (início e fim)!','err');
     return;
   }
-
   if(new Date(dataIni) > new Date(dataFim)){
     showToast('Data início não pode ser maior que data fim!','err');
     return;
   }
 
-  showToast('Período: ' + brData(dataIni) + ' a ' + brData(dataFim));
+  // Renderiza o pódio com dados do intervalo escolhido
+  const ld = LOJAS.map(l => {
+    const fat = calcFatEntre(l.id, dataIni, dataFim);
+    const nat = calcNAtendEntre(l.id, dataIni, dataFim);
+    const ite = calcNItensEntre(l.id, dataIni, dataFim);
+    const tm  = nat > 0 ? fat / nat : 0;
+    const pa  = nat > 0 ? ite / nat : 0;
+    return { ...l, fat, nat, ite, tm, pa };
+  }).sort((a, b) => b.fat - a.fat);
+
+  const totFat  = ld.reduce((s, l) => s + l.fat, 0);
+  const totNat  = ld.reduce((s, l) => s + l.nat, 0);
+  const totIte  = ld.reduce((s, l) => s + l.ite, 0);
+  const tmRede  = totNat > 0 ? totFat / totNat : 0;
+  const paRede  = totNat > 0 ? totIte / totNat : 0;
+
+  const emoji = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + 'º';
+  const el = document.getElementById('rank-podio-lojas');
+  if(!el) return;
+  el.innerHTML =
+    `<div class="sc" style="margin-bottom:12px">`
+    + `<div class="st">📅 Período: ${brData(dataIni)} → ${brData(dataFim)}</div>`
+    + `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">`
+    + `<div style="background:rgba(255,255,255,.03);padding:10px;border-radius:8px">`
+    +   `<div style="font-size:9px;color:var(--muted);letter-spacing:1px">FATURAMENTO</div>`
+    +   `<div style="font-size:16px;font-weight:800;color:var(--verde)">${fmt(totFat)}</div>`
+    + `</div>`
+    + `<div style="background:rgba(255,255,255,.03);padding:10px;border-radius:8px">`
+    +   `<div style="font-size:9px;color:var(--muted);letter-spacing:1px">ATENDIMENTOS</div>`
+    +   `<div style="font-size:16px;font-weight:800;color:var(--azul)">${totNat.toLocaleString('pt-BR')}</div>`
+    + `</div>`
+    + `<div style="background:rgba(255,255,255,.03);padding:10px;border-radius:8px">`
+    +   `<div style="font-size:9px;color:var(--muted);letter-spacing:1px">TICKET MÉDIO</div>`
+    +   `<div style="font-size:16px;font-weight:800;color:var(--ouro)">${fmt(tmRede)}</div>`
+    + `</div>`
+    + `<div style="background:rgba(255,255,255,.03);padding:10px;border-radius:8px">`
+    +   `<div style="font-size:9px;color:var(--muted);letter-spacing:1px">P.A.</div>`
+    +   `<div style="font-size:16px;font-weight:800;color:#b07cd6">${paRede > 0 ? fmtPA(paRede) : '--'}</div>`
+    + `</div>`
+    + `</div></div>`
+    + `<div class="sc">`
+    + `<div class="st">🏆 Ranking por faturamento</div>`
+    + `<div style="overflow-x:auto;margin-top:8px">`
+    + `<table style="width:100%;border-collapse:collapse;min-width:520px">`
+    +   `<thead><tr style="border-bottom:1px solid var(--borda)">`
+    +     `<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px">POS.</th>`
+    +     `<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px">LOJA</th>`
+    +     `<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">FATURAMENTO</th>`
+    +     `<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">TM</th>`
+    +     `<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">ATEND.</th>`
+    +     `<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">P.A.</th>`
+    +   `</tr></thead><tbody>`
+    + ld.map((l, i) =>
+        `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">`
+        + `<td style="padding:9px 8px;font-size:14px">${emoji(i)}</td>`
+        + `<td style="padding:9px 8px;font-size:12px;font-weight:600">${l.nome}</td>`
+        + `<td style="padding:9px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--verde)">${fmt(l.fat)}</td>`
+        + `<td style="padding:9px 8px;text-align:right;font-size:12px">${l.tm > 0 ? fmt(l.tm) : '--'}</td>`
+        + `<td style="padding:9px 8px;text-align:right;font-size:12px;color:var(--muted)">${l.nat.toLocaleString('pt-BR')}</td>`
+        + `<td style="padding:9px 8px;text-align:right;font-size:12px;color:#b07cd6">${l.pa > 0 ? fmtPA(l.pa) : '--'}</td>`
+        + `</tr>`).join('')
+    + `</tbody></table></div></div>`;
+
+  showToast('Ranking atualizado: ' + brData(dataIni) + ' → ' + brData(dataFim));
 }
 
 function buscarMesAnteriorPeriodo(){
@@ -18753,6 +18863,66 @@ function renderControle(){
     </div>`;
 
   el.innerHTML = seletor + resumo + tabela + blocoDiag;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// [NEW 25/07] META DE CAMPANHA POR VENDEDORA
+// A Moni pediu: "gostaria que aparecesse o valor de meta de campanha
+// para o time além das lojas". A meta da loja é dividida entre as
+// vendedoras ATIVAS por padrão (partes iguais), com override manual
+// em obj.metasPorVendedora[vendId]. O que a vendedora já realizou vem
+// dos lançamentos existentes (r.vendedoras[vendId]).
+// ════════════════════════════════════════════════════════════════════
+
+// Meta de UMA vendedora nesta campanha
+function metaVendCamp(obj, vendId, lid){
+  if(!obj || !vendId || !lid) return 0;
+  // 1) override explícito por vendedora (definido pelo admin)
+  const explicita = obj.metasPorVendedora?.[vendId];
+  if(explicita > 0) return Number(explicita);
+  // 2) dividir a meta da loja pelas vendedoras ativas dessa loja
+  const metaLoja = (obj.metasPorLoja?.[lid]) || obj.metaLoja || 0;
+  if(!metaLoja) return 0;
+  const vendsLoja = vendsAtivas(lid);
+  if(!vendsLoja.length) return 0;
+  return Math.round((metaLoja / vendsLoja.length) * 100) / 100;
+}
+
+// Realizado da vendedora nesta campanha (soma de todos os lançamentos)
+function realizadoVendCamp(campId, vendId){
+  if(!campId || !vendId) return 0;
+  return (D.campRealizados || [])
+    .filter(r => r.campId === campId)
+    .reduce((s, r) => s + (Number(r.vendedoras?.[vendId]) || 0), 0);
+}
+
+// Atualiza o percentual de cada vendedora no card do form
+// (chamado quando muda campanha, ao digitar valor, e após salvar)
+function atualizarMetasVendsCamp(){
+  const campId = document.getElementById('camp-sel-real')?.value;
+  if(!campId) return;
+  const obj = D.campObjetivos?.find(o => o.id === campId);
+  if(!obj) return;
+  const lid = lojaId();
+  vendsAtivas(lid).forEach(v => {
+    const el = document.getElementById('camp-vend-pct-' + v.id);
+    if(!el) return;
+    const meta = metaVendCamp(obj, v.id, lid);
+    const realJa = realizadoVendCamp(campId, v.id);
+    const noForm = parseBR(document.getElementById('camp-vend-' + v.id)?.value) || 0;
+    const total = realJa + noForm;
+    if(meta <= 0){
+      el.textContent = '';
+      return;
+    }
+    const pct = total / meta * 100;
+    const cor = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : 'var(--muted)';
+    // Ex.: "Meta R$ 1.250,00 · Realizado R$ 800,00 (64%)"
+    el.innerHTML = `Meta ${fmt(meta)} · Realizado <strong style="color:${cor}">${fmt(total)} (${pct.toFixed(0)}%)</strong>`;
+    el.style.color = 'var(--muted)';
+    el.style.fontSize = '10px';
+  });
 }
 
 </script>
