@@ -11173,7 +11173,7 @@ async function salvarCampReal(){
 // ── RENDER PRINCIPAL ─────────────────────────────────────────
 function renderCampLista(){
   initCampData();
-  const el = document.getElementById('camp-lista');
+  const el = document.getElementById('camp-lista-adm') || document.getElementById('camp-lista'); // [FIX 24/07] usa o destino que existir
   if(!el) return;
   const lid = lojaId();
 
@@ -11201,7 +11201,7 @@ function renderCampLista(){
   if(_campFiltroStatus === 'ativas')      objs = objs.filter(o=>!o.arquivada);
   else if(_campFiltroStatus === 'arquivadas') objs = objs.filter(o=>!!o.arquivada);
 
-  objs.sort((a,b)=>b.ini.localeCompare(a.ini));
+  objs.sort((a,b)=>String(b.ini||b.dataIni||"").localeCompare(String(a.ini||a.dataIni||""))); // [FIX 24/07] tolera campanha sem ini
 
   if(!objs.length){
     const msg = _campFiltroStatus==='arquivadas'
@@ -11477,6 +11477,8 @@ function editarCampObj(id){
 }
 
 function excluirCampObj(id){
+  // [FIX 24/07] só o admin pode excluir campanha (mesma razão de arquivar)
+  if(!isAdmin()){ showToast('Apenas a gestão pode excluir campanhas.','warn'); return; }
   if(!confirm('Excluir este objetivo? Os realizados vinculados também serão removidos.')) return;
   D.campObjetivos = D.campObjetivos.filter(o=>o.id!==id);
   // [FIX Bug2] Registrar tombstone para cada realizado excluído com o objetivo
@@ -11491,6 +11493,9 @@ function excluirCampObj(id){
 }
 // ── Arquivar/reativar campanha ─────────────────────────────────────
 function arquivarCampObj(id){
+  // [FIX 24/07] só o admin arquiva/reativa. campObjetivos é gravado apenas no
+  // doc do admin; se a loja alterasse, o sync reverteria (parecia sumir).
+  if(!isAdmin()){ showToast('Apenas a gestão pode arquivar campanhas.','warn'); return; }
   const obj = D.campObjetivos.find(o=>o.id===id);
   if(!obj) return;
   const acao = obj.arquivada ? 'Reativar' : 'Arquivar';
