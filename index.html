@@ -1407,6 +1407,23 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="tab"        id="dtab-semana" onclick="tabDash('semana',this)">Semana</button>
     <button class="tab"        id="dtab-mes"    onclick="tabDash('mes',this)">Mês</button>
   </div>
+  <!-- [FIX 26/07] Seletor de loja no dashboard (só admin).
+       Antes o admin sempre via a meta e o faturamento SOMADOS da rede —
+       a Moni queria conseguir olhar loja por loja. -->
+  <div id="dash-loja-wrap" style="display:none;margin-bottom:14px;align-items:center;gap:8px;flex-wrap:wrap">
+    <label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Visão:</label>
+    <select id="dash-loja-sel" onchange="window._dashLojaFiltro=this.value;carregarDash()"
+      style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px">
+      <option value="">🌐 Rede toda</option>
+      <option value="mooca">🏪 Mooca Plaza</option>
+      <option value="leopoldina">🏪 Vila Leopoldina</option>
+      <option value="perdizes">🏪 Perdizes</option>
+      <option value="santana">🏪 Santana</option>
+      <option value="jarpaul">🏪 Lorena (Jardim Paulista)</option>
+      <option value="pinheiros">🏪 Alto de Pinheiros</option>
+      <option value="ibirapuera">🏪 Shop. Ibirapuera</option>
+    </select>
+  </div>
   <!-- Alerta de Ritmo -->
   <div id="alerta-ritmo" style="margin-bottom:16px"></div>
   <!-- KPIs -->
@@ -1484,7 +1501,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Painel Clientes (loja vê) -->
       <div class="rcard" style="margin-top:12px">
         <div style="font-size:12px;font-weight:600;margin-bottom:12px">👥 Clientes do Dia</div>
-        <div id="painel-clientes-dash" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <!-- [FIX 26/07] adicionado o card Aniversariantes que a Moni queria -->
+        <div id="painel-clientes-dash" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
           <div style="text-align:center;background:var(--card2);border-radius:8px;padding:10px">
             <div style="font-size:9px;color:var(--muted);margin-bottom:4px">ATENDIDOS</div>
             <div style="font-size:20px;font-weight:700;color:var(--azul)" id="pc-atend">0</div>
@@ -1497,6 +1515,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <div style="text-align:center;background:var(--card2);border-radius:8px;padding:10px">
             <div style="font-size:9px;color:var(--muted);margin-bottom:4px">NOVOS</div>
             <div style="font-size:20px;font-weight:700;color:var(--ouro)" id="pc-novos">0</div>
+          </div>
+          <div style="text-align:center;background:var(--card2);border-radius:8px;padding:10px">
+            <div style="font-size:9px;color:var(--muted);margin-bottom:4px">🎂 ANIVERSARIANTES</div>
+            <div style="font-size:20px;font-weight:700;color:#FF69B4" id="pc-aniv">0</div>
           </div>
         </div>
       </div>
@@ -6922,9 +6944,23 @@ function carregarDash(){
   if(!D.vendas) D.vendas={};
   const lid=lojaId(), hj=hoje();
 
+  // [FIX 26/07] Mostra o seletor de loja quando é admin
+  const _dwrap = document.getElementById("dash-loja-wrap");
+  if(_dwrap) _dwrap.style.display = isAdmin() ? "flex" : "none";
+
+  // [FIX 26/07] Admin pode filtrar para ver KPIs de uma loja específica.
+  // Isso resolve o "meta da rede quando deveria mostrar da loja" — agora o
+  // admin escolhe qual loja quer analisar.
+  const _dashFiltroLoja = isAdmin() ? (window._dashLojaFiltro || "") : "";
+  const _visaoLoja = _dashFiltroLoja || (isAdmin() ? null : lid);
+
   // ── Admin vê TOTAL DA REDE; loja vê SÓ a sua
   let fatHj, metaDiaRef, superDiaRef, realSem, metaSemRef, superSemRef, realMes, metaMesRef, superMesRef, tkLabel;
-  if(isAdmin()){
+  // [FIX 26/07] Se admin escolheu uma loja no seletor, usa o mesmo cálculo
+  // do ramo "loja" mas com o lid da loja escolhida — a lógica reaproveita.
+  const _lidEfetivo = _visaoLoja || lid;
+  const _ehVisaoRede = isAdmin() && !_dashFiltroLoja;
+  if(_ehVisaoRede){
     // Soma todas as lojas
     fatHj=LOJAS.reduce((s,l)=>s+calcDia(l.id),0);
     realSem=LOJAS.reduce((s,l)=>s+calcSem(l.id),0);
@@ -6946,25 +6982,26 @@ function carregarDash(){
     superMesRef=LOJAS.reduce((s,l)=>s+(getMetas(l.id).superMes||0),0);
     tkLabel="Rede";
   } else {
-    const metas=getMetas(lid)||{};
-    const prog=metaDiaLojaProgressiva(lid,hj)||{};
-    fatHj=calcDia(lid);
-    realSem=calcSem(lid); realMes=calcMes(lid);
+    // [FIX 26/07] loja OU admin filtrando por uma loja: usa _lidEfetivo
+    const _lidC = _lidEfetivo;
+    const metas=getMetas(_lidC)||{};
+    const prog=metaDiaLojaProgressiva(_lidC,hj)||{};
+    fatHj=calcDia(_lidC);
+    realSem=calcSem(_lidC); realMes=calcMes(_lidC);
     // Meta diária progressiva: (meta restante) ÷ dias úteis restantes
-    const _diasRest = diasAbertosRestantes(lid);
-    const _acum     = calcMesAte(lid, hj);
+    const _diasRest = diasAbertosRestantes(_lidC);
+    const _acum     = calcMesAte(_lidC, hj);
     const _rest     = Math.max(0, (metas.mes||0) - _acum);
     metaDiaRef = _diasRest > 0 ? parseFloat((_rest/_diasRest).toFixed(2)) : (metas.dia||0);
     if(metaDiaRef <= 0) metaDiaRef = metas.dia||0;
-    // Super meta diária também progressiva: (superMes - realizado) ÷ dias restantes
     const _restSuper = Math.max(0, (metas.superMes||0) - _acum);
     superDiaRef = _diasRest > 0 ? parseFloat((_restSuper/_diasRest).toFixed(2)) : (metas.superDia||0);
-    if(superDiaRef <= 0) superDiaRef = metas.superDia||0; metaSemRef=getMetaSemLoja(lid); superSemRef=metas.superSem||0;
+    if(superDiaRef <= 0) superDiaRef = metas.superDia||0; metaSemRef=getMetaSemLoja(_lidC); superSemRef=metas.superSem||0;
     metaMesRef=metas.mes||0; superMesRef=metas.superMes||0;
-    tkLabel=lojaNome();
+    tkLabel = _dashFiltroLoja ? (LOJAS.find(l=>l.id===_lidC)?.nome || _lidC) : lojaNome();
   }
   // m = metas da loja (para uso em projeção e dicas)
-  const m = isAdmin() ? {mes:metaMesRef,superMes:superMesRef,dia:metaDiaRef,superDia:superDiaRef,sem:metaSemRef,superSem:superSemRef,ticket:150} : (getMetas(lid)||{});
+  const m = _ehVisaoRede ? {mes:metaMesRef,superMes:superMesRef,dia:metaDiaRef,superDia:superDiaRef,sem:metaSemRef,superSem:superSemRef,ticket:150} : (getMetas(_lidEfetivo)||{});
 
   // [NEW 21/07] Período selecionado no dashboard (dia | semana | mes)
   const _per = window._tabDash || 'dia';
@@ -7090,8 +7127,18 @@ function carregarDash(){
 
   // Painel clientes — [FIX 22/07] admin somava D.vendas["admin"], que não existe.
   // Agora o admin agrega as 7 lojas; a loja segue lendo a sua.
-  let atend, conv, novos;
-  if(isAdmin()){
+  let atend, conv, novos, aniv;
+  // [FIX 26/07] Aniversariantes vêm de D.fluxo com origem/tipoCliente='aniversario'
+  // (o registro de fluxo é criado quando a loja informa o motivo da visita)
+  const _contarAnivHoje = (filtroLoja) => {
+    return (D.fluxo || []).filter(f => {
+      if(f.data !== hj) return false;
+      if(filtroLoja && f.loja !== filtroLoja) return false;
+      return f.origem === 'aniversario' || f.tipoCliente === 'aniversario';
+    }).length;
+  };
+  // [FIX 26/07] Respeitar o filtro do admin (dashboard por loja)
+  if(_ehVisaoRede){
     atend = 0; conv = 0; novos = 0;
     LOJAS.forEach(l=>{
       const r = (D.vendas[l.id]||{})[hj]||{};
@@ -7099,24 +7146,29 @@ function carregarDash(){
       conv  += Number(r.trans||0);
       novos += Number(r.clinov||0);
     });
-    // sem consolidado gravado, cai nos lançamentos por vendedora
     if(atend===0 && conv===0){
       conv  = LOJAS.reduce((s,l)=>s+calcNAtend(l.id,"dia"),0);
       atend = conv;
     }
+    aniv = _contarAnivHoje(null);
   } else {
-    atend = v.cli||0; conv = v.trans||0; novos = v.clinov||0;
-    if(atend===0 && conv===0){ conv = calcNAtend(lid,"dia"); atend = conv; }
+    const _lidP = _lidEfetivo;
+    const _vp = (D.vendas[_lidP]||{})[hj]||{};
+    atend = _vp.cli||0; conv = _vp.trans||0; novos = _vp.clinov||0;
+    if(atend===0 && conv===0){ conv = calcNAtend(_lidP,"dia"); atend = conv; }
+    aniv = _contarAnivHoje(_lidP);
   }
   const convPct = atend>0 ? (conv/atend*100).toFixed(0) : 0;
   const pcA=document.getElementById("pc-atend");
   const pcC=document.getElementById("pc-conv");
   const pcCP=document.getElementById("pc-conv-pct");
   const pcN=document.getElementById("pc-novos");
+  const pcAn=document.getElementById("pc-aniv"); // [FIX 26/07]
   if(pcA) pcA.textContent=atend;
   if(pcC) pcC.textContent=conv;
   if(pcCP) pcCP.textContent=convPct+"%";
   if(pcN) pcN.textContent=novos;
+  if(pcAn) pcAn.textContent=aniv;
 
   // Painel meta de produtos
 
@@ -7887,7 +7939,11 @@ async function salvarLanc(){
     // Conceito: cada "Salvar" é um ticket/venda adicional no dia, não uma substituição
     // Para zerar, usar o botão ✕ (limparVend) no card da vendedora
     let fatTotal = 0, transTotal2 = 0, itensTotal2 = 0;
-    vendasParaSalvar.forEach(({v, vval, vatend})=>{
+    // [FIX 26/07] vitens FALTAVA na desestruturação. Consequência: ao
+    // referenciar vitens no corpo, dava ReferenceError silencioso dentro
+    // do try/catch — nenhuma vendedora era salva. Aparecia como se o
+    // sistema exigisse a equipe inteira.
+    vendasParaSalvar.forEach(({v, vval, vatend, vitens})=>{
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       // Pegar o registro existente do dia (se houver)
       const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0};
