@@ -5982,7 +5982,14 @@ function semaforoRitmo(pct){
 
 // Projecao do mes
 function calcProjecao(lid){
-  const realMes = calcMes(lid);
+  // [FIX 26/07] Antes usava só calcMes (lançamento diário). Quando a loja
+  // só tinha histórico manual do mês (comum em meses recém-fechados), o
+  // realMes vinha zero e a projeção sumia inteira — a Moni ficava sem
+  // "Análise & Dicas". Agora consulta a fonte da verdade (realizadoDoMes,
+  // que já cruza diário + histórico com precedência).
+  if(!lid) return null;
+  const mesRef = hoje().slice(0,7);
+  const realMes = realizadoDoMes(lid, mesRef).valor || calcMes(lid);
   const dp = diasAbertosPassados(lid);
   const dr = diasAbertosRestantes(lid);
   const du = diasAbertosNoMes(lid);
@@ -6987,10 +6994,20 @@ function carregarDash(){
     const metas=getMetas(_lidC)||{};
     const prog=metaDiaLojaProgressiva(_lidC,hj)||{};
     fatHj=calcDia(_lidC);
-    realSem=calcSem(_lidC); realMes=calcMes(_lidC);
+    // [FIX 26/07] realMes considera histórico (bug do painel Santana)
+    realSem=calcSem(_lidC);
+    const _hjMR2 = hj.slice(0,7);
+    realMes = Math.max(calcMes(_lidC), realizadoDoMes(_lidC, _hjMR2).valor || 0);
     // Meta diária progressiva: (meta restante) ÷ dias úteis restantes
     const _diasRest = diasAbertosRestantes(_lidC);
-    const _acum     = calcMesAte(_lidC, hj);
+    // [FIX 26/07] _acum vinha só de calcMesAte (lançamento diário). Se a
+    // loja só tem histórico manual do mês, dá 0 e a meta/dia fica em
+    // (105k - 0) / 4 = 26k — completamente irreal. Agora usa
+    // realizadoDoMes que já cruza as duas origens.
+    const _hjMR = hj.slice(0,7);
+    const _acumHist = realizadoDoMes(_lidC, _hjMR).valor || 0;
+    const _acumDia  = calcMesAte(_lidC, hj);
+    const _acum     = Math.max(_acumDia, _acumHist);
     const _rest     = Math.max(0, (metas.mes||0) - _acum);
     metaDiaRef = _diasRest > 0 ? parseFloat((_rest/_diasRest).toFixed(2)) : (metas.dia||0);
     if(metaDiaRef <= 0) metaDiaRef = metas.dia||0;
@@ -7087,8 +7104,8 @@ function carregarDash(){
   setBar("s",pS,realSem,metaSemRef,superSemRef);
   setBar("m",pM,realMes,metaMesRef,superMesRef);
 
-  // Alerta de ritmo — admin usa totais da rede
-  const proj=isAdmin()?calcProjecaoRede():calcProjecao(lid);
+  // [FIX 26/07] Alerta respeita filtro do admin e considera histórico manual
+  const proj=_ehVisaoRede ? calcProjecaoRede() : calcProjecao(_lidEfetivo);
   const pProjMes=proj&&metaMesRef>0?proj.projecao/metaMesRef*100:0;
   const sf=semaforoRitmo(pProjMes||pM);
   const alertaEl=document.getElementById("alerta-ritmo");
@@ -7199,7 +7216,9 @@ function setBar(id,pct,real,meta,superMeta){
 function gerarDicas(v,m,pD){
   const lid2=lojaId();
   const ds=[],tk=v.trans>0?v.fat/v.trans:0,tm=Number(v.tm||0);
-  const proj=isAdmin()?calcProjecaoRede():calcProjecao(lid2);
+  // [FIX 26/07] Dicas do dashboard também respeitam o filtro do admin
+  const _lidD = (window._dashLojaFiltro || (isAdmin() ? null : lid2));
+  const proj=(_lidD ? calcProjecao(_lidD) : (isAdmin() ? calcProjecaoRede() : calcProjecao(lid2)));
   const mRef=isAdmin()?LOJAS.reduce((s,l)=>s+(getMetas(l.id).mes||0),0):(m.mes||0);
   const pProjMes=proj&&mRef>0?proj.projecao/mRef*100:pD;
   if(pProjMes>=120) ds.push({c:"var(--verde)",t:"<strong>Ritmo de Super Meta!</strong> Continue o foco e vai superar os 125% da meta!"});
