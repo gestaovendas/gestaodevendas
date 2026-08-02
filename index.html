@@ -1404,7 +1404,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
     <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
     <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
@@ -1568,7 +1568,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Mês Anterior (widget no Dashboard) -->
       <div class="rcard" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Mês Anterior</span></div>
+          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Histórico</span></div>
           <div style="display:flex;gap:6px;align-items:center">
             <!-- [NEW 22/07] navegação entre meses (antes era fixo no mês passado) -->
             <button onclick="mesAntNavegar(-1)" class="btn-s" title="Mês anterior"
@@ -2287,13 +2287,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 
-<!-- MÊS ANTERIOR — performance do mês passado -->
+<!-- HISTÓRICO — performance dos meses passados -->
 <div class="page" id="page-mesant">
   <div class="ph">
     <div>
-      <h1 class="pt">Mês <span>Anterior</span></h1>
+      <h1 class="pt">Histó<span>rico</span></h1>
       <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
     </div>
+  </div>
+
+  <!-- [NEW 28/07] Seletor de mês — permite ver performance de qualquer mês passado -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <label style="font-size:12px;font-weight:600">Mês:</label>
+    <select id="hist-mes-sel" onchange="window._histMesRef=this.value;renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="">Mês anterior (padrão)</option>
+    </select>
   </div>
 
   <!-- Filtro de loja -->
@@ -16813,6 +16821,20 @@ if(typeof brData !== 'function'){
 // MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
 // ════════════════════════════════════════════════════════════════════
 function renderMesAnterior(){
+  // [FIX 28/07] Popula o seletor de mês com todos os meses que têm dados,
+  // preservando a seleção atual em window._histMesRef.
+  const _histSel = document.getElementById('hist-mes-sel');
+  if(_histSel){
+    const meses = mesesDisponiveis();
+    const _selecionado = window._histMesRef || '';
+    const mesesNomes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    _histSel.innerHTML = '<option value="">Mês anterior (padrão)</option>' +
+      meses.map(mr => {
+        const [y, m] = mr.split('-');
+        const _rot = mesesNomes[parseInt(m)] + '/' + y;
+        return `<option value="${mr}" ${_selecionado===mr?'selected':''}>${_rot}</option>`;
+      }).join('');
+  }
   // [FIX 23/07] Página liberada para todos os perfis. A loja fica travada
   // na própria loja; só o admin escolhe entre todas.
   const _selML = document.getElementById('mesant-loja');
@@ -16838,8 +16860,11 @@ function renderMesAnterior(){
     anoAnterior = parseInt(yyyy);
     mesAnterior = String(mesNum - 1).padStart(2, '0');
   }
-  const mesRef = anoAnterior + '-' + mesAnterior;
-  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(mesAnterior)];
+  // [FIX 28/07] Usa o mês escolhido no seletor, se houver; senão o mês anterior
+  const _mesEscolhido = window._histMesRef && /^\d{4}-\d{2}$/.test(window._histMesRef) ? window._histMesRef : null;
+  const mesRef = _mesEscolhido || (anoAnterior + '-' + mesAnterior);
+  const _mm = mesRef.split('-')[1];
+  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(_mm)];
   
   // Filtro de loja
   const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
@@ -17224,7 +17249,7 @@ function renderMesAnteriorDashboard(){
     }).join('');
   }
   const _tit = document.getElementById('mesant-widget-titulo');
-  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Mês Anterior' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
+  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Histórico' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
   
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
@@ -18801,7 +18826,80 @@ function renderPerformance(){
     const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
     subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
   }
-  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoAlertas;
+  // [NEW 28/07] Bloco Mês a Mês — meta, realizado, % e P.A. históricos
+  // Loja inteira: usa metaDoMes/realizadoDoMes/paDoMes já existentes
+  // Vendedora individual: usa calcVendPer(id, "YYYY-MM") e meta cadastrada da vendedora
+  const _mesesHist = mesesDisponiveis().slice(0, 6); // últimos 6 meses
+  let blocoMesAMes = '';
+  if(_mesesHist.length){
+    const linhas = _mesesHist.map(mr => {
+      let meta, real, pa, tm, nAtend;
+      if(vendId){
+        // Vendedora individual
+        const vObj = D.vendedoras.find(v => v.id === vendId) || {};
+        meta = Number(vObj.metaMes) || 0;
+        real = calcVendPer(vendId, mr);
+        // Peças e atendimentos da vendedora naquele mês
+        let itens = 0, atend = 0;
+        Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
+          if(d.startsWith(mr)){
+            itens += Number(vd.itens || 0);
+            const t = Number(vd.trans || 0);
+            atend += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
+          }
+        });
+        pa = atend > 0 ? itens / atend : 0;
+        tm = atend > 0 ? real / atend : 0;
+        nAtend = atend;
+      } else {
+        // Loja inteira
+        meta = metaDoMes(lid, mr).valor || 0;
+        real = realizadoDoMes(lid, mr).valor || 0;
+        const paObj = typeof paDoMes === 'function' ? paDoMes(lid, mr) : {valor:0};
+        pa = paObj.valor || 0;
+        // TM e atendimentos: usar vendasDoMes se existir
+        const atendObj = typeof vendasDoMes === 'function' ? vendasDoMes(lid, mr) : {valor:0};
+        nAtend = atendObj.valor || 0;
+        tm = nAtend > 0 ? real / nAtend : 0;
+      }
+      const pct = meta > 0 ? real / meta * 100 : 0;
+      const cor = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : pct > 0 ? 'var(--verm)' : 'var(--muted)';
+      const [ano, mesN] = mr.split('-');
+      const mesesNome = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+      const mesLabel = mesesNome[parseInt(mesN)-1] + '/' + ano.slice(2);
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
+        <td style="padding:9px 8px;font-weight:600">${mesLabel}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${meta > 0 ? fmt(meta) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${real > 0 ? fmt(real) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${meta > 0 ? pct.toFixed(0) + '%' : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--azul)">${tm > 0 ? fmt(tm) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:#b07cd6">${pa > 0 ? fmtPA(pa) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${nAtend > 0 ? nAtend.toLocaleString('pt-BR') : '--'}</td>
+      </tr>`;
+    }).join('');
+    const _tituloMM = vendId
+      ? `Últimos 6 meses de ${D.vendedoras.find(v=>v.id===vendId)?.nome || 'vendedora'}`
+      : `Últimos 6 meses da loja`;
+    blocoMesAMes = `<div class="sc" style="margin-top:16px">
+      <div class="st">📅 ${_tituloMM}</div>
+      <div style="overflow-x:auto;margin-top:8px">
+        <table style="width:100%;border-collapse:collapse;min-width:560px;font-size:12px">
+          <thead><tr style="border-bottom:1px solid var(--borda)">
+            <th style="padding:8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px">MÊS</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">META</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">REALIZADO</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">%</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">TM</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">P.A.</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">ATEND.</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoMesAMes + blocoAlertas;
 }
 
 
