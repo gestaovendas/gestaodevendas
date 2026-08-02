@@ -260,7 +260,10 @@ try{
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
           _campExcluidos:      D2._campExcluidos       || [],
-          _vendsExcluidas:     D2._vendsExcluidas      || []
+          _vendsExcluidas:     D2._vendsExcluidas      || [],
+          // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
+          _lojasArquivadas:    D2._lojasArquivadas     || [],
+          _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -316,6 +319,45 @@ try{
             });
             if(D2.historicoMeses?.[lidA]){
               payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: D2.historicoMeses[lidA] });
+            }
+            // [FIX 27/07] admin propaga metasLoja/vendedoras/tombstones desta loja.
+            // Antes o admin gravava só no principal, e o doc da loja continuava com
+            // metas antigas — se a loja lesse o doc dela antes do principal, ou por
+            // qualquer race no merge, via valor velho. Agora o admin escreve a meta
+            // que ele acabou de definir DIRETO no doc da loja também. Merge no
+            // fsCarregar por _savedAt garante que a mais recente vença.
+            if(D2.metasLoja?.[lidA]){
+              const metasRemotasLoja = remotoA.metasLoja?.[lidA] || {};
+              const metasFinal = Object.assign({}, metasRemotasLoja);
+              Object.entries(D2.metasLoja[lidA]).forEach(([mr, m])=>{
+                const _tsL = Number(m?._savedAt||0);
+                const _tsR = Number(metasRemotasLoja[mr]?._savedAt||0);
+                if(!metasRemotasLoja[mr] || _tsL >= _tsR) metasFinal[mr] = m;
+              });
+              payloadA.metasLoja = Object.assign({}, remotoA.metasLoja||{}, { [lidA]: metasFinal });
+            }
+            // vendedoras da loja: mesma regra
+            if(Array.isArray(D2.vendedoras)){
+              const vendsLoja = D2.vendedoras.filter(v=>v.loja===lidA);
+              if(vendsLoja.length){
+                const remotasV = Array.isArray(remotoA.vendedoras) ? remotoA.vendedoras : [];
+                const outV = remotasV.slice();
+                vendsLoja.forEach(rv=>{
+                  const i = outV.findIndex(x=>x.id===rv.id);
+                  if(i<0) outV.push(rv);
+                  else {
+                    const _tsL = Number(rv._savedAt||0);
+                    const _tsR = Number(outV[i]?._savedAt||0);
+                    if(_tsL >= _tsR) outV[i] = rv;
+                  }
+                });
+                payloadA.vendedoras = outV;
+              }
+            }
+            // tombstones (lojas arquivadas etc)
+            if(Array.isArray(D2._lojasArquivadas)){
+              payloadA._lojasArquivadas   = D2._lojasArquivadas;
+              payloadA._lojasArquivadasTs = D2._lojasArquivadasTs || Date.now();
             }
             await setDoc(doc(db,"avatim",docIdA), {
               dados:  JSON.stringify(payloadA),
@@ -1567,7 +1609,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">Lançar Venda</div>
     <div class="gr">
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="l-data" value="">
+        <input type="date" id="l-data" value="" onchange="carregarVendsForm()">
       </div>
       <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
         <select id="l-loja" onchange="carregarVendsForm()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
@@ -3838,7 +3880,10 @@ service cloud.firestore {
 // ============================================================
 // CONSTANTES
 // ============================================================
-const LOJAS=[
+// [NEW 27/07] LOJAS_TODAS é a lista completa (7 lojas). Uma loja arquivada
+// não deve mais aparecer em rankings, dashboards ou totalizações — mas o
+// histórico dela precisa continuar consultável (dados de meses anteriores).
+const LOJAS_TODAS=[
   {id:"mooca",      nome:"Mooca Plaza",       cnpj:"31.290.480/0001-04"},
   {id:"leopoldina", nome:"Vila Leopoldina",    cnpj:"49.574.300/0001-73"},
   {id:"perdizes",   nome:"Perdizes",           cnpj:"49.574.300/0002-54"},
@@ -3847,6 +3892,69 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
+
+// LOJAS agora é um GETTER — filtra as arquivadas dinamicamente. Isto 
+// preserva os 111 usos existentes (LOJAS.forEach, LOJAS.reduce, etc.) e
+// automaticamente pula lojas arquivadas em todo dashboard/agregação sem
+// precisar tocar em cada laço.
+function lojaArquivada(lid){
+  try{ return Array.isArray(D?._lojasArquivadas) && D._lojasArquivadas.includes(lid); }
+  catch(e){ return false; }
+}
+Object.defineProperty(globalThis, 'LOJAS', {
+  get(){ return LOJAS_TODAS.filter(l => !lojaArquivada(l.id)); },
+  configurable: true
+});
+
+// Ações de arquivar/reativar loja (só admin) — seguem a mesma REGRA DE
+// AUTORIDADE de campanhas: gestão só pelo admin
+function arquivarLoja(lid){
+  if(!isAdmin()){ showToast('Apenas a gestão pode arquivar lojas.','warn'); return; }
+  const loja = LOJAS_TODAS.find(l=>l.id===lid);
+  if(!loja){ showToast('Loja não encontrada.','err'); return; }
+  if(!confirm('Arquivar a loja '+loja.nome+'?\n\nEla sairá do dashboard e das agregações, mas o histórico será preservado.')) return;
+  _toggleLojaArquivada(lid, true, loja.nome);
+}
+function reativarLoja(lid){
+  if(!isAdmin()){ showToast('Apenas a gestão pode reativar lojas.','warn'); return; }
+  const loja = LOJAS_TODAS.find(l=>l.id===lid);
+  if(!loja) return;
+  _toggleLojaArquivada(lid, false, loja.nome);
+}
+// [FIX 27/07] Mesmo modelo de arquivarVendedora: bypass do save() com guards,
+// gravação imediata no localStorage e envio direto ao fsGravar.
+async function _toggleLojaArquivada(lid, arquivar, nome){
+  if(!Array.isArray(D._lojasArquivadas)) D._lojasArquivadas = [];
+  if(arquivar){
+    if(!D._lojasArquivadas.includes(lid)) D._lojasArquivadas.push(lid);
+  } else {
+    D._lojasArquivadas = D._lojasArquivadas.filter(x=>x!==lid);
+  }
+  D._lojasArquivadasTs = Date.now();
+  // gravação imediata no localStorage
+  try{ localStorage.setItem('avatim_v5', JSON.stringify(D)); }catch(e){}
+  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now();
+  showToast(arquivar ? '📦 '+nome+' arquivada' : '✅ '+nome+' reativada');
+  if(typeof carregarDash === 'function') carregarDash();
+  if(typeof renderLojas === 'function') renderLojas();
+  // Firebase direto — bypass do save() com guards
+  try{
+    const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
+    if(_okAL && window.fsGravar){
+      await window.fsGravar(JSON.stringify(D));
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
+      console.log('[Avatim] _toggleLojaArquivada Firebase OK:', lid, 'arquivada=', arquivar);
+    } else {
+      window._pendingLocalData = null;
+      showToast('⚠️ Firebase offline. '+nome+' salva localmente.','warn');
+    }
+  }catch(eL){
+    window._pendingLocalData = null;
+    showToast('⚠️ '+nome+' salva localmente. Firebase: '+(eL.code||eL.message),'warn');
+  }
+}
 
 // Hashes PBKDF2-SHA256, 100.000 iterações + salt derivado do email
 // Torna brute-force e rainbow tables ineficazes (custo ~100.000x maior que SHA-256 puro)
@@ -7443,7 +7551,10 @@ function carregarVendsForm(lidOverride){
     }
   }
   
-  const hj=hoje();
+  // [FIX 27/07] respeita a data escolhida em l-data (permite lançar/editar dias
+  // anteriores). Antes o form sempre carregava dados de hoje, mesmo com data trocada.
+  const _dataEl = document.getElementById("l-data");
+  const hj = (_dataEl?.value && /^\d{4}-\d{2}-\d{2}$/.test(_dataEl.value)) ? _dataEl.value : hoje();
   const vends=vendsAtivas(lid);
   const grid=document.getElementById("vend-lanc-grid");
   if(!grid) return;
@@ -9784,6 +9895,9 @@ function tabLojas(t,el){_tabLojas=t;document.querySelectorAll("#page-lojas .tab"
 
 function renderLojas(per="hoje"){
   const hj=hoje();
+  // [FIX 27/07] LOJAS agora exclui arquivadas automaticamente (getter).
+  // Aqui a lista de renderização também exclui — a seção de "Arquivadas"
+  // é renderizada separadamente logo abaixo.
   const lojasBase = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
   const ld=lojasBase.map(l=>{
     const m=getMetas(l.id);
@@ -9799,11 +9913,27 @@ function renderLojas(per="hoje"){
   document.getElementById("rede-best-v").textContent=fmt(ld[0].v);
   document.getElementById("rede-alrt").textContent=ld[ld.length-1].nome;
   document.getElementById("rede-media").textContent=med.toFixed(0)+"%";
+  // [NEW 27/07] Bloco de lojas arquivadas para o admin (reativar)
+  const _gridEl = document.getElementById("lojas-grid");
+  const _arquivadas = (D._lojasArquivadas || []);
+  const _renderArquivadas = () => {
+    if(!isAdmin() || !_arquivadas.length) return '';
+    return `<div style="grid-column:1/-1;margin-top:16px;padding-top:12px;border-top:1px dashed var(--borda)">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📦 Lojas arquivadas (${_arquivadas.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${_arquivadas.map(lid=>{
+        const _lArq = LOJAS_TODAS.find(l=>l.id===lid);
+        if(!_lArq) return '';
+        return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted);text-decoration:line-through">${_lArq.nome}</span>
+          <button onclick="reativarLoja('${_lArq.id}')" style="background:var(--verde);color:var(--preto);border:none;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">↩️ Reativar</button>
+        </div>`;
+      }).join('')}</div></div>`;
+  };
   document.getElementById("lojas-grid").innerHTML=ld.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
     const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
-  }).join("");
+    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span>${isAdmin()?`<button onclick="event.stopPropagation();arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer" title="Arquivar loja">📦</button>`:''}</div></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
+  }).join("") + _renderArquivadas();
   const cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-lojas").innerHTML=ld.map((l,i)=>{
     const max=ld[0].v||1, c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
@@ -11850,6 +11980,30 @@ function calcPrevLoja(lid){
   if(el("ml-pssem-"+lid)) el("ml-pssem-"+lid).textContent = fmt(auto.superSem);
   if(el("ml-psdia-"+lid)) el("ml-psdia-"+lid).textContent = fmt(auto.superDia);
   if(el("ml-pv-"+lid))    el("ml-pv-"+lid).textContent    = nv>0?fmt(parseFloat((mes/nv).toFixed(2))):"--";
+
+  // [NEW 27/07] Preencher automaticamente meta de cada vendedora com
+  // meta_loja/nº_vendedoras, respeitando edição manual (dataset.manual="1")
+  if(mes > 0 && nv > 0){
+    const metaVend      = parseFloat((mes/nv).toFixed(2));
+    const superVend     = parseFloat((smes/nv).toFixed(2));
+    const ticketVend    = ticket;
+    vendsAtivas(lid).forEach(v => {
+      const mvEl  = document.getElementById("mv-mes-"+v.id);
+      const smvEl = document.getElementById("mv-smes-"+v.id);
+      const tvEl  = document.getElementById("mv-ticket-"+v.id);
+      // só preenche se estiver vazio E não foi editado manualmente
+      if(mvEl && (!mvEl.value || mvEl.value === "0") && mvEl.dataset.manual !== "1"){
+        mvEl.value = metaVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+      if(smvEl && (!smvEl.value || smvEl.value === "0") && smvEl.dataset.manual !== "1"){
+        smvEl.value = superVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+      if(tvEl && (!tvEl.value || tvEl.value === "0") && tvEl.dataset.manual !== "1"){
+        tvEl.value = ticketVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+    });
+  }
+
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
@@ -11945,7 +12099,7 @@ function renderMetasVendSection(lid){
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:600;margin-bottom:3px">META MÊS (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" placeholder="Ex: 48000"
+          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
             style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.3)'">
         </div>
