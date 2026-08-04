@@ -1362,18 +1362,17 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📅</span>Histórico</button>
     <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
     <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
          histórico é feito em "Lançar Histórico". A página segue existindo para
          não quebrar links antigos, mas sai da navegação. -->
     <button class="ni" onclick="nav('controle')" id="nav-controle"><span class="ic">🎯</span>Controle Ano a Ano</button>
-    <button class="ni" onclick="nav('plano')" id="nav-plano"><span class="ic">🗺️</span>Plano de Ação</button>
+    <button class="ni" onclick="nav('plano')" id="nav-plano"><span class="ic">📆</span>Análise Semanal</button>
     <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
-    <button class="ni admin-only" onclick="nav('historico')" id="nav-historico" style="display:none"><span class="ic">📅</span>Histórico</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">🏷️</span>Campanhas</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -1527,7 +1526,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Mês Anterior (widget no Dashboard) -->
       <div class="rcard" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Mês Anterior</span></div>
+          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Histórico</span></div>
           <div style="display:flex;gap:6px;align-items:center">
             <!-- [NEW 22/07] navegação entre meses (antes era fixo no mês passado) -->
             <button onclick="mesAntNavegar(-1)" class="btn-s" title="Mês anterior"
@@ -2250,7 +2249,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-mesant">
   <div class="ph">
     <div>
-      <h1 class="pt">Mês <span>Anterior</span></h1>
+      <h1 class="pt">His<span>tórico</span></h1>
       <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
     </div>
   </div>
@@ -2758,7 +2757,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-plano">
   <div class="ph">
     <div>
-      <h1 class="pt">Plano de <span>Ação</span></h1>
+      <h1 class="pt">Análise <span>Semanal</span></h1>
       <div class="ps">Meta semanal e diária por loja — recalculada conforme o realizado</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -5714,6 +5713,8 @@ function planoSemanal(lid, mesRef){
     const dIni = mesRef+'-'+pad2(s.ini);
     const dFim = mesRef+'-'+pad2(s.fim);
     const realizado = calcFatEntre(lid, dIni, dFim) || 0;
+    const clientes  = calcNAtendEntre(lid, dIni, dFim) || 0;  // cupons/atendimentos
+    const itens     = calcNItensEntre(lid, dIni, dFim) || 0;  // peças
     const semanasRestantes = 4 - s.n + 1;
     // meta desta semana = o que ainda falta ÷ semanas restantes (incl. esta)
     const metaSemana = semanasRestantes>0 ? Math.round((restante/semanasRestantes)*100)/100 : 0;
@@ -5725,12 +5726,26 @@ function planoSemanal(lid, mesRef){
       metaSemana, realizado,
       pct: metaSemana>0 ? (realizado/metaSemana*100) : 0,
       faltaSemana: Math.max(0, metaSemana - realizado),
-      metaDia: dias>0 ? Math.round((metaSemana/dias)*100)/100 : 0
+      metaDia: dias>0 ? Math.round((metaSemana/dias)*100)/100 : 0,
+      clientes, itens,
+      tm: clientes>0 ? realizado/clientes : 0,
+      pa: clientes>0 ? itens/clientes : 0
     };
+  });
+  // [NEW 04/08] crescimento de cada indicador vs a SEMANA ANTERIOR
+  linhas.forEach((l,i)=>{
+    const ant = i>0 ? linhas[i-1] : null;
+    l.gReal = _cresc(l.realizado, ant?ant.realizado:null);
+    l.gCli  = _cresc(l.clientes,  ant?ant.clientes:null);
+    l.gIt   = _cresc(l.itens,     ant?ant.itens:null);
+    l.gTM   = _cresc(l.tm,        ant?ant.tm:null);
+    l.gPA   = _cresc(l.pa,        ant?ant.pa:null);
   });
   return {
     metaMes, linhas,
     realizadoMes: linhas.reduce((a,l)=>a+l.realizado,0),
+    clientesMes: linhas.reduce((a,l)=>a+l.clientes,0),
+    itensMes: linhas.reduce((a,l)=>a+l.itens,0),
     origemMeta: (metaDoMes(lid, mesRef)?.origem) || null
   };
 }
@@ -5752,6 +5767,20 @@ function metaDiaPlano(lid, mesRef, dataRef){
   const diasRest = sem.fim - dia + 1;
   return diasRest>0 ? Math.round((faltaSem/diasRest)*100)/100 : 0;
 }
+// Crescimento percentual vs período anterior (verde sobe, vermelho cai)
+function _cresc(atual, ant){
+  if(ant==null || ant===0) return {pct:0, txt:'—', cor:'var(--muted)'};
+  const pct = (atual - ant)/ant*100;
+  const seta = pct>0.5 ? '▲' : (pct<-0.5 ? '▼' : '•');
+  const cor  = pct>0.5 ? 'var(--verde)' : (pct<-0.5 ? 'var(--verm)' : 'var(--muted)');
+  const sinal = pct>0 ? '+' : '';
+  return {pct, txt: seta+' '+sinal+pct.toFixed(0)+'%', cor};
+}
+// Célula de tabela com valor + delta de crescimento embaixo
+function _celG(v, cor, g){
+  return `<td><div style="color:${cor};font-weight:600">${v}</div>`
+       + `<div style="font-size:10px;color:${g.cor};font-weight:600;margin-top:2px">${g.txt}</div></td>`;
+}
 function _corPct(p){
   if(p>=100) return 'var(--verde)';
   if(p>=70)  return 'var(--ouro)';
@@ -5765,7 +5794,7 @@ function _statusPlano(p){
   return {t:'Sem venda', c:'var(--muted)'};
 }
 
-// Popula seletores da página Plano de Ação
+// Popula seletores da página Análise Semanal
 function popularSelectPlano(){
   const selMes = document.getElementById('plano-mes-sel');
   if(selMes){
@@ -5793,7 +5822,7 @@ function popularSelectPlano(){
   }
 }
 
-// Render principal da página Plano de Ação
+// Render principal da página Análise Semanal
 function renderPlanoAcao(){
   const box = document.getElementById('plano-conteudo');
   if(!box) return;
@@ -5841,7 +5870,7 @@ function _planoResumoRede(mesRef){
 
   return `
   <div class="sc">
-    <div class="st" style="margin-bottom:14px">🗺️ Plano de Ação — Rede ${emMesAtual?'(Semana '+semanaDoMes(hj)+')':''}</div>
+    <div class="st" style="margin-bottom:14px">📆 Análise Semanal — Rede ${emMesAtual?'(Semana '+semanaDoMes(hj)+')':''}</div>
     <div style="overflow-x:auto">
       <table class="dtable">
         <thead><tr>
@@ -5872,7 +5901,7 @@ function _planoDetalheLoja(lid, mesRef){
   const faltaMes = Math.max(0, p.metaMes - p.realizadoMes);
 
   if(p.metaMes<=0){
-    return `<div class="sc"><div class="st">🗺️ Plano de Ação — ${nome}</div>
+    return `<div class="sc"><div class="st">📆 Análise Semanal — ${nome}</div>
       <div style="color:var(--muted);font-size:13px;padding:8px 0">
         Nenhuma <b>meta do mês</b> cadastrada para esta loja em ${mesRef}.
         Cadastre em <b>Metas por Loja</b> ou <b>Lançar Histórico</b> para o plano ser calculado.
@@ -5897,8 +5926,12 @@ function _planoDetalheLoja(lid, mesRef){
         </td>
         <td style="color:var(--muted)">${dIniF}–${dFimF}</td>
         <td style="font-weight:700">${fmt(l.metaSemana)}</td>
-        <td style="color:var(--verde);font-weight:600">${fmt(l.realizado)}</td>
+        ${_celG(fmt(l.realizado),'var(--verde)', l.gReal)}
         <td style="color:${_corPct(l.pct)};font-weight:700">${l.pct.toFixed(0)}%</td>
+        ${_celG(String(l.clientes),'var(--texto)', l.gCli)}
+        ${_celG(String(l.itens),'var(--texto)', l.gIt)}
+        ${_celG(fmt(l.tm),'var(--azul)', l.gTM)}
+        ${_celG(fmtPA(l.pa),'#b07cd6', l.gPA)}
         <td style="color:var(--azul)">${fmt(l.metaDia)}</td>
         <td><span style="color:${st.c};font-weight:700">${st.t}</span></td>
       </tr>`;
@@ -5914,7 +5947,7 @@ function _planoDetalheLoja(lid, mesRef){
     const diasRest = sem.fim - Number(hj.split('-')[2]) + 1;
     blocoDia = `
       <div class="sc" style="margin-top:14px;border:1px solid rgba(201,168,76,.3)">
-        <div class="st">🎯 Plano de hoje — Semana ${sem.n}</div>
+        <div class="st">🎯 Meta de hoje — Semana ${sem.n}</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
           ${kpi('META DE HOJE', fmt(metaDiaHoje), 'var(--ouro)')}
           ${kpi('JÁ FEITO HOJE', fmt(realHoje), 'var(--verde)')}
@@ -5931,7 +5964,7 @@ function _planoDetalheLoja(lid, mesRef){
 
   return `
   <div class="sc">
-    <div class="st" style="margin-bottom:14px">🗺️ Plano de Ação — ${nome}</div>
+    <div class="st" style="margin-bottom:14px">📆 Análise Semanal — ${nome}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px">
       ${kpi('META DO MÊS', fmt(p.metaMes))}
       ${kpi('REALIZADO', fmt(p.realizadoMes), 'var(--verde)')}
@@ -5941,15 +5974,16 @@ function _planoDetalheLoja(lid, mesRef){
     <div style="overflow-x:auto">
       <table class="dtable">
         <thead><tr>
-          <th>Semana</th><th>Período</th><th>Meta da semana</th><th>Realizado</th>
-          <th>%</th><th>Meta/dia</th><th>Status</th>
+          <th>Semana</th><th>Período</th><th>Meta</th><th>Realizado</th><th>%</th>
+          <th>Clientes</th><th>Itens</th><th>TM</th><th>P.A.</th><th>Meta/dia</th><th>Status</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">
       A <b>meta da semana</b> se ajusta sozinha: o que uma semana não fecha é redistribuído
-      entre as semanas seguintes (falta ÷ semanas restantes).
+      entre as semanas seguintes (falta ÷ semanas restantes). Os percentuais <b>▲▼</b> ao lado
+      de cada indicador mostram o <b>crescimento vs a semana anterior</b> (Realizado, Clientes, Itens, TM e P.A.).
     </div>
   </div>
   ${blocoDia}`;
@@ -6590,7 +6624,7 @@ function nav(pg){
       renderMesAnterior();
     },
     plano:()=>{
-      // [NEW 04/08] Plano de Ação
+      // [NEW 04/08] Análise Semanal
       popularSelectPlano();
       renderPlanoAcao();
     },
@@ -17381,7 +17415,7 @@ function renderMesAnteriorDashboard(){
     }).join('');
   }
   const _tit = document.getElementById('mesant-widget-titulo');
-  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Mês Anterior' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
+  if(_tit) _tit.textContent = 'Histórico — ' + mesNome + '/' + anoSel;
   
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
