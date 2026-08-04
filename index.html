@@ -260,10 +260,7 @@ try{
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
           _campExcluidos:      D2._campExcluidos       || [],
-          _vendsExcluidas:     D2._vendsExcluidas      || [],
-          // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
-          _lojasArquivadas:    D2._lojasArquivadas     || [],
-          _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0
+          _vendsExcluidas:     D2._vendsExcluidas      || []
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -319,45 +316,6 @@ try{
             });
             if(D2.historicoMeses?.[lidA]){
               payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: D2.historicoMeses[lidA] });
-            }
-            // [FIX 27/07] admin propaga metasLoja/vendedoras/tombstones desta loja.
-            // Antes o admin gravava só no principal, e o doc da loja continuava com
-            // metas antigas — se a loja lesse o doc dela antes do principal, ou por
-            // qualquer race no merge, via valor velho. Agora o admin escreve a meta
-            // que ele acabou de definir DIRETO no doc da loja também. Merge no
-            // fsCarregar por _savedAt garante que a mais recente vença.
-            if(D2.metasLoja?.[lidA]){
-              const metasRemotasLoja = remotoA.metasLoja?.[lidA] || {};
-              const metasFinal = Object.assign({}, metasRemotasLoja);
-              Object.entries(D2.metasLoja[lidA]).forEach(([mr, m])=>{
-                const _tsL = Number(m?._savedAt||0);
-                const _tsR = Number(metasRemotasLoja[mr]?._savedAt||0);
-                if(!metasRemotasLoja[mr] || _tsL >= _tsR) metasFinal[mr] = m;
-              });
-              payloadA.metasLoja = Object.assign({}, remotoA.metasLoja||{}, { [lidA]: metasFinal });
-            }
-            // vendedoras da loja: mesma regra
-            if(Array.isArray(D2.vendedoras)){
-              const vendsLoja = D2.vendedoras.filter(v=>v.loja===lidA);
-              if(vendsLoja.length){
-                const remotasV = Array.isArray(remotoA.vendedoras) ? remotoA.vendedoras : [];
-                const outV = remotasV.slice();
-                vendsLoja.forEach(rv=>{
-                  const i = outV.findIndex(x=>x.id===rv.id);
-                  if(i<0) outV.push(rv);
-                  else {
-                    const _tsL = Number(rv._savedAt||0);
-                    const _tsR = Number(outV[i]?._savedAt||0);
-                    if(_tsL >= _tsR) outV[i] = rv;
-                  }
-                });
-                payloadA.vendedoras = outV;
-              }
-            }
-            // tombstones (lojas arquivadas etc)
-            if(Array.isArray(D2._lojasArquivadas)){
-              payloadA._lojasArquivadas   = D2._lojasArquivadas;
-              payloadA._lojasArquivadasTs = D2._lojasArquivadasTs || Date.now();
             }
             await setDoc(doc(db,"avatim",docIdA), {
               dados:  JSON.stringify(payloadA),
@@ -1404,13 +1362,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Mês Anterior</button>
     <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
     <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
          histórico é feito em "Lançar Histórico". A página segue existindo para
          não quebrar links antigos, mas sai da navegação. -->
     <button class="ni" onclick="nav('controle')" id="nav-controle"><span class="ic">🎯</span>Controle Ano a Ano</button>
+    <button class="ni" onclick="nav('plano')" id="nav-plano"><span class="ic">🗺️</span>Plano de Ação</button>
     <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
@@ -1568,7 +1527,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <!-- Mês Anterior (widget no Dashboard) -->
       <div class="rcard" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Histórico</span></div>
+          <div style="font-size:12px;font-weight:600">📈 <span id="mesant-widget-titulo">Mês Anterior</span></div>
           <div style="display:flex;gap:6px;align-items:center">
             <!-- [NEW 22/07] navegação entre meses (antes era fixo no mês passado) -->
             <button onclick="mesAntNavegar(-1)" class="btn-s" title="Mês anterior"
@@ -1609,7 +1568,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">Lançar Venda</div>
     <div class="gr">
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="l-data" value="" onchange="carregarVendsForm()">
+        <input type="date" id="l-data" value="">
       </div>
       <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
         <select id="l-loja" onchange="carregarVendsForm()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
@@ -2287,21 +2246,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 
-<!-- HISTÓRICO — performance dos meses passados -->
+<!-- MÊS ANTERIOR — performance do mês passado -->
 <div class="page" id="page-mesant">
   <div class="ph">
     <div>
-      <h1 class="pt">Histó<span>rico</span></h1>
+      <h1 class="pt">Mês <span>Anterior</span></h1>
       <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
     </div>
-  </div>
-
-  <!-- [NEW 28/07] Seletor de mês — permite ver performance de qualquer mês passado -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Mês:</label>
-    <select id="hist-mes-sel" onchange="window._histMesRef=this.value;renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="">Mês anterior (padrão)</option>
-    </select>
   </div>
 
   <!-- Filtro de loja -->
@@ -2804,6 +2755,20 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <!-- ESTOQUE -->
+<div class="page" id="page-plano">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Plano de <span>Ação</span></h1>
+      <div class="ps">Meta semanal e diária por loja — recalculada conforme o realizado</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="plano-loja-sel" class="admin-only" style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none" onchange="renderPlanoAcao()"></select>
+      <select id="plano-mes-sel" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none" onchange="renderPlanoAcao()"></select>
+    </div>
+  </div>
+  <div id="plano-conteudo"></div>
+</div>
+
 <div class="page" id="page-estoque">
   <div class="ph">
     <div>
@@ -3888,10 +3853,7 @@ service cloud.firestore {
 // ============================================================
 // CONSTANTES
 // ============================================================
-// [NEW 27/07] LOJAS_TODAS é a lista completa (7 lojas). Uma loja arquivada
-// não deve mais aparecer em rankings, dashboards ou totalizações — mas o
-// histórico dela precisa continuar consultável (dados de meses anteriores).
-const LOJAS_TODAS=[
+const LOJAS=[
   {id:"mooca",      nome:"Mooca Plaza",       cnpj:"31.290.480/0001-04"},
   {id:"leopoldina", nome:"Vila Leopoldina",    cnpj:"49.574.300/0001-73"},
   {id:"perdizes",   nome:"Perdizes",           cnpj:"49.574.300/0002-54"},
@@ -3900,69 +3862,6 @@ const LOJAS_TODAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
-
-// LOJAS agora é um GETTER — filtra as arquivadas dinamicamente. Isto 
-// preserva os 111 usos existentes (LOJAS.forEach, LOJAS.reduce, etc.) e
-// automaticamente pula lojas arquivadas em todo dashboard/agregação sem
-// precisar tocar em cada laço.
-function lojaArquivada(lid){
-  try{ return Array.isArray(D?._lojasArquivadas) && D._lojasArquivadas.includes(lid); }
-  catch(e){ return false; }
-}
-Object.defineProperty(globalThis, 'LOJAS', {
-  get(){ return LOJAS_TODAS.filter(l => !lojaArquivada(l.id)); },
-  configurable: true
-});
-
-// Ações de arquivar/reativar loja (só admin) — seguem a mesma REGRA DE
-// AUTORIDADE de campanhas: gestão só pelo admin
-function arquivarLoja(lid){
-  if(!isAdmin()){ showToast('Apenas a gestão pode arquivar lojas.','warn'); return; }
-  const loja = LOJAS_TODAS.find(l=>l.id===lid);
-  if(!loja){ showToast('Loja não encontrada.','err'); return; }
-  if(!confirm('Arquivar a loja '+loja.nome+'?\n\nEla sairá do dashboard e das agregações, mas o histórico será preservado.')) return;
-  _toggleLojaArquivada(lid, true, loja.nome);
-}
-function reativarLoja(lid){
-  if(!isAdmin()){ showToast('Apenas a gestão pode reativar lojas.','warn'); return; }
-  const loja = LOJAS_TODAS.find(l=>l.id===lid);
-  if(!loja) return;
-  _toggleLojaArquivada(lid, false, loja.nome);
-}
-// [FIX 27/07] Mesmo modelo de arquivarVendedora: bypass do save() com guards,
-// gravação imediata no localStorage e envio direto ao fsGravar.
-async function _toggleLojaArquivada(lid, arquivar, nome){
-  if(!Array.isArray(D._lojasArquivadas)) D._lojasArquivadas = [];
-  if(arquivar){
-    if(!D._lojasArquivadas.includes(lid)) D._lojasArquivadas.push(lid);
-  } else {
-    D._lojasArquivadas = D._lojasArquivadas.filter(x=>x!==lid);
-  }
-  D._lojasArquivadasTs = Date.now();
-  // gravação imediata no localStorage
-  try{ localStorage.setItem('avatim_v5', JSON.stringify(D)); }catch(e){}
-  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
-  window._pendingLocalDataTs = Date.now();
-  showToast(arquivar ? '📦 '+nome+' arquivada' : '✅ '+nome+' reativada');
-  if(typeof carregarDash === 'function') carregarDash();
-  if(typeof renderLojas === 'function') renderLojas();
-  // Firebase direto — bypass do save() com guards
-  try{
-    const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
-    if(_okAL && window.fsGravar){
-      await window.fsGravar(JSON.stringify(D));
-      window._pendingLocalData   = null;
-      window._pendingLocalDataTs = null;
-      console.log('[Avatim] _toggleLojaArquivada Firebase OK:', lid, 'arquivada=', arquivar);
-    } else {
-      window._pendingLocalData = null;
-      showToast('⚠️ Firebase offline. '+nome+' salva localmente.','warn');
-    }
-  }catch(eL){
-    window._pendingLocalData = null;
-    showToast('⚠️ '+nome+' salva localmente. Firebase: '+(eL.code||eL.message),'warn');
-  }
-}
 
 // Hashes PBKDF2-SHA256, 100.000 iterações + salt derivado do email
 // Torna brute-force e rainbow tables ineficazes (custo ~100.000x maior que SHA-256 puro)
@@ -5785,6 +5684,278 @@ function metaSemanaProgressiva(lid, semana){
   return metaProgressiva;
 }
 
+// ============================================================
+// [NEW 04/08] PLANO DE AÇÃO — meta semanal por DIVISÃO IGUAL e
+// redistribuição do que falta (modelo da Moni).
+//   Ex.: meta 100.000 ÷ 4 = 25.000/semana.
+//        S1 realizou só 15.000 → (100.000 − 15.000) ÷ 3 = 28.333,33
+//        nas semanas 2, 3 e 4. Se S1 tivesse feito 30.000 →
+//        (100.000 − 30.000) ÷ 3 = 23.333,33 (vale p/ maior ou menor).
+// Fonte da meta: metaDoMes() (cadastro + Lançar Histórico).
+// Fonte do realizado: calcFatEntre() (lançamento diário + fallback loja).
+// ============================================================
+function semanasDoMes(mesRef){
+  const [y,m] = (mesRef||mesAtual()).split('-').map(Number);
+  const ultimo = new Date(y, m, 0).getDate();
+  return [
+    {n:1, ini:1,  fim:7},
+    {n:2, ini:8,  fim:14},
+    {n:3, ini:15, fim:21},
+    {n:4, ini:22, fim:ultimo}
+  ];
+}
+function planoSemanal(lid, mesRef){
+  mesRef = mesRef || mesAtual();
+  const metaMes = (metaDoMes(lid, mesRef)?.valor) || 0;
+  const sems = semanasDoMes(mesRef);
+  const pad2 = n => String(n).padStart(2,'0');
+  let restante = metaMes;
+  const linhas = sems.map(s => {
+    const dIni = mesRef+'-'+pad2(s.ini);
+    const dFim = mesRef+'-'+pad2(s.fim);
+    const realizado = calcFatEntre(lid, dIni, dFim) || 0;
+    const semanasRestantes = 4 - s.n + 1;
+    // meta desta semana = o que ainda falta ÷ semanas restantes (incl. esta)
+    const metaSemana = semanasRestantes>0 ? Math.round((restante/semanasRestantes)*100)/100 : 0;
+    // abate o REALIZADO real (não a meta) — é isso que redistribui p/ frente
+    restante = Math.max(0, restante - realizado);
+    const dias = s.fim - s.ini + 1;
+    return {
+      n:s.n, ini:s.ini, fim:s.fim, dIni, dFim, dias,
+      metaSemana, realizado,
+      pct: metaSemana>0 ? (realizado/metaSemana*100) : 0,
+      faltaSemana: Math.max(0, metaSemana - realizado),
+      metaDia: dias>0 ? Math.round((metaSemana/dias)*100)/100 : 0
+    };
+  });
+  return {
+    metaMes, linhas,
+    realizadoMes: linhas.reduce((a,l)=>a+l.realizado,0),
+    origemMeta: (metaDoMes(lid, mesRef)?.origem) || null
+  };
+}
+// Semana (1..4) a que uma data pertence dentro do próprio plano
+function _linhaSemanaPlano(plano, dataRef){
+  const dia = Number((dataRef||hoje()).split('-')[2]);
+  return plano.linhas.find(l => dia>=l.ini && dia<=l.fim) || plano.linhas[3];
+}
+// Meta do DIA (semana atual): quanto falta na semana ÷ dias restantes (incl. hoje)
+function metaDiaPlano(lid, mesRef, dataRef){
+  dataRef = dataRef || hoje();
+  mesRef  = mesRef || dataRef.slice(0,7);
+  const plano = planoSemanal(lid, mesRef);
+  const sem = _linhaSemanaPlano(plano, dataRef);
+  const dia = Number(dataRef.split('-')[2]);
+  const pad2 = n => String(n).padStart(2,'0');
+  const realAteOntem = dia>sem.ini ? (calcFatEntre(lid, sem.dIni, mesRef+'-'+pad2(dia-1))||0) : 0;
+  const faltaSem = Math.max(0, sem.metaSemana - realAteOntem);
+  const diasRest = sem.fim - dia + 1;
+  return diasRest>0 ? Math.round((faltaSem/diasRest)*100)/100 : 0;
+}
+function _corPct(p){
+  if(p>=100) return 'var(--verde)';
+  if(p>=70)  return 'var(--ouro)';
+  if(p>0)    return 'var(--verm)';
+  return 'var(--muted)';
+}
+function _statusPlano(p){
+  if(p>=100) return {t:'Batida',   c:'var(--verde)'};
+  if(p>=70)  return {t:'No ritmo', c:'var(--ouro)'};
+  if(p>0)    return {t:'Atrás',    c:'var(--verm)'};
+  return {t:'Sem venda', c:'var(--muted)'};
+}
+
+// Popula seletores da página Plano de Ação
+function popularSelectPlano(){
+  const selMes = document.getElementById('plano-mes-sel');
+  if(selMes){
+    const atual = selMes.value;
+    const meses = mesesDisponiveis();
+    if(!meses.includes(mesAtual())) meses.unshift(mesAtual());
+    selMes.innerHTML = meses.map(m=>{
+      const [y,mm]=m.split('-');
+      const nome=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][Number(mm)];
+      return `<option value="${m}">${nome}/${y}</option>`;
+    }).join('');
+    selMes.value = atual && meses.includes(atual) ? atual : mesAtual();
+  }
+  const selLoja = document.getElementById('plano-loja-sel');
+  if(selLoja){
+    if(isAdmin()){
+      selLoja.style.display='block';
+      const atual = selLoja.value;
+      selLoja.innerHTML = '<option value="">🌐 Todas as lojas</option>' +
+        LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
+      selLoja.value = atual || '';
+    } else {
+      selLoja.style.display='none';
+    }
+  }
+}
+
+// Render principal da página Plano de Ação
+function renderPlanoAcao(){
+  const box = document.getElementById('plano-conteudo');
+  if(!box) return;
+  const mesRef = document.getElementById('plano-mes-sel')?.value || mesAtual();
+  const admin  = isAdmin();
+  const lojaSel = document.getElementById('plano-loja-sel')?.value || '';
+
+  // Admin com "Todas as lojas" → resumo da rede (clique numa loja p/ detalhe)
+  if(admin && !lojaSel){
+    box.innerHTML = _planoResumoRede(mesRef);
+    return;
+  }
+  const lid = admin ? lojaSel : lojaId();
+  if(!lid){ box.innerHTML = '<div class="sc" style="color:var(--muted)">Selecione uma loja.</div>'; return; }
+  box.innerHTML = _planoDetalheLoja(lid, mesRef);
+}
+
+// Resumo da rede: 1 linha por loja
+function _planoResumoRede(mesRef){
+  const hj = hoje();
+  const emMesAtual = mesRef === mesAtual();
+  const linhas = LOJAS.map(l=>{
+    const p = planoSemanal(l.id, mesRef);
+    const pct = p.metaMes>0 ? (p.realizadoMes/p.metaMes*100) : 0;
+    const semAtual = emMesAtual ? _linhaSemanaPlano(p, hj) : p.linhas[3];
+    const metaDiaHoje = emMesAtual ? metaDiaPlano(l.id, mesRef, hj) : semAtual.metaDia;
+    const st = _statusPlano(pct);
+    return {l, p, pct, semAtual, metaDiaHoje, st};
+  }).sort((a,b)=> (b.p.realizadoMes) - (a.p.realizadoMes));
+
+  const rows = linhas.map(x=>`
+    <tr style="cursor:pointer" onclick="document.getElementById('plano-loja-sel').value='${x.l.id}';renderPlanoAcao();">
+      <td style="font-weight:600">${x.l.nome}</td>
+      <td>${fmt(x.p.metaMes)}</td>
+      <td style="color:var(--verde);font-weight:600">${fmt(x.p.realizadoMes)}</td>
+      <td style="color:${_corPct(x.pct)};font-weight:700">${x.pct.toFixed(0)}%</td>
+      <td style="color:var(--ouro)">${fmt(x.semAtual.metaSemana)}</td>
+      <td style="color:var(--azul);font-weight:600">${fmt(x.metaDiaHoje)}</td>
+      <td><span style="color:${x.st.c};font-weight:700">${x.st.t}</span></td>
+    </tr>`).join('');
+
+  const totMeta = linhas.reduce((a,x)=>a+x.p.metaMes,0);
+  const totReal = linhas.reduce((a,x)=>a+x.p.realizadoMes,0);
+  const totPct  = totMeta>0 ? totReal/totMeta*100 : 0;
+
+  return `
+  <div class="sc">
+    <div class="st" style="margin-bottom:14px">🗺️ Plano de Ação — Rede ${emMesAtual?'(Semana '+semanaDoMes(hj)+')':''}</div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr>
+          <th>Loja</th><th>Meta mês</th><th>Realizado</th><th>%</th>
+          <th>Meta desta semana</th><th>Meta/dia hoje</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--borda);font-weight:700">
+          <td>REDE</td><td>${fmt(totMeta)}</td>
+          <td style="color:var(--verde)">${fmt(totReal)}</td>
+          <td style="color:${_corPct(totPct)}">${totPct.toFixed(0)}%</td>
+          <td colspan="3"></td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:var(--muted)">👆 Clique numa loja para ver o plano semanal e diário detalhado.</div>
+  </div>`;
+}
+
+// Detalhe de UMA loja: KPIs do mês + tabela das 4 semanas + plano do dia
+function _planoDetalheLoja(lid, mesRef){
+  const loja = LOJAS.find(l=>l.id===lid);
+  const nome = loja ? loja.nome : lid;
+  const p = planoSemanal(lid, mesRef);
+  const hj = hoje();
+  const emMesAtual = mesRef === mesAtual();
+  const pctMes = p.metaMes>0 ? (p.realizadoMes/p.metaMes*100) : 0;
+  const faltaMes = Math.max(0, p.metaMes - p.realizadoMes);
+
+  if(p.metaMes<=0){
+    return `<div class="sc"><div class="st">🗺️ Plano de Ação — ${nome}</div>
+      <div style="color:var(--muted);font-size:13px;padding:8px 0">
+        Nenhuma <b>meta do mês</b> cadastrada para esta loja em ${mesRef}.
+        Cadastre em <b>Metas por Loja</b> ou <b>Lançar Histórico</b> para o plano ser calculado.
+      </div></div>`;
+  }
+
+  const kpi = (rot,val,cor)=>`
+    <div style="background:var(--cinza);border:1px solid var(--borda);border-radius:12px;padding:14px">
+      <div style="font-size:10px;color:var(--muted);letter-spacing:.5px;font-weight:700">${rot}</div>
+      <div style="font-size:18px;font-weight:800;color:${cor||'var(--texto)'};margin-top:4px">${val}</div>
+    </div>`;
+
+  const rows = p.linhas.map(l=>{
+    const st = _statusPlano(l.pct);
+    const dIniF = l.ini+'/'+mesRef.slice(5,7);
+    const dFimF = l.fim+'/'+mesRef.slice(5,7);
+    const ehAtual = emMesAtual && Number(hj.split('-')[2])>=l.ini && Number(hj.split('-')[2])<=l.fim;
+    return `
+      <tr style="${ehAtual?'background:rgba(201,168,76,.06)':''}">
+        <td style="font-weight:${ehAtual?700:400};color:${ehAtual?'var(--ouro)':'var(--texto)'}">
+          Semana ${l.n}${ehAtual?' <span style="font-size:9px;color:var(--ouro)">ATUAL</span>':''}
+        </td>
+        <td style="color:var(--muted)">${dIniF}–${dFimF}</td>
+        <td style="font-weight:700">${fmt(l.metaSemana)}</td>
+        <td style="color:var(--verde);font-weight:600">${fmt(l.realizado)}</td>
+        <td style="color:${_corPct(l.pct)};font-weight:700">${l.pct.toFixed(0)}%</td>
+        <td style="color:var(--azul)">${fmt(l.metaDia)}</td>
+        <td><span style="color:${st.c};font-weight:700">${st.t}</span></td>
+      </tr>`;
+  }).join('');
+
+  // Plano do dia (só faz sentido no mês corrente)
+  let blocoDia = '';
+  if(emMesAtual){
+    const metaDiaHoje = metaDiaPlano(lid, mesRef, hj);
+    const realHoje = calcFatEntre(lid, hj, hj) || 0;
+    const pctDia = metaDiaHoje>0 ? realHoje/metaDiaHoje*100 : 0;
+    const sem = _linhaSemanaPlano(p, hj);
+    const diasRest = sem.fim - Number(hj.split('-')[2]) + 1;
+    blocoDia = `
+      <div class="sc" style="margin-top:14px;border:1px solid rgba(201,168,76,.3)">
+        <div class="st">🎯 Plano de hoje — Semana ${sem.n}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+          ${kpi('META DE HOJE', fmt(metaDiaHoje), 'var(--ouro)')}
+          ${kpi('JÁ FEITO HOJE', fmt(realHoje), 'var(--verde)')}
+          ${kpi('% DO DIA', pctDia.toFixed(0)+'%', _corPct(pctDia))}
+          ${kpi('DIAS RESTANTES NA SEMANA', String(diasRest), 'var(--azul)')}
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--texto)">
+          Para fechar a semana no ritmo, a loja precisa fazer
+          <b style="color:var(--ouro)">${fmt(metaDiaHoje)}/dia</b> nos próximos
+          <b>${diasRest}</b> dia(s). Falta <b>${fmt(sem.faltaSemana)}</b> na semana.
+        </div>
+      </div>`;
+  }
+
+  return `
+  <div class="sc">
+    <div class="st" style="margin-bottom:14px">🗺️ Plano de Ação — ${nome}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px">
+      ${kpi('META DO MÊS', fmt(p.metaMes))}
+      ${kpi('REALIZADO', fmt(p.realizadoMes), 'var(--verde)')}
+      ${kpi('% DO MÊS', pctMes.toFixed(0)+'%', _corPct(pctMes))}
+      ${kpi('FALTA', fmt(faltaMes), 'var(--ouro)')}
+    </div>
+    <div style="overflow-x:auto">
+      <table class="dtable">
+        <thead><tr>
+          <th>Semana</th><th>Período</th><th>Meta da semana</th><th>Realizado</th>
+          <th>%</th><th>Meta/dia</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+      A <b>meta da semana</b> se ajusta sozinha: o que uma semana não fecha é redistribuído
+      entre as semanas seguintes (falta ÷ semanas restantes).
+    </div>
+  </div>
+  ${blocoDia}`;
+}
+
+
 // Retorna meta semanal para uso no carregarDash (loja ou rede)
 
 // Meta semanal progressiva POR VENDEDORA (recalcula com base no realizado)
@@ -6417,6 +6588,11 @@ function nav(pg){
     mesant:()=>{
       // [NEW] Mês Anterior
       renderMesAnterior();
+    },
+    plano:()=>{
+      // [NEW 04/08] Plano de Ação
+      popularSelectPlano();
+      renderPlanoAcao();
     },
     historicoanu:()=>{
       // [NEW] Histórico Anual
@@ -7559,10 +7735,7 @@ function carregarVendsForm(lidOverride){
     }
   }
   
-  // [FIX 27/07] respeita a data escolhida em l-data (permite lançar/editar dias
-  // anteriores). Antes o form sempre carregava dados de hoje, mesmo com data trocada.
-  const _dataEl = document.getElementById("l-data");
-  const hj = (_dataEl?.value && /^\d{4}-\d{2}-\d{2}$/.test(_dataEl.value)) ? _dataEl.value : hoje();
+  const hj=hoje();
   const vends=vendsAtivas(lid);
   const grid=document.getElementById("vend-lanc-grid");
   if(!grid) return;
@@ -8278,6 +8451,8 @@ function renderHistoricoLanc(){
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
   const mes=hoje().slice(0,7);
+  // [NEW 04/08] plano do mês p/ mostrar META x REALIZADO por dia
+  const _planoHL = (typeof planoSemanal==='function') ? planoSemanal(lid, mes) : {metaMes:0,realizadoMes:0,linhas:[]};
   // Pegar todos os dias do mês com lançamentos (via vendasVend + fallback D.vendas)
   const diasComLanc={};
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
@@ -8316,6 +8491,14 @@ function renderHistoricoLanc(){
     rows+="<tr style='"+(isHoje?"background:rgba(201,168,76,.05)":"")+"'>"
       +"<td style='font-weight:"+(isHoje?700:400)+";color:"+(isHoje?"var(--ouro)":"var(--texto)")+"'>"+dFmt+(isHoje?" <span style='font-size:9px;color:var(--ouro)'>HOJE</span>":"")+"</td>"
       +"<td style='font-weight:700;color:var(--verde)'>"+fmt(fat)+"</td>"
+      +(function(){
+         var _ln=(_planoHL.linhas||[]).find(function(L){var _d=Number(d.split('-')[2]);return _d>=L.ini&&_d<=L.fim;});
+         var _md=_ln?_ln.metaDia:0;
+         var _p=_md>0?(fat/_md*100):0;
+         var _c=_p>=100?'var(--verde)':(_p>=70?'var(--ouro)':(_p>0?'var(--verm)':'var(--muted)'));
+         return "<td style='color:var(--muted)'>"+(_md>0?fmt(_md):'--')+"</td>"
+              + "<td style='color:"+_c+";font-weight:700'>"+(_md>0?_p.toFixed(0)+'%':'--')+"</td>";
+       })()
       +"<td style='color:var(--azul)'>"+fmt(tm)+"</td>"
       +"<td style='color:#b07cd6;font-weight:600'>"+(paDia>0?fmtPA(paDia):"--")+"</td>"
       +"<td style='color:var(--muted)'>"+natDia+"</td>"
@@ -8325,8 +8508,17 @@ function renderHistoricoLanc(){
       +"</td>"
       +"</tr>";
   });
-  el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
-    +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>P.A.</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
+  // [NEW 04/08] faixa-resumo META x REALIZADO do mês
+  var _pctMes = _planoHL.metaMes>0 ? (_planoHL.realizadoMes/_planoHL.metaMes*100) : 0;
+  var _corMes = _pctMes>=100?'var(--verde)':(_pctMes>=70?'var(--ouro)':(_pctMes>0?'var(--verm)':'var(--muted)'));
+  var _resumoMes = _planoHL.metaMes>0 ? (
+      "<div style='display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px;padding:8px 12px;background:var(--cinza);border:1px solid var(--borda);border-radius:10px;font-size:12px'>"
+      + "<span style='color:var(--muted)'>Meta do mês: <b style='color:var(--texto)'>"+fmt(_planoHL.metaMes)+"</b></span>"
+      + "<span style='color:var(--muted)'>Realizado: <b style='color:var(--verde)'>"+fmt(_planoHL.realizadoMes)+"</b></span>"
+      + "<span style='color:var(--muted)'>Atingido: <b style='color:"+_corMes+"'>"+_pctMes.toFixed(0)+"%</b></span>"
+      + "</div>") : "";
+  el.innerHTML=_resumoMes+"<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
+    +"<thead><tr><th>Data</th><th>Total</th><th>Meta dia</th><th>%</th><th>TM</th><th>P.A.</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
     +"<tbody>"+rows+"</tbody></table></div>";
 }
 function editarLanc(lid, data){
@@ -9903,9 +10095,6 @@ function tabLojas(t,el){_tabLojas=t;document.querySelectorAll("#page-lojas .tab"
 
 function renderLojas(per="hoje"){
   const hj=hoje();
-  // [FIX 27/07] LOJAS agora exclui arquivadas automaticamente (getter).
-  // Aqui a lista de renderização também exclui — a seção de "Arquivadas"
-  // é renderizada separadamente logo abaixo.
   const lojasBase = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
   const ld=lojasBase.map(l=>{
     const m=getMetas(l.id);
@@ -9921,27 +10110,11 @@ function renderLojas(per="hoje"){
   document.getElementById("rede-best-v").textContent=fmt(ld[0].v);
   document.getElementById("rede-alrt").textContent=ld[ld.length-1].nome;
   document.getElementById("rede-media").textContent=med.toFixed(0)+"%";
-  // [NEW 27/07] Bloco de lojas arquivadas para o admin (reativar)
-  const _gridEl = document.getElementById("lojas-grid");
-  const _arquivadas = (D._lojasArquivadas || []);
-  const _renderArquivadas = () => {
-    if(!isAdmin() || !_arquivadas.length) return '';
-    return `<div style="grid-column:1/-1;margin-top:16px;padding-top:12px;border-top:1px dashed var(--borda)">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📦 Lojas arquivadas (${_arquivadas.length})</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">${_arquivadas.map(lid=>{
-        const _lArq = LOJAS_TODAS.find(l=>l.id===lid);
-        if(!_lArq) return '';
-        return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);text-decoration:line-through">${_lArq.nome}</span>
-          <button onclick="reativarLoja('${_lArq.id}')" style="background:var(--verde);color:var(--preto);border:none;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">↩️ Reativar</button>
-        </div>`;
-      }).join('')}</div></div>`;
-  };
   document.getElementById("lojas-grid").innerHTML=ld.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
     const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span>${isAdmin()?`<button onclick="event.stopPropagation();arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer" title="Arquivar loja">📦</button>`:''}</div></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
-  }).join("") + _renderArquivadas();
+    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
+  }).join("");
   const cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-lojas").innerHTML=ld.map((l,i)=>{
     const max=ld[0].v||1, c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
@@ -11988,30 +12161,6 @@ function calcPrevLoja(lid){
   if(el("ml-pssem-"+lid)) el("ml-pssem-"+lid).textContent = fmt(auto.superSem);
   if(el("ml-psdia-"+lid)) el("ml-psdia-"+lid).textContent = fmt(auto.superDia);
   if(el("ml-pv-"+lid))    el("ml-pv-"+lid).textContent    = nv>0?fmt(parseFloat((mes/nv).toFixed(2))):"--";
-
-  // [NEW 27/07] Preencher automaticamente meta de cada vendedora com
-  // meta_loja/nº_vendedoras, respeitando edição manual (dataset.manual="1")
-  if(mes > 0 && nv > 0){
-    const metaVend      = parseFloat((mes/nv).toFixed(2));
-    const superVend     = parseFloat((smes/nv).toFixed(2));
-    const ticketVend    = ticket;
-    vendsAtivas(lid).forEach(v => {
-      const mvEl  = document.getElementById("mv-mes-"+v.id);
-      const smvEl = document.getElementById("mv-smes-"+v.id);
-      const tvEl  = document.getElementById("mv-ticket-"+v.id);
-      // só preenche se estiver vazio E não foi editado manualmente
-      if(mvEl && (!mvEl.value || mvEl.value === "0") && mvEl.dataset.manual !== "1"){
-        mvEl.value = metaVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-      }
-      if(smvEl && (!smvEl.value || smvEl.value === "0") && smvEl.dataset.manual !== "1"){
-        smvEl.value = superVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-      }
-      if(tvEl && (!tvEl.value || tvEl.value === "0") && tvEl.dataset.manual !== "1"){
-        tvEl.value = ticketVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-      }
-    });
-  }
-
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
@@ -12107,7 +12256,7 @@ function renderMetasVendSection(lid){
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:600;margin-bottom:3px">META MÊS (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
+          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" placeholder="Ex: 48000"
             style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.3)'">
         </div>
@@ -12754,8 +12903,8 @@ function renderRankings(tab) {
   // --- Dados de todas as lojas ---
   const ld = LOJAS.map(l => {
     const m    = getMetas(l.id);
-    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : calcMes(l.id);
-    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : m.mes;
+    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : (realizadoDoMes(l.id, mesAtual()).valor || calcMes(l.id));
+    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : (metaDoMes(l.id, mesAtual()).valor || m.mes);
     const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(l.id)*1.2 : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
     const tm   = per==='ano' ? calcTMAno(l.id) : calcTMLoja(l.id, perV);
@@ -13185,8 +13334,8 @@ function renderRankingLoja() {
   const loja = LOJAS.find(l=>l.id===lid);
   const m    = getMetas(lid);
   const hj   = hoje();
-  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : per==='ano' ? calcAno(lid) : calcMes(lid);
-  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : m.mes;
+  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : per==='ano' ? calcAno(lid) : (realizadoDoMes(lid, mesAtual()).valor || calcMes(lid));
+  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : (metaDoMes(lid, mesAtual()).valor || m.mes);
   const sm    = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
   const pct   = meta>0 ? vLoja/meta*100 : 0;
   const cor   = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
@@ -16821,20 +16970,6 @@ if(typeof brData !== 'function'){
 // MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
 // ════════════════════════════════════════════════════════════════════
 function renderMesAnterior(){
-  // [FIX 28/07] Popula o seletor de mês com todos os meses que têm dados,
-  // preservando a seleção atual em window._histMesRef.
-  const _histSel = document.getElementById('hist-mes-sel');
-  if(_histSel){
-    const meses = mesesDisponiveis();
-    const _selecionado = window._histMesRef || '';
-    const mesesNomes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-    _histSel.innerHTML = '<option value="">Mês anterior (padrão)</option>' +
-      meses.map(mr => {
-        const [y, m] = mr.split('-');
-        const _rot = mesesNomes[parseInt(m)] + '/' + y;
-        return `<option value="${mr}" ${_selecionado===mr?'selected':''}>${_rot}</option>`;
-      }).join('');
-  }
   // [FIX 23/07] Página liberada para todos os perfis. A loja fica travada
   // na própria loja; só o admin escolhe entre todas.
   const _selML = document.getElementById('mesant-loja');
@@ -16860,11 +16995,8 @@ function renderMesAnterior(){
     anoAnterior = parseInt(yyyy);
     mesAnterior = String(mesNum - 1).padStart(2, '0');
   }
-  // [FIX 28/07] Usa o mês escolhido no seletor, se houver; senão o mês anterior
-  const _mesEscolhido = window._histMesRef && /^\d{4}-\d{2}$/.test(window._histMesRef) ? window._histMesRef : null;
-  const mesRef = _mesEscolhido || (anoAnterior + '-' + mesAnterior);
-  const _mm = mesRef.split('-')[1];
-  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(_mm)];
+  const mesRef = anoAnterior + '-' + mesAnterior;
+  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(mesAnterior)];
   
   // Filtro de loja
   const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
@@ -17249,7 +17381,7 @@ function renderMesAnteriorDashboard(){
     }).join('');
   }
   const _tit = document.getElementById('mesant-widget-titulo');
-  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Histórico' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
+  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Mês Anterior' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
   
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
@@ -18826,80 +18958,7 @@ function renderPerformance(){
     const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
     subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
   }
-  // [NEW 28/07] Bloco Mês a Mês — meta, realizado, % e P.A. históricos
-  // Loja inteira: usa metaDoMes/realizadoDoMes/paDoMes já existentes
-  // Vendedora individual: usa calcVendPer(id, "YYYY-MM") e meta cadastrada da vendedora
-  const _mesesHist = mesesDisponiveis().slice(0, 6); // últimos 6 meses
-  let blocoMesAMes = '';
-  if(_mesesHist.length){
-    const linhas = _mesesHist.map(mr => {
-      let meta, real, pa, tm, nAtend;
-      if(vendId){
-        // Vendedora individual
-        const vObj = D.vendedoras.find(v => v.id === vendId) || {};
-        meta = Number(vObj.metaMes) || 0;
-        real = calcVendPer(vendId, mr);
-        // Peças e atendimentos da vendedora naquele mês
-        let itens = 0, atend = 0;
-        Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
-          if(d.startsWith(mr)){
-            itens += Number(vd.itens || 0);
-            const t = Number(vd.trans || 0);
-            atend += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
-          }
-        });
-        pa = atend > 0 ? itens / atend : 0;
-        tm = atend > 0 ? real / atend : 0;
-        nAtend = atend;
-      } else {
-        // Loja inteira
-        meta = metaDoMes(lid, mr).valor || 0;
-        real = realizadoDoMes(lid, mr).valor || 0;
-        const paObj = typeof paDoMes === 'function' ? paDoMes(lid, mr) : {valor:0};
-        pa = paObj.valor || 0;
-        // TM e atendimentos: usar vendasDoMes se existir
-        const atendObj = typeof vendasDoMes === 'function' ? vendasDoMes(lid, mr) : {valor:0};
-        nAtend = atendObj.valor || 0;
-        tm = nAtend > 0 ? real / nAtend : 0;
-      }
-      const pct = meta > 0 ? real / meta * 100 : 0;
-      const cor = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : pct > 0 ? 'var(--verm)' : 'var(--muted)';
-      const [ano, mesN] = mr.split('-');
-      const mesesNome = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-      const mesLabel = mesesNome[parseInt(mesN)-1] + '/' + ano.slice(2);
-      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
-        <td style="padding:9px 8px;font-weight:600">${mesLabel}</td>
-        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${meta > 0 ? fmt(meta) : '--'}</td>
-        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${real > 0 ? fmt(real) : '--'}</td>
-        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${meta > 0 ? pct.toFixed(0) + '%' : '--'}</td>
-        <td style="padding:9px 8px;text-align:right;color:var(--azul)">${tm > 0 ? fmt(tm) : '--'}</td>
-        <td style="padding:9px 8px;text-align:right;color:#b07cd6">${pa > 0 ? fmtPA(pa) : '--'}</td>
-        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${nAtend > 0 ? nAtend.toLocaleString('pt-BR') : '--'}</td>
-      </tr>`;
-    }).join('');
-    const _tituloMM = vendId
-      ? `Últimos 6 meses de ${D.vendedoras.find(v=>v.id===vendId)?.nome || 'vendedora'}`
-      : `Últimos 6 meses da loja`;
-    blocoMesAMes = `<div class="sc" style="margin-top:16px">
-      <div class="st">📅 ${_tituloMM}</div>
-      <div style="overflow-x:auto;margin-top:8px">
-        <table style="width:100%;border-collapse:collapse;min-width:560px;font-size:12px">
-          <thead><tr style="border-bottom:1px solid var(--borda)">
-            <th style="padding:8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px">MÊS</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">META</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">REALIZADO</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">%</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">TM</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">P.A.</th>
-            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">ATEND.</th>
-          </tr></thead>
-          <tbody>${linhas}</tbody>
-        </table>
-      </div>
-    </div>`;
-  }
-
-  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoMesAMes + blocoAlertas;
+  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoAlertas;
 }
 
 
