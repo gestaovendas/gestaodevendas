@@ -260,7 +260,10 @@ try{
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
           _campExcluidos:      D2._campExcluidos       || [],
-          _vendsExcluidas:     D2._vendsExcluidas      || []
+          _vendsExcluidas:     D2._vendsExcluidas      || [],
+          // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
+          _lojasArquivadas:    D2._lojasArquivadas     || [],
+          _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -316,6 +319,45 @@ try{
             });
             if(D2.historicoMeses?.[lidA]){
               payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: D2.historicoMeses[lidA] });
+            }
+            // [FIX 27/07] admin propaga metasLoja/vendedoras/tombstones desta loja.
+            // Antes o admin gravava só no principal, e o doc da loja continuava com
+            // metas antigas — se a loja lesse o doc dela antes do principal, ou por
+            // qualquer race no merge, via valor velho. Agora o admin escreve a meta
+            // que ele acabou de definir DIRETO no doc da loja também. Merge no
+            // fsCarregar por _savedAt garante que a mais recente vença.
+            if(D2.metasLoja?.[lidA]){
+              const metasRemotasLoja = remotoA.metasLoja?.[lidA] || {};
+              const metasFinal = Object.assign({}, metasRemotasLoja);
+              Object.entries(D2.metasLoja[lidA]).forEach(([mr, m])=>{
+                const _tsL = Number(m?._savedAt||0);
+                const _tsR = Number(metasRemotasLoja[mr]?._savedAt||0);
+                if(!metasRemotasLoja[mr] || _tsL >= _tsR) metasFinal[mr] = m;
+              });
+              payloadA.metasLoja = Object.assign({}, remotoA.metasLoja||{}, { [lidA]: metasFinal });
+            }
+            // vendedoras da loja: mesma regra
+            if(Array.isArray(D2.vendedoras)){
+              const vendsLoja = D2.vendedoras.filter(v=>v.loja===lidA);
+              if(vendsLoja.length){
+                const remotasV = Array.isArray(remotoA.vendedoras) ? remotoA.vendedoras : [];
+                const outV = remotasV.slice();
+                vendsLoja.forEach(rv=>{
+                  const i = outV.findIndex(x=>x.id===rv.id);
+                  if(i<0) outV.push(rv);
+                  else {
+                    const _tsL = Number(rv._savedAt||0);
+                    const _tsR = Number(outV[i]?._savedAt||0);
+                    if(_tsL >= _tsR) outV[i] = rv;
+                  }
+                });
+                payloadA.vendedoras = outV;
+              }
+            }
+            // tombstones (lojas arquivadas etc)
+            if(Array.isArray(D2._lojasArquivadas)){
+              payloadA._lojasArquivadas   = D2._lojasArquivadas;
+              payloadA._lojasArquivadasTs = D2._lojasArquivadasTs || Date.now();
             }
             await setDoc(doc(db,"avatim",docIdA), {
               dados:  JSON.stringify(payloadA),
@@ -1362,17 +1404,18 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📅</span>Histórico</button>
+    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
+    <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
     <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
     <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
     <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
          histórico é feito em "Lançar Histórico". A página segue existindo para
          não quebrar links antigos, mas sai da navegação. -->
     <button class="ni" onclick="nav('controle')" id="nav-controle"><span class="ic">🎯</span>Controle Ano a Ano</button>
-    <button class="ni" onclick="nav('plano')" id="nav-plano"><span class="ic">📆</span>Análise Semanal</button>
     <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
     <button class="ni admin-only" onclick="nav('rankings')" id="nav-rankings" style="display:none"><span class="ic">&#127942;</span>Rankings</button>
+    <button class="ni admin-only" onclick="nav('historico')" id="nav-historico" style="display:none"><span class="ic">📅</span>Histórico</button>
     <button class="ni" onclick="nav('estoque')" id="nav-estoque"><span class="ic">🏷️</span>Campanhas</button>
   </div>
   <div class="sb-sec admin-only" style="display:none">
@@ -1567,7 +1610,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">Lançar Venda</div>
     <div class="gr">
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
-        <input type="date" id="l-data" value="">
+        <input type="date" id="l-data" value="" onchange="carregarVendsForm()">
       </div>
       <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
         <select id="l-loja" onchange="carregarVendsForm()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
@@ -2245,13 +2288,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 
-<!-- MÊS ANTERIOR — performance do mês passado -->
+<!-- HISTÓRICO — performance dos meses passados -->
 <div class="page" id="page-mesant">
   <div class="ph">
     <div>
-      <h1 class="pt">His<span>tórico</span></h1>
+      <h1 class="pt">Histó<span>rico</span></h1>
       <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
     </div>
+  </div>
+
+  <!-- [NEW 28/07] Seletor de mês — permite ver performance de qualquer mês passado -->
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <label style="font-size:12px;font-weight:600">Mês:</label>
+    <select id="hist-mes-sel" onchange="window._histMesRef=this.value;renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
+      <option value="">Mês anterior (padrão)</option>
+    </select>
   </div>
 
   <!-- Filtro de loja -->
@@ -2290,6 +2341,63 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 </div>
+
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     RELATÓRIOS ESTRATÉGICOS (novo — 02/08)
+     9 abas: Executivo, Comp.Mensal, Comp.Anual, Bench.Lojas, Bench.Vends,
+     IGP, Preditivos, Projeção, Cruzamentos. Reaproveita metaDoMes,
+     realizadoDoMes, calcVendPer, calcFatEntre, paDoMes, mesesDisponiveis.
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-relatorios">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Relatórios <span>Estratégicos</span></h1>
+      <div class="ps">Dashboard executivo, benchmarks, IGP e cruzamentos</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="rel-loja-sel" onchange="window._relLojaSel=this.value;renderRelatorios()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px">
+        <option value="">🌐 Rede toda</option>
+      </select>
+      <button class="btn-s" onclick="renderRelatorios()" style="font-size:12px">🔄 Atualizar</button>
+    </div>
+  </div>
+
+  <!-- Abas dos 9 relatórios -->
+  <div id="rel-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--borda)">
+    <button class="rel-tab active" data-aba="executivo"  onclick="_relTab('executivo',this)">📊 Executivo</button>
+    <button class="rel-tab"        data-aba="mensal"     onclick="_relTab('mensal',this)">📅 Comparativo Mensal</button>
+    <button class="rel-tab"        data-aba="anual"      onclick="_relTab('anual',this)">📈 Comparativo Anual</button>
+    <button class="rel-tab"        data-aba="benchlojas" onclick="_relTab('benchlojas',this)">🏆 Benchmark Lojas</button>
+    <button class="rel-tab"        data-aba="benchvends" onclick="_relTab('benchvends',this)">👥 Benchmark Vendedoras</button>
+    <button class="rel-tab"        data-aba="igp"        onclick="_relTab('igp',this)">⭐ IGP</button>
+    <button class="rel-tab"        data-aba="preditivo"  onclick="_relTab('preditivo',this)">🔮 Preditivo</button>
+    <button class="rel-tab"        data-aba="projecao"   onclick="_relTab('projecao',this)">🎯 Projeção de Metas</button>
+    <button class="rel-tab"        data-aba="cruzamento" onclick="_relTab('cruzamento',this)">🔗 Cruzamentos</button>
+  </div>
+
+  <div id="rel-conteudo" style="min-height:400px"></div>
+</div>
+<style>
+  .rel-tab{background:transparent;border:1px solid var(--borda);color:var(--muted);padding:8px 14px;border-radius:8px;font-size:12px;font-family:DM Sans,sans-serif;cursor:pointer;transition:all .15s}
+  .rel-tab:hover{border-color:var(--ouro);color:var(--texto)}
+  .rel-tab.active{background:linear-gradient(135deg,var(--ouro),#d4af37);color:#000;border-color:var(--ouro);font-weight:600}
+  .rel-kpi{background:var(--card2);border-radius:8px;padding:14px;text-align:center}
+  .rel-kpi-l{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px}
+  .rel-kpi-v{font-family:Playfair Display,serif;font-size:22px;font-weight:700}
+  .rel-kpi-s{font-size:10px;color:var(--muted);margin-top:4px}
+  .rel-delta-up{color:var(--verde);font-weight:600}
+  .rel-delta-down{color:var(--verm);font-weight:600}
+  .rel-delta-flat{color:var(--muted)}
+  .rel-tabela{width:100%;border-collapse:collapse;min-width:520px}
+  .rel-tabela th{padding:9px 8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px;border-bottom:1px solid var(--borda)}
+  .rel-tabela td{padding:9px 8px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.05)}
+  .rel-tabela .num{text-align:right;font-variant-numeric:tabular-nums}
+  .rel-bar{height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden;position:relative}
+  .rel-bar-fill{height:100%;border-radius:4px;transition:width .3s}
+</style>
 
 
 <!-- HISTÓRICO ANUAL — 2021 até agora, mês a mês -->
@@ -2754,20 +2862,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <!-- ESTOQUE -->
-<div class="page" id="page-plano">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Análise <span>Semanal</span></h1>
-      <div class="ps">Meta semanal e diária por loja — recalculada conforme o realizado</div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <select id="plano-loja-sel" class="admin-only" style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none" onchange="renderPlanoAcao()"></select>
-      <select id="plano-mes-sel" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none" onchange="renderPlanoAcao()"></select>
-    </div>
-  </div>
-  <div id="plano-conteudo"></div>
-</div>
-
 <div class="page" id="page-estoque">
   <div class="ph">
     <div>
@@ -3852,7 +3946,10 @@ service cloud.firestore {
 // ============================================================
 // CONSTANTES
 // ============================================================
-const LOJAS=[
+// [NEW 27/07] LOJAS_TODAS é a lista completa (7 lojas). Uma loja arquivada
+// não deve mais aparecer em rankings, dashboards ou totalizações — mas o
+// histórico dela precisa continuar consultável (dados de meses anteriores).
+const LOJAS_TODAS=[
   {id:"mooca",      nome:"Mooca Plaza",       cnpj:"31.290.480/0001-04"},
   {id:"leopoldina", nome:"Vila Leopoldina",    cnpj:"49.574.300/0001-73"},
   {id:"perdizes",   nome:"Perdizes",           cnpj:"49.574.300/0002-54"},
@@ -3861,6 +3958,69 @@ const LOJAS=[
   {id:"pinheiros",  nome:"Alto de Pinheiros",  cnpj:"31.290.480/0006-00"},
   {id:"ibirapuera", nome:"Shop. Ibirapuera",   cnpj:"31.290.480/0007-91"},
 ];
+
+// LOJAS agora é um GETTER — filtra as arquivadas dinamicamente. Isto 
+// preserva os 111 usos existentes (LOJAS.forEach, LOJAS.reduce, etc.) e
+// automaticamente pula lojas arquivadas em todo dashboard/agregação sem
+// precisar tocar em cada laço.
+function lojaArquivada(lid){
+  try{ return Array.isArray(D?._lojasArquivadas) && D._lojasArquivadas.includes(lid); }
+  catch(e){ return false; }
+}
+Object.defineProperty(globalThis, 'LOJAS', {
+  get(){ return LOJAS_TODAS.filter(l => !lojaArquivada(l.id)); },
+  configurable: true
+});
+
+// Ações de arquivar/reativar loja (só admin) — seguem a mesma REGRA DE
+// AUTORIDADE de campanhas: gestão só pelo admin
+function arquivarLoja(lid){
+  if(!isAdmin()){ showToast('Apenas a gestão pode arquivar lojas.','warn'); return; }
+  const loja = LOJAS_TODAS.find(l=>l.id===lid);
+  if(!loja){ showToast('Loja não encontrada.','err'); return; }
+  if(!confirm('Arquivar a loja '+loja.nome+'?\n\nEla sairá do dashboard e das agregações, mas o histórico será preservado.')) return;
+  _toggleLojaArquivada(lid, true, loja.nome);
+}
+function reativarLoja(lid){
+  if(!isAdmin()){ showToast('Apenas a gestão pode reativar lojas.','warn'); return; }
+  const loja = LOJAS_TODAS.find(l=>l.id===lid);
+  if(!loja) return;
+  _toggleLojaArquivada(lid, false, loja.nome);
+}
+// [FIX 27/07] Mesmo modelo de arquivarVendedora: bypass do save() com guards,
+// gravação imediata no localStorage e envio direto ao fsGravar.
+async function _toggleLojaArquivada(lid, arquivar, nome){
+  if(!Array.isArray(D._lojasArquivadas)) D._lojasArquivadas = [];
+  if(arquivar){
+    if(!D._lojasArquivadas.includes(lid)) D._lojasArquivadas.push(lid);
+  } else {
+    D._lojasArquivadas = D._lojasArquivadas.filter(x=>x!==lid);
+  }
+  D._lojasArquivadasTs = Date.now();
+  // gravação imediata no localStorage
+  try{ localStorage.setItem('avatim_v5', JSON.stringify(D)); }catch(e){}
+  window._pendingLocalData   = JSON.parse(JSON.stringify(D));
+  window._pendingLocalDataTs = Date.now();
+  showToast(arquivar ? '📦 '+nome+' arquivada' : '✅ '+nome+' reativada');
+  if(typeof carregarDash === 'function') carregarDash();
+  if(typeof renderLojas === 'function') renderLojas();
+  // Firebase direto — bypass do save() com guards
+  try{
+    const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
+    if(_okAL && window.fsGravar){
+      await window.fsGravar(JSON.stringify(D));
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
+      console.log('[Avatim] _toggleLojaArquivada Firebase OK:', lid, 'arquivada=', arquivar);
+    } else {
+      window._pendingLocalData = null;
+      showToast('⚠️ Firebase offline. '+nome+' salva localmente.','warn');
+    }
+  }catch(eL){
+    window._pendingLocalData = null;
+    showToast('⚠️ '+nome+' salva localmente. Firebase: '+(eL.code||eL.message),'warn');
+  }
+}
 
 // Hashes PBKDF2-SHA256, 100.000 iterações + salt derivado do email
 // Torna brute-force e rainbow tables ineficazes (custo ~100.000x maior que SHA-256 puro)
@@ -5683,313 +5843,6 @@ function metaSemanaProgressiva(lid, semana){
   return metaProgressiva;
 }
 
-// ============================================================
-// [NEW 04/08] PLANO DE AÇÃO — meta semanal por DIVISÃO IGUAL e
-// redistribuição do que falta (modelo da Moni).
-//   Ex.: meta 100.000 ÷ 4 = 25.000/semana.
-//        S1 realizou só 15.000 → (100.000 − 15.000) ÷ 3 = 28.333,33
-//        nas semanas 2, 3 e 4. Se S1 tivesse feito 30.000 →
-//        (100.000 − 30.000) ÷ 3 = 23.333,33 (vale p/ maior ou menor).
-// Fonte da meta: metaDoMes() (cadastro + Lançar Histórico).
-// Fonte do realizado: calcFatEntre() (lançamento diário + fallback loja).
-// ============================================================
-function semanasDoMes(mesRef){
-  const [y,m] = (mesRef||mesAtual()).split('-').map(Number);
-  const ultimo = new Date(y, m, 0).getDate();
-  return [
-    {n:1, ini:1,  fim:7},
-    {n:2, ini:8,  fim:14},
-    {n:3, ini:15, fim:21},
-    {n:4, ini:22, fim:ultimo}
-  ];
-}
-function planoSemanal(lid, mesRef){
-  mesRef = mesRef || mesAtual();
-  const metaMes = (metaDoMes(lid, mesRef)?.valor) || 0;
-  const sems = semanasDoMes(mesRef);
-  const pad2 = n => String(n).padStart(2,'0');
-  let restante = metaMes;
-  const linhas = sems.map(s => {
-    const dIni = mesRef+'-'+pad2(s.ini);
-    const dFim = mesRef+'-'+pad2(s.fim);
-    const realizado = calcFatEntre(lid, dIni, dFim) || 0;
-    const clientes  = calcNAtendEntre(lid, dIni, dFim) || 0;  // cupons/atendimentos
-    const itens     = calcNItensEntre(lid, dIni, dFim) || 0;  // peças
-    const semanasRestantes = 4 - s.n + 1;
-    // meta desta semana = o que ainda falta ÷ semanas restantes (incl. esta)
-    const metaSemana = semanasRestantes>0 ? Math.round((restante/semanasRestantes)*100)/100 : 0;
-    // abate o REALIZADO real (não a meta) — é isso que redistribui p/ frente
-    restante = Math.max(0, restante - realizado);
-    const dias = s.fim - s.ini + 1;
-    return {
-      n:s.n, ini:s.ini, fim:s.fim, dIni, dFim, dias,
-      metaSemana, realizado,
-      pct: metaSemana>0 ? (realizado/metaSemana*100) : 0,
-      faltaSemana: Math.max(0, metaSemana - realizado),
-      metaDia: dias>0 ? Math.round((metaSemana/dias)*100)/100 : 0,
-      clientes, itens,
-      tm: clientes>0 ? realizado/clientes : 0,
-      pa: clientes>0 ? itens/clientes : 0
-    };
-  });
-  // [NEW 04/08] crescimento de cada indicador vs a SEMANA ANTERIOR
-  linhas.forEach((l,i)=>{
-    const ant = i>0 ? linhas[i-1] : null;
-    l.gReal = _cresc(l.realizado, ant?ant.realizado:null);
-    l.gCli  = _cresc(l.clientes,  ant?ant.clientes:null);
-    l.gIt   = _cresc(l.itens,     ant?ant.itens:null);
-    l.gTM   = _cresc(l.tm,        ant?ant.tm:null);
-    l.gPA   = _cresc(l.pa,        ant?ant.pa:null);
-  });
-  return {
-    metaMes, linhas,
-    realizadoMes: linhas.reduce((a,l)=>a+l.realizado,0),
-    clientesMes: linhas.reduce((a,l)=>a+l.clientes,0),
-    itensMes: linhas.reduce((a,l)=>a+l.itens,0),
-    origemMeta: (metaDoMes(lid, mesRef)?.origem) || null
-  };
-}
-// Semana (1..4) a que uma data pertence dentro do próprio plano
-function _linhaSemanaPlano(plano, dataRef){
-  const dia = Number((dataRef||hoje()).split('-')[2]);
-  return plano.linhas.find(l => dia>=l.ini && dia<=l.fim) || plano.linhas[3];
-}
-// Meta do DIA (semana atual): quanto falta na semana ÷ dias restantes (incl. hoje)
-function metaDiaPlano(lid, mesRef, dataRef){
-  dataRef = dataRef || hoje();
-  mesRef  = mesRef || dataRef.slice(0,7);
-  const plano = planoSemanal(lid, mesRef);
-  const sem = _linhaSemanaPlano(plano, dataRef);
-  const dia = Number(dataRef.split('-')[2]);
-  const pad2 = n => String(n).padStart(2,'0');
-  const realAteOntem = dia>sem.ini ? (calcFatEntre(lid, sem.dIni, mesRef+'-'+pad2(dia-1))||0) : 0;
-  const faltaSem = Math.max(0, sem.metaSemana - realAteOntem);
-  const diasRest = sem.fim - dia + 1;
-  return diasRest>0 ? Math.round((faltaSem/diasRest)*100)/100 : 0;
-}
-// Crescimento percentual vs período anterior (verde sobe, vermelho cai)
-function _cresc(atual, ant){
-  if(ant==null || ant===0) return {pct:0, txt:'—', cor:'var(--muted)'};
-  const pct = (atual - ant)/ant*100;
-  const seta = pct>0.5 ? '▲' : (pct<-0.5 ? '▼' : '•');
-  const cor  = pct>0.5 ? 'var(--verde)' : (pct<-0.5 ? 'var(--verm)' : 'var(--muted)');
-  const sinal = pct>0 ? '+' : '';
-  return {pct, txt: seta+' '+sinal+pct.toFixed(0)+'%', cor};
-}
-// Célula de tabela com valor + delta de crescimento embaixo
-function _celG(v, cor, g){
-  return `<td><div style="color:${cor};font-weight:600">${v}</div>`
-       + `<div style="font-size:10px;color:${g.cor};font-weight:600;margin-top:2px">${g.txt}</div></td>`;
-}
-function _corPct(p){
-  if(p>=100) return 'var(--verde)';
-  if(p>=70)  return 'var(--ouro)';
-  if(p>0)    return 'var(--verm)';
-  return 'var(--muted)';
-}
-function _statusPlano(p){
-  if(p>=100) return {t:'Batida',   c:'var(--verde)'};
-  if(p>=70)  return {t:'No ritmo', c:'var(--ouro)'};
-  if(p>0)    return {t:'Atrás',    c:'var(--verm)'};
-  return {t:'Sem venda', c:'var(--muted)'};
-}
-
-// Popula seletores da página Análise Semanal
-function popularSelectPlano(){
-  const selMes = document.getElementById('plano-mes-sel');
-  if(selMes){
-    const atual = selMes.value;
-    const meses = mesesDisponiveis();
-    if(!meses.includes(mesAtual())) meses.unshift(mesAtual());
-    selMes.innerHTML = meses.map(m=>{
-      const [y,mm]=m.split('-');
-      const nome=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][Number(mm)];
-      return `<option value="${m}">${nome}/${y}</option>`;
-    }).join('');
-    selMes.value = atual && meses.includes(atual) ? atual : mesAtual();
-  }
-  const selLoja = document.getElementById('plano-loja-sel');
-  if(selLoja){
-    if(isAdmin()){
-      selLoja.style.display='block';
-      const atual = selLoja.value;
-      selLoja.innerHTML = '<option value="">🌐 Todas as lojas</option>' +
-        LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
-      selLoja.value = atual || '';
-    } else {
-      selLoja.style.display='none';
-    }
-  }
-}
-
-// Render principal da página Análise Semanal
-function renderPlanoAcao(){
-  const box = document.getElementById('plano-conteudo');
-  if(!box) return;
-  const mesRef = document.getElementById('plano-mes-sel')?.value || mesAtual();
-  const admin  = isAdmin();
-  const lojaSel = document.getElementById('plano-loja-sel')?.value || '';
-
-  // Admin com "Todas as lojas" → resumo da rede (clique numa loja p/ detalhe)
-  if(admin && !lojaSel){
-    box.innerHTML = _planoResumoRede(mesRef);
-    return;
-  }
-  const lid = admin ? lojaSel : lojaId();
-  if(!lid){ box.innerHTML = '<div class="sc" style="color:var(--muted)">Selecione uma loja.</div>'; return; }
-  box.innerHTML = _planoDetalheLoja(lid, mesRef);
-}
-
-// Resumo da rede: 1 linha por loja
-function _planoResumoRede(mesRef){
-  const hj = hoje();
-  const emMesAtual = mesRef === mesAtual();
-  const linhas = LOJAS.map(l=>{
-    const p = planoSemanal(l.id, mesRef);
-    const pct = p.metaMes>0 ? (p.realizadoMes/p.metaMes*100) : 0;
-    const semAtual = emMesAtual ? _linhaSemanaPlano(p, hj) : p.linhas[3];
-    const metaDiaHoje = emMesAtual ? metaDiaPlano(l.id, mesRef, hj) : semAtual.metaDia;
-    const st = _statusPlano(pct);
-    return {l, p, pct, semAtual, metaDiaHoje, st};
-  }).sort((a,b)=> (b.p.realizadoMes) - (a.p.realizadoMes));
-
-  const rows = linhas.map(x=>`
-    <tr style="cursor:pointer" onclick="document.getElementById('plano-loja-sel').value='${x.l.id}';renderPlanoAcao();">
-      <td style="font-weight:600">${x.l.nome}</td>
-      <td>${fmt(x.p.metaMes)}</td>
-      <td style="color:var(--verde);font-weight:600">${fmt(x.p.realizadoMes)}</td>
-      <td style="color:${_corPct(x.pct)};font-weight:700">${x.pct.toFixed(0)}%</td>
-      <td style="color:var(--ouro)">${fmt(x.semAtual.metaSemana)}</td>
-      <td style="color:var(--azul);font-weight:600">${fmt(x.metaDiaHoje)}</td>
-      <td><span style="color:${x.st.c};font-weight:700">${x.st.t}</span></td>
-    </tr>`).join('');
-
-  const totMeta = linhas.reduce((a,x)=>a+x.p.metaMes,0);
-  const totReal = linhas.reduce((a,x)=>a+x.p.realizadoMes,0);
-  const totPct  = totMeta>0 ? totReal/totMeta*100 : 0;
-
-  return `
-  <div class="sc">
-    <div class="st" style="margin-bottom:14px">📆 Análise Semanal — Rede ${emMesAtual?'(Semana '+semanaDoMes(hj)+')':''}</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th>Loja</th><th>Meta mês</th><th>Realizado</th><th>%</th>
-          <th>Meta desta semana</th><th>Meta/dia hoje</th><th>Status</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr style="border-top:2px solid var(--borda);font-weight:700">
-          <td>REDE</td><td>${fmt(totMeta)}</td>
-          <td style="color:var(--verde)">${fmt(totReal)}</td>
-          <td style="color:${_corPct(totPct)}">${totPct.toFixed(0)}%</td>
-          <td colspan="3"></td>
-        </tr></tfoot>
-      </table>
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:var(--muted)">👆 Clique numa loja para ver o plano semanal e diário detalhado.</div>
-  </div>`;
-}
-
-// Detalhe de UMA loja: KPIs do mês + tabela das 4 semanas + plano do dia
-function _planoDetalheLoja(lid, mesRef){
-  const loja = LOJAS.find(l=>l.id===lid);
-  const nome = loja ? loja.nome : lid;
-  const p = planoSemanal(lid, mesRef);
-  const hj = hoje();
-  const emMesAtual = mesRef === mesAtual();
-  const pctMes = p.metaMes>0 ? (p.realizadoMes/p.metaMes*100) : 0;
-  const faltaMes = Math.max(0, p.metaMes - p.realizadoMes);
-
-  if(p.metaMes<=0){
-    return `<div class="sc"><div class="st">📆 Análise Semanal — ${nome}</div>
-      <div style="color:var(--muted);font-size:13px;padding:8px 0">
-        Nenhuma <b>meta do mês</b> cadastrada para esta loja em ${mesRef}.
-        Cadastre em <b>Metas por Loja</b> ou <b>Lançar Histórico</b> para o plano ser calculado.
-      </div></div>`;
-  }
-
-  const kpi = (rot,val,cor)=>`
-    <div style="background:var(--cinza);border:1px solid var(--borda);border-radius:12px;padding:14px">
-      <div style="font-size:10px;color:var(--muted);letter-spacing:.5px;font-weight:700">${rot}</div>
-      <div style="font-size:18px;font-weight:800;color:${cor||'var(--texto)'};margin-top:4px">${val}</div>
-    </div>`;
-
-  const rows = p.linhas.map(l=>{
-    const st = _statusPlano(l.pct);
-    const dIniF = l.ini+'/'+mesRef.slice(5,7);
-    const dFimF = l.fim+'/'+mesRef.slice(5,7);
-    const ehAtual = emMesAtual && Number(hj.split('-')[2])>=l.ini && Number(hj.split('-')[2])<=l.fim;
-    return `
-      <tr style="${ehAtual?'background:rgba(201,168,76,.06)':''}">
-        <td style="font-weight:${ehAtual?700:400};color:${ehAtual?'var(--ouro)':'var(--texto)'}">
-          Semana ${l.n}${ehAtual?' <span style="font-size:9px;color:var(--ouro)">ATUAL</span>':''}
-        </td>
-        <td style="color:var(--muted)">${dIniF}–${dFimF}</td>
-        <td style="font-weight:700">${fmt(l.metaSemana)}</td>
-        ${_celG(fmt(l.realizado),'var(--verde)', l.gReal)}
-        <td style="color:${_corPct(l.pct)};font-weight:700">${l.pct.toFixed(0)}%</td>
-        ${_celG(String(l.clientes),'var(--texto)', l.gCli)}
-        ${_celG(String(l.itens),'var(--texto)', l.gIt)}
-        ${_celG(fmt(l.tm),'var(--azul)', l.gTM)}
-        ${_celG(fmtPA(l.pa),'#b07cd6', l.gPA)}
-        <td style="color:var(--azul)">${fmt(l.metaDia)}</td>
-        <td><span style="color:${st.c};font-weight:700">${st.t}</span></td>
-      </tr>`;
-  }).join('');
-
-  // Plano do dia (só faz sentido no mês corrente)
-  let blocoDia = '';
-  if(emMesAtual){
-    const metaDiaHoje = metaDiaPlano(lid, mesRef, hj);
-    const realHoje = calcFatEntre(lid, hj, hj) || 0;
-    const pctDia = metaDiaHoje>0 ? realHoje/metaDiaHoje*100 : 0;
-    const sem = _linhaSemanaPlano(p, hj);
-    const diasRest = sem.fim - Number(hj.split('-')[2]) + 1;
-    blocoDia = `
-      <div class="sc" style="margin-top:14px;border:1px solid rgba(201,168,76,.3)">
-        <div class="st">🎯 Meta de hoje — Semana ${sem.n}</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
-          ${kpi('META DE HOJE', fmt(metaDiaHoje), 'var(--ouro)')}
-          ${kpi('JÁ FEITO HOJE', fmt(realHoje), 'var(--verde)')}
-          ${kpi('% DO DIA', pctDia.toFixed(0)+'%', _corPct(pctDia))}
-          ${kpi('DIAS RESTANTES NA SEMANA', String(diasRest), 'var(--azul)')}
-        </div>
-        <div style="margin-top:10px;font-size:12px;color:var(--texto)">
-          Para fechar a semana no ritmo, a loja precisa fazer
-          <b style="color:var(--ouro)">${fmt(metaDiaHoje)}/dia</b> nos próximos
-          <b>${diasRest}</b> dia(s). Falta <b>${fmt(sem.faltaSemana)}</b> na semana.
-        </div>
-      </div>`;
-  }
-
-  return `
-  <div class="sc">
-    <div class="st" style="margin-bottom:14px">📆 Análise Semanal — ${nome}</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px">
-      ${kpi('META DO MÊS', fmt(p.metaMes))}
-      ${kpi('REALIZADO', fmt(p.realizadoMes), 'var(--verde)')}
-      ${kpi('% DO MÊS', pctMes.toFixed(0)+'%', _corPct(pctMes))}
-      ${kpi('FALTA', fmt(faltaMes), 'var(--ouro)')}
-    </div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr>
-          <th>Semana</th><th>Período</th><th>Meta</th><th>Realizado</th><th>%</th>
-          <th>Clientes</th><th>Itens</th><th>TM</th><th>P.A.</th><th>Meta/dia</th><th>Status</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
-      A <b>meta da semana</b> se ajusta sozinha: o que uma semana não fecha é redistribuído
-      entre as semanas seguintes (falta ÷ semanas restantes). Os percentuais <b>▲▼</b> ao lado
-      de cada indicador mostram o <b>crescimento vs a semana anterior</b> (Realizado, Clientes, Itens, TM e P.A.).
-    </div>
-  </div>
-  ${blocoDia}`;
-}
-
-
 // Retorna meta semanal para uso no carregarDash (loja ou rede)
 
 // Meta semanal progressiva POR VENDEDORA (recalcula com base no realizado)
@@ -6623,11 +6476,7 @@ function nav(pg){
       // [NEW] Mês Anterior
       renderMesAnterior();
     },
-    plano:()=>{
-      // [NEW 04/08] Análise Semanal
-      popularSelectPlano();
-      renderPlanoAcao();
-    },
+    relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
     historicoanu:()=>{
       // [NEW] Histórico Anual
       const selAno = document.getElementById('hanu-ano');
@@ -7769,7 +7618,10 @@ function carregarVendsForm(lidOverride){
     }
   }
   
-  const hj=hoje();
+  // [FIX 27/07] respeita a data escolhida em l-data (permite lançar/editar dias
+  // anteriores). Antes o form sempre carregava dados de hoje, mesmo com data trocada.
+  const _dataEl = document.getElementById("l-data");
+  const hj = (_dataEl?.value && /^\d{4}-\d{2}-\d{2}$/.test(_dataEl.value)) ? _dataEl.value : hoje();
   const vends=vendsAtivas(lid);
   const grid=document.getElementById("vend-lanc-grid");
   if(!grid) return;
@@ -8485,8 +8337,6 @@ function renderHistoricoLanc(){
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
   const mes=hoje().slice(0,7);
-  // [NEW 04/08] plano do mês p/ mostrar META x REALIZADO por dia
-  const _planoHL = (typeof planoSemanal==='function') ? planoSemanal(lid, mes) : {metaMes:0,realizadoMes:0,linhas:[]};
   // Pegar todos os dias do mês com lançamentos (via vendasVend + fallback D.vendas)
   const diasComLanc={};
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
@@ -8525,14 +8375,6 @@ function renderHistoricoLanc(){
     rows+="<tr style='"+(isHoje?"background:rgba(201,168,76,.05)":"")+"'>"
       +"<td style='font-weight:"+(isHoje?700:400)+";color:"+(isHoje?"var(--ouro)":"var(--texto)")+"'>"+dFmt+(isHoje?" <span style='font-size:9px;color:var(--ouro)'>HOJE</span>":"")+"</td>"
       +"<td style='font-weight:700;color:var(--verde)'>"+fmt(fat)+"</td>"
-      +(function(){
-         var _ln=(_planoHL.linhas||[]).find(function(L){var _d=Number(d.split('-')[2]);return _d>=L.ini&&_d<=L.fim;});
-         var _md=_ln?_ln.metaDia:0;
-         var _p=_md>0?(fat/_md*100):0;
-         var _c=_p>=100?'var(--verde)':(_p>=70?'var(--ouro)':(_p>0?'var(--verm)':'var(--muted)'));
-         return "<td style='color:var(--muted)'>"+(_md>0?fmt(_md):'--')+"</td>"
-              + "<td style='color:"+_c+";font-weight:700'>"+(_md>0?_p.toFixed(0)+'%':'--')+"</td>";
-       })()
       +"<td style='color:var(--azul)'>"+fmt(tm)+"</td>"
       +"<td style='color:#b07cd6;font-weight:600'>"+(paDia>0?fmtPA(paDia):"--")+"</td>"
       +"<td style='color:var(--muted)'>"+natDia+"</td>"
@@ -8542,17 +8384,8 @@ function renderHistoricoLanc(){
       +"</td>"
       +"</tr>";
   });
-  // [NEW 04/08] faixa-resumo META x REALIZADO do mês
-  var _pctMes = _planoHL.metaMes>0 ? (_planoHL.realizadoMes/_planoHL.metaMes*100) : 0;
-  var _corMes = _pctMes>=100?'var(--verde)':(_pctMes>=70?'var(--ouro)':(_pctMes>0?'var(--verm)':'var(--muted)'));
-  var _resumoMes = _planoHL.metaMes>0 ? (
-      "<div style='display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px;padding:8px 12px;background:var(--cinza);border:1px solid var(--borda);border-radius:10px;font-size:12px'>"
-      + "<span style='color:var(--muted)'>Meta do mês: <b style='color:var(--texto)'>"+fmt(_planoHL.metaMes)+"</b></span>"
-      + "<span style='color:var(--muted)'>Realizado: <b style='color:var(--verde)'>"+fmt(_planoHL.realizadoMes)+"</b></span>"
-      + "<span style='color:var(--muted)'>Atingido: <b style='color:"+_corMes+"'>"+_pctMes.toFixed(0)+"%</b></span>"
-      + "</div>") : "";
-  el.innerHTML=_resumoMes+"<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
-    +"<thead><tr><th>Data</th><th>Total</th><th>Meta dia</th><th>%</th><th>TM</th><th>P.A.</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
+  el.innerHTML="<div style='overflow-x:auto'><table class='dtable' style='font-size:11px'>"
+    +"<thead><tr><th>Data</th><th>Total</th><th>TM</th><th>P.A.</th><th>Atend.</th><th style='width:60px'></th></tr></thead>"
     +"<tbody>"+rows+"</tbody></table></div>";
 }
 function editarLanc(lid, data){
@@ -10129,6 +9962,9 @@ function tabLojas(t,el){_tabLojas=t;document.querySelectorAll("#page-lojas .tab"
 
 function renderLojas(per="hoje"){
   const hj=hoje();
+  // [FIX 27/07] LOJAS agora exclui arquivadas automaticamente (getter).
+  // Aqui a lista de renderização também exclui — a seção de "Arquivadas"
+  // é renderizada separadamente logo abaixo.
   const lojasBase = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lojaId());
   const ld=lojasBase.map(l=>{
     const m=getMetas(l.id);
@@ -10144,11 +9980,27 @@ function renderLojas(per="hoje"){
   document.getElementById("rede-best-v").textContent=fmt(ld[0].v);
   document.getElementById("rede-alrt").textContent=ld[ld.length-1].nome;
   document.getElementById("rede-media").textContent=med.toFixed(0)+"%";
+  // [NEW 27/07] Bloco de lojas arquivadas para o admin (reativar)
+  const _gridEl = document.getElementById("lojas-grid");
+  const _arquivadas = (D._lojasArquivadas || []);
+  const _renderArquivadas = () => {
+    if(!isAdmin() || !_arquivadas.length) return '';
+    return `<div style="grid-column:1/-1;margin-top:16px;padding-top:12px;border-top:1px dashed var(--borda)">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📦 Lojas arquivadas (${_arquivadas.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${_arquivadas.map(lid=>{
+        const _lArq = LOJAS_TODAS.find(l=>l.id===lid);
+        if(!_lArq) return '';
+        return `<div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted);text-decoration:line-through">${_lArq.nome}</span>
+          <button onclick="reativarLoja('${_lArq.id}')" style="background:var(--verde);color:var(--preto);border:none;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">↩️ Reativar</button>
+        </div>`;
+      }).join('')}</div></div>`;
+  };
   document.getElementById("lojas-grid").innerHTML=ld.map((l,i)=>{
     const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
     const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
-  }).join("");
+    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span>${isAdmin()?`<button onclick="event.stopPropagation();arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer" title="Arquivar loja">📦</button>`:''}</div></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
+  }).join("") + _renderArquivadas();
   const cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-lojas").innerHTML=ld.map((l,i)=>{
     const max=ld[0].v||1, c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
@@ -12195,6 +12047,30 @@ function calcPrevLoja(lid){
   if(el("ml-pssem-"+lid)) el("ml-pssem-"+lid).textContent = fmt(auto.superSem);
   if(el("ml-psdia-"+lid)) el("ml-psdia-"+lid).textContent = fmt(auto.superDia);
   if(el("ml-pv-"+lid))    el("ml-pv-"+lid).textContent    = nv>0?fmt(parseFloat((mes/nv).toFixed(2))):"--";
+
+  // [NEW 27/07] Preencher automaticamente meta de cada vendedora com
+  // meta_loja/nº_vendedoras, respeitando edição manual (dataset.manual="1")
+  if(mes > 0 && nv > 0){
+    const metaVend      = parseFloat((mes/nv).toFixed(2));
+    const superVend     = parseFloat((smes/nv).toFixed(2));
+    const ticketVend    = ticket;
+    vendsAtivas(lid).forEach(v => {
+      const mvEl  = document.getElementById("mv-mes-"+v.id);
+      const smvEl = document.getElementById("mv-smes-"+v.id);
+      const tvEl  = document.getElementById("mv-ticket-"+v.id);
+      // só preenche se estiver vazio E não foi editado manualmente
+      if(mvEl && (!mvEl.value || mvEl.value === "0") && mvEl.dataset.manual !== "1"){
+        mvEl.value = metaVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+      if(smvEl && (!smvEl.value || smvEl.value === "0") && smvEl.dataset.manual !== "1"){
+        smvEl.value = superVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+      if(tvEl && (!tvEl.value || tvEl.value === "0") && tvEl.dataset.manual !== "1"){
+        tvEl.value = ticketVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      }
+    });
+  }
+
   atualizaResumoRede();
 }
 function salvarMetasVendedoras(lid){
@@ -12290,7 +12166,7 @@ function renderMetasVendSection(lid){
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:600;margin-bottom:3px">META MÊS (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" placeholder="Ex: 48000"
+          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
             style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.3)'">
         </div>
@@ -12937,8 +12813,8 @@ function renderRankings(tab) {
   // --- Dados de todas as lojas ---
   const ld = LOJAS.map(l => {
     const m    = getMetas(l.id);
-    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : (realizadoDoMes(l.id, mesAtual()).valor || calcMes(l.id));
-    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : (metaDoMes(l.id, mesAtual()).valor || m.mes);
+    const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : calcMes(l.id);
+    const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : m.mes;
     const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(l.id)*1.2 : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
     const tm   = per==='ano' ? calcTMAno(l.id) : calcTMLoja(l.id, perV);
@@ -13368,8 +13244,8 @@ function renderRankingLoja() {
   const loja = LOJAS.find(l=>l.id===lid);
   const m    = getMetas(lid);
   const hj   = hoje();
-  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : per==='ano' ? calcAno(lid) : (realizadoDoMes(lid, mesAtual()).valor || calcMes(lid));
-  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : (metaDoMes(lid, mesAtual()).valor || m.mes);
+  const vLoja = per==='hoje' ? calcDia(lid) : per==='semana' ? calcSem(lid) : per==='ano' ? calcAno(lid) : calcMes(lid);
+  const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : m.mes;
   const sm    = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
   const pct   = meta>0 ? vLoja/meta*100 : 0;
   const cor   = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
@@ -17004,6 +16880,20 @@ if(typeof brData !== 'function'){
 // MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
 // ════════════════════════════════════════════════════════════════════
 function renderMesAnterior(){
+  // [FIX 28/07] Popula o seletor de mês com todos os meses que têm dados,
+  // preservando a seleção atual em window._histMesRef.
+  const _histSel = document.getElementById('hist-mes-sel');
+  if(_histSel){
+    const meses = mesesDisponiveis();
+    const _selecionado = window._histMesRef || '';
+    const mesesNomes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    _histSel.innerHTML = '<option value="">Mês anterior (padrão)</option>' +
+      meses.map(mr => {
+        const [y, m] = mr.split('-');
+        const _rot = mesesNomes[parseInt(m)] + '/' + y;
+        return `<option value="${mr}" ${_selecionado===mr?'selected':''}>${_rot}</option>`;
+      }).join('');
+  }
   // [FIX 23/07] Página liberada para todos os perfis. A loja fica travada
   // na própria loja; só o admin escolhe entre todas.
   const _selML = document.getElementById('mesant-loja');
@@ -17029,8 +16919,11 @@ function renderMesAnterior(){
     anoAnterior = parseInt(yyyy);
     mesAnterior = String(mesNum - 1).padStart(2, '0');
   }
-  const mesRef = anoAnterior + '-' + mesAnterior;
-  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(mesAnterior)];
+  // [FIX 28/07] Usa o mês escolhido no seletor, se houver; senão o mês anterior
+  const _mesEscolhido = window._histMesRef && /^\d{4}-\d{2}$/.test(window._histMesRef) ? window._histMesRef : null;
+  const mesRef = _mesEscolhido || (anoAnterior + '-' + mesAnterior);
+  const _mm = mesRef.split('-')[1];
+  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(_mm)];
   
   // Filtro de loja
   const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
@@ -17415,7 +17308,7 @@ function renderMesAnteriorDashboard(){
     }).join('');
   }
   const _tit = document.getElementById('mesant-widget-titulo');
-  if(_tit) _tit.textContent = 'Histórico — ' + mesNome + '/' + anoSel;
+  if(_tit) _tit.textContent = (mesRef===mesAnteriorRef() ? 'Histórico' : 'Histórico') + ' — ' + mesNome + '/' + anoSel;
   
   // Consolidado de todas as 7 lojas
   let totMeta = 0, totFat = 0, totVendas = 0;
@@ -18992,7 +18885,80 @@ function renderPerformance(){
     const nomeVend = vendId ? (D.vendedoras.find(v=>v.id===vendId)?.nome || '') : '';
     subEl.textContent = nomeVend ? `${nomeVend} · ${nomeLoja}` : `${nomeLoja} — o que fazer hoje para vender mais`;
   }
-  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoAlertas;
+  // [NEW 28/07] Bloco Mês a Mês — meta, realizado, % e P.A. históricos
+  // Loja inteira: usa metaDoMes/realizadoDoMes/paDoMes já existentes
+  // Vendedora individual: usa calcVendPer(id, "YYYY-MM") e meta cadastrada da vendedora
+  const _mesesHist = mesesDisponiveis().slice(0, 6); // últimos 6 meses
+  let blocoMesAMes = '';
+  if(_mesesHist.length){
+    const linhas = _mesesHist.map(mr => {
+      let meta, real, pa, tm, nAtend;
+      if(vendId){
+        // Vendedora individual
+        const vObj = D.vendedoras.find(v => v.id === vendId) || {};
+        meta = Number(vObj.metaMes) || 0;
+        real = calcVendPer(vendId, mr);
+        // Peças e atendimentos da vendedora naquele mês
+        let itens = 0, atend = 0;
+        Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
+          if(d.startsWith(mr)){
+            itens += Number(vd.itens || 0);
+            const t = Number(vd.trans || 0);
+            atend += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
+          }
+        });
+        pa = atend > 0 ? itens / atend : 0;
+        tm = atend > 0 ? real / atend : 0;
+        nAtend = atend;
+      } else {
+        // Loja inteira
+        meta = metaDoMes(lid, mr).valor || 0;
+        real = realizadoDoMes(lid, mr).valor || 0;
+        const paObj = typeof paDoMes === 'function' ? paDoMes(lid, mr) : {valor:0};
+        pa = paObj.valor || 0;
+        // TM e atendimentos: usar vendasDoMes se existir
+        const atendObj = typeof vendasDoMes === 'function' ? vendasDoMes(lid, mr) : {valor:0};
+        nAtend = atendObj.valor || 0;
+        tm = nAtend > 0 ? real / nAtend : 0;
+      }
+      const pct = meta > 0 ? real / meta * 100 : 0;
+      const cor = pct >= 100 ? 'var(--verde)' : pct >= 70 ? 'var(--ouro)' : pct > 0 ? 'var(--verm)' : 'var(--muted)';
+      const [ano, mesN] = mr.split('-');
+      const mesesNome = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+      const mesLabel = mesesNome[parseInt(mesN)-1] + '/' + ano.slice(2);
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
+        <td style="padding:9px 8px;font-weight:600">${mesLabel}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${meta > 0 ? fmt(meta) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${real > 0 ? fmt(real) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;font-weight:700;color:${cor}">${meta > 0 ? pct.toFixed(0) + '%' : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--azul)">${tm > 0 ? fmt(tm) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:#b07cd6">${pa > 0 ? fmtPA(pa) : '--'}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--muted)">${nAtend > 0 ? nAtend.toLocaleString('pt-BR') : '--'}</td>
+      </tr>`;
+    }).join('');
+    const _tituloMM = vendId
+      ? `Últimos 6 meses de ${D.vendedoras.find(v=>v.id===vendId)?.nome || 'vendedora'}`
+      : `Últimos 6 meses da loja`;
+    blocoMesAMes = `<div class="sc" style="margin-top:16px">
+      <div class="st">📅 ${_tituloMM}</div>
+      <div style="overflow-x:auto;margin-top:8px">
+        <table style="width:100%;border-collapse:collapse;min-width:560px;font-size:12px">
+          <thead><tr style="border-bottom:1px solid var(--borda)">
+            <th style="padding:8px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px">MÊS</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">META</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">REALIZADO</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">%</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">TM</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">P.A.</th>
+            <th style="padding:8px;text-align:right;font-size:10px;color:var(--muted);letter-spacing:1px">ATEND.</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML = seletor + blocoFoco + blocoPA + blocoTM + blocoConversao + blocoComp + blocoMesAMes + blocoAlertas;
 }
 
 
@@ -19481,6 +19447,778 @@ function atualizarMetasVendsCamp(){
   });
 }
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// RELATÓRIOS ESTRATÉGICOS — 9 abas [NEW 02/08]
+// Reaproveita metaDoMes/realizadoDoMes/vendasDoMes/paDoMes/mesesDisponiveis
+// /calcVendPer/calcFatEntre/calcNAtendEntre/calcNItensEntre/LOJAS.
+// ═══════════════════════════════════════════════════════════════════════
+
+window._relAbaAtual  = window._relAbaAtual  || 'executivo';
+window._relLojaSel   = window._relLojaSel   || ''; // "" = rede toda
+
+// ── Utilidades ───────────────────────────────────────────────────────
+function _relLojasVisiveis(){
+  if(isAdmin()) return LOJAS.filter(l=> !window._relLojaSel || l.id===window._relLojaSel);
+  return LOJAS.filter(l=>l.id===lojaId());
+}
+function _relDelta(atual, ant){
+  const a = Number(atual)||0, b = Number(ant)||0;
+  if(b <= 0) return { pct:0, txt:'—', cls:'rel-delta-flat' };
+  const pct = ((a-b)/b)*100;
+  const cls = pct > 0.5 ? 'rel-delta-up' : (pct < -0.5 ? 'rel-delta-down' : 'rel-delta-flat');
+  const s = pct >= 0 ? '▲ +'+pct.toFixed(1)+'%' : '▼ '+pct.toFixed(1)+'%';
+  return { pct, txt:s, cls };
+}
+function _relMesLabel(mesRef){
+  const nomes = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const [y,m] = mesRef.split('-');
+  return nomes[parseInt(m)] + '/' + y.slice(2);
+}
+function _relMesAnterior(mesRef){
+  const [y,m] = mesRef.split('-').map(Number);
+  return m === 1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+}
+function _relMesAnoAnt(mesRef){
+  const [y,m] = mesRef.split('-');
+  return (parseInt(y)-1)+'-'+m;
+}
+// Agrega múltiplas lojas em um único objeto de indicadores
+function _relAgregar(lojas, mesRef){
+  let meta=0, real=0, itens=0, atend=0;
+  lojas.forEach(l=>{
+    meta  += metaDoMes(l.id, mesRef).valor || 0;
+    real  += realizadoDoMes(l.id, mesRef).valor || 0;
+    atend += vendasDoMes(l.id, mesRef) || 0;
+    // Itens totais para P.A. da rede
+    const paObj = paDoMes(l.id, mesRef);
+    const vObj  = vendasDoMes(l.id, mesRef);
+    if(paObj > 0 && vObj > 0) itens += paObj * vObj;
+  });
+  const tm = atend > 0 ? real/atend : 0;
+  const pa = atend > 0 ? itens/atend : 0;
+  const pct= meta > 0 ? (real/meta)*100 : 0;
+  return { meta, real, itens, atend, tm, pa, pct };
+}
+
+// ── Troca de aba ─────────────────────────────────────────────────────
+function _relTab(aba, btn){
+  window._relAbaAtual = aba;
+  document.querySelectorAll('.rel-tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderRelatorios();
+}
+
+// ── Ponto de entrada ─────────────────────────────────────────────────
+function renderRelatorios(){
+  const el = document.getElementById('rel-conteudo');
+  if(!el) return;
+  // Popula o select de loja (só admin)
+  const sel = document.getElementById('rel-loja-sel');
+  if(sel && (sel.options?.length || 0) <= 1 && isAdmin()){
+    sel.innerHTML = '<option value="">🌐 Rede toda</option>' +
+      LOJAS.map(l=>`<option value="${l.id}" ${window._relLojaSel===l.id?'selected':''}>🏪 ${l.nome}</option>`).join('');
+  }
+  if(sel && !isAdmin() && sel.parentElement && sel.parentElement.style){
+    sel.parentElement.style.display = 'none';
+  }
+  const aba = window._relAbaAtual || 'executivo';
+  try{
+    if(aba === 'executivo')   el.innerHTML = _relExecutivo();
+    else if(aba === 'mensal') el.innerHTML = _relMensal();
+    else if(aba === 'anual')  el.innerHTML = _relAnual();
+    else if(aba === 'benchlojas') el.innerHTML = _relBenchLojas();
+    else if(aba === 'benchvends') el.innerHTML = _relBenchVends();
+    else if(aba === 'igp')    el.innerHTML = _relIGP();
+    else if(aba === 'preditivo') el.innerHTML = _relPreditivo();
+    else if(aba === 'projecao')  el.innerHTML = _relProjecao();
+    else if(aba === 'cruzamento') el.innerHTML = _relCruzamento();
+    else el.innerHTML = '<div class="sc"><div style="padding:20px;color:var(--muted)">Aba não encontrada.</div></div>';
+  }catch(e){
+    console.error('[relatorios]', e);
+    el.innerHTML = `<div class="sc"><div style="padding:20px;color:var(--verm)">Erro ao renderizar: ${e.message}</div></div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 1. DASHBOARD EXECUTIVO
+// ══════════════════════════════════════════════════════════════════════
+function _relExecutivo(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+  const mesAnt   = _relMesAnterior(mesAtual);
+
+  const agrAtu = _relAgregar(lojas, mesAtual);
+  const agrAnt = _relAgregar(lojas, mesAnt);
+
+  // KPIs principais
+  const kpis = [
+    { label:'FATURAMENTO', v:fmt(agrAtu.real),    d:_relDelta(agrAtu.real, agrAnt.real), cor:'var(--verde)' },
+    { label:'META',        v:fmt(agrAtu.meta),    d:_relDelta(agrAtu.meta, agrAnt.meta), cor:'var(--ouro)'  },
+    { label:'% META',      v:agrAtu.pct.toFixed(1)+'%', d:_relDelta(agrAtu.pct, agrAnt.pct), cor:agrAtu.pct>=100?'var(--verde)':agrAtu.pct>=70?'var(--ouro)':'var(--verm)' },
+    { label:'ATENDIMENTOS',v:agrAtu.atend.toLocaleString('pt-BR'), d:_relDelta(agrAtu.atend, agrAnt.atend), cor:'var(--azul)' },
+    { label:'TICKET MÉDIO',v:agrAtu.tm > 0 ? fmt(agrAtu.tm) : '--', d:_relDelta(agrAtu.tm, agrAnt.tm), cor:'#b07cd6' },
+    { label:'P.A.',        v:agrAtu.pa > 0 ? fmtPA(agrAtu.pa) : '--', d:_relDelta(agrAtu.pa, agrAnt.pa), cor:'#e6a817' }
+  ];
+
+  const kpiHtml = kpis.map(k=>`
+    <div class="rel-kpi">
+      <div class="rel-kpi-l">${k.label}</div>
+      <div class="rel-kpi-v" style="color:${k.cor}">${k.v}</div>
+      <div class="rel-kpi-s"><span class="${k.d.cls}">${k.d.txt}</span> vs ${_relMesLabel(mesAnt)}</div>
+    </div>`).join('');
+
+  // Evolução dos últimos 6 meses (mini gráfico)
+  const meses6 = [];
+  let m = mesAtual;
+  for(let i=0;i<6;i++){ meses6.unshift(m); m = _relMesAnterior(m); }
+  const dadosEvol = meses6.map(mr => ({ mes:mr, ...(_relAgregar(lojas, mr)) }));
+  const maxFat = Math.max(...dadosEvol.map(d=>d.real), 1);
+
+  const barrasHtml = dadosEvol.map(d=>{
+    const h = maxFat > 0 ? (d.real/maxFat)*100 : 0;
+    const cor = d.pct >= 100 ? 'var(--verde)' : d.pct >= 70 ? 'var(--ouro)' : 'var(--verm)';
+    return `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:50px">
+      <div style="width:100%;height:120px;display:flex;align-items:flex-end;justify-content:center;padding:0 4px">
+        <div style="width:100%;height:${h.toFixed(1)}%;background:${cor};border-radius:4px 4px 0 0;min-height:2px" title="${_relMesLabel(d.mes)}: ${fmt(d.real)}"></div>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:600">${_relMesLabel(d.mes)}</div>
+      <div style="font-size:10px;color:var(--texto);font-weight:600">${d.real > 0 ? fmt(d.real).replace('R$ ','') : '--'}</div>
+      <div style="font-size:9px;color:${d.pct>=100?'var(--verde)':d.pct>=70?'var(--ouro)':'var(--verm)'}">${d.meta > 0 ? d.pct.toFixed(0)+'%' : '--'}</div>
+    </div>`;
+  }).join('');
+
+  // Destaques: melhor e pior loja do mês
+  const rankingLojas = lojas.map(l=>{
+    const meta = metaDoMes(l.id, mesAtual).valor || 0;
+    const real = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const pct  = meta > 0 ? (real/meta)*100 : 0;
+    return { ...l, meta, real, pct };
+  }).sort((a,b)=>b.pct-a.pct);
+
+  const melhor = rankingLojas[0];
+  const pior   = rankingLojas[rankingLojas.length-1];
+
+  const destaqueHtml = lojas.length > 1 && melhor ? `
+    <div class="sc" style="margin-top:14px">
+      <div class="st">🎯 Destaques do mês</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+        <div style="background:var(--card2);padding:12px;border-radius:8px;border-left:3px solid var(--verde)">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">🥇 MELHOR PERFORMANCE</div>
+          <div style="font-size:15px;font-weight:700;margin-top:4px">${melhor.nome}</div>
+          <div style="font-size:12px;color:var(--verde);font-weight:600">${melhor.pct.toFixed(1)}% da meta</div>
+        </div>
+        <div style="background:var(--card2);padding:12px;border-radius:8px;border-left:3px solid ${pior.pct>=70?'var(--ouro)':'var(--verm)'}">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px">⚠️ ATENÇÃO</div>
+          <div style="font-size:15px;font-weight:700;margin-top:4px">${pior.nome}</div>
+          <div style="font-size:12px;color:${pior.pct>=70?'var(--ouro)':'var(--verm)'};font-weight:600">${pior.pct.toFixed(1)}% da meta</div>
+        </div>
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="sc">
+      <div class="st">📊 Executivo — ${_relMesLabel(mesAtual)}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">
+        ${kpiHtml}
+      </div>
+    </div>
+    <div class="sc" style="margin-top:14px">
+      <div class="st">📈 Evolução — Últimos 6 meses</div>
+      <div style="display:flex;gap:6px;margin-top:14px;padding:0 6px;align-items:flex-end;min-height:180px">
+        ${barrasHtml}
+      </div>
+    </div>
+    ${destaqueHtml}
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 2. COMPARATIVO MENSAL — Mês atual vs mês anterior, indicador a indicador
+// ══════════════════════════════════════════════════════════════════════
+function _relMensal(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+  const mesAnt   = _relMesAnterior(mesAtual);
+
+  // Comparativo por loja
+  const linhas = lojas.map(l=>{
+    const A = { meta:metaDoMes(l.id, mesAtual).valor||0, real:realizadoDoMes(l.id, mesAtual).valor||0,
+                atend:vendasDoMes(l.id, mesAtual)||0, pa:paDoMes(l.id, mesAtual)||0 };
+    const B = { meta:metaDoMes(l.id, mesAnt).valor||0, real:realizadoDoMes(l.id, mesAnt).valor||0,
+                atend:vendasDoMes(l.id, mesAnt)||0, pa:paDoMes(l.id, mesAnt)||0 };
+    A.tm = A.atend > 0 ? A.real/A.atend : 0;
+    B.tm = B.atend > 0 ? B.real/B.atend : 0;
+    const dReal  = _relDelta(A.real, B.real);
+    const dAtend = _relDelta(A.atend, B.atend);
+    const dTM    = _relDelta(A.tm, B.tm);
+    const dPA    = _relDelta(A.pa, B.pa);
+    return { loja:l.nome, A, B, dReal, dAtend, dTM, dPA };
+  });
+
+  const linhasHtml = linhas.map(r=>`
+    <tr>
+      <td><strong>${r.loja}</strong></td>
+      <td class="num">${r.A.real > 0 ? fmt(r.A.real) : '--'}<br><small style="color:var(--muted)">${r.B.real > 0 ? fmt(r.B.real) : '—'}</small></td>
+      <td class="num"><span class="${r.dReal.cls}">${r.dReal.txt}</span></td>
+      <td class="num">${r.A.atend > 0 ? r.A.atend.toLocaleString('pt-BR') : '--'}<br><small style="color:var(--muted)">${r.B.atend > 0 ? r.B.atend.toLocaleString('pt-BR') : '—'}</small></td>
+      <td class="num"><span class="${r.dAtend.cls}">${r.dAtend.txt}</span></td>
+      <td class="num">${r.A.tm > 0 ? fmt(r.A.tm) : '--'}<br><small style="color:var(--muted)">${r.B.tm > 0 ? fmt(r.B.tm) : '—'}</small></td>
+      <td class="num"><span class="${r.dTM.cls}">${r.dTM.txt}</span></td>
+      <td class="num">${r.A.pa > 0 ? fmtPA(r.A.pa) : '--'}<br><small style="color:var(--muted)">${r.B.pa > 0 ? fmtPA(r.B.pa) : '—'}</small></td>
+      <td class="num"><span class="${r.dPA.cls}">${r.dPA.txt}</span></td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">📅 Comparativo — ${_relMesLabel(mesAtual)} vs ${_relMesLabel(mesAnt)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Valor grande = mês atual. Valor pequeno abaixo = mês anterior. ▲/▼ = variação.</div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th>
+            <th class="num">FATURAMENTO</th><th class="num">Δ</th>
+            <th class="num">ATENDIMENTOS</th><th class="num">Δ</th>
+            <th class="num">TICKET MÉDIO</th><th class="num">Δ</th>
+            <th class="num">P.A.</th><th class="num">Δ</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 3. COMPARATIVO ANUAL — YoY do mês atual e YTD acumulado
+// ══════════════════════════════════════════════════════════════════════
+function _relAnual(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+  const mesAnoAnt = _relMesAnoAnt(mesAtual);
+
+  const linhas = lojas.map(l=>{
+    // Mês atual vs mesmo mês do ano anterior
+    const A = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const B = realizadoDoMes(l.id, mesAnoAnt).valor || 0;
+    // YTD (year-to-date): soma de jan até mesAtual do ano corrente vs mesmo período ano anterior
+    const [y, m] = mesAtual.split('-').map(Number);
+    let ytdAtu = 0, ytdAnt = 0;
+    for(let mm = 1; mm <= m; mm++){
+      const mrA = y + '-' + String(mm).padStart(2,'0');
+      const mrB = (y-1) + '-' + String(mm).padStart(2,'0');
+      ytdAtu += realizadoDoMes(l.id, mrA).valor || 0;
+      ytdAnt += realizadoDoMes(l.id, mrB).valor || 0;
+    }
+    const dMes = _relDelta(A, B);
+    const dYtd = _relDelta(ytdAtu, ytdAnt);
+    return { loja:l.nome, A, B, ytdAtu, ytdAnt, dMes, dYtd };
+  });
+
+  const linhasHtml = linhas.map(r=>`
+    <tr>
+      <td><strong>${r.loja}</strong></td>
+      <td class="num">${r.A > 0 ? fmt(r.A) : '--'}</td>
+      <td class="num" style="color:var(--muted)">${r.B > 0 ? fmt(r.B) : '—'}</td>
+      <td class="num"><span class="${r.dMes.cls}">${r.dMes.txt}</span></td>
+      <td class="num">${r.ytdAtu > 0 ? fmt(r.ytdAtu) : '--'}</td>
+      <td class="num" style="color:var(--muted)">${r.ytdAnt > 0 ? fmt(r.ytdAnt) : '—'}</td>
+      <td class="num"><span class="${r.dYtd.cls}">${r.dYtd.txt}</span></td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">📈 Comparativo Anual — ${_relMesLabel(mesAtual)} vs ${_relMesLabel(mesAnoAnt)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">YoY do mês + YTD (jan até o mês atual, comparado ao mesmo período do ano anterior).</div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th>
+            <th class="num">${_relMesLabel(mesAtual).toUpperCase()}</th>
+            <th class="num">${_relMesLabel(mesAnoAnt).toUpperCase()}</th>
+            <th class="num">YoY</th>
+            <th class="num">YTD ${mesAtual.split('-')[0]}</th>
+            <th class="num">YTD ${parseInt(mesAtual.split('-')[0])-1}</th>
+            <th class="num">YoY YTD</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 4. BENCHMARK ENTRE LOJAS — ranking multi-indicador
+// ══════════════════════════════════════════════════════════════════════
+function _relBenchLojas(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+
+  const dados = lojas.map(l=>{
+    const meta = metaDoMes(l.id, mesAtual).valor || 0;
+    const real = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const atend= vendasDoMes(l.id, mesAtual) || 0;
+    const pa   = paDoMes(l.id, mesAtual) || 0;
+    const tm   = atend > 0 ? real/atend : 0;
+    const pct  = meta > 0 ? (real/meta)*100 : 0;
+    return { ...l, meta, real, atend, pa, tm, pct };
+  });
+
+  // Ranking em cada indicador
+  const rank = (campo) => {
+    const ord = [...dados].sort((a,b)=> (b[campo]||0) - (a[campo]||0));
+    const map = {};
+    ord.forEach((d,i)=> map[d.id] = i+1);
+    return map;
+  };
+  const rPct   = rank('pct');
+  const rReal  = rank('real');
+  const rTm    = rank('tm');
+  const rPa    = rank('pa');
+  const rAtend = rank('atend');
+
+  const _pos = n => n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n + 'º';
+
+  const linhasHtml = dados.sort((a,b)=>b.pct-a.pct).map(d=>`
+    <tr>
+      <td><strong>${d.nome}</strong></td>
+      <td class="num" style="font-weight:700;color:${d.pct>=100?'var(--verde)':d.pct>=70?'var(--ouro)':'var(--verm)'}">${d.pct.toFixed(1)}% ${_pos(rPct[d.id])}</td>
+      <td class="num">${d.real > 0 ? fmt(d.real) : '--'} <small style="color:var(--muted)">${_pos(rReal[d.id])}</small></td>
+      <td class="num">${d.tm > 0 ? fmt(d.tm) : '--'} <small style="color:var(--muted)">${_pos(rTm[d.id])}</small></td>
+      <td class="num">${d.pa > 0 ? fmtPA(d.pa) : '--'} <small style="color:var(--muted)">${_pos(rPa[d.id])}</small></td>
+      <td class="num">${d.atend > 0 ? d.atend.toLocaleString('pt-BR') : '--'} <small style="color:var(--muted)">${_pos(rAtend[d.id])}</small></td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">🏆 Benchmark entre Lojas — ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada loja tem sua posição em 5 indicadores. Ordenado por % da meta.</div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th>
+            <th class="num">% META</th>
+            <th class="num">FATURAMENTO</th>
+            <th class="num">TICKET MÉDIO</th>
+            <th class="num">P.A.</th>
+            <th class="num">ATENDIMENTOS</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 5. BENCHMARK ENTRE VENDEDORAS — top 15 da rede/loja
+// ══════════════════════════════════════════════════════════════════════
+function _relBenchVends(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+  const lojaIds = new Set(lojas.map(l=>l.id));
+
+  const vends = (D.vendedoras || []).filter(v =>
+    lojaIds.has(v.loja) && v.ativa !== false && v.cargo !== 'VRLL'
+  );
+
+  const dados = vends.map(v=>{
+    const real = calcVendPer(v.id, mesAtual);
+    let itens = 0, atend = 0;
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd])=>{
+      if(d.startsWith(mesAtual)){
+        itens += Number(vd.itens || 0);
+        const t = Number(vd.trans || 0);
+        atend += t > 0 ? t : ((Number(vd.val)||0) > 0 ? 1 : 0);
+      }
+    });
+    const tm = atend > 0 ? real/atend : 0;
+    const pa = atend > 0 ? itens/atend : 0;
+    const meta = Number(v.metaMes) || 0;
+    const pct = meta > 0 ? (real/meta)*100 : 0;
+    const lojaNome = LOJAS.find(l=>l.id===v.loja)?.nome || v.loja;
+    return { ...v, real, atend, tm, pa, meta, pct, lojaNome };
+  }).filter(d=>d.real > 0)
+    .sort((a,b)=>b.real - a.real)
+    .slice(0, 15);
+
+  const _pos = n => n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n + 'º';
+
+  const linhasHtml = dados.map((v,i)=>`
+    <tr>
+      <td>${_pos(i+1)}</td>
+      <td><strong>${v.nome}</strong><br><small style="color:var(--muted)">${v.lojaNome}</small></td>
+      <td class="num">${fmt(v.real)}</td>
+      <td class="num">${v.meta > 0 ? fmt(v.meta) : '--'}</td>
+      <td class="num" style="color:${v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)'};font-weight:600">${v.meta > 0 ? v.pct.toFixed(0)+'%' : '--'}</td>
+      <td class="num">${v.tm > 0 ? fmt(v.tm) : '--'}</td>
+      <td class="num">${v.pa > 0 ? fmtPA(v.pa) : '--'}</td>
+      <td class="num" style="color:var(--muted)">${v.atend > 0 ? v.atend.toLocaleString('pt-BR') : '--'}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">👥 Benchmark entre Vendedoras — Top 15 de ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Ordenado por faturamento no mês. Só vendedoras com lançamentos.</div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>POS.</th>
+            <th>VENDEDORA</th>
+            <th class="num">REALIZADO</th>
+            <th class="num">META</th>
+            <th class="num">% META</th>
+            <th class="num">TICKET MÉDIO</th>
+            <th class="num">P.A.</th>
+            <th class="num">ATEND.</th>
+          </tr></thead>
+          <tbody>${linhasHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Nenhuma vendedora com lançamentos neste mês.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 6. ÍNDICE GERAL DE PERFORMANCE (IGP) — score composto 0-100
+//    Pesos: %Meta 40, TM 20, P.A. 20, Atend. 20
+// ══════════════════════════════════════════════════════════════════════
+function _relIGP(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+
+  const dados = lojas.map(l=>{
+    const meta = metaDoMes(l.id, mesAtual).valor || 0;
+    const real = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const atend= vendasDoMes(l.id, mesAtual) || 0;
+    const pa   = paDoMes(l.id, mesAtual) || 0;
+    const tm   = atend > 0 ? real/atend : 0;
+    const pct  = meta > 0 ? (real/meta)*100 : 0;
+    return { ...l, meta, real, atend, pa, tm, pct };
+  });
+
+  // Normaliza cada indicador (0-100 dentro da rede)
+  const maxPct   = Math.max(...dados.map(d=>d.pct), 1);
+  const maxTm    = Math.max(...dados.map(d=>d.tm),  1);
+  const maxPa    = Math.max(...dados.map(d=>d.pa),  1);
+  const maxAtend = Math.max(...dados.map(d=>d.atend),1);
+
+  const igp = dados.map(d=>{
+    // Pesos: %Meta 40% (não normalizado — o próprio pct já é 0-100+), TM 20%, P.A. 20%, Atend 20%
+    const nPct   = Math.min(d.pct, 120); // teto 120 pra não distorcer
+    const nTm    = maxTm    > 0 ? (d.tm/maxTm)*100    : 0;
+    const nPa    = maxPa    > 0 ? (d.pa/maxPa)*100    : 0;
+    const nAtend = maxAtend > 0 ? (d.atend/maxAtend)*100 : 0;
+    const score = nPct*0.40 + nTm*0.20 + nPa*0.20 + nAtend*0.20;
+    return { ...d, score, nPct, nTm, nPa, nAtend };
+  }).sort((a,b)=>b.score-a.score);
+
+  const _cor = s => s >= 80 ? 'var(--verde)' : s >= 60 ? 'var(--ouro)' : s >= 40 ? '#e6a817' : 'var(--verm)';
+  const _classificacao = s => s >= 80 ? 'Excelente' : s >= 60 ? 'Bom' : s >= 40 ? 'Regular' : 'Atenção';
+
+  const linhasHtml = igp.map((d,i)=>`
+    <tr>
+      <td>${i+1}º</td>
+      <td><strong>${d.nome}</strong></td>
+      <td class="num" style="font-weight:700;color:${_cor(d.score)};font-size:15px">${d.score.toFixed(1)}</td>
+      <td class="num" style="color:${_cor(d.score)}">${_classificacao(d.score)}</td>
+      <td class="num" style="color:var(--muted)">${d.pct.toFixed(0)}%</td>
+      <td class="num" style="color:var(--muted)">${d.tm > 0 ? fmt(d.tm) : '--'}</td>
+      <td class="num" style="color:var(--muted)">${d.pa > 0 ? fmtPA(d.pa) : '--'}</td>
+      <td class="num" style="color:var(--muted)">${d.atend.toLocaleString('pt-BR')}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">⭐ Índice Geral de Performance (IGP) — ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Score composto (0-100). Pesos: <strong>%Meta 40%</strong> · <strong>TM 20%</strong> · <strong>P.A. 20%</strong> · <strong>Atendimentos 20%</strong>.
+        Classificação: <span style="color:var(--verde)">≥80 Excelente</span> · <span style="color:var(--ouro)">≥60 Bom</span> · <span style="color:#e6a817">≥40 Regular</span> · <span style="color:var(--verm)">&lt;40 Atenção</span>.
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>POS.</th>
+            <th>LOJA</th>
+            <th class="num">IGP</th>
+            <th class="num">CLASSIFICAÇÃO</th>
+            <th class="num">% Meta</th>
+            <th class="num">TM</th>
+            <th class="num">P.A.</th>
+            <th class="num">Atend.</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 7. INDICADORES PREDITIVOS — média móvel dos últimos 3 meses
+// ══════════════════════════════════════════════════════════════════════
+function _relPreditivo(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+
+  // Últimos 3 meses fechados (excluindo o mês atual)
+  const meses = [];
+  let m = _relMesAnterior(mesAtual);
+  for(let i=0;i<3;i++){ meses.unshift(m); m = _relMesAnterior(m); }
+
+  const linhas = lojas.map(l=>{
+    const historico = meses.map(mr => ({
+      mes: mr,
+      real: realizadoDoMes(l.id, mr).valor || 0,
+      atend: vendasDoMes(l.id, mr) || 0,
+      pa: paDoMes(l.id, mr) || 0
+    }));
+    const media = {
+      real:  historico.reduce((s,h)=>s+h.real,  0) / 3,
+      atend: historico.reduce((s,h)=>s+h.atend, 0) / 3,
+      pa:    historico.filter(h=>h.pa>0).length > 0
+             ? historico.filter(h=>h.pa>0).reduce((s,h)=>s+h.pa,0) / historico.filter(h=>h.pa>0).length
+             : 0
+    };
+    // Tendência: comparar o mais recente com o mais antigo dos 3
+    const tendReal = historico[0].real > 0 ? _relDelta(historico[2].real, historico[0].real) : { txt:'—', cls:'rel-delta-flat' };
+    // Previsão do mês atual = média + tendência aplicada
+    const previsaoReal = media.real; // simples, sem projetar tendência para não gerar valores irreais
+    const previsaoAtend = media.atend;
+    return { loja:l.nome, historico, media, tendReal, previsaoReal, previsaoAtend };
+  });
+
+  const linhasHtml = linhas.map(r=>`
+    <tr>
+      <td><strong>${r.loja}</strong></td>
+      <td class="num">${r.historico[0].real > 0 ? fmt(r.historico[0].real) : '--'}</td>
+      <td class="num">${r.historico[1].real > 0 ? fmt(r.historico[1].real) : '--'}</td>
+      <td class="num">${r.historico[2].real > 0 ? fmt(r.historico[2].real) : '--'}</td>
+      <td class="num" style="font-weight:600;color:var(--ouro)">${r.media.real > 0 ? fmt(r.media.real) : '--'}</td>
+      <td class="num"><span class="${r.tendReal.cls}">${r.tendReal.txt}</span></td>
+      <td class="num" style="font-weight:600;color:var(--azul)">${r.previsaoReal > 0 ? fmt(r.previsaoReal) : '--'}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">🔮 Indicadores Preditivos — Baseado nos últimos 3 meses fechados</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Média móvel simples. Previsão para <strong>${_relMesLabel(mesAtual)}</strong> = média dos 3 meses anteriores.
+        Tendência = variação do primeiro para o último dos 3 meses.
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th>
+            <th class="num">${_relMesLabel(meses[0]).toUpperCase()}</th>
+            <th class="num">${_relMesLabel(meses[1]).toUpperCase()}</th>
+            <th class="num">${_relMesLabel(meses[2]).toUpperCase()}</th>
+            <th class="num">MÉDIA 3M</th>
+            <th class="num">TENDÊNCIA</th>
+            <th class="num">PREVISÃO ${_relMesLabel(mesAtual).toUpperCase()}</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 8. PROJEÇÃO DE METAS — cenários conservador/atual/otimista
+// ══════════════════════════════════════════════════════════════════════
+function _relProjecao(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+  const hj = hoje();
+  const _mesAntFn = _relMesAnterior;
+
+  const linhas = lojas.map(l=>{
+    const meta = metaDoMes(l.id, mesAtual).valor || 0;
+    const real = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const dp = diasAbertosPassados(l.id);
+    const dr = diasAbertosRestantes(l.id);
+    const du = diasAbertosNoMes(l.id);
+    // Ritmo atual
+    const mediaAtual = dp > 0 ? real / dp : 0;
+    const projAtu    = real + (mediaAtual * dr);
+    // Cenário conservador: 90% do ritmo atual
+    const projConservador = real + (mediaAtual * 0.9 * dr);
+    // Cenário otimista: 115% do ritmo (esforço extra)
+    const projOtimista    = real + (mediaAtual * 1.15 * dr);
+    // Necessário/dia para bater meta
+    const necessario = dr > 0 ? Math.max(0, meta - real) / dr : 0;
+    // % da meta em cada cenário
+    const pctAtu = meta > 0 ? (projAtu/meta)*100 : 0;
+    const pctCons= meta > 0 ? (projConservador/meta)*100 : 0;
+    const pctOtim= meta > 0 ? (projOtimista/meta)*100 : 0;
+    return { loja:l.nome, meta, real, dp, dr, du, mediaAtual, projAtu, projConservador, projOtimista, necessario, pctAtu, pctCons, pctOtim };
+  });
+
+  const _corPct = p => p >= 100 ? 'var(--verde)' : p >= 90 ? 'var(--ouro)' : 'var(--verm)';
+
+  const linhasHtml = linhas.map(r=>`
+    <tr>
+      <td><strong>${r.loja}</strong></td>
+      <td class="num">${r.meta > 0 ? fmt(r.meta) : '--'}</td>
+      <td class="num">${r.real > 0 ? fmt(r.real) : '--'} <small style="color:var(--muted)">(${r.dp}d)</small></td>
+      <td class="num">${fmt(r.necessario)}<br><small style="color:var(--muted)">${r.dr} dias</small></td>
+      <td class="num" style="color:var(--verm)">${fmt(r.projConservador)}<br><small style="color:${_corPct(r.pctCons)}">${r.pctCons.toFixed(0)}%</small></td>
+      <td class="num" style="color:var(--azul)">${fmt(r.projAtu)}<br><small style="color:${_corPct(r.pctAtu)}">${r.pctAtu.toFixed(0)}%</small></td>
+      <td class="num" style="color:var(--verde)">${fmt(r.projOtimista)}<br><small style="color:${_corPct(r.pctOtim)}">${r.pctOtim.toFixed(0)}%</small></td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">🎯 Projeção de Metas — ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Três cenários baseados no ritmo atual: <span style="color:var(--verm)">Conservador</span> (90% do ritmo),
+        <span style="color:var(--azul)">Atual</span> (ritmo mantido),
+        <span style="color:var(--verde)">Otimista</span> (115% do ritmo).
+        <strong>Necessário/dia</strong> é o quanto falta dividido pelos dias úteis restantes.
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th>
+            <th class="num">META</th>
+            <th class="num">REALIZADO</th>
+            <th class="num">NECESSÁRIO/DIA</th>
+            <th class="num">CONSERVADOR</th>
+            <th class="num">ATUAL</th>
+            <th class="num">OTIMISTA</th>
+          </tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 9. CRUZAMENTO DE INDICADORES — TM × Conversão, P.A. × TM, Campanhas × Resultado
+// ══════════════════════════════════════════════════════════════════════
+function _relCruzamento(){
+  const lojas = _relLojasVisiveis();
+  const mesAtual = hoje().slice(0,7);
+
+  // Dados base por loja
+  const pts = lojas.map(l=>{
+    const real = realizadoDoMes(l.id, mesAtual).valor || 0;
+    const atend= vendasDoMes(l.id, mesAtual) || 0;
+    const pa   = paDoMes(l.id, mesAtual) || 0;
+    const tm   = atend > 0 ? real/atend : 0;
+    // Conversão: atendimentos convertidos / atendimentos totais
+    // Como não há fluxo diferenciado no total do mês, uso vendas do dia consolidadas
+    // Aproximação: conv = trans/cli quando cli>0
+    let cli = 0, conv = 0;
+    Object.entries(D.vendas?.[l.id] || {}).forEach(([d, vd])=>{
+      if(d.startsWith(mesAtual)){
+        cli  += Number(vd.cli||0);
+        conv += Number(vd.trans||0);
+      }
+    });
+    const taxaConv = cli > 0 ? (conv/cli)*100 : 0;
+    // Campanhas × Resultado: soma do que foi lançado em campanhas neste mês
+    const campFat = (D.campRealizados || [])
+      .filter(r => r.lojaId === l.id && r.data && r.data.startsWith(mesAtual))
+      .reduce((s,r)=> s + (typeof _fatLancamento === 'function' ? _fatLancamento(r) : Number(r.fat)||0), 0);
+    const pctCamp = real > 0 ? (campFat/real)*100 : 0;
+    return { ...l, real, tm, pa, taxaConv, campFat, pctCamp };
+  });
+
+  // Matriz simples: TM × P.A. (categorização quadrantes)
+  const medTM = pts.reduce((s,p)=>s+p.tm,0) / (pts.length || 1);
+  const medPA = pts.reduce((s,p)=>s+p.pa,0) / (pts.filter(p=>p.pa>0).length || 1);
+
+  const linhasTMxPA = pts.map(p=>{
+    let quad, cor;
+    if(p.tm >= medTM && p.pa >= medPA){ quad = 'Alto TM + Alto P.A. — Ideal'; cor = 'var(--verde)'; }
+    else if(p.tm >= medTM && p.pa < medPA){ quad = 'Alto TM + Baixo P.A. — Foco em venda cruzada'; cor = 'var(--ouro)'; }
+    else if(p.tm < medTM && p.pa >= medPA){ quad = 'Baixo TM + Alto P.A. — Foco em ticket'; cor = 'var(--ouro)'; }
+    else { quad = 'Baixo TM + Baixo P.A. — Atenção'; cor = 'var(--verm)'; }
+    return { ...p, quad, cor };
+  });
+
+  const linhasTMxPAHtml = linhasTMxPA.map(p=>`
+    <tr>
+      <td><strong>${p.nome}</strong></td>
+      <td class="num">${p.tm > 0 ? fmt(p.tm) : '--'}</td>
+      <td class="num">${p.pa > 0 ? fmtPA(p.pa) : '--'}</td>
+      <td style="color:${p.cor};font-weight:600">${p.quad}</td>
+    </tr>`).join('');
+
+  const linhasConvHtml = pts.map(p=>`
+    <tr>
+      <td><strong>${p.nome}</strong></td>
+      <td class="num">${p.taxaConv > 0 ? p.taxaConv.toFixed(1)+'%' : '--'}</td>
+      <td class="num">${p.tm > 0 ? fmt(p.tm) : '--'}</td>
+      <td class="num">${p.real > 0 ? fmt(p.real) : '--'}</td>
+      <td style="color:var(--muted);font-size:11px">${
+        p.taxaConv >= 50 && p.tm >= medTM ? '✅ Conversão alta + Ticket alto = combo ideal' :
+        p.taxaConv >= 50 && p.tm < medTM  ? '⚡ Converte bem mas ticket abaixo — treinar upsell' :
+        p.taxaConv <  50 && p.tm >= medTM ? '💰 Ticket alto mas perde clientes — treinar abordagem' :
+        p.taxaConv > 0 ? '🔴 Precisa melhorar abordagem E ticket' : '—'
+      }</td>
+    </tr>`).join('');
+
+  const linhasCampHtml = pts.filter(p=>p.campFat > 0).map(p=>`
+    <tr>
+      <td><strong>${p.nome}</strong></td>
+      <td class="num">${fmt(p.campFat)}</td>
+      <td class="num">${fmt(p.real)}</td>
+      <td class="num" style="color:${p.pctCamp>=20?'var(--verde)':p.pctCamp>=10?'var(--ouro)':'var(--muted)'};font-weight:600">${p.pctCamp.toFixed(1)}%</td>
+    </tr>`).join('');
+
+  return `
+    <div class="sc">
+      <div class="st">🔗 Cruzamento: TM × P.A. — ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Média da rede: TM ${fmt(medTM)} · P.A. ${fmtPA(medPA)}. Quadrantes ajudam a decidir foco de treinamento.
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th><th class="num">TM</th><th class="num">P.A.</th><th>QUADRANTE</th>
+          </tr></thead>
+          <tbody>${linhasTMxPAHtml}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sc" style="margin-top:14px">
+      <div class="st">🔗 Cruzamento: Conversão × Ticket Médio × Faturamento</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Conversão = trans÷atendimentos do painel de clientes. Quando trans/atend não estão disponíveis, aparece "—".
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th><th class="num">CONVERSÃO</th><th class="num">TM</th><th class="num">FATURAMENTO</th><th>DIAGNÓSTICO</th>
+          </tr></thead>
+          <tbody>${linhasConvHtml}</tbody>
+        </table>
+      </div>
+    </div>
+    ${linhasCampHtml ? `
+    <div class="sc" style="margin-top:14px">
+      <div class="st">🔗 Cruzamento: Campanhas × Resultado</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Quanto do faturamento total do mês veio de campanhas ativas.
+      </div>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>LOJA</th><th class="num">FAT. CAMPANHAS</th><th class="num">FAT. TOTAL</th><th class="num">% DO TOTAL</th>
+          </tr></thead>
+          <tbody>${linhasCampHtml}</tbody>
+        </table>
+      </div>
+    </div>` : ''}
+  `;
+}
 
 </script>
 </body>
