@@ -1752,8 +1752,23 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
   <!-- HISTÓRICO DE LANÇAMENTOS -->
   <div class="sc" style="margin-top:0">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="st" style="margin:0">🗓️ Histórico do Mês</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div class="st" style="margin:0">🗓️ Histórico</div>
+      <!-- [NEW 06/08] Navegador de mês: setas + select para ver meses passados -->
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="lancHistNavMes(-1)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);cursor:pointer;font-size:14px"
+          title="Mês anterior">‹</button>
+        <select id="lanc-hist-mes-sel" onchange="lancHistSelecionarMes(this.value)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;min-width:140px">
+        </select>
+        <button onclick="lancHistNavMes(1)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);cursor:pointer;font-size:14px"
+          title="Próximo mês">›</button>
+        <button onclick="lancHistIrHoje()"
+          style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.4);border-radius:6px;padding:6px 10px;color:var(--ouro);cursor:pointer;font-size:11px;font-weight:600"
+          title="Voltar ao mês atual">Hoje</button>
+      </div>
       <div style="font-size:10px;color:var(--muted)">Clique 🗑️ para excluir</div>
     </div>
     <div id="hist-lanc-box"></div>
@@ -8329,6 +8344,24 @@ async function deletarLanc(lid, data){
   }
 }
 
+// [NEW 06/08] Estado do navegador de mês do Histórico do Painel do Dia
+window._lancHistMes = window._lancHistMes || null; // null = mês atual
+function lancHistNavMes(delta){
+  const atual = window._lancHistMes || hoje().slice(0,7);
+  const [y,m] = atual.split("-").map(Number);
+  const total = y*12 + (m-1) + delta;
+  const nY = Math.floor(total/12), nM = (total%12)+1;
+  window._lancHistMes = nY + "-" + String(nM).padStart(2,"0");
+  renderHistoricoLanc();
+}
+function lancHistSelecionarMes(mr){
+  window._lancHistMes = mr || null;
+  renderHistoricoLanc();
+}
+function lancHistIrHoje(){
+  window._lancHistMes = null;
+  renderHistoricoLanc();
+}
 function renderHistoricoLanc(){
   const el=document.getElementById("hist-lanc-box");
   if(!el) return;
@@ -8336,7 +8369,33 @@ function renderHistoricoLanc(){
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
-  const mes=hoje().slice(0,7);
+  // [FIX 06/08] usa o mês do seletor; padrão é o mês atual
+  const mes = window._lancHistMes || hoje().slice(0,7);
+  // Popular o select de meses disponíveis (todos com dados + últimos 12)
+  const _sel = document.getElementById("lanc-hist-mes-sel");
+  if(_sel){
+    const nomesMes = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+    const _mesesSet = new Set();
+    // últimos 12 meses (para navegação futura ou atual)
+    const _hj = hoje();
+    const [_hY,_hM] = _hj.split("-").map(Number);
+    for(let i=0;i<12;i++){
+      const t = _hY*12 + (_hM-1) - i;
+      const nY = Math.floor(t/12), nM = (t%12)+1;
+      _mesesSet.add(nY + "-" + String(nM).padStart(2,"0"));
+    }
+    // + meses com dados (mesesDisponiveis)
+    if(typeof mesesDisponiveis === "function"){
+      mesesDisponiveis().forEach(mr => _mesesSet.add(mr));
+    }
+    const meses = [..._mesesSet].sort().reverse();
+    _sel.innerHTML = meses.map(mr => {
+      const [y,mm] = mr.split("-");
+      const lbl = nomesMes[parseInt(mm)] + "/" + y;
+      const marcaHoje = mr === hoje().slice(0,7) ? " (atual)" : "";
+      return `<option value="${mr}" ${mr===mes?"selected":""}>${lbl}${marcaHoje}</option>`;
+    }).join("");
+  }
   // Pegar todos os dias do mês com lançamentos (via vendasVend + fallback D.vendas)
   const diasComLanc={};
   D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
@@ -12009,7 +12068,7 @@ function renderMetasLojas(){
             <div style="font-size:15px;font-weight:700;color:var(--roxo)" id="ml-pv-${loja.id}">${m.mes&&nv?fmt(parseFloat((m.mes/nv).toFixed(2))):'--'}</div>
           </div>
         </div>
-        <button onclick="salvarMetaLoja('${loja.id}')" style="width:100%;background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:7px;padding:10px;color:var(--preto);font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer">💾 Salvar Meta da Loja</button>
+        <div style="display:flex;gap:6px"><button onclick="redistribuirMetaVends('${loja.id}')" style="flex:1;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.5);border-radius:7px;padding:10px;color:#a78bfa;font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer" title="Divide a meta da loja igualmente entre as vendedoras ativas">🔄 Redistribuir</button><button onclick="salvarMetaLoja('${loja.id}')" style="flex:2;background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:7px;padding:10px;color:var(--preto);font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer">💾 Salvar Meta da Loja</button></div>
       </div>
       ${renderMetasVendSection(loja.id)}
     </div>`;
@@ -12172,13 +12231,13 @@ function renderMetasVendSection(lid){
         </div>
         <div>
           <div style="font-size:8px;color:var(--roxo);font-weight:600;margin-bottom:3px">SUPER META (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${v.superMetaMes||''}" placeholder="Auto +25%"
+          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${v.superMetaMes||''}" oninput="this.dataset.manual='1'" placeholder="Auto +25%"
             style="width:100%;background:var(--cinza);border:1px solid rgba(139,92,246,.3);border-radius:5px;padding:6px 8px;color:var(--roxo);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--roxo)'" onblur="this.style.borderColor='rgba(139,92,246,.3)'">
         </div>
         <div>
           <div style="font-size:8px;color:var(--azul);font-weight:600;margin-bottom:3px">TICKET ALVO (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-ticket-${v.id}" value="${v.ticketAlvo||350}" placeholder="350"
+          <input type="text" inputmode="decimal" id="mv-ticket-${v.id}" value="${v.ticketAlvo||350}" oninput="this.dataset.manual='1'" placeholder="350"
             style="width:100%;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--azul)'" onblur="this.style.borderColor='rgba(91,141,239,.3)'">
         </div>
@@ -12186,13 +12245,13 @@ function renderMetasVendSection(lid){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div>
           <div style="font-size:8px;color:var(--verde);font-weight:600;margin-bottom:3px">🎂 META ANIVERSARIANTES (qtd/mês)</div>
-          <input type="text" inputmode="numeric" id="mv-aniv-${v.id}" value="${v.metaAniv||''}" placeholder="Ex: 10"
+          <input type="text" inputmode="numeric" id="mv-aniv-${v.id}" value="${v.metaAniv||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 10"
             style="width:100%;background:var(--cinza);border:1px solid rgba(46,204,135,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none;box-sizing:border-box;text-align:center"
             onfocus="this.style.borderColor='var(--verde)'" onblur="this.style.borderColor='rgba(46,204,135,.3)'">
         </div>
         <div>
           <div style="font-size:8px;color:var(--laranja);font-weight:600;margin-bottom:3px">♻️ META REATIVAÇÃO (qtd/mês)</div>
-          <input type="text" inputmode="numeric" id="mv-inativ-${v.id}" value="${v.metaInativ||''}" placeholder="Ex: 5"
+          <input type="text" inputmode="numeric" id="mv-inativ-${v.id}" value="${v.metaInativ||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 5"
             style="width:100%;background:var(--cinza);border:1px solid rgba(251,140,0,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:13px;font-weight:700;outline:none;box-sizing:border-box;text-align:center"
             onfocus="this.style.borderColor='var(--laranja)'" onblur="this.style.borderColor='rgba(251,140,0,.3)'">
         </div>
@@ -12208,6 +12267,39 @@ function calcAcumVend(vid){
   const mes=hoje().slice(0,7);let t=0;
   for(const d in(D.vendasVend[vid]||{}))if(d.startsWith(mes))t+=Number(D.vendasVend[vid][d].val||0);
   return t;
+}
+function redistribuirMetaVends(lid){
+  // [NEW 06/08] Botão explícito da Moni: "Redistribuir" divide a meta da
+  // loja igualmente entre as vendedoras ativas, sobrescrevendo mesmo os
+  // campos que ela editou manualmente antes. Também limpa dataset.manual
+  // para que a distribuição volte a valer.
+  const mes = parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
+  const smes= parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
+  const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||250;
+  if(mes<=0){ showToast("Preencha a meta da loja primeiro!","err"); return; }
+  const vends = vendsAtivas(lid);
+  if(!vends.length){ showToast("Sem vendedoras ativas para distribuir.","err"); return; }
+  if(!confirm("Redistribuir a meta da loja igualmente entre "+vends.length+" vendedoras?\n\nIsso sobrescreve os valores atuais dos campos das vendedoras.")) return;
+  const metaVend  = parseFloat((mes/vends.length).toFixed(2));
+  const superVend = parseFloat((smes/vends.length).toFixed(2));
+  vends.forEach(v => {
+    const mvEl  = document.getElementById("mv-mes-"+v.id);
+    const smvEl = document.getElementById("mv-smes-"+v.id);
+    const tvEl  = document.getElementById("mv-ticket-"+v.id);
+    if(mvEl){
+      mvEl.value = metaVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      delete mvEl.dataset.manual;
+    }
+    if(smvEl){
+      smvEl.value = superVend.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      delete smvEl.dataset.manual;
+    }
+    if(tvEl){
+      tvEl.value = ticket.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      delete tvEl.dataset.manual;
+    }
+  });
+  showToast("✅ Redistribuído: "+fmt(metaVend)+" por vendedora. Não esqueça de clicar em Salvar Meta da Loja.");
 }
 function salvarMetaLoja(lid){
   const metaCli=parseInt(document.getElementById("ml-cli-"+lid)?.value)||0;
