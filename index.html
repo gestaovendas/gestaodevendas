@@ -1771,6 +1771,19 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <div style="font-size:10px;color:var(--muted)">Clique 🗑️ para excluir</div>
     </div>
+    <!-- [NEW 07/08] Calendário do mês selecionado -->
+    <div id="cal-lanc-wrap" style="margin:12px 0;padding:12px;background:var(--card2);border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">📆 Calendário — clique num dia para carregar</div>
+        <div style="font-size:10px;color:var(--muted)">
+          <span style="display:inline-block;width:10px;height:10px;background:var(--verde);border-radius:2px;vertical-align:middle;margin-right:3px"></span> ≥100% ·
+          <span style="display:inline-block;width:10px;height:10px;background:var(--ouro);border-radius:2px;vertical-align:middle;margin:0 3px"></span> ≥70% ·
+          <span style="display:inline-block;width:10px;height:10px;background:var(--verm);border-radius:2px;vertical-align:middle;margin:0 3px"></span> &lt;70% ·
+          <span style="display:inline-block;width:10px;height:10px;background:var(--cinza);border-radius:2px;vertical-align:middle;margin:0 3px"></span> sem lançamento
+        </div>
+      </div>
+      <div id="cal-lanc-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px"></div>
+    </div>
     <div id="hist-lanc-box"></div>
   </div>
 
@@ -2376,7 +2389,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px">
         <option value="">🌐 Rede toda</option>
       </select>
-      <button class="btn-s" onclick="renderRelatorios()" style="font-size:12px">🔄 Atualizar</button>
+      <button class="btn-s" onclick="renderRelatorios()" style="font-size:12px">🔄 Atualizar</button><button class="btn-s" onclick="exportarRelatorioPDF()" style="font-size:12px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Exportar a aba atual para PDF (via impressão do navegador)">📄 Exportar PDF</button>
     </div>
   </div>
 
@@ -7693,6 +7706,7 @@ function carregarVendsForm(lidOverride){
   // Atualiza consolidado e histórico sempre que a loja muda
   renderConsolidadoLanc(lid);
   renderHistoricoLanc();
+  if(typeof renderCalendarioLanc === 'function') renderCalendarioLanc();
 
   if(!vends.length){
     grid.innerHTML="<div style='color:var(--muted);font-size:12px;padding:12px 0'>Sem vendedoras cadastradas para esta loja.</div>";
@@ -7798,7 +7812,12 @@ function carregarVendsForm(lidOverride){
         <div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:1px">➕ Adicionar venda</div>
-            ${valAtual>0?`<div style="font-size:11px;font-weight:700;color:var(--ouro)">Acumulado: ${fmt(valAtual)}</div>`:''}
+            ${valAtual>0?`<div style="display:flex;gap:8px;align-items:center;font-size:10px">
+              <span style="font-weight:700;color:var(--ouro)">${fmt(valAtual)}</span>
+              ${atendAtual>0?`<span style="color:var(--muted)">·</span><span style="color:var(--azul);font-weight:600">${atendAtual} atend.</span>`:''}
+              ${itensAtual>0?`<span style="color:var(--muted)">·</span><span style="color:#b07cd6;font-weight:600">${itensAtual} peças</span>`:''}
+              ${itensAtual>0&&atendAtual>0?`<span style="color:var(--muted)">·</span><span style="color:#e6a817;font-weight:600">P.A. ${fmtPA(itensAtual/atendAtual)}</span>`:''}
+            </div>`:''}
           </div>
           <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:end">
             <input type="text" inputmode="decimal" id="vlanc_${v.id}"
@@ -8346,21 +8365,48 @@ async function deletarLanc(lid, data){
 
 // [NEW 06/08] Estado do navegador de mês do Histórico do Painel do Dia
 window._lancHistMes = window._lancHistMes || null; // null = mês atual
+
+// [FIX 07/08] Ao navegar, também preenche l-data com uma data DENTRO daquele mês.
+// Isso faz TODO o Painel do Dia (cards de vendedora com meta+realizado, KPIs,
+// form) refletir o mês selecionado, não só a lista.
+function _lancHistAplicarMes(mr){
+  window._lancHistMes = mr || null;
+  // Se voltamos ao mês atual (null), l-data volta para hoje
+  const dataAlvo = mr && mr !== hoje().slice(0,7)
+    ? _ultimoDiaDoMes(mr)   // mês passado: último dia daquele mês
+    : hoje();                // mês atual: hoje
+  const dataEl = document.getElementById("l-data");
+  if(dataEl){
+    dataEl.value = dataAlvo;
+  }
+  // Re-renderiza TUDO do Painel do Dia com a nova data-base
+  if(typeof carregarVendsForm === "function") carregarVendsForm();
+  renderHistoricoLanc();
+  if(typeof renderCalendarioLanc === "function") renderCalendarioLanc();
+}
+function _ultimoDiaDoMes(mr){
+  // Se for o mês atual ou futuro, usa hoje; se mês passado, o último dia do mês.
+  const [y,m] = mr.split("-").map(Number);
+  const hj = hoje();
+  const [hY,hM] = hj.split("-").map(Number);
+  if(y > hY || (y === hY && m > hM)) return mr + "-01"; // futuro
+  if(y === hY && m === hM) return hj;                    // mês atual
+  const lastDay = new Date(y, m, 0).getDate();
+  return mr + "-" + String(lastDay).padStart(2,"0");
+}
 function lancHistNavMes(delta){
   const atual = window._lancHistMes || hoje().slice(0,7);
   const [y,m] = atual.split("-").map(Number);
   const total = y*12 + (m-1) + delta;
   const nY = Math.floor(total/12), nM = (total%12)+1;
-  window._lancHistMes = nY + "-" + String(nM).padStart(2,"0");
-  renderHistoricoLanc();
+  const mesNovo = nY + "-" + String(nM).padStart(2,"0");
+  _lancHistAplicarMes(mesNovo);
 }
 function lancHistSelecionarMes(mr){
-  window._lancHistMes = mr || null;
-  renderHistoricoLanc();
+  _lancHistAplicarMes(mr || null);
 }
 function lancHistIrHoje(){
-  window._lancHistMes = null;
-  renderHistoricoLanc();
+  _lancHistAplicarMes(null);
 }
 function renderHistoricoLanc(){
   const el=document.getElementById("hist-lanc-box");
@@ -20310,6 +20356,229 @@ function _relCruzamento(){
       </div>
     </div>` : ''}
   `;
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 07/08] CALENDÁRIO do Painel do Dia — grid mensal com atingimento
+// Cada dia é um quadrado colorido por % da meta diária progressiva:
+// verde ≥100%, ouro ≥70%, verm <70% com dado, cinza sem lançamento.
+// Clicar num dia carrega ele no form de lançamento.
+// ══════════════════════════════════════════════════════════════════════
+function renderCalendarioLanc(){
+  const grid = document.getElementById('cal-lanc-grid');
+  if(!grid) return;
+
+  // Loja (admin usa a do seletor; loja usa a própria)
+  const selLoja = document.getElementById('lanc-loja-sel');
+  const lid = isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0]?.id)
+    : lojaId();
+  if(!lid) { grid.innerHTML = '<div style="color:var(--muted);font-size:11px;grid-column:1/-1;text-align:center;padding:20px">Selecione uma loja para ver o calendário.</div>'; return; }
+
+  // Mês do calendário: usa _lancHistMes se setado; senão mês atual
+  const mesRef = window._lancHistMes || hoje().slice(0,7);
+  const [y, m] = mesRef.split('-').map(Number);
+  const diasNoMes = new Date(y, m, 0).getDate();
+  const primeiroDiaSem = new Date(y, m-1, 1).getDay(); // 0=domingo
+
+  // Meta diária de referência (do mês) — divide meta mensal pelo nº de dias úteis
+  const metas = getMetas(lid, mesRef);
+  const metaDiaBase = metas.dia || (metas.mes ? metas.mes / diasNoMes : 0);
+
+  // Fatura por dia — vendasVend (por vendedora) OU D.vendas (consolidado)
+  const fatPorDia = {};
+  D.vendedoras.filter(v => v.loja === lid).forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([dt, dd]) => {
+      if(dt.startsWith(mesRef)){
+        fatPorDia[dt] = (fatPorDia[dt] || 0) + (Number(dd.val) || 0);
+      }
+    });
+  });
+  Object.entries(D.vendas[lid] || {}).forEach(([dt, dd]) => {
+    if(dt.startsWith(mesRef) && !fatPorDia[dt]){
+      fatPorDia[dt] = Number(dd.fat) || 0;
+    }
+  });
+
+  // Cabeçalho D S T Q Q S S
+  const nomesDia = ['D','S','T','Q','Q','S','S'];
+  let html = nomesDia.map(n => `<div style="text-align:center;font-size:9px;color:var(--muted);font-weight:600;padding:4px 0">${n}</div>`).join('');
+
+  // Espaços em branco antes do dia 1
+  for(let i = 0; i < primeiroDiaSem; i++){
+    html += '<div></div>';
+  }
+
+  const hoje_ = hoje();
+  const dataAtual = document.getElementById('l-data')?.value || hoje_;
+
+  for(let d = 1; d <= diasNoMes; d++){
+    const dt = mesRef + '-' + String(d).padStart(2,'0');
+    const fat = fatPorDia[dt] || 0;
+    const pct = metaDiaBase > 0 ? (fat / metaDiaBase) * 100 : 0;
+
+    let bg, cor, txtCor;
+    if(fat === 0){
+      bg = 'rgba(255,255,255,.05)';
+      cor = 'var(--cinza)';
+      txtCor = 'var(--muted)';
+    } else if(pct >= 100){
+      bg = 'rgba(40,167,69,.2)';
+      cor = 'var(--verde)';
+      txtCor = 'var(--verde)';
+    } else if(pct >= 70){
+      bg = 'rgba(201,168,76,.2)';
+      cor = 'var(--ouro)';
+      txtCor = 'var(--ouro)';
+    } else {
+      bg = 'rgba(220,53,69,.2)';
+      cor = 'var(--verm)';
+      txtCor = 'var(--verm)';
+    }
+
+    const ehSelecionado = dt === dataAtual;
+    const ehHoje        = dt === hoje_;
+    const borda = ehSelecionado
+      ? '2px solid var(--ouro)'
+      : ehHoje
+        ? '1px dashed var(--azul)'
+        : '1px solid rgba(255,255,255,.05)';
+
+    const dataDisp = String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0');
+    const fatDisp = fat > 0 ? fmt(fat).replace('R$ ','R$') : '';
+    const pctDisp = fat > 0 && metaDiaBase > 0 ? pct.toFixed(0) + '%' : '';
+
+    html += `<div onclick="calSelecionarDia('${dt}')"
+      style="background:${bg};border:${borda};border-radius:6px;padding:5px 3px;text-align:center;cursor:pointer;transition:all .15s;min-height:52px;display:flex;flex-direction:column;justify-content:center;align-items:center"
+      onmouseover="this.style.transform='scale(1.05)';this.style.zIndex='2';this.style.position='relative'"
+      onmouseout="this.style.transform='';this.style.zIndex='';this.style.position=''"
+      title="${dataDisp}${fat>0 ? ' — '+fmt(fat)+' ('+pctDisp+' da meta dia)' : ' — sem lançamento'}">
+      <div style="font-size:11px;font-weight:600;color:${ehSelecionado ? 'var(--ouro)' : 'var(--texto)'}">${d}</div>
+      ${fat > 0 ? `<div style="font-size:8px;color:${txtCor};font-weight:600;margin-top:2px;line-height:1.1">${pctDisp}</div>` : ''}
+    </div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+// Seleciona um dia do calendário: coloca em l-data e recarrega o Painel
+function calSelecionarDia(dt){
+  const dataEl = document.getElementById('l-data');
+  if(!dataEl) return;
+  dataEl.value = dt;
+  // Se o dia clicado é de outro mês, ajustar _lancHistMes
+  const mrClicado = dt.slice(0,7);
+  const mrAtual = window._lancHistMes || hoje().slice(0,7);
+  if(mrClicado !== mrAtual){
+    window._lancHistMes = mrClicado === hoje().slice(0,7) ? null : mrClicado;
+  }
+  if(typeof carregarVendsForm === 'function') carregarVendsForm();
+  if(typeof renderHistoricoLanc === 'function') renderHistoricoLanc();
+  renderCalendarioLanc();
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 07/08] EXPORTAR RELATÓRIO EM PDF
+// Usa window.print() com CSS de impressão. Abre janela nova só com o
+// conteúdo da aba atual, cabeçalho e data — o usuário escolhe
+// "Salvar como PDF" na caixa de impressão do navegador.
+// ══════════════════════════════════════════════════════════════════════
+function exportarRelatorioPDF(){
+  const conteudoEl = document.getElementById('rel-conteudo');
+  if(!conteudoEl || !conteudoEl.innerHTML.trim()){
+    showToast('Nada para exportar. Selecione uma aba primeiro.','warn');
+    return;
+  }
+
+  const nomesAba = {
+    executivo:  'Dashboard Executivo',
+    mensal:     'Comparativo Mensal',
+    anual:      'Comparativo Anual',
+    benchlojas: 'Benchmark entre Lojas',
+    benchvends: 'Benchmark entre Vendedoras',
+    igp:        'Índice Geral de Performance (IGP)',
+    preditivo:  'Indicadores Preditivos',
+    projecao:   'Projeção de Metas',
+    cruzamento: 'Cruzamento de Indicadores'
+  };
+  const aba = window._relAbaAtual || 'executivo';
+  const titulo = nomesAba[aba] || 'Relatório Estratégico';
+
+  const filtroLoja = window._relLojaSel
+    ? (LOJAS.find(l=>l.id===window._relLojaSel)?.nome || 'Rede toda')
+    : 'Rede toda';
+
+  const hj = hoje();
+  const dataFmt = hj.split('-').reverse().join('/');
+  const horaFmt = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+
+  // Abre janela e escreve o conteúdo com estilo próprio de impressão
+  const w = window.open('', '_blank', 'width=1024,height=768');
+  if(!w){
+    showToast('Bloqueio de pop-up detectado — libere para exportar PDF.','err');
+    return;
+  }
+
+  w.document.write(`<!doctype html>
+<html lang="pt-BR"><head>
+<meta charset="UTF-8">
+<title>${titulo} — MonAris</title>
+<style>
+  * { box-sizing:border-box; }
+  body { font-family: 'DM Sans', Arial, sans-serif; margin:0; padding:24px; color:#111; background:#fff; font-size:12px; }
+  .print-header { border-bottom:2px solid #c9a84c; padding-bottom:12px; margin-bottom:18px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px; }
+  .print-header h1 { font-family:'Playfair Display', Georgia, serif; margin:0 0 4px 0; font-size:22px; color:#111; font-weight:700; }
+  .print-header .sub { font-size:11px; color:#666; }
+  .print-header .meta { text-align:right; font-size:11px; color:#666; }
+  .print-header .meta strong { color:#111; }
+  .print-content { }
+  .sc { background:#fafafa; border:1px solid #ddd; border-radius:8px; padding:14px; margin-bottom:14px; page-break-inside:avoid; }
+  .st { font-size:13px; font-weight:700; color:#111; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px; }
+  table { width:100%; border-collapse:collapse; font-size:11px; margin-top:6px; }
+  th { background:#f0f0f0; color:#333; padding:6px 8px; text-align:left; border-bottom:1px solid #ccc; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+  td { padding:6px 8px; border-bottom:1px solid #eee; }
+  .num { text-align:right; }
+  small { font-size:9px; color:#888; }
+  .rel-kpi { display:inline-block; background:#f8f8f8; border:1px solid #ddd; border-radius:6px; padding:10px 12px; margin-right:8px; margin-bottom:8px; min-width:120px; text-align:center; }
+  .rel-kpi-l { font-size:9px; color:#666; text-transform:uppercase; letter-spacing:.8px; margin-bottom:3px; }
+  .rel-kpi-v { font-size:16px; font-weight:700; color:#111; }
+  .rel-kpi-s { font-size:9px; color:#666; margin-top:2px; }
+  .rel-delta-up { color:#28a745; font-weight:600; }
+  .rel-delta-down { color:#dc3545; font-weight:600; }
+  .rel-delta-flat { color:#888; }
+  .print-footer { position:fixed; bottom:8px; left:24px; right:24px; text-align:center; font-size:9px; color:#999; border-top:1px solid #eee; padding-top:6px; }
+  @media print {
+    body { padding:16px; }
+    .no-print { display:none !important; }
+    .sc { break-inside:avoid; }
+    .print-footer { position:fixed; bottom:0; }
+    @page { margin:15mm; }
+  }
+</style>
+</head>
+<body>
+  <div class="print-header">
+    <div>
+      <h1>${titulo}</h1>
+      <div class="sub">Relatório Estratégico — MonAris Sales Control</div>
+    </div>
+    <div class="meta">
+      <div><strong>Loja:</strong> ${filtroLoja}</div>
+      <div><strong>Emitido em:</strong> ${dataFmt} às ${horaFmt}</div>
+    </div>
+  </div>
+  <div class="print-content">
+    ${conteudoEl.innerHTML}
+  </div>
+  <div class="print-footer">MonAris Sales Control · ${dataFmt}</div>
+</body></html>`);
+  // Dispara a impressão pela janela pai — mais confiável que embutir código script no template
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 500);
+  w.document.close();
 }
 
 </script>
