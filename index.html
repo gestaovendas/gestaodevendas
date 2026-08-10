@@ -8939,17 +8939,52 @@ function renderFluxo(){
     : "<div style='color:var(--muted);font-size:12px;padding:16px 0'>Nenhum registro no período.</div>";
 
   // ── Por loja (só admin vê dados de todas; loja vê só a própria)
+  // [FIX 10/08] Agora mostra também o TOTAL de atendimentos da loja no período
+  // (vem do lançamento diário via calcNAtendEntre / vendasDoMes) — que é o
+  // universo real. "N clientes registrados" = fluxo (walk-in/whatsapp/etc).
+  // "X atendimentos totais" = todos os cupons fiscais do período.
+  // Determinar o intervalo efetivo em uso
+  const per_de_l  = document.getElementById("fluxo-per-de")?.value  || "";
+  const per_ate_l = document.getElementById("fluxo-per-ate")?.value || "";
+  let iniPer, fimPer;
+  if(per_de_l || per_ate_l){
+    iniPer = per_de_l  || "2020-01-01";
+    fimPer = per_ate_l || hoje();
+  } else if(_tabFluxo === "mes"){
+    const mes = hoje().slice(0,7);
+    iniPer = mes + "-01";
+    const [y,m] = mes.split("-").map(Number);
+    fimPer = mes + "-" + String(new Date(y, m, 0).getDate()).padStart(2,"0");
+  } else if(_tabFluxo === "semana"){
+    const hj_d = new Date(); hj_d.setHours(0,0,0,0);
+    const ds = hj_d.getDay(); const diff = ds===0?6:ds-1;
+    const seg = new Date(hj_d); seg.setDate(hj_d.getDate()-diff);
+    iniPer = seg.getFullYear()+"-"+String(seg.getMonth()+1).padStart(2,"0")+"-"+String(seg.getDate()).padStart(2,"0");
+    fimPer = hoje();
+  } else {
+    iniPer = "2020-01-01";
+    fimPer = hoje();
+  }
+
   const lojasVis=isAdmin()?LOJAS:LOJAS.filter(l=>l.id===lojaId());
   document.getElementById("fluxo-por-loja").innerHTML=lojasVis.map(l=>{
     const rLoja=filtrarFluxoData(D.fluxo.filter(r=>r.loja===l.id));
     const nL=rLoja.length, valL=rLoja.reduce((s,r)=>s+(r.valor||0),0);
     const top=Object.entries(rLoja.reduce((acc,r)=>{acc[r.origem]=(acc[r.origem]||0)+1;return acc;},{})).sort((a,b)=>b[1]-a[1])[0];
+    // [NEW 10/08] Total de atendimentos da loja no período (todos os cupons)
+    let totalAtend = 0;
+    try{ totalAtend = calcNAtendEntre(l.id, iniPer, fimPer) || 0; }catch(e){ totalAtend = 0; }
+    const pctRastreado = totalAtend > 0 ? (nL/totalAtend*100) : 0;
     return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <span style="font-size:12px;font-weight:600">${l.nome}</span>
-        <span style="font-size:13px;font-weight:700;color:var(--azul)">${nL} clientes</span>
+        <span style="font-size:13px;font-weight:700;color:var(--verde)">${totalAtend.toLocaleString("pt-BR")} atendimentos</span>
       </div>
-      <div style="font-size:10px;color:var(--muted)">Vendas: ${fmt(valL)}${top?" · Top: "+ORIGENS[top[0]]?.emoji+" "+ORIGENS[top[0]]?.label:""}</div>
+      <div style="font-size:10px;color:var(--muted)">
+        <span style="color:var(--azul);font-weight:600">${nL} clientes registrados</span>
+        ${totalAtend > 0 ? `<span style="color:var(--ouro);margin-left:6px">(${pctRastreado.toFixed(1)}% rastreado)</span>` : ""}
+        · Vendas: ${fmt(valL)}${top?" · Top: "+ORIGENS[top[0]]?.emoji+" "+ORIGENS[top[0]]?.label:""}
+      </div>
     </div>`;
   }).join("") || "<div style='color:var(--muted);font-size:12px;padding:8px 0'>Sem dados.</div>";
 
