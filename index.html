@@ -9103,6 +9103,83 @@ function exportarPDFFluxo(){
     return {k, label:v.label, emoji:v.emoji, n, val};
   }).filter(o=>o.n>0).sort((a,b)=>b.n-a.n);
 
+  // [NEW 10/08] Por loja — inclui total de atendimentos do período (calcNAtendEntre)
+  // Determina o intervalo do PDF (fim = último dia se aberto)
+  const _perDeP  = document.getElementById("fluxo-per-de")?.value  || "";
+  const _perAteP = document.getElementById("fluxo-per-ate")?.value || "";
+  let iniPDF, fimPDF;
+  if(_perDeP || _perAteP){
+    iniPDF = _perDeP  || "2020-01-01";
+    fimPDF = _perAteP || hoje();
+  } else if(_tabFluxo === "mes"){
+    const mes = hoje().slice(0,7);
+    iniPDF = mes + "-01";
+    const [y,m] = mes.split("-").map(Number);
+    fimPDF = mes + "-" + String(new Date(y, m, 0).getDate()).padStart(2,"0");
+  } else if(_tabFluxo === "semana"){
+    const hj_d = new Date(); hj_d.setHours(0,0,0,0);
+    const ds = hj_d.getDay(); const diff = ds===0?6:ds-1;
+    const seg = new Date(hj_d); seg.setDate(hj_d.getDate()-diff);
+    iniPDF = seg.getFullYear()+"-"+String(seg.getMonth()+1).padStart(2,"0")+"-"+String(seg.getDate()).padStart(2,"0");
+    fimPDF = hoje();
+  } else { iniPDF = "2020-01-01"; fimPDF = hoje(); }
+
+  const lojasPDF = lojaFiltro ? LOJAS.filter(l=>l.id===lojaFiltro) : LOJAS;
+  const porLojaPDF = lojasPDF.map(l=>{
+    const rL = regs.filter(r=>r.loja===l.id);
+    const nRegL = rL.length;
+    const valL  = rL.reduce((s,r)=>s+(r.valor||0), 0);
+    let atendL = 0;
+    try{ atendL = calcNAtendEntre(l.id, iniPDF, fimPDF) || 0; }catch(e){ atendL = 0; }
+    const pctRastr = atendL > 0 ? (nRegL/atendL*100) : 0;
+    return { nome:l.nome, nRegL, valL, atendL, pctRastr };
+  }).filter(x => x.atendL > 0 || x.nRegL > 0);
+
+  const rowsPorLoja = porLojaPDF.map(x=>`<tr>
+    <td><strong>${x.nome}</strong></td>
+    <td style="text-align:right"><strong>${x.atendL.toLocaleString("pt-BR")}</strong></td>
+    <td style="text-align:right">${x.nRegL}</td>
+    <td style="text-align:right">${x.atendL>0 ? x.pctRastr.toFixed(1)+"%" : "—"}</td>
+    <td style="text-align:right">${x.valL>0 ? fmt(x.valL) : "—"}</td>
+  </tr>`).join("");
+
+  // [NEW 10/08] Clientes recorrentes — mesmo nome normalizado com 2+ visitas
+  const normNomePDF = n => (n||"").trim().toLowerCase().replace(/\s+/g, " ");
+  const agrPDF = {};
+  regs.forEach(r=>{
+    const chave = normNomePDF(r.nome);
+    if(!chave) return;
+    if(!agrPDF[chave]) agrPDF[chave] = { nome: r.nome.trim(), regs: [] };
+    agrPDF[chave].regs.push(r);
+  });
+  const recorrentesPDF = Object.values(agrPDF)
+    .filter(g => g.regs.length >= 2)
+    .map(g=>{
+      const total = g.regs.reduce((s,r)=>s+(r.valor||0), 0);
+      const origens = [...new Set(g.regs.map(r=>r.origem))];
+      const ultimaData = g.regs.map(r=>r.data).sort().reverse()[0];
+      return { nome:g.nome, count:g.regs.length, total, origens, ultimaData };
+    })
+    .sort((a,b)=> b.count - a.count || b.total - a.total);
+
+  const totClientesUnicPDF = Object.keys(agrPDF).length;
+  const totRecPDF = recorrentesPDF.length;
+  const pctRecPDF = totClientesUnicPDF > 0 ? (totRecPDF/totClientesUnicPDF*100).toFixed(1) : "0";
+
+  const rowsRecorrentes = recorrentesPDF.slice(0, 50).map(r=>{
+    const tm = r.count > 0 ? r.total/r.count : 0;
+    const origensStr = r.origens.map(o => ORIGENS[o]?.emoji || "•").join(" ");
+    const dataStr = r.ultimaData ? r.ultimaData.split("-").reverse().join("/") : "—";
+    return `<tr>
+      <td><strong>${r.nome}</strong></td>
+      <td style="text-align:center"><strong>${r.count}×</strong></td>
+      <td style="text-align:right">${fmt(r.total)}</td>
+      <td style="text-align:right">${fmt(tm)}</td>
+      <td>${origensStr}</td>
+      <td>${dataStr}</td>
+    </tr>`;
+  }).join("");
+
   const rowsOrigem = porOrigem.map(o=>`<tr>
     <td>${o.emoji} ${o.label}</td>
     <td style="text-align:center">${o.n}</td>
@@ -9161,6 +9238,31 @@ tr:nth-child(even){background:#fafafa}
 <table>
   <thead><tr><th>Origem</th><th style="text-align:center">Clientes</th><th style="text-align:right">%</th><th style="text-align:right">Vendas</th></tr></thead>
   <tbody>${rowsOrigem}</tbody>
+</table>
+
+<h2>Movimento por Loja</h2>
+<table>
+  <thead><tr>
+    <th>Loja</th>
+    <th style="text-align:right">Atendimentos totais</th>
+    <th style="text-align:right">Clientes registrados</th>
+    <th style="text-align:right">% Rastreado</th>
+    <th style="text-align:right">Vendas do fluxo</th>
+  </tr></thead>
+  <tbody>${rowsPorLoja || '<tr><td colspan="5" style="text-align:center;color:#999">Sem movimento no período.</td></tr>'}</tbody>
+</table>
+
+<h2>Clientes Recorrentes ${totRecPDF > 0 ? `— ${totRecPDF} de ${totClientesUnicPDF} clientes voltaram (${pctRecPDF}%)` : ''}${recorrentesPDF.length>50?" — primeiros 50":""}</h2>
+<table>
+  <thead><tr>
+    <th>Cliente</th>
+    <th style="text-align:center">Visitas</th>
+    <th style="text-align:right">Total Comprado</th>
+    <th style="text-align:right">Ticket Médio</th>
+    <th>Origens</th>
+    <th>Última Compra</th>
+  </tr></thead>
+  <tbody>${rowsRecorrentes || '<tr><td colspan="6" style="text-align:center;color:#999">Nenhum cliente com 2 ou mais visitas no período.</td></tr>'}</tbody>
 </table>
 
 <h2>Registros Detalhados${regs.length>100?" (primeiros 100)":""}</h2>
