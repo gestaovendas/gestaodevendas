@@ -2179,6 +2179,15 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
+  <!-- [NEW 08/08] Clientes recorrentes -->
+  <div class="sc" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="st" style="margin:0">🔁 Clientes Recorrentes</div>
+      <div style="font-size:10px;color:var(--muted)" id="fluxo-recorrentes-info">--</div>
+    </div>
+    <div id="fluxo-recorrentes">--</div>
+  </div>
+
   <!-- Lista de registros -->
   <div class="sc">
     <div class="st">📋 Registros</div>
@@ -8846,6 +8855,18 @@ function tabFluxo(t,el){
 }
 
 function filtrarFluxoData(registros){
+  // [FIX 08/08] Período personalizado tem prioridade sobre a aba (hoje/semana/mês).
+  // Isso permite extrair relatórios de qualquer intervalo — a queixa da Moni.
+  const per_de  = document.getElementById("fluxo-per-de")?.value  || "";
+  const per_ate = document.getElementById("fluxo-per-ate")?.value || "";
+  if(per_de || per_ate){
+    return registros.filter(r=>{
+      if(!r.data) return false;
+      if(per_de  && r.data < per_de)  return false;
+      if(per_ate && r.data > per_ate) return false;
+      return true;
+    });
+  }
   const hoje_d=new Date(); hoje_d.setHours(0,0,0,0);
   if(_tabFluxo==="mes"){
     const mes=hoje().slice(0,7);
@@ -8907,7 +8928,13 @@ function renderFluxo(){
         <div style="height:6px;background:var(--cinza);border-radius:6px;overflow:hidden">
           <div style="width:${(o.n/maxN*100).toFixed(0)}%;height:100%;background:${o.cor};border-radius:6px;transition:width .4s"></div>
         </div>
-        <div style="font-size:9px;color:var(--muted);margin-top:2px">${(o.n/totalClientes*100).toFixed(0)}% dos clientes</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">
+          <span>${(o.n/totalClientes*100).toFixed(1)}% dos clientes</span>
+          ${o.val > 0 && totalVendas > 0 ? `
+            <span style="margin-left:8px;color:var(--verde);font-weight:600">
+              ${(o.val/totalVendas*100).toFixed(1)}% do total das vendas
+            </span>` : ''}
+        </div>
       </div>`).join("")
     : "<div style='color:var(--muted);font-size:12px;padding:16px 0'>Nenhum registro no período.</div>";
 
@@ -8925,6 +8952,75 @@ function renderFluxo(){
       <div style="font-size:10px;color:var(--muted)">Vendas: ${fmt(valL)}${top?" · Top: "+ORIGENS[top[0]]?.emoji+" "+ORIGENS[top[0]]?.label:""}</div>
     </div>`;
   }).join("") || "<div style='color:var(--muted);font-size:12px;padding:8px 0'>Sem dados.</div>";
+
+  // ── [NEW 08/08] Clientes recorrentes — mesmo nome com 2+ registros no período
+  // Normaliza o nome (trim + lower + sem espaços duplos) para agrupar variações
+  const normNome = n => (n||"").trim().toLowerCase().replace(/\s+/g, " ");
+  const agrupados = {};
+  regs.forEach(r => {
+    const chave = normNome(r.nome);
+    if(!chave) return;
+    if(!agrupados[chave]) agrupados[chave] = { nome: r.nome.trim(), regs: [] };
+    agrupados[chave].regs.push(r);
+  });
+  const recorrentes = Object.values(agrupados)
+    .filter(g => g.regs.length >= 2)
+    .map(g => {
+      const total = g.regs.reduce((s,r)=>s+(r.valor||0), 0);
+      const origens = [...new Set(g.regs.map(r=>r.origem))];
+      const ultimaData = g.regs.map(r=>r.data).sort().reverse()[0];
+      const lojas = [...new Set(g.regs.map(r=>r.loja))];
+      return { nome: g.nome, count: g.regs.length, total, origens, ultimaData, lojas };
+    })
+    .sort((a,b) => b.count - a.count || b.total - a.total);
+
+  const totalRecorrentes = recorrentes.length;
+  const totalClientesUnicos = Object.keys(agrupados).length;
+  const pctRecorrencia = totalClientesUnicos > 0 ? (totalRecorrentes/totalClientesUnicos*100).toFixed(1) : "0";
+
+  const _infoEl = document.getElementById("fluxo-recorrentes-info");
+  if(_infoEl){
+    _infoEl.textContent = totalRecorrentes > 0
+      ? `${totalRecorrentes} de ${totalClientesUnicos} clientes voltaram (${pctRecorrencia}% de recorrência)`
+      : `${totalClientesUnicos} clientes únicos — nenhum recorrente no período`;
+  }
+  const _recEl = document.getElementById("fluxo-recorrentes");
+  if(_recEl){
+    if(recorrentes.length === 0){
+      _recEl.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0">Nenhum cliente com 2 ou mais registros no período selecionado.</div>';
+    } else {
+      _recEl.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="dtable" style="min-width:520px">
+            <thead><tr>
+              <th>Cliente</th>
+              <th style="text-align:center">Visitas</th>
+              <th style="text-align:right">Total Comprado</th>
+              <th style="text-align:right">Ticket Médio</th>
+              <th>Origens</th>
+              <th>Última Compra</th>
+            </tr></thead>
+            <tbody>
+              ${recorrentes.slice(0, 20).map(r => {
+                const tm = r.count > 0 ? r.total/r.count : 0;
+                const origensStr = r.origens.map(o => ORIGENS[o]?.emoji || "•").join(" ");
+                const dataStr = r.ultimaData ? r.ultimaData.split("-").reverse().join("/") : "—";
+                return `<tr>
+                  <td><strong>${r.nome}</strong></td>
+                  <td style="text-align:center"><span style="background:rgba(201,168,76,.2);color:var(--ouro);padding:2px 8px;border-radius:10px;font-weight:600">${r.count}×</span></td>
+                  <td style="text-align:right;font-weight:600">${fmt(r.total)}</td>
+                  <td style="text-align:right;color:var(--muted)">${fmt(tm)}</td>
+                  <td style="font-size:14px">${origensStr}</td>
+                  <td style="color:var(--muted);font-size:11px">${dataStr}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+        ${recorrentes.length > 20 ? `<div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">Mostrando 20 de ${recorrentes.length}</div>` : ""}
+      `;
+    }
+  }
 
   // ── Tabela de registros
   const tbody=document.getElementById("tbody-fluxo");
