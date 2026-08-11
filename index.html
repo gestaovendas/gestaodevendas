@@ -1403,6 +1403,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="sb-lbl">Analise</div>
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
+    <button class="ni" onclick="nav('contatos')" id="nav-contatos"><span class="ic">&#128222;</span>Clientes Contatados</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
     <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
     <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
@@ -2744,6 +2745,163 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <!-- RANKINGS -->
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     [NEW 11/08] PÁGINA CLIENTES CONTATADOS
+     Registro/acompanhamento de contatos com clientes (aniversariantes,
+     inativos, outros). Loja registra os contatos; admin acompanha.
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-contatos">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Clientes <span>Contatados</span></h1>
+      <div class="ps">Acompanhamento dos contatos feitos pela equipe</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-p" onclick="abrirFormContato()">+ Registrar Contato</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div id="contatos-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
+
+  <!-- Filtros -->
+  <div class="sc" style="margin-bottom:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:11px;color:var(--muted);letter-spacing:.5px">FILTRAR:</label>
+
+      <select id="ct-filtro-loja" onchange="renderContatos()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" class="admin-only">
+        <option value="">🏪 Todas as lojas</option>
+      </select>
+
+      <select id="ct-filtro-vend" onchange="renderContatos()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">👥 Todas as vendedoras</option>
+      </select>
+
+      <select id="ct-filtro-tipo" onchange="renderContatos()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">📋 Todos os tipos</option>
+        <option value="aniversario">🎂 Aniversariantes</option>
+        <option value="inativo">💤 Inativos</option>
+        <option value="outro">💬 Outros</option>
+      </select>
+
+      <input type="date" id="ct-filtro-de"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" onchange="renderContatos()">
+      <span style="color:var(--muted);font-size:11px">até</span>
+      <input type="date" id="ct-filtro-ate"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" onchange="renderContatos()">
+
+      <button class="btn-s" onclick="limparFiltrosContatos()" style="font-size:10px;padding:6px 10px">Limpar</button>
+    </div>
+  </div>
+
+  <!-- Contatos por vendedora (admin) -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">👥 Contatos por Vendedora</div>
+    <div id="contatos-por-vend" style="margin-top:10px"></div>
+  </div>
+
+  <!-- Lista -->
+  <div class="sc">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="st" style="margin:0">📋 Registros</div>
+      <div id="contatos-lista-info" style="font-size:10px;color:var(--muted)"></div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:640px" id="contatos-tabela">
+        <thead><tr>
+          <th>Data</th>
+          <th>Cliente</th>
+          <th>Tipo</th>
+          <th>Vendedora</th>
+          <th>Loja</th>
+          <th>Retorno</th>
+          <th>Observação</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="contatos-tbody"></tbody>
+      </table>
+    </div>
+    <div id="contatos-vazio" style="display:none;text-align:center;padding:30px;color:var(--muted);font-size:12px">
+      Nenhum contato registrado no filtro selecionado.
+    </div>
+  </div>
+</div>
+
+<!-- Formulário de contato (modal) -->
+<div id="ct-form-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;padding:20px;overflow-y:auto">
+  <div style="max-width:520px;margin:40px auto;background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <div style="font-family:'Playfair Display',serif;font-size:18px;font-weight:700">📞 Registrar Contato</div>
+      <button onclick="fecharFormContato()" style="background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer">✕</button>
+    </div>
+    <div style="display:grid;gap:12px">
+      <input type="hidden" id="ct-form-id" value="">
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">DATA</label>
+        <input type="date" id="ct-form-data"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">CLIENTE *</label>
+        <input type="text" id="ct-form-cliente" placeholder="Nome do cliente"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">TIPO *</label>
+        <select id="ct-form-tipo"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+          <option value="aniversario">🎂 Aniversariante</option>
+          <option value="inativo">💤 Cliente inativo</option>
+          <option value="outro">💬 Outro contato</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">LOJA</label>
+        <select id="ct-form-loja"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">VENDEDORA *</label>
+        <select id="ct-form-vend"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">CLIENTE RETORNOU?</label>
+        <select id="ct-form-retorno"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+          <option value="pendente">⏳ Aguardando retorno</option>
+          <option value="sim">✅ Sim, retornou</option>
+          <option value="nao">❌ Não retornou</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">OBSERVAÇÃO</label>
+        <textarea id="ct-form-obs" placeholder="Ex: enviou mensagem no WhatsApp, cliente pediu para ver linha X..." rows="3"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px;resize:vertical;font-family:inherit"></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="btn-s" onclick="fecharFormContato()" style="flex:1">Cancelar</button>
+        <button class="btn-p" onclick="salvarContato()" style="flex:2">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <div class="page" id="page-rankings">
   <div class="ph">
     <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedoras por loja e ranking geral da rede</div></div>
@@ -4786,6 +4944,7 @@ if(!D.metasProd)  D.metasProd=[];
 if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
+if(!D.contatos)   D.contatos=[];
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.historicoMeses[lojaId][mesRef]
 // [FIX 21/07] MIGRAÇÃO: a estrutura antiga era global (D.historicoMeses["2026-06"]),
@@ -5157,6 +5316,7 @@ function save(){
     const temCamp      = D.campRealizados && D.campRealizados.length>0;
     const temCampObj   = D.campObjetivos && D.campObjetivos.length>0; // ✅ VERIFICAR OBJETIVOS
     const temFluxo     = D.fluxo && D.fluxo.length>0;
+    const temContatos  = D.contatos && D.contatos.length>0;
     const temVendedoras = D.vendedoras && D.vendedoras.length > 0;
     const temMetasLoja  = D.metasLoja && Object.keys(D.metasLoja).some(lid =>
       Object.keys(D.metasLoja[lid]||{}).some(mr => (D.metasLoja[lid][mr]?.mes||0) > 0)
@@ -5164,7 +5324,7 @@ function save(){
     // [FIX 21/07] histórico contava como "sem dados" e o save era bloqueado
     const temHistMes   = D.historicoMeses && Object.keys(D.historicoMeses).some(l=>Object.keys(D.historicoMeses[l]||{}).length>0);
     const temHistLoja  = D.historicoLojas && Object.keys(D.historicoLojas).some(l=>(D.historicoLojas[l]||[]).length>0);
-    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temVendedoras || temMetasLoja || temHistMes || temHistLoja;
+    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temContatos || temVendedoras || temMetasLoja || temHistMes || temHistLoja;
 
     // Bloquear SOMENTE se não há absolutamente nenhum dado E não é admin
     // (admin sempre pode salvar metas, vendedoras, etc.)
@@ -5428,6 +5588,13 @@ async function loadFromFirestore(){
         if(!D.fluxo) D.fluxo=[];
         remoto.fluxo.forEach(r=>{
           if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
+        });
+      }
+      // [NEW 11/08] contatos: mesmo padrão do fluxo (merge por ID)
+      if(remoto.contatos && remoto.contatos.length){
+        if(!D.contatos) D.contatos=[];
+        remoto.contatos.forEach(c=>{
+          if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c);
         });
       }
       if(remoto.configCom)   D.configCom   = remoto.configCom;
@@ -6516,6 +6683,7 @@ function nav(pg){
       renderMesAnterior();
     },
     relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
+    contatos:()=>{ if(typeof renderContatos==="function") renderContatos(); },
     historicoanu:()=>{
       // [NEW] Histórico Anual
       const selAno = document.getElementById('hanu-ano');
@@ -14461,6 +14629,11 @@ async function forceSyncAdmin(){
       if(!D.fluxo) D.fluxo=[];
       remoto.fluxo.forEach(r=>{ if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r); });
     }
+    // [NEW 11/08] contatos: mesmo padrão
+    if(remoto.contatos?.length){
+      if(!D.contatos) D.contatos=[];
+      remoto.contatos.forEach(c=>{ if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c); });
+    }
     localStorage.setItem('avatim_v5', JSON.stringify(D));
     const ts = new Date().toLocaleTimeString('pt-BR');
     if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
@@ -20832,13 +21005,14 @@ function exportarRelatorioPDF(){
 
 
 // ══════════════════════════════════════════════════════════════════════
-// [NEW 10/08] MODO DIVULGAÇÃO — PDF só com pódio para publicar/mandar
-// Diferente do PDF gerencial (números detalhados, tabelas): mostra só o
-// pódio das lojas e das vendedoras em visual limpo, para publicar no
-// grupo, no mural, etc. Sem números que não interessam à divulgação.
+// [REV 11/08] MODO DIVULGAÇÃO — CSS print-friendly + sempre top 3
+// Refeito para: (1) CSS que funciona bem tanto na tela como impresso —
+// fundo creme claro com texto escuro dourado, não some quando o
+// navegador remove background. (2) Sempre 3 lugares, mesmo com menos
+// candidatos (preenche com "—"). (3) Nunca mostrar valores em R$ —
+// apenas posição, nome, % da meta e (para vendedoras) TM.
 // ══════════════════════════════════════════════════════════════════════
 
-// Utilitário: abre janela com HTML de divulgação e chama print()
 function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody){
   const w = window.open('', '_blank', 'width=1024,height=768');
   if(!w){
@@ -20850,34 +21024,31 @@ function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody){
   w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>${titulo} — MonAris</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'DM Sans',Arial,sans-serif;background:linear-gradient(135deg,#0f0f0f 0%,#1a1611 100%);color:#f5f0e0;padding:40px 24px;min-height:100vh}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}
+  body{font-family:'DM Sans',Arial,sans-serif;background:#faf8f0;color:#1a1611;padding:36px 24px;min-height:100vh}
   .cover{max-width:820px;margin:0 auto}
   .brand{text-align:center;margin-bottom:8px}
-  .brand-name{font-family:'Playfair Display',Georgia,serif;font-size:36px;font-weight:800;color:#f5f0e0;letter-spacing:2px}
+  .brand-name{font-family:'Playfair Display',Georgia,serif;font-size:36px;font-weight:800;color:#1a1611;letter-spacing:2px}
   .brand-name span{color:#c9a84c}
   .brand-tag{font-size:11px;color:#8a7f5f;letter-spacing:4px;text-transform:uppercase;margin-top:4px}
   h1{font-family:'Playfair Display',Georgia,serif;font-size:44px;font-weight:800;text-align:center;margin:28px 0 8px;color:#c9a84c;letter-spacing:1px}
-  .sub{text-align:center;font-size:14px;color:#c9a84c;opacity:.75;margin-bottom:32px;letter-spacing:1px}
+  .sub{text-align:center;font-size:14px;color:#8a7f5f;margin-bottom:32px;letter-spacing:1px;font-weight:600}
   .podio{display:flex;justify-content:center;align-items:flex-end;gap:16px;margin:40px auto;max-width:640px}
-  .lugar{background:linear-gradient(180deg,rgba(201,168,76,.2),rgba(201,168,76,.05));border:1px solid rgba(201,168,76,.4);border-radius:16px;padding:22px 12px;text-align:center;flex:1;position:relative}
-  .lugar.p1{flex:1.25;padding-top:34px;background:linear-gradient(180deg,rgba(255,215,0,.25),rgba(255,215,0,.05));border-color:#ffd700}
-  .lugar.p2{background:linear-gradient(180deg,rgba(192,192,192,.2),rgba(192,192,192,.05));border-color:#c0c0c0}
-  .lugar.p3{background:linear-gradient(180deg,rgba(205,127,50,.2),rgba(205,127,50,.05));border-color:#cd7f32}
+  .lugar{background:#fff;border:2px solid #c9a84c;border-radius:16px;padding:22px 12px;text-align:center;flex:1;position:relative;box-shadow:0 4px 12px rgba(0,0,0,.08)}
+  .lugar.p1{flex:1.3;padding-top:34px;background:linear-gradient(180deg,#fff8dc,#fff);border-color:#c9a84c;border-width:3px;box-shadow:0 6px 18px rgba(201,168,76,.25)}
+  .lugar.p2{background:linear-gradient(180deg,#f5f5f5,#fff);border-color:#a8a8a8}
+  .lugar.p3{background:linear-gradient(180deg,#faf0e6,#fff);border-color:#cd7f32}
+  .lugar.vazio{opacity:.45;background:#f0ede4;border-color:#d4cfbf;border-style:dashed}
   .medalha{font-size:52px;line-height:1;margin-bottom:12px}
-  .lugar-nome{font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:700;color:#f5f0e0;margin-bottom:6px;line-height:1.2}
-  .lugar-info{font-size:12px;color:rgba(245,240,224,.7);letter-spacing:.5px}
-  h2{font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:700;color:#c9a84c;text-align:center;margin:56px 0 24px;letter-spacing:1px;border-bottom:1px solid rgba(201,168,76,.2);padding-bottom:8px}
-  .top3{display:grid;grid-template-columns:1fr;gap:12px;max-width:520px;margin:0 auto}
-  .item{background:rgba(201,168,76,.08);border-left:3px solid #c9a84c;border-radius:8px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:14px}
-  .item .medalha-small{font-size:24px;flex-shrink:0}
-  .item .nome{font-family:'Playfair Display',Georgia,serif;font-size:16px;font-weight:700;color:#f5f0e0;flex:1}
-  .item .info{font-size:11px;color:rgba(245,240,224,.65);text-align:right;letter-spacing:.5px}
-  .footer{text-align:center;font-size:10px;color:rgba(245,240,224,.4);margin-top:60px;letter-spacing:1px}
+  .lugar-nome{font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:700;color:#1a1611;margin-bottom:6px;line-height:1.2}
+  .lugar-info{font-size:12px;color:#8a7f5f;letter-spacing:.5px;font-weight:600}
+  h2{font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:700;color:#c9a84c;text-align:center;margin:56px 0 24px;letter-spacing:1px;border-bottom:1px solid rgba(201,168,76,.3);padding-bottom:8px}
+  .footer{text-align:center;font-size:10px;color:#8a7f5f;margin-top:60px;letter-spacing:1px;border-top:1px solid rgba(201,168,76,.2);padding-top:12px}
   .footer strong{color:#c9a84c}
   @media print{
-    body{background:#0f0f0f;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    @page{margin:12mm;background:#0f0f0f}
+    @page{margin:12mm}
+    body{background:#faf8f0}
+    .lugar{page-break-inside:avoid}
   }
 </style></head><body>
 <div class="cover">
@@ -20895,73 +21066,55 @@ function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody){
   setTimeout(function(){ try{ w.print(); }catch(e){} }, 500);
 }
 
-// Monta o HTML do pódio 1-2-3 (grande) + top adicionais em lista
-function _htmlPodio(items, tipoNome){
-  if(!items || !items.length) return `<div style="text-align:center;color:#8a7f5f;padding:40px">Nada para publicar ainda.</div>`;
-  const medalhas = ['🥇','🥈','🥉'];
-  const top3 = items.slice(0, 3);
-  const resto = items.slice(3, 10); // top 4-10
-
-  // ordem visual do pódio: 2 · 1 · 3 (para o 1º ficar no meio, mais alto)
-  let podioHtml = '';
-  if(top3.length >= 3){
-    podioHtml = `<div class="podio">
-      <div class="lugar p2"><div class="medalha">🥈</div><div class="lugar-nome">${top3[1].nome}</div><div class="lugar-info">${top3[1].info||''}</div></div>
-      <div class="lugar p1"><div class="medalha">🥇</div><div class="lugar-nome">${top3[0].nome}</div><div class="lugar-info">${top3[0].info||''}</div></div>
-      <div class="lugar p3"><div class="medalha">🥉</div><div class="lugar-nome">${top3[2].nome}</div><div class="lugar-info">${top3[2].info||''}</div></div>
-    </div>`;
-  } else {
-    // Menos de 3: alinhar simples
-    podioHtml = `<div class="podio">${top3.map((it,i)=>`
-      <div class="lugar ${i===0?'p1':i===1?'p2':'p3'}"><div class="medalha">${medalhas[i]}</div><div class="lugar-nome">${it.nome}</div><div class="lugar-info">${it.info||''}</div></div>
-    `).join('')}</div>`;
+// Monta pódio 2-1-3 SEMPRE com 3 lugares (preenche com placeholder se faltar)
+function _htmlPodio(items){
+  const arr = (items || []).slice(0, 3);
+  // Preencher até 3 com placeholder vazio
+  while(arr.length < 3){
+    arr.push({ nome:'—', info:'', vazio:true });
   }
-
-  let restoHtml = '';
-  if(resto.length){
-    restoHtml = `<h2>Demais destaques</h2>
-      <div class="top3">
-        ${resto.map((it,i)=>`
-          <div class="item">
-            <div class="medalha-small">${i+4}º</div>
-            <div class="nome">${it.nome}</div>
-            <div class="info">${it.info||''}</div>
-          </div>`).join('')}
-      </div>`;
-  }
-  return podioHtml + restoHtml;
+  const [primeiro, segundo, terceiro] = arr;
+  const cls = it => it.vazio ? ' vazio' : '';
+  return `<div class="podio">
+    <div class="lugar p2${cls(segundo)}">
+      <div class="medalha">🥈</div>
+      <div class="lugar-nome">${segundo.nome}</div>
+      ${segundo.info ? `<div class="lugar-info">${segundo.info}</div>` : ''}
+    </div>
+    <div class="lugar p1${cls(primeiro)}">
+      <div class="medalha">🥇</div>
+      <div class="lugar-nome">${primeiro.nome}</div>
+      ${primeiro.info ? `<div class="lugar-info">${primeiro.info}</div>` : ''}
+    </div>
+    <div class="lugar p3${cls(terceiro)}">
+      <div class="medalha">🥉</div>
+      <div class="lugar-nome">${terceiro.nome}</div>
+      ${terceiro.info ? `<div class="lugar-info">${terceiro.info}</div>` : ''}
+    </div>
+  </div>`;
 }
 
-// ── DIVULGAÇÃO — RANKINGS GERAIS (Rede/Lojas/Vendedoras) ──
+// ── DIVULGAÇÃO — RANKINGS GERAIS ─────────────────────────────────────
 function exportarModoDivulgacaoRanking(){
-  // Determinar aba ativa
-  const abaEl = document.querySelector('#page-rankings .tab.active');
-  const aba = abaEl?.textContent.trim() || 'Rede';
-  // Determinar período ativo
-  const perEl = document.querySelector('#page-rankings .tabs .tab.active');
-  // Simplificar: usar sempre "mês" para divulgação (mais estável) — ou o que o usuário selecionou
   const per = window._rankPerAtual || 'mes';
   const perLbl = per==='hoje'?'Hoje':per==='semana'?'Semana':per==='mes'?'Mês':per==='ano'?'Ano':'Período';
 
-  // Ranking de lojas (por % da meta no período)
+  // Ranking de lojas por % da meta (só posição + %)
   const lojasRank = LOJAS.map(l => {
     const metas = getMetas(l.id);
     let real = 0, meta = 0;
     if(per === 'hoje'){
-      real = calcDia(l.id);
-      meta = metas.dia || 0;
+      real = calcDia(l.id); meta = metas.dia || 0;
     } else if(per === 'semana'){
-      real = calcSem(l.id);
-      meta = metas.sem || 0;
+      real = calcSem(l.id); meta = metas.sem || 0;
     } else if(per === 'ano'){
-      // Soma dos últimos 12 meses (aproximação)
       const y = new Date().getFullYear();
       for(let m=1; m<=12; m++){
         const mr = y + '-' + String(m).padStart(2,'0');
         real += realizadoDoMes(l.id, mr).valor || 0;
         meta += metaDoMes(l.id, mr).valor || 0;
       }
-    } else { // mes
+    } else {
       const mr = hoje().slice(0,7);
       real = realizadoDoMes(l.id, mr).valor || 0;
       meta = metaDoMes(l.id, mr).valor || 0;
@@ -20971,40 +21124,48 @@ function exportarModoDivulgacaoRanking(){
   }).filter(l => l.real > 0)
     .sort((a,b) => b.pct - a.pct || b.real - a.real);
 
-  // Ranking de vendedoras (por realizado no período)
+  // Ranking de vendedoras por realizado — mostra loja + TM
   const vendsAtiv = (D.vendedoras||[]).filter(v => v.ativa !== false && v.cargo !== 'VRLL');
   const vendsRank = vendsAtiv.map(v => {
-    let real = 0;
+    let real = 0, atend = 0;
     if(per === 'ano'){
       real = calcVendAno(v.id);
+      // Somar atendimentos do ano
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        atend += Number(dd.trans||0);
+      });
     } else if(per === 'mes'){
-      real = calcVendPer(v.id, hoje().slice(0,7));
-    } else {
+      const mr = hoje().slice(0,7);
+      real = calcVendPer(v.id, mr);
+      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
+        if(dt.startsWith(mr)) atend += Number(dd.trans||0);
+      });
+    } else if(per === 'semana' || per === 'hoje'){
       real = calcVendPer(v.id, per);
+      // atendimentos: aproximação — deixar sem TM se não conseguir
     }
+    const tm = atend > 0 ? real/atend : 0;
     const lojaNome = LOJAS.find(l => l.id === v.loja)?.nome || v.loja;
-    return { nome: v.nome, loja: lojaNome, real, info: lojaNome };
+    const info = tm > 0 ? `${lojaNome} · TM ${fmt(tm)}` : lojaNome;
+    return { nome: v.nome, loja: lojaNome, real, tm, info };
   }).filter(v => v.real > 0)
     .sort((a,b) => b.real - a.real);
 
   const body = `
     <h2>Ranking de Lojas — ${perLbl}</h2>
-    ${_htmlPodio(lojasRank, 'lojas')}
+    ${_htmlPodio(lojasRank)}
     <h2>Ranking de Vendedoras — ${perLbl}</h2>
-    ${_htmlPodio(vendsRank, 'vendedoras')}
+    ${_htmlPodio(vendsRank)}
   `;
   _abrirJanelaDivulgacao('Resultados', perLbl + ' — ' + hoje().split('-').reverse().join('/'), body);
 }
 
-// ── DIVULGAÇÃO — CAMPANHAS (pódio de lojas + vendedoras da campanha atual) ──
+// ── DIVULGAÇÃO — CAMPANHAS ──────────────────────────────────────────
 function exportarModoDivulgacaoCamp(){
   initCampData();
   const filtroId = document.getElementById('rel-camp-sel')?.value || '';
-  const lid = lojaId();
   let objs = D.campObjetivos || [];
   if(filtroId) objs = objs.filter(o => o.id === filtroId);
-  // aplicar filtro de loja se admin selecionou
-  if(!isAdmin()) objs = objs; // loja vê todos os objetivos, mas dados só da própria
 
   if(!objs.length){
     showToast('Selecione uma campanha para publicar.','warn');
@@ -21012,14 +21173,15 @@ function exportarModoDivulgacaoCamp(){
   }
 
   const campIds = objs.map(o => o.id);
-  let reaisAll = (D.campRealizados||[]).filter(r => campIds.includes(r.campId));
+  const reaisAll = (D.campRealizados||[]).filter(r => campIds.includes(r.campId));
 
-  // Ranking de lojas
+  // Ranking de lojas por % da meta
   const porLoja = {};
-  LOJAS.forEach(l => porLoja[l.id] = {lojaId:l.id, nome:l.nome, fat:0, meta:0});
+  LOJAS.forEach(l => porLoja[l.id] = {lojaId:l.id, nome:l.nome, fat:0, meta:0, atend:0});
   reaisAll.forEach(r => {
     if(!porLoja[r.lojaId]) return;
-    porLoja[r.lojaId].fat += _fatLancamento(r);
+    porLoja[r.lojaId].fat   += _fatLancamento(r);
+    porLoja[r.lojaId].atend += _atendLancamento(r);
   });
   objs.forEach(o => {
     const temMetasPorLoja = o.metasPorLoja && Object.keys(o.metasPorLoja).length > 0;
@@ -21032,20 +21194,17 @@ function exportarModoDivulgacaoCamp(){
     .filter(l => l.fat > 0)
     .map(l => {
       const pct = l.meta > 0 ? (l.fat/l.meta)*100 : 0;
-      return { nome: l.nome, info: pct>0 ? pct.toFixed(0)+'% da meta' : fmt(l.fat) };
+      // Só mostra o percentual, sem valor em R$
+      return { nome: l.nome, pct, info: pct>0 ? pct.toFixed(0)+'% da meta' : '' };
     })
-    .sort((a,b) => {
-      const pa = parseFloat(a.info) || 0;
-      const pb = parseFloat(b.info) || 0;
-      return pb - pa;
-    });
+    .sort((a,b) => b.pct - a.pct);
 
-  // Ranking de vendedoras
+  // Ranking de vendedoras — mostra loja + TM
   const porVend = {};
   reaisAll.forEach(r => {
     if(!r.vendedoras) return;
     Object.entries(r.vendedoras).forEach(([vId, val]) => {
-      if(!porVend[vId]) porVend[vId] = {fat:0, nome:'', loja:''};
+      if(!porVend[vId]) porVend[vId] = {fat:0, nome:'', loja:'', atend:0};
       porVend[vId].fat += Number(val) || 0;
       if(!porVend[vId].nome){
         const vObj = D.vendedoras.find(v => v.id === vId);
@@ -21055,25 +21214,375 @@ function exportarModoDivulgacaoCamp(){
         }
       }
     });
+    // Ratear atendimentos do lançamento entre as vendedoras proporcionalmente
+    const totalFatLanc = _fatLancamento(r);
+    const atendLanc = _atendLancamento(r);
+    if(totalFatLanc > 0 && atendLanc > 0){
+      Object.entries(r.vendedoras).forEach(([vId, val]) => {
+        if(porVend[vId]){
+          porVend[vId].atend += (Number(val)/totalFatLanc) * atendLanc;
+        }
+      });
+    }
   });
   const rankVends = Object.values(porVend)
     .filter(v => v.fat > 0 && v.nome)
-    .map(v => ({ nome: v.nome, info: v.loja }))
-    .sort((a,b) => 0); // já ordenados por fat via porVend loop
-  // Reordenar por fat
-  const rankVendsList = Object.values(porVend)
-    .filter(v => v.fat > 0 && v.nome)
     .sort((a,b) => b.fat - a.fat)
-    .map(v => ({ nome: v.nome, info: v.loja }));
+    .map(v => {
+      const tm = v.atend > 0 ? v.fat/v.atend : 0;
+      const info = tm > 0 ? `${v.loja} · TM ${fmt(tm)}` : v.loja;
+      return { nome: v.nome, info };
+    });
 
   const campNome = objs.length === 1 ? objs[0].nome : `${objs.length} campanhas`;
   const body = `
     <h2>Ranking de Lojas</h2>
-    ${_htmlPodio(rankLojas, 'lojas')}
+    ${_htmlPodio(rankLojas)}
     <h2>Ranking de Vendedoras</h2>
-    ${_htmlPodio(rankVendsList, 'vendedoras')}
+    ${_htmlPodio(rankVends)}
   `;
   _abrirJanelaDivulgacao('Resultado da Campanha', campNome, body);
+}
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 11/08] CLIENTES CONTATADOS — acompanhamento dos contatos
+// D.contatos = [{ id, data, cliente, tipo, vendId, loja, retorno, obs, ts }]
+// Loja registra contatos; admin acompanha por vendedora/tipo/período.
+// ══════════════════════════════════════════════════════════════════════
+
+if(!D.contatos) D.contatos = [];
+
+const CT_TIPOS = {
+  aniversario: { emoji:'🎂', label:'Aniversariante', cor:'#e6a817' },
+  inativo:     { emoji:'💤', label:'Inativo',        cor:'#b07cd6' },
+  outro:       { emoji:'💬', label:'Outro',          cor:'var(--muted)' }
+};
+
+const CT_RETORNOS = {
+  pendente: { emoji:'⏳', label:'Aguardando', cor:'var(--muted)' },
+  sim:      { emoji:'✅', label:'Retornou',   cor:'var(--verde)' },
+  nao:      { emoji:'❌', label:'Não',        cor:'var(--verm)' }
+};
+
+// ── ABRIR/FECHAR FORMULÁRIO ──────────────────────────────────────────
+function abrirFormContato(id){
+  if(!D.contatos) D.contatos = [];
+  const modal = document.getElementById('ct-form-modal');
+  if(!modal) return;
+
+  // Popular selects de loja e vendedora
+  const selLoja = document.getElementById('ct-form-loja');
+  const selVend = document.getElementById('ct-form-vend');
+  const lojaAtual = isAdmin() ? (LOJAS[0]?.id || '') : lojaId();
+  selLoja.innerHTML = LOJAS.map(l=>`<option value="${l.id}" ${l.id===lojaAtual?'selected':''}>${l.nome}</option>`).join('');
+  selLoja.disabled = !isAdmin(); // loja fica travada na própria
+  _popularVendsFormContato(selLoja.value);
+  selLoja.onchange = () => _popularVendsFormContato(selLoja.value);
+
+  // Se edição
+  if(id){
+    const c = D.contatos.find(x => x.id === id);
+    if(!c){ showToast('Contato não encontrado.','err'); return; }
+    document.getElementById('ct-form-id').value      = c.id;
+    document.getElementById('ct-form-data').value    = c.data;
+    document.getElementById('ct-form-cliente').value = c.cliente;
+    document.getElementById('ct-form-tipo').value    = c.tipo;
+    document.getElementById('ct-form-loja').value    = c.loja;
+    _popularVendsFormContato(c.loja);
+    document.getElementById('ct-form-vend').value    = c.vendId;
+    document.getElementById('ct-form-retorno').value = c.retorno || 'pendente';
+    document.getElementById('ct-form-obs').value     = c.obs || '';
+  } else {
+    document.getElementById('ct-form-id').value      = '';
+    document.getElementById('ct-form-data').value    = hoje();
+    document.getElementById('ct-form-cliente').value = '';
+    document.getElementById('ct-form-tipo').value    = 'aniversario';
+    document.getElementById('ct-form-retorno').value = 'pendente';
+    document.getElementById('ct-form-obs').value     = '';
+  }
+  modal.style.display = 'block';
+}
+
+function _popularVendsFormContato(lid){
+  const selVend = document.getElementById('ct-form-vend');
+  if(!selVend) return;
+  const vends = vendsAtivas(lid);
+  selVend.innerHTML = vends.length
+    ? vends.map(v => `<option value="${v.id}">${v.nome}</option>`).join('')
+    : '<option value="">— Sem vendedoras ativas —</option>';
+}
+
+function fecharFormContato(){
+  const modal = document.getElementById('ct-form-modal');
+  if(modal) modal.style.display = 'none';
+}
+
+// ── SALVAR ────────────────────────────────────────────────────────────
+function salvarContato(){
+  if(!D.contatos) D.contatos = [];
+
+  const id      = document.getElementById('ct-form-id').value;
+  const data    = document.getElementById('ct-form-data').value;
+  const cliente = document.getElementById('ct-form-cliente').value.trim();
+  const tipo    = document.getElementById('ct-form-tipo').value;
+  const loja    = document.getElementById('ct-form-loja').value;
+  const vendId  = document.getElementById('ct-form-vend').value;
+  const retorno = document.getElementById('ct-form-retorno').value;
+  const obs     = document.getElementById('ct-form-obs').value.trim();
+
+  if(!cliente){ showToast('Informe o nome do cliente.','err'); return; }
+  if(!vendId){ showToast('Selecione a vendedora que fez o contato.','err'); return; }
+  if(!data){ showToast('Informe a data.','err'); return; }
+
+  const now = Date.now();
+  if(id){
+    // Edição
+    const idx = D.contatos.findIndex(c => c.id === id);
+    if(idx === -1){ showToast('Contato não encontrado.','err'); return; }
+    D.contatos[idx] = {
+      ...D.contatos[idx],
+      data, cliente, tipo, loja, vendId, retorno, obs, ts: now
+    };
+    showToast('Contato atualizado.','ok');
+  } else {
+    D.contatos.push({
+      id: 'ct' + now + Math.random().toString(36).slice(2,7),
+      data, cliente, tipo, loja, vendId, retorno, obs, ts: now
+    });
+    showToast('Contato registrado.','ok');
+  }
+
+  save();
+  fecharFormContato();
+  renderContatos();
+}
+
+// ── EXCLUIR ──────────────────────────────────────────────────────────
+function excluirContato(id){
+  if(!D.contatos) D.contatos = [];
+  const c = D.contatos.find(x => x.id === id);
+  if(!c) return;
+  if(!confirm('Excluir este contato de "' + c.cliente + '"?')) return;
+  D.contatos = D.contatos.filter(x => x.id !== id);
+  save();
+  renderContatos();
+  showToast('Contato excluído.','ok');
+}
+
+// ── ATUALIZAR STATUS DE RETORNO ─────────────────────────────────────
+function marcarRetornoContato(id, retorno){
+  if(!D.contatos) D.contatos = [];
+  const idx = D.contatos.findIndex(c => c.id === id);
+  if(idx === -1) return;
+  D.contatos[idx] = { ...D.contatos[idx], retorno, ts: Date.now() };
+  save();
+  renderContatos();
+}
+
+// ── FILTRAR ─────────────────────────────────────────────────────────
+function _filtrarContatos(){
+  if(!D.contatos) return [];
+  const fLoja = document.getElementById('ct-filtro-loja')?.value  || '';
+  const fVend = document.getElementById('ct-filtro-vend')?.value  || '';
+  const fTipo = document.getElementById('ct-filtro-tipo')?.value  || '';
+  const fDe   = document.getElementById('ct-filtro-de')?.value    || '';
+  const fAte  = document.getElementById('ct-filtro-ate')?.value   || '';
+
+  return D.contatos.filter(c => {
+    // Loja: admin com filtro OU loja logada
+    if(!isAdmin()){
+      if(c.loja !== lojaId()) return false;
+    } else if(fLoja){
+      if(c.loja !== fLoja) return false;
+    }
+    if(fVend && c.vendId !== fVend) return false;
+    if(fTipo && c.tipo !== fTipo) return false;
+    if(fDe   && c.data < fDe) return false;
+    if(fAte  && c.data > fAte) return false;
+    return true;
+  });
+}
+
+function limparFiltrosContatos(){
+  ['ct-filtro-loja','ct-filtro-vend','ct-filtro-tipo','ct-filtro-de','ct-filtro-ate'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  renderContatos();
+}
+
+// ── RENDER ──────────────────────────────────────────────────────────
+function renderContatos(){
+  if(!D.contatos) D.contatos = [];
+
+  // Popular selects
+  const selLoja = document.getElementById('ct-filtro-loja');
+  if(selLoja && isAdmin() && selLoja.options.length <= 1){
+    selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>' +
+      LOJAS.map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+  }
+  const selVend = document.getElementById('ct-filtro-vend');
+  if(selVend){
+    const vendsVis = isAdmin()
+      ? (D.vendedoras || [])
+      : (D.vendedoras || []).filter(v => v.loja === lojaId());
+    selVend.innerHTML = '<option value="">👥 Todas as vendedoras</option>' +
+      vendsVis.filter(v => v.ativa !== false)
+        .sort((a,b) => (a.nome||'').localeCompare(b.nome||''))
+        .map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
+  }
+
+  const contatos = _filtrarContatos();
+  const hj = hoje();
+
+  // ── KPIs
+  const hojeCount    = contatos.filter(c => c.data === hj).length;
+  const anivCount    = contatos.filter(c => c.tipo === 'aniversario').length;
+  const inativoCount = contatos.filter(c => c.tipo === 'inativo').length;
+  const retornaramCount = contatos.filter(c => c.retorno === 'sim').length;
+  const pendentesCount  = contatos.filter(c => c.retorno === 'pendente').length;
+  const total = contatos.length;
+  const taxaRetorno = total > 0 ? (retornaramCount/total*100).toFixed(0) : '0';
+
+  const kpiEl = document.getElementById('contatos-kpis');
+  if(kpiEl){
+    kpiEl.innerHTML = `
+      <div class="kcard azul">
+        <div class="kl">HOJE</div>
+        <div class="kv" style="font-size:20px">${hojeCount}</div>
+        <div class="ks">contatos</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">TOTAL</div>
+        <div class="kv" style="font-size:20px">${total}</div>
+        <div class="ks">no filtro</div>
+      </div>
+      <div class="kcard laranja">
+        <div class="kl">🎂 ANIVERSARIANTES</div>
+        <div class="kv" style="font-size:20px">${anivCount}</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">💤 INATIVOS</div>
+        <div class="kv" style="font-size:20px;color:#b07cd6">${inativoCount}</div>
+      </div>
+      <div class="kcard verde">
+        <div class="kl">✅ RETORNARAM</div>
+        <div class="kv" style="font-size:20px">${retornaramCount}</div>
+        <div class="ks">${taxaRetorno}% de retorno</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">⏳ AGUARDANDO</div>
+        <div class="kv" style="font-size:20px;color:var(--ouro)">${pendentesCount}</div>
+      </div>
+    `;
+  }
+
+  // ── Contatos por vendedora (agrupado)
+  const porVendEl = document.getElementById('contatos-por-vend');
+  if(porVendEl){
+    const porVend = {};
+    contatos.forEach(c => {
+      if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, retornaram:0 };
+      porVend[c.vendId].total++;
+      if(c.tipo === 'aniversario') porVend[c.vendId].aniv++;
+      else if(c.tipo === 'inativo') porVend[c.vendId].inativo++;
+      else porVend[c.vendId].outro++;
+      if(c.retorno === 'sim') porVend[c.vendId].retornaram++;
+    });
+    const linhas = Object.entries(porVend).map(([vid, stats]) => {
+      const v = D.vendedoras.find(x => x.id === vid);
+      const nome = v?.nome || vid;
+      const lojaN = LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '';
+      const taxa = stats.total > 0 ? (stats.retornaram/stats.total*100).toFixed(0) : '0';
+      return { nome, lojaN, ...stats, taxa: Number(taxa) };
+    }).sort((a,b) => b.total - a.total);
+
+    if(linhas.length){
+      porVendEl.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="dtable" style="min-width:520px">
+            <thead><tr>
+              <th>Vendedora</th>
+              <th>Loja</th>
+              <th style="text-align:center">Total</th>
+              <th style="text-align:center">🎂 Aniv.</th>
+              <th style="text-align:center">💤 Inativ.</th>
+              <th style="text-align:center">💬 Outro</th>
+              <th style="text-align:center">✅ Retornou</th>
+              <th style="text-align:center">% Retorno</th>
+            </tr></thead>
+            <tbody>
+              ${linhas.map(l => `<tr>
+                <td><strong>${l.nome}</strong></td>
+                <td style="color:var(--muted);font-size:11px">${l.lojaN}</td>
+                <td style="text-align:center;font-weight:700;color:var(--ouro)">${l.total}</td>
+                <td style="text-align:center">${l.aniv}</td>
+                <td style="text-align:center;color:#b07cd6">${l.inativo}</td>
+                <td style="text-align:center">${l.outro}</td>
+                <td style="text-align:center;color:var(--verde);font-weight:600">${l.retornaram}</td>
+                <td style="text-align:center;font-weight:700;color:${l.taxa>=50?'var(--verde)':l.taxa>=25?'var(--ouro)':'var(--verm)'}">${l.taxa}%</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } else {
+      porVendEl.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">Nenhum contato no período selecionado.</div>';
+    }
+  }
+
+  // ── Lista de registros
+  const tbody = document.getElementById('contatos-tbody');
+  const vazio = document.getElementById('contatos-vazio');
+  const info  = document.getElementById('contatos-lista-info');
+  if(!tbody) return;
+
+  if(contatos.length === 0){
+    tbody.innerHTML = '';
+    if(vazio) vazio.style.display = 'block';
+    if(info) info.textContent = '';
+    return;
+  }
+  if(vazio) vazio.style.display = 'none';
+  if(info) info.textContent = `${contatos.length} registro${contatos.length===1?'':'s'}`;
+
+  // Ordenar por data desc, depois ts desc
+  const ordenados = [...contatos].sort((a,b) =>
+    (b.data||'').localeCompare(a.data||'') || (b.ts||0) - (a.ts||0)
+  );
+
+  tbody.innerHTML = ordenados.map(c => {
+    const v = D.vendedoras.find(x => x.id === c.vendId);
+    const vNome = v?.nome || '—';
+    const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
+    const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
+    const retInfo = CT_RETORNOS[c.retorno || 'pendente'];
+    const dataFmt = (c.data||'').split('-').reverse().join('/');
+    return `<tr>
+      <td style="font-size:11px">${dataFmt}</td>
+      <td><strong>${c.cliente}</strong></td>
+      <td><span style="color:${tipoInfo.cor};font-weight:600;font-size:11px">${tipoInfo.emoji} ${tipoInfo.label}</span></td>
+      <td>${vNome}</td>
+      <td style="color:var(--muted);font-size:11px">${lNome}</td>
+      <td>
+        <select onchange="marcarRetornoContato('${c.id}', this.value)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer">
+          <option value="pendente" ${c.retorno==='pendente'||!c.retorno?'selected':''}>⏳ Aguardando</option>
+          <option value="sim" ${c.retorno==='sim'?'selected':''}>✅ Retornou</option>
+          <option value="nao" ${c.retorno==='nao'?'selected':''}>❌ Não</option>
+        </select>
+      </td>
+      <td style="font-size:11px;color:var(--muted);max-width:200px;word-wrap:break-word">${c.obs || '—'}</td>
+      <td style="white-space:nowrap">
+        <button onclick="abrirFormContato('${c.id}')" title="Editar"
+          style="background:none;border:none;color:var(--azul);cursor:pointer;font-size:14px">✏️</button>
+        <button onclick="excluirContato('${c.id}')" title="Excluir"
+          style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:14px">🗑️</button>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 </script>
