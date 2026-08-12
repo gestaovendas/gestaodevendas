@@ -2766,6 +2766,48 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <!-- KPIs -->
   <div id="contatos-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
 
+  <!-- [NEW 12/08] Lembretes: contatos a retomar + clientes sem follow-up -->
+  <div class="sc" style="margin-bottom:14px;border-left:3px solid #e6a817">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <div class="st" style="margin:0">🔔 Lembretes para retomar</div>
+      <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted)">
+        <label>Prazo:</label>
+        <select id="ct-lembrete-dias" onchange="renderContatos()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px">
+          <option value="7">7 dias</option>
+          <option value="15">15 dias</option>
+          <option value="30" selected>30 dias</option>
+          <option value="60">60 dias</option>
+        </select>
+      </div>
+    </div>
+    <div id="contatos-lembretes"></div>
+  </div>
+
+  <!-- [NEW 12/08] Calendário visual dos contatos do mês -->
+  <div class="sc" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <div class="st" style="margin:0">📆 Calendário dos contatos</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="ctCalNavMes(-1)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);cursor:pointer;font-size:14px" title="Mês anterior">‹</button>
+        <div id="ct-cal-mes-label" style="font-size:12px;font-weight:600;color:var(--ouro);min-width:120px;text-align:center"></div>
+        <button onclick="ctCalNavMes(1)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);cursor:pointer;font-size:14px" title="Próximo mês">›</button>
+        <button onclick="ctCalIrHoje()"
+          style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.4);border-radius:6px;padding:4px 10px;color:var(--ouro);cursor:pointer;font-size:11px;font-weight:600">Hoje</button>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">
+      <span style="display:inline-block;width:10px;height:10px;background:rgba(40,167,69,.3);border-radius:2px;vertical-align:middle;margin-right:3px"></span> Comprou/Interesse ·
+      <span style="display:inline-block;width:10px;height:10px;background:rgba(201,168,76,.3);border-radius:2px;vertical-align:middle;margin:0 3px"></span> Aguardando ·
+      <span style="display:inline-block;width:10px;height:10px;background:rgba(220,53,69,.3);border-radius:2px;vertical-align:middle;margin:0 3px"></span> Sem resposta ·
+      <span style="display:inline-block;width:10px;height:10px;background:rgba(139,92,246,.3);border-radius:2px;vertical-align:middle;margin:0 3px"></span> Retomar hoje
+    </div>
+    <div id="ct-cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px"></div>
+  </div>
+
+
   <!-- Filtros -->
   <div class="sc" style="margin-bottom:14px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -2879,18 +2921,33 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
 
       <div>
-        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">CLIENTE RETORNOU?</label>
-        <select id="ct-form-retorno"
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">RESPOSTA DO CLIENTE</label>
+        <select id="ct-form-retorno" onchange="_ctAtualizarProximoContatoUI()"
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
-          <option value="pendente">⏳ Aguardando retorno</option>
-          <option value="sim">✅ Sim, retornou</option>
-          <option value="nao">❌ Não retornou</option>
+          <option value="pendente">⏳ Aguardando resposta</option>
+          <option value="interesse">💚 Respondeu — com interesse</option>
+          <option value="sem_interesse">🤷 Respondeu — sem interesse no momento</option>
+          <option value="nao_respondeu">📵 Não respondeu</option>
+          <option value="pediu_retorno">🔁 Cliente pediu para retornar</option>
+          <option value="agendou_visita">📅 Cliente agendou visita</option>
+          <option value="comprou">🛒 Cliente realizou compra</option>
+          <option value="numero_invalido">🚫 Número inválido</option>
         </select>
       </div>
 
+      <!-- [NEW 12/08] Próximo contato: quando cliente pede retorno ou agenda -->
+      <div id="ct-form-proximo-wrap" style="display:none">
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">
+          <span id="ct-form-proximo-label">PRÓXIMO CONTATO</span>
+        </label>
+        <input type="date" id="ct-form-proximo"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Data em que a vendedora deve retomar este contato.</div>
+      </div>
+
       <div>
-        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">OBSERVAÇÃO</label>
-        <textarea id="ct-form-obs" placeholder="Ex: enviou mensagem no WhatsApp, cliente pediu para ver linha X..." rows="3"
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">OBSERVAÇÃO DO CLIENTE</label>
+        <textarea id="ct-form-obs" placeholder="Ex: cliente perguntou pela linha Ozara, disse que passa aqui na terça — anote tudo!" rows="3"
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px;resize:vertical;font-family:inherit"></textarea>
       </div>
 
@@ -4946,6 +5003,7 @@ if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
+if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.historicoMeses[lojaId][mesRef]
 // [FIX 21/07] MIGRAÇÃO: a estrutura antiga era global (D.historicoMeses["2026-06"]),
@@ -21263,10 +21321,26 @@ const CT_TIPOS = {
 };
 
 const CT_RETORNOS = {
-  pendente: { emoji:'⏳', label:'Aguardando', cor:'var(--muted)' },
-  sim:      { emoji:'✅', label:'Retornou',   cor:'var(--verde)' },
-  nao:      { emoji:'❌', label:'Não',        cor:'var(--verm)' }
+  pendente:        { emoji:'⏳', label:'Aguardando',                 cor:'var(--muted)' },
+  interesse:       { emoji:'💚', label:'Respondeu — com interesse',  cor:'var(--verde)' },
+  sem_interesse:   { emoji:'🤷', label:'Respondeu — sem interesse',  cor:'#999' },
+  nao_respondeu:   { emoji:'📵', label:'Não respondeu',              cor:'var(--verm)' },
+  pediu_retorno:   { emoji:'🔁', label:'Pediu para retornar',        cor:'var(--ouro)' },
+  agendou_visita:  { emoji:'📅', label:'Agendou visita',             cor:'#a78bfa' },
+  comprou:         { emoji:'🛒', label:'Realizou compra',            cor:'var(--verde)' },
+  numero_invalido: { emoji:'🚫', label:'Número inválido',            cor:'#666' }
 };
+
+// [NEW 12/08] Migração: dados antigos com retorno=sim/nao vão para os novos códigos
+function _migrarRetornosAntigos(){
+  if(!D.contatos || !D.contatos.length) return 0;
+  let migrados = 0;
+  D.contatos.forEach(c => {
+    if(c.retorno === 'sim'){ c.retorno = 'comprou'; migrados++; }
+    else if(c.retorno === 'nao'){ c.retorno = 'nao_respondeu'; migrados++; }
+  });
+  return migrados;
+}
 
 // ── ABRIR/FECHAR FORMULÁRIO ──────────────────────────────────────────
 function abrirFormContato(id){
@@ -21295,6 +21369,7 @@ function abrirFormContato(id){
     _popularVendsFormContato(c.loja);
     document.getElementById('ct-form-vend').value    = c.vendId;
     document.getElementById('ct-form-retorno').value = c.retorno || 'pendente';
+    document.getElementById('ct-form-proximo').value = c.proximoContato || '';
     document.getElementById('ct-form-obs').value     = c.obs || '';
   } else {
     document.getElementById('ct-form-id').value      = '';
@@ -21302,9 +21377,38 @@ function abrirFormContato(id){
     document.getElementById('ct-form-cliente').value = '';
     document.getElementById('ct-form-tipo').value    = 'aniversario';
     document.getElementById('ct-form-retorno').value = 'pendente';
+    document.getElementById('ct-form-proximo').value = '';
     document.getElementById('ct-form-obs').value     = '';
   }
+  _ctAtualizarProximoContatoUI(); // mostra/esconde campo próximo contato
   modal.style.display = 'block';
+}
+
+// [NEW 12/08] Mostra o campo "próximo contato" apenas para os status que fazem sentido
+// e ajusta o rótulo/data padrão
+function _ctAtualizarProximoContatoUI(){
+  const sel = document.getElementById('ct-form-retorno');
+  const wrap = document.getElementById('ct-form-proximo-wrap');
+  const lbl  = document.getElementById('ct-form-proximo-label');
+  const inp  = document.getElementById('ct-form-proximo');
+  if(!sel || !wrap) return;
+  const v = sel.value;
+  // Mostrar para status que envolvem retomada de contato
+  const mostrar = ['pediu_retorno','agendou_visita','sem_interesse','pendente'].includes(v);
+  wrap.style.display = mostrar ? '' : 'none';
+  if(!mostrar) return;
+  // Rótulo por contexto
+  if(v === 'pediu_retorno') lbl.textContent = 'DATA QUE O CLIENTE PEDIU PARA RETORNAR';
+  else if(v === 'agendou_visita') lbl.textContent = 'DATA DA VISITA AGENDADA';
+  else if(v === 'sem_interesse') lbl.textContent = 'PRÓXIMA TENTATIVA (SUGERIDA)';
+  else lbl.textContent = 'PRÓXIMO CONTATO (OPCIONAL)';
+  // Sugerir data se vazia
+  if(!inp.value){
+    const [y,m,d] = hoje().split('-').map(Number);
+    const diasSug = v === 'agendou_visita' ? 3 : (v === 'sem_interesse' ? 30 : 7);
+    const nova = new Date(y, m-1, d + diasSug);
+    inp.value = nova.getFullYear() + '-' + String(nova.getMonth()+1).padStart(2,'0') + '-' + String(nova.getDate()).padStart(2,'0');
+  }
 }
 
 function _popularVendsFormContato(lid){
@@ -21332,6 +21436,7 @@ function salvarContato(){
   const loja    = document.getElementById('ct-form-loja').value;
   const vendId  = document.getElementById('ct-form-vend').value;
   const retorno = document.getElementById('ct-form-retorno').value;
+  const proximoContato = document.getElementById('ct-form-proximo').value || '';
   const obs     = document.getElementById('ct-form-obs').value.trim();
 
   if(!cliente){ showToast('Informe o nome do cliente.','err'); return; }
@@ -21345,13 +21450,13 @@ function salvarContato(){
     if(idx === -1){ showToast('Contato não encontrado.','err'); return; }
     D.contatos[idx] = {
       ...D.contatos[idx],
-      data, cliente, tipo, loja, vendId, retorno, obs, ts: now
+      data, cliente, tipo, loja, vendId, retorno, proximoContato, obs, ts: now
     };
     showToast('Contato atualizado.','ok');
   } else {
     D.contatos.push({
       id: 'ct' + now + Math.random().toString(36).slice(2,7),
-      data, cliente, tipo, loja, vendId, retorno, obs, ts: now
+      data, cliente, tipo, loja, vendId, retorno, proximoContato, obs, ts: now
     });
     showToast('Contato registrado.','ok');
   }
@@ -21418,6 +21523,7 @@ function limparFiltrosContatos(){
 // ── RENDER ──────────────────────────────────────────────────────────
 function renderContatos(){
   if(!D.contatos) D.contatos = [];
+  if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
 
   // Popular selects
   const selLoja = document.getElementById('ct-filtro-loja');
@@ -21443,10 +21549,20 @@ function renderContatos(){
   const hojeCount    = contatos.filter(c => c.data === hj).length;
   const anivCount    = contatos.filter(c => c.tipo === 'aniversario').length;
   const inativoCount = contatos.filter(c => c.tipo === 'inativo').length;
-  const retornaramCount = contatos.filter(c => c.retorno === 'sim').length;
-  const pendentesCount  = contatos.filter(c => c.retorno === 'pendente').length;
+  // KPIs atualizados: contamos "converteu" (comprou/agendou) e "engajou" (respondeu)
+  const compraCount   = contatos.filter(c => c.retorno === 'comprou').length;
+  const agendouCount  = contatos.filter(c => c.retorno === 'agendou_visita').length;
+  const interesseCount= contatos.filter(c => c.retorno === 'interesse').length;
+  const pediuCount    = contatos.filter(c => c.retorno === 'pediu_retorno').length;
+  const semIntCount   = contatos.filter(c => c.retorno === 'sem_interesse').length;
+  const naoRespCount  = contatos.filter(c => c.retorno === 'nao_respondeu').length;
+  const invalidoCount = contatos.filter(c => c.retorno === 'numero_invalido').length;
+  const pendentesCount = contatos.filter(c => !c.retorno || c.retorno === 'pendente').length;
+  const respondeuCount = contatos.filter(c => ['interesse','sem_interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)).length;
+  const retornaramCount = compraCount + agendouCount + interesseCount + pediuCount; // engajamento útil
   const total = contatos.length;
   const taxaRetorno = total > 0 ? (retornaramCount/total*100).toFixed(0) : '0';
+  const taxaConv    = total > 0 ? (compraCount/total*100).toFixed(0) : '0';
 
   const kpiEl = document.getElementById('contatos-kpis');
   if(kpiEl){
@@ -21470,13 +21586,22 @@ function renderContatos(){
         <div class="kv" style="font-size:20px;color:#b07cd6">${inativoCount}</div>
       </div>
       <div class="kcard verde">
-        <div class="kl">✅ RETORNARAM</div>
-        <div class="kv" style="font-size:20px">${retornaramCount}</div>
-        <div class="ks">${taxaRetorno}% de retorno</div>
+        <div class="kl">🛒 COMPRARAM</div>
+        <div class="kv" style="font-size:20px">${compraCount}</div>
+        <div class="ks">${taxaConv}% de conversão</div>
+      </div>
+      <div class="kcard verde">
+        <div class="kl">💚 COM INTERESSE</div>
+        <div class="kv" style="font-size:20px">${interesseCount + pediuCount + agendouCount}</div>
+        <div class="ks">${taxaRetorno}% engajaram</div>
       </div>
       <div class="kcard">
         <div class="kl">⏳ AGUARDANDO</div>
         <div class="kv" style="font-size:20px;color:var(--ouro)">${pendentesCount}</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">📵 SEM RESPOSTA</div>
+        <div class="kv" style="font-size:20px;color:var(--verm)">${naoRespCount + invalidoCount}</div>
       </div>
     `;
   }
@@ -21486,20 +21611,24 @@ function renderContatos(){
   if(porVendEl){
     const porVend = {};
     contatos.forEach(c => {
-      if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, retornaram:0 };
+      if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, comprou:0, engajou:0, semResp:0 };
       porVend[c.vendId].total++;
       if(c.tipo === 'aniversario') porVend[c.vendId].aniv++;
       else if(c.tipo === 'inativo') porVend[c.vendId].inativo++;
       else porVend[c.vendId].outro++;
-      if(c.retorno === 'sim') porVend[c.vendId].retornaram++;
+      // [FIX 12/08] usa novos status
+      if(c.retorno === 'comprou') porVend[c.vendId].comprou++;
+      if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) porVend[c.vendId].engajou++;
+      if(['nao_respondeu','numero_invalido'].includes(c.retorno)) porVend[c.vendId].semResp++;
     });
     const linhas = Object.entries(porVend).map(([vid, stats]) => {
       const v = D.vendedoras.find(x => x.id === vid);
       const nome = v?.nome || vid;
       const lojaN = LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '';
-      const taxa = stats.total > 0 ? (stats.retornaram/stats.total*100).toFixed(0) : '0';
-      return { nome, lojaN, ...stats, taxa: Number(taxa) };
-    }).sort((a,b) => b.total - a.total);
+      const taxa = stats.total > 0 ? (stats.engajou/stats.total*100).toFixed(0) : '0';
+      const taxaConv = stats.total > 0 ? (stats.comprou/stats.total*100).toFixed(0) : '0';
+      return { nome, lojaN, ...stats, taxa: Number(taxa), taxaConv: Number(taxaConv) };
+    }).sort((a,b) => b.engajou - a.engajou || b.total - a.total);
 
     if(linhas.length){
       porVendEl.innerHTML = `
@@ -21512,8 +21641,11 @@ function renderContatos(){
               <th style="text-align:center">🎂 Aniv.</th>
               <th style="text-align:center">💤 Inativ.</th>
               <th style="text-align:center">💬 Outro</th>
-              <th style="text-align:center">✅ Retornou</th>
-              <th style="text-align:center">% Retorno</th>
+              <th style="text-align:center">🛒 Comprou</th>
+              <th style="text-align:center">💚 Engajou</th>
+              <th style="text-align:center">📵 Sem resp.</th>
+              <th style="text-align:center">% Engajou</th>
+              <th style="text-align:center">% Conv.</th>
             </tr></thead>
             <tbody>
               ${linhas.map(l => `<tr>
@@ -21523,8 +21655,11 @@ function renderContatos(){
                 <td style="text-align:center">${l.aniv}</td>
                 <td style="text-align:center;color:#b07cd6">${l.inativo}</td>
                 <td style="text-align:center">${l.outro}</td>
-                <td style="text-align:center;color:var(--verde);font-weight:600">${l.retornaram}</td>
+                <td style="text-align:center;color:var(--verde);font-weight:700">${l.comprou}</td>
+                <td style="text-align:center;color:var(--verde)">${l.engajou}</td>
+                <td style="text-align:center;color:var(--verm)">${l.semResp}</td>
                 <td style="text-align:center;font-weight:700;color:${l.taxa>=50?'var(--verde)':l.taxa>=25?'var(--ouro)':'var(--verm)'}">${l.taxa}%</td>
+                <td style="text-align:center;font-weight:700;color:${l.taxaConv>=20?'var(--verde)':l.taxaConv>=10?'var(--ouro)':'var(--verm)'}">${l.taxaConv}%</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -21559,7 +21694,7 @@ function renderContatos(){
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
     const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
-    const retInfo = CT_RETORNOS[c.retorno || 'pendente'];
+    const retInfo = CT_RETORNOS[c.retorno] || CT_RETORNOS.pendente;
     const dataFmt = (c.data||'').split('-').reverse().join('/');
     return `<tr>
       <td style="font-size:11px">${dataFmt}</td>
@@ -21569,11 +21704,10 @@ function renderContatos(){
       <td style="color:var(--muted);font-size:11px">${lNome}</td>
       <td>
         <select onchange="marcarRetornoContato('${c.id}', this.value)"
-          style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer">
-          <option value="pendente" ${c.retorno==='pendente'||!c.retorno?'selected':''}>⏳ Aguardando</option>
-          <option value="sim" ${c.retorno==='sim'?'selected':''}>✅ Retornou</option>
-          <option value="nao" ${c.retorno==='nao'?'selected':''}>❌ Não</option>
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer;max-width:180px">
+          ${Object.entries(CT_RETORNOS).map(([k,v])=>`<option value="${k}" ${(c.retorno||'pendente')===k?'selected':''}>${v.emoji} ${v.label}</option>`).join('')}
         </select>
+        ${c.proximoContato ? `<div style="font-size:9px;color:var(--ouro);margin-top:2px" title="Data programada para retomar">🔁 ${c.proximoContato.split('-').reverse().join('/')}</div>` : ''}
       </td>
       <td style="font-size:11px;color:var(--muted);max-width:200px;word-wrap:break-word">${c.obs || '—'}</td>
       <td style="white-space:nowrap">
@@ -21584,6 +21718,10 @@ function renderContatos(){
       </td>
     </tr>`;
   }).join('');
+
+  // [NEW 12/08] Renderizar blocos novos
+  if(typeof _renderLembretes === 'function') _renderLembretes();
+  if(typeof _renderCalendarioContatos === 'function') _renderCalendarioContatos();
 }
 
 
@@ -21595,6 +21733,7 @@ function renderContatos(){
 // ══════════════════════════════════════════════════════════════════════
 function exportarPDFContatos(){
   if(!D.contatos) D.contatos = [];
+  if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
   const contatos = _filtrarContatos();
 
   if(!contatos.length){
@@ -21637,22 +21776,32 @@ function exportarPDFContatos(){
   const anivCount   = contatos.filter(c => c.tipo === 'aniversario').length;
   const inatCount   = contatos.filter(c => c.tipo === 'inativo').length;
   const outroCount  = contatos.filter(c => c.tipo === 'outro').length;
-  const retorCount  = contatos.filter(c => c.retorno === 'sim').length;
-  const pendCount   = contatos.filter(c => c.retorno === 'pendente').length;
-  const naoRetCount = contatos.filter(c => c.retorno === 'nao').length;
+  // [FIX 12/08] KPIs com os novos status
+  const compraCount   = contatos.filter(c => c.retorno === 'comprou').length;
+  const interesseCount= contatos.filter(c => c.retorno === 'interesse').length;
+  const pediuCount    = contatos.filter(c => c.retorno === 'pediu_retorno').length;
+  const agendouCount  = contatos.filter(c => c.retorno === 'agendou_visita').length;
+  const semIntCount   = contatos.filter(c => c.retorno === 'sem_interesse').length;
+  const naoRetCount   = contatos.filter(c => c.retorno === 'nao_respondeu').length;
+  const invalidoCount = contatos.filter(c => c.retorno === 'numero_invalido').length;
+  const pendCount     = contatos.filter(c => !c.retorno || c.retorno === 'pendente').length;
+  const engajouCount  = compraCount + interesseCount + pediuCount + agendouCount;
   const total = contatos.length;
-  const pctRetorno = total > 0 ? (retorCount/total*100).toFixed(1) : '0';
+  const pctConv    = total > 0 ? (compraCount/total*100).toFixed(1) : '0';
+  const pctEngajou = total > 0 ? (engajouCount/total*100).toFixed(1) : '0';
 
   // Agregado por vendedora
   const porVend = {};
   contatos.forEach(c => {
-    if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, retornaram:0, pendentes:0 };
+    if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, comprou:0, engajou:0, semResp:0, pendentes:0 };
     porVend[c.vendId].total++;
     if(c.tipo === 'aniversario') porVend[c.vendId].aniv++;
     else if(c.tipo === 'inativo') porVend[c.vendId].inativo++;
     else porVend[c.vendId].outro++;
-    if(c.retorno === 'sim') porVend[c.vendId].retornaram++;
-    if(c.retorno === 'pendente' || !c.retorno) porVend[c.vendId].pendentes++;
+    if(c.retorno === 'comprou') porVend[c.vendId].comprou++;
+    if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) porVend[c.vendId].engajou++;
+    if(['nao_respondeu','numero_invalido'].includes(c.retorno)) porVend[c.vendId].semResp++;
+    if(!c.retorno || c.retorno === 'pendente') porVend[c.vendId].pendentes++;
   });
   const linhasVend = Object.entries(porVend).map(([vid, stats]) => {
     const v = D.vendedoras.find(x => x.id === vid);
@@ -21660,9 +21809,10 @@ function exportarPDFContatos(){
       nome: v?.nome || vid,
       lojaN: LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '',
       ...stats,
-      taxa: stats.total > 0 ? (stats.retornaram/stats.total*100).toFixed(0) : '0'
+      taxa: stats.total > 0 ? (stats.engajou/stats.total*100).toFixed(0) : '0',
+      taxaConv: stats.total > 0 ? (stats.comprou/stats.total*100).toFixed(0) : '0'
     };
-  }).sort((a,b) => b.total - a.total);
+  }).sort((a,b) => b.engajou - a.engajou || b.total - a.total);
 
   const rowsVend = linhasVend.map(l => `<tr>
     <td><strong>${l.nome}</strong></td>
@@ -21671,10 +21821,12 @@ function exportarPDFContatos(){
     <td style="text-align:center">${l.aniv}</td>
     <td style="text-align:center">${l.inativo}</td>
     <td style="text-align:center">${l.outro}</td>
-    <td style="text-align:center;color:#28a745;font-weight:600">${l.retornaram}</td>
-    <td style="text-align:center;color:#dc3545">${(l.total - l.retornaram - l.pendentes)}</td>
+    <td style="text-align:center;color:#28a745;font-weight:700">${l.comprou}</td>
+    <td style="text-align:center;color:#28a745">${l.engajou}</td>
+    <td style="text-align:center;color:#dc3545">${l.semResp}</td>
     <td style="text-align:center">${l.pendentes}</td>
     <td style="text-align:center;font-weight:700">${l.taxa}%</td>
+    <td style="text-align:center;font-weight:700">${l.taxaConv}%</td>
   </tr>`).join('');
 
   // Lista de registros ordenada por data desc
@@ -21686,7 +21838,7 @@ function exportarPDFContatos(){
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
     const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
-    const retInfo = CT_RETORNOS[c.retorno || 'pendente'];
+    const retInfo = CT_RETORNOS[c.retorno] || CT_RETORNOS.pendente;
     const dataFmt = (c.data||'').split('-').reverse().join('/');
     return `<tr>
       <td style="white-space:nowrap">${dataFmt}</td>
@@ -21754,9 +21906,10 @@ function exportarPDFContatos(){
     <div class="kpi"><div class="kpi-l">🎂 Aniversariantes</div><div class="kpi-v" style="color:#e6a817">${anivCount}</div></div>
     <div class="kpi"><div class="kpi-l">💤 Inativos</div><div class="kpi-v" style="color:#b07cd6">${inatCount}</div></div>
     <div class="kpi"><div class="kpi-l">💬 Outros</div><div class="kpi-v">${outroCount}</div></div>
-    <div class="kpi"><div class="kpi-l">✅ Retornaram</div><div class="kpi-v" style="color:#28a745">${retorCount}</div><div class="kpi-s">${pctRetorno}% do total</div></div>
+    <div class="kpi"><div class="kpi-l">🛒 Compraram</div><div class="kpi-v" style="color:#28a745">${compraCount}</div><div class="kpi-s">${pctConv}% de conversão</div></div>
+    <div class="kpi"><div class="kpi-l">💚 Com interesse</div><div class="kpi-v" style="color:#28a745">${interesseCount + pediuCount + agendouCount}</div><div class="kpi-s">${pctEngajou}% engajaram</div></div>
     <div class="kpi"><div class="kpi-l">⏳ Aguardando</div><div class="kpi-v" style="color:#c9a84c">${pendCount}</div></div>
-    <div class="kpi"><div class="kpi-l">❌ Não retornaram</div><div class="kpi-v" style="color:#dc3545">${naoRetCount}</div></div>
+    <div class="kpi"><div class="kpi-l">📵 Sem resposta</div><div class="kpi-v" style="color:#dc3545">${naoRetCount + invalidoCount}</div></div>
   </div>
 
   <h2>Contatos por Vendedora</h2>
@@ -21768,12 +21921,14 @@ function exportarPDFContatos(){
       <th style="text-align:center">🎂 Aniv.</th>
       <th style="text-align:center">💤 Inativ.</th>
       <th style="text-align:center">💬 Outro</th>
-      <th style="text-align:center">✅ Retor.</th>
-      <th style="text-align:center">❌ Não</th>
+      <th style="text-align:center">🛒 Comprou</th>
+      <th style="text-align:center">💚 Engajou</th>
+      <th style="text-align:center">📵 Sem resp.</th>
       <th style="text-align:center">⏳ Aguard.</th>
-      <th style="text-align:center">% Retorno</th>
+      <th style="text-align:center">% Engajou</th>
+      <th style="text-align:center">% Conv.</th>
     </tr></thead>
-    <tbody>${rowsVend || '<tr><td colspan="10" style="text-align:center;color:#999;padding:14px">Nenhum contato no período.</td></tr>'}</tbody>
+    <tbody>${rowsVend || '<tr><td colspan="12" style="text-align:center;color:#999;padding:14px">Nenhum contato no período.</td></tr>'}</tbody>
   </table>
 
   <h2>Registros Detalhados ${contatos.length > 200 ? '(primeiros 200)' : ''}</h2>
@@ -21794,6 +21949,325 @@ function exportarPDFContatos(){
 </body></html>`);
   w.document.close();
   setTimeout(function(){ try{ w.print(); }catch(e){} }, 500);
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 12/08] LEMBRETES E CALENDÁRIO — página Contatos
+// Cruzamento com origem do fluxo. Novos status: pediu_retorno com data
+// programada gera alerta quando chega. Clientes do fluxo há 30d sem
+// compra sem contato de follow-up também alertam.
+// ══════════════════════════════════════════════════════════════════════
+
+window._ctCalMes = window._ctCalMes || null; // null = mês atual
+
+function _ctDiffDias(dataA, dataB){
+  if(!dataA || !dataB) return 0;
+  const [yA,mA,dA_] = dataA.split('-').map(Number);
+  const [yB,mB,dB_] = dataB.split('-').map(Number);
+  const a = new Date(yA, mA-1, dA_);
+  const b = new Date(yB, mB-1, dB_);
+  return Math.round((a - b) / 86400000);
+}
+
+// ── LEMBRETES ────────────────────────────────────────────────────────
+// (1) Retorno programado que chegou: cliente pediu retornar / agendou
+//     visita / próxima tentativa marcada — data já venceu
+// (2) Contatos pendentes há mais que N dias
+// (3) Clientes do fluxo que passaram e não compraram — sem follow-up
+function _calcularLembretes(){
+  const hj = hoje();
+  const dias = parseInt(document.getElementById('ct-lembrete-dias')?.value || '30', 10);
+  const contatos = D.contatos || [];
+  const fluxo = D.fluxo || [];
+
+  const isAd = isAdmin();
+  const _lidUser = lojaId();
+  const _matchLoja = (obj) => isAd ? true : (obj.loja === _lidUser);
+
+  // ── (1) Retorno programado venceu ──
+  const programados = contatos.filter(c =>
+    _matchLoja(c) &&
+    c.proximoContato &&
+    c.proximoContato <= hj &&
+    !['comprou','sem_interesse','numero_invalido'].includes(c.retorno) // ainda vale retomar
+  ).map(c => ({
+    ...c,
+    diasAtraso: _ctDiffDias(hj, c.proximoContato)
+  })).sort((a,b) => b.diasAtraso - a.diasAtraso);
+
+  // ── (2) Pendentes antigos (sem próximo contato programado) ──
+  const pendentes = contatos.filter(c =>
+    _matchLoja(c) &&
+    (c.retorno === 'pendente' || !c.retorno) &&
+    !c.proximoContato && // se tem programado, entra no (1)
+    c.data &&
+    _ctDiffDias(hj, c.data) >= dias
+  ).map(c => ({
+    ...c,
+    diasSem: _ctDiffDias(hj, c.data)
+  })).sort((a,b) => b.diasSem - a.diasSem);
+
+  // ── (3) Clientes do fluxo há X+ dias sem compra e sem contato ──
+  const normNome = n => (n||'').trim().toLowerCase().replace(/\s+/g, ' ');
+  const contatosPorClienteLoja = {};
+  contatos.forEach(c => {
+    const chave = normNome(c.cliente) + '|' + c.loja;
+    if(!contatosPorClienteLoja[chave]) contatosPorClienteLoja[chave] = [];
+    contatosPorClienteLoja[chave].push(c);
+  });
+
+  const fluxoSemFollowup = fluxo.filter(f => {
+    if(!_matchLoja(f)) return false;
+    if(!f.data) return false;
+    const diasPassados = _ctDiffDias(hj, f.data);
+    if(diasPassados < dias) return false;
+    if(diasPassados > 120) return false; // não fica alertando eternamente
+    const chave = normNome(f.nome) + '|' + f.loja;
+    const cts = contatosPorClienteLoja[chave] || [];
+    // Já teve contato depois → pular
+    const jaContatouDepois = cts.some(c => c.data >= f.data);
+    if(jaContatouDepois) return false;
+    // "não comprou" ou compra baixa
+    const valorBaixo = (f.valor || 0) <= 50;
+    return valorBaixo;
+  }).map(f => ({
+    ...f,
+    diasSem: _ctDiffDias(hj, f.data)
+  })).sort((a,b) => b.diasSem - a.diasSem);
+
+  return { programados, pendentes, fluxoSemFollowup };
+}
+
+function _renderLembretes(){
+  const el = document.getElementById('contatos-lembretes');
+  if(!el) return;
+  const { programados, pendentes, fluxoSemFollowup } = _calcularLembretes();
+
+  const totalLembretes = programados.length + pendentes.length + fluxoSemFollowup.length;
+  if(totalLembretes === 0){
+    el.innerHTML = `<div style="text-align:center;color:var(--verde);padding:16px;font-size:12px">
+      ✅ Tudo em dia. Nenhum contato para retomar no prazo escolhido.
+    </div>`;
+    return;
+  }
+
+  // ── (1) Programados vencidos
+  const _programHtml = programados.slice(0, 15).map(c => {
+    const v = (D.vendedoras || []).find(x => x.id === c.vendId);
+    const vNome = v?.nome || '—';
+    const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
+    const retInfo = CT_RETORNOS[c.retorno] || CT_RETORNOS.pendente;
+    const proxFmt = c.proximoContato.split('-').reverse().join('/');
+    const corAtraso = c.diasAtraso >= 3 ? 'var(--verm)' : (c.diasAtraso >= 1 ? 'var(--ouro)' : '#a78bfa');
+    const lblAtraso = c.diasAtraso === 0 ? 'HOJE' : (c.diasAtraso > 0 ? `${c.diasAtraso}d atraso` : 'em breve');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${c.cliente}</div>
+        <div style="font-size:10px;color:var(--muted)">
+          ${retInfo.emoji} ${retInfo.label} · ${vNome} · ${lNome} · Retomar: ${proxFmt}
+        </div>
+        ${c.obs ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${c.obs}"</div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:10px;color:${corAtraso};font-weight:700;white-space:nowrap">
+        ${lblAtraso}
+      </div>
+      <button onclick="abrirFormContato('${c.id}')" title="Retomar contato"
+        style="background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.5);color:#a78bfa;padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;white-space:nowrap">🔁 Retomar</button>
+    </div>`;
+  }).join('');
+
+  // ── (2) Pendentes há muito
+  const _pendentesHtml = pendentes.slice(0, 15).map(c => {
+    const v = (D.vendedoras || []).find(x => x.id === c.vendId);
+    const vNome = v?.nome || '—';
+    const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
+    const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
+    const dataFmt = (c.data||'').split('-').reverse().join('/');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${c.cliente}</div>
+        <div style="font-size:10px;color:var(--muted)">
+          ${tipoInfo.emoji} ${tipoInfo.label} · ${vNome} · ${lNome} · Contato: ${dataFmt}
+        </div>
+        ${c.obs ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${c.obs}"</div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:11px;color:${c.diasSem>=60?'var(--verm)':'var(--ouro)'};font-weight:700;white-space:nowrap">
+        ${c.diasSem}d
+      </div>
+      <button onclick="abrirFormContato('${c.id}')" title="Atualizar status"
+        style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.4);color:var(--ouro);padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;white-space:nowrap">📝 Atualizar</button>
+    </div>`;
+  }).join('');
+
+  // ── (3) Fluxo sem follow-up (cruzamento com Origem do Fluxo)
+  const _fluxoHtml = fluxoSemFollowup.slice(0, 15).map(f => {
+    const v = (D.vendedoras || []).find(x => x.id === f.vendId);
+    const vNome = v?.nome || '—';
+    const lNome = LOJAS.find(l => l.id === f.loja)?.nome || f.loja || '—';
+    const dataFmt = (f.data||'').split('-').reverse().join('/');
+    const origemLbl = (typeof ORIGENS !== 'undefined' && ORIGENS[f.origem])
+      ? `${ORIGENS[f.origem].emoji} ${ORIGENS[f.origem].label}`
+      : (f.origem || '—');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${f.nome}</div>
+        <div style="font-size:10px;color:var(--muted)">
+          ${origemLbl} · ${vNome} · ${lNome} · Passagem: ${dataFmt} · ${f.valor > 0 ? 'Comprou '+fmt(f.valor) : 'Não comprou'}
+        </div>
+        ${f.obs ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${f.obs}"</div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:11px;color:${f.diasSem>=60?'var(--verm)':'var(--ouro)'};font-weight:700;white-space:nowrap">
+        ${f.diasSem}d
+      </div>
+      <button onclick="_ctNovoContatoDeFluxo('${f.id}')" title="Registrar contato agora"
+        style="background:rgba(40,167,69,.15);border:1px solid rgba(40,167,69,.4);color:var(--verde);padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;white-space:nowrap">📞 Contatar</button>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    ${programados.length ? `
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:#a78bfa;letter-spacing:.5px;margin-bottom:6px;font-weight:600">
+          🔁 RETOMAR HOJE — ${programados.length} contato${programados.length===1?'':'s'} programado${programados.length===1?'':'s'}
+        </div>
+        ${_programHtml}
+        ${programados.length > 15 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando 15 de ${programados.length}</div>` : ''}
+      </div>` : ''}
+    ${pendentes.length ? `
+      <div style="margin-bottom:${fluxoSemFollowup.length ? '14px' : '0'}">
+        <div style="font-size:11px;color:var(--ouro);letter-spacing:.5px;margin-bottom:6px;font-weight:600">
+          ⏳ AGUARDANDO RESPOSTA HÁ MUITO — ${pendentes.length} pendente${pendentes.length===1?'':'s'}
+        </div>
+        ${_pendentesHtml}
+        ${pendentes.length > 15 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando 15 de ${pendentes.length}</div>` : ''}
+      </div>` : ''}
+    ${fluxoSemFollowup.length ? `
+      <div>
+        <div style="font-size:11px;color:var(--verde);letter-spacing:.5px;margin-bottom:6px;font-weight:600">
+          🎯 PASSARAM NA LOJA E NÃO COMPRARAM — ${fluxoSemFollowup.length} sem follow-up
+        </div>
+        ${_fluxoHtml}
+        ${fluxoSemFollowup.length > 15 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando 15 de ${fluxoSemFollowup.length}</div>` : ''}
+      </div>` : ''}
+  `;
+}
+
+// Pré-preencher formulário com dados do fluxo
+function _ctNovoContatoDeFluxo(fluxoId){
+  const f = (D.fluxo || []).find(x => x.id === fluxoId);
+  if(!f){ showToast('Registro não encontrado.','err'); return; }
+  abrirFormContato();
+  setTimeout(() => {
+    const clEl = document.getElementById('ct-form-cliente');
+    if(clEl) clEl.value = f.nome || '';
+    const loEl = document.getElementById('ct-form-loja');
+    if(loEl){
+      loEl.value = f.loja || '';
+      if(typeof _popularVendsFormContato === 'function') _popularVendsFormContato(f.loja);
+    }
+    const veEl = document.getElementById('ct-form-vend');
+    if(veEl && f.vendId) veEl.value = f.vendId;
+    const tiEl = document.getElementById('ct-form-tipo');
+    if(tiEl) tiEl.value = 'outro';
+    const obEl = document.getElementById('ct-form-obs');
+    if(obEl) obEl.value = 'Passou na loja em ' + (f.data||'').split('-').reverse().join('/') + ' e não comprou — retomar contato';
+  }, 0);
+}
+
+// ── CALENDÁRIO ───────────────────────────────────────────────────────
+function ctCalNavMes(delta){
+  const atual = window._ctCalMes || hoje().slice(0,7);
+  const [y,m] = atual.split('-').map(Number);
+  const total = y*12 + (m-1) + delta;
+  const nY = Math.floor(total/12), nM = (total%12)+1;
+  window._ctCalMes = nY + '-' + String(nM).padStart(2,'0');
+  _renderCalendarioContatos();
+}
+function ctCalIrHoje(){
+  window._ctCalMes = null;
+  _renderCalendarioContatos();
+}
+
+function _renderCalendarioContatos(){
+  const grid = document.getElementById('ct-cal-grid');
+  const lblEl = document.getElementById('ct-cal-mes-label');
+  if(!grid) return;
+
+  const mesRef = window._ctCalMes || hoje().slice(0,7);
+  const [y, m] = mesRef.split('-').map(Number);
+  const nomesMes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  if(lblEl) lblEl.textContent = nomesMes[m] + '/' + y;
+
+  const diasNoMes = new Date(y, m, 0).getDate();
+  const primeiroDiaSem = new Date(y, m-1, 1).getDay();
+
+  const contatos = (typeof _filtrarContatos === 'function' ? _filtrarContatos() : (D.contatos || []))
+    .filter(c => c.data && c.data.startsWith(mesRef));
+
+  // Agregar por dia (contatos feitos)
+  const porDia = {};
+  contatos.forEach(c => {
+    if(!porDia[c.data]) porDia[c.data] = { total:0, ganhou:0, aguardando:0, semResp:0, prog:0 };
+    porDia[c.data].total++;
+    if(['comprou','interesse','agendou_visita','pediu_retorno'].includes(c.retorno)) porDia[c.data].ganhou++;
+    else if(['nao_respondeu','numero_invalido','sem_interesse'].includes(c.retorno)) porDia[c.data].semResp++;
+    else porDia[c.data].aguardando++;
+  });
+
+  // Marcar dias que têm próximo contato programado
+  (D.contatos || []).forEach(c => {
+    if(!c.proximoContato) return;
+    if(!c.proximoContato.startsWith(mesRef)) return;
+    if(['comprou','sem_interesse','numero_invalido'].includes(c.retorno)) return;
+    if(!porDia[c.proximoContato]) porDia[c.proximoContato] = { total:0, ganhou:0, aguardando:0, semResp:0, prog:0 };
+    porDia[c.proximoContato].prog++;
+  });
+
+  const nomesDia = ['D','S','T','Q','Q','S','S'];
+  let html = nomesDia.map(n => `<div style="text-align:center;font-size:9px;color:var(--muted);font-weight:600;padding:4px 0">${n}</div>`).join('');
+
+  for(let i = 0; i < primeiroDiaSem; i++) html += '<div></div>';
+
+  const hj = hoje();
+  for(let d = 1; d <= diasNoMes; d++){
+    const dt = mesRef + '-' + String(d).padStart(2,'0');
+    const stats = porDia[dt];
+    const total = stats?.total || 0;
+    const prog = stats?.prog || 0;
+
+    let bg, corTxt;
+    if(prog > 0 && total === 0){
+      // Só programado — retomar hoje
+      bg = 'rgba(139,92,246,.3)'; corTxt = '#a78bfa';
+    } else if(!stats || total === 0){
+      bg = 'rgba(255,255,255,.04)'; corTxt = 'var(--muted)';
+    } else if(stats.ganhou >= stats.semResp && stats.ganhou >= stats.aguardando){
+      bg = 'rgba(40,167,69,.25)'; corTxt = 'var(--verde)';
+    } else if(stats.semResp > stats.aguardando){
+      bg = 'rgba(220,53,69,.25)'; corTxt = 'var(--verm)';
+    } else {
+      bg = 'rgba(201,168,76,.25)'; corTxt = 'var(--ouro)';
+    }
+
+    const ehHoje = dt === hj;
+    const borda = ehHoje ? '1px dashed var(--azul)' : '1px solid rgba(255,255,255,.05)';
+
+    const partesToolTip = [];
+    if(total > 0) partesToolTip.push(`${total} contato${total>1?'s':''} (${stats.ganhou} 💚 · ${stats.aguardando} ⏳ · ${stats.semResp} 📵)`);
+    if(prog > 0) partesToolTip.push(`${prog} retomar hoje 🔁`);
+    const tooltip = `${dt.split('-').reverse().join('/')}: ${partesToolTip.join(' · ') || 'sem movimentação'}`;
+
+    html += `<div title="${tooltip}"
+      style="background:${bg};border:${borda};border-radius:6px;padding:5px 3px;text-align:center;min-height:52px;display:flex;flex-direction:column;justify-content:center;align-items:center;cursor:default">
+      <div style="font-size:11px;font-weight:600;color:${ehHoje?'var(--ouro)':'var(--texto)'}">${d}</div>
+      ${total > 0 ? `<div style="font-size:9px;color:${corTxt};font-weight:700;margin-top:2px">${total}</div>` : ''}
+      ${prog > 0 ? `<div style="font-size:8px;color:#a78bfa;font-weight:700">🔁${prog}</div>` : ''}
+    </div>`;
+  }
+
+  grid.innerHTML = html;
 }
 
 </script>
