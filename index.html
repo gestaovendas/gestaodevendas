@@ -263,7 +263,10 @@ try{
           _vendsExcluidas:     D2._vendsExcluidas      || [],
           // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
           _lojasArquivadas:    D2._lojasArquivadas     || [],
-          _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0
+          _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0,
+          // [FIX 13/08] contatos NÃO estava subindo — nenhum admin ou loja via os contatos criados em outros dispositivos
+          contatos:            D2.contatos             || [],
+          _contatosExcluidos:  D2._contatosExcluidos   || {}
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -402,20 +405,21 @@ try{
           vendasLoja[dt] = dados; // incluir sempre — confia no D local
         });
 
-        // ── vendasVend: TODOS os vids de vendedoras desta loja ───
-        // Usa D2.vendedoras para descobrir quem é da loja,
-        // MAS também inclui qualquer vid que já existia no doc remoto
-        // para não perder dados históricos de vendedoras removidas.
+        // ── vendasVend: enviar TUDO que a loja tem em D2.vendasVend ─
+        // [FIX 13/08 CRÍTICO] Antes filtrávamos por vidsLoja (D2.vendedoras
+        // com v.loja===lid). Se D.vendedoras estava vazio/incompleto (sync
+        // parcial, primeira carga, cache perdido), vidsLoja ficava vazio e
+        // TODAS as vendas por vendedora eram descartadas silenciosamente.
+        // Vendedoras lançavam pelo Painel do Dia e o admin nunca via nada.
+        // Fix: enviar TUDO em D2.vendasVend. O doc loja_X só é escrito pela
+        // própria loja, então tudo que está em D2.vendasVend dela é dela.
+        // O admin, ao ler todos os loja_X, mescla usando D.vendedoras para
+        // descobrir a qual loja cada vendedora pertence.
         const vendasVendLoja = {};
-        const vidsLoja = new Set(
-          (D2.vendedoras||[]).filter(v=>v.loja===lid).map(v=>v.id)
-        );
         Object.entries(D2.vendasVend||{}).forEach(([vid, dias]) => {
-          if(!vidsLoja.has(vid)) return;
-          // [FIX TOMBSTONE] Incluir todos os dias presentes — confia no D local
           const diasFiltrados = {};
           Object.entries(dias||{}).forEach(([dt, d]) => {
-            diasFiltrados[dt] = d; // incluir sempre
+            diasFiltrados[dt] = d;
           });
           if(Object.keys(diasFiltrados).length > 0) vendasVendLoja[vid] = diasFiltrados;
         });
@@ -478,6 +482,10 @@ try{
             // [FIX 22/07] histórico da loja também precisa subir
             historicoMeses: D2.historicoMeses?.[lid] ? { [lid]: D2.historicoMeses[lid] } : {},
             historicoLojas: D2.historicoLojas?.[lid] ? { [lid]: D2.historicoLojas[lid] } : {},
+            // [FIX 13/08] contatos NÃO estava subindo — vendedoras registravam e admin nunca via
+            // Loja envia SÓ os contatos da própria loja
+            contatos:       (D2.contatos||[]).filter(c => c.loja === lid),
+            _contatosExcluidos: D2._contatosExcluidos || {},
             // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
             _vendsExcluidas:      D2._vendsExcluidas      || [],
             _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
@@ -643,6 +651,27 @@ try{
                 if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
               });
             }
+            // [FIX 13/08] contatos: merge por ID (mesmo padrão do fluxo)
+            // Admin lê contatos de TODAS as lojas — respeita tombstones
+            if(pedaco.contatos && pedaco.contatos.length){
+              if(!base.contatos) base.contatos=[];
+              const _tsc = base._contatosExcluidos || {};
+              pedaco.contatos.forEach(c=>{
+                if(_tsc[c.id]) return; // excluído — não ressuscitar
+                const idx = base.contatos.findIndex(x=>x.id===c.id);
+                if(idx < 0) base.contatos.push(c);
+                else if((Number(c.ts)||0) > (Number(base.contatos[idx].ts)||0)) base.contatos[idx] = c;
+              });
+            }
+            // Mesclar tombstones de contatos da loja
+            if(pedaco._contatosExcluidos){
+              if(!base._contatosExcluidos) base._contatosExcluidos = {};
+              Object.entries(pedaco._contatosExcluidos).forEach(([id, ts])=>{
+                if(!base._contatosExcluidos[id] || ts > base._contatosExcluidos[id]){
+                  base._contatosExcluidos[id] = ts;
+                }
+              });
+            }
             // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
             // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
             // Lojas também podem ter exclusões registradas que o admin precisa respeitar
@@ -795,6 +824,25 @@ try{
                 if(!base.fluxo) base.fluxo=[];
                 pedaco.fluxo.forEach(r=>{
                   if(!base.fluxo.find(x=>x.id===r.id)) base.fluxo.push(r);
+                });
+              }
+              // [FIX 13/08] contatos: merge por ID (respeita tombstones)
+              if(pedaco.contatos && pedaco.contatos.length){
+                if(!base.contatos) base.contatos=[];
+                const _tsc = base._contatosExcluidos || {};
+                pedaco.contatos.forEach(c=>{
+                  if(_tsc[c.id]) return; // excluído — não ressuscitar
+                  const idx = base.contatos.findIndex(x=>x.id===c.id);
+                  if(idx < 0) base.contatos.push(c);
+                  else if((Number(c.ts)||0) > (Number(base.contatos[idx].ts)||0)) base.contatos[idx] = c;
+                });
+              }
+              if(pedaco._contatosExcluidos){
+                if(!base._contatosExcluidos) base._contatosExcluidos = {};
+                Object.entries(pedaco._contatosExcluidos).forEach(([id, ts])=>{
+                  if(!base._contatosExcluidos[id] || ts > base._contatosExcluidos[id]){
+                    base._contatosExcluidos[id] = ts;
+                  }
                 });
               }
               // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
@@ -21482,6 +21530,10 @@ function excluirContato(id){
   if(!c) return;
   if(!confirm('Excluir este contato de "' + c.cliente + '"?')) return;
   D.contatos = D.contatos.filter(x => x.id !== id);
+  // [FIX 13/08] tombstone: registra que este contato foi excluído
+  // para que o merge do Firebase não traga ele de volta em outros dispositivos
+  if(!D._contatosExcluidos) D._contatosExcluidos = {};
+  D._contatosExcluidos[id] = Date.now();
   save();
   renderContatos();
   showToast('Contato excluído.','ok');
