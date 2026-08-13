@@ -2828,6 +2828,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <option value="">📋 Todos os tipos</option>
         <option value="aniversario">🎂 Aniversariantes</option>
         <option value="inativo">💤 Inativos</option>
+        <option value="pos_venda">📦 Pós-venda</option>
+        <option value="mensagem">💌 Mensagem</option>
+        <option value="imediata">⚡ Imediata</option>
         <option value="outro">💬 Outros</option>
       </select>
 
@@ -2902,6 +2905,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
           <option value="aniversario">🎂 Aniversariante</option>
           <option value="inativo">💤 Cliente inativo</option>
+          <option value="pos_venda">📦 Pós-venda (feedback da compra)</option>
+          <option value="mensagem">💌 Mensagem (WhatsApp/SMS/e-mail)</option>
+          <option value="imediata">⚡ Imediata (chamada urgente/agora)</option>
           <option value="outro">💬 Outro contato</option>
         </select>
       </div>
@@ -21315,9 +21321,12 @@ function exportarModoDivulgacaoCamp(){
 if(!D.contatos) D.contatos = [];
 
 const CT_TIPOS = {
-  aniversario: { emoji:'🎂', label:'Aniversariante', cor:'#e6a817' },
-  inativo:     { emoji:'💤', label:'Inativo',        cor:'#b07cd6' },
-  outro:       { emoji:'💬', label:'Outro',          cor:'var(--muted)' }
+  aniversario: { emoji:'🎂', label:'Aniversariante',    cor:'#e6a817' },
+  inativo:     { emoji:'💤', label:'Inativo',           cor:'#b07cd6' },
+  pos_venda:   { emoji:'📦', label:'Pós-venda',         cor:'#4ec9ff' },
+  mensagem:    { emoji:'💌', label:'Mensagem',          cor:'#7ac74f' },
+  imediata:    { emoji:'⚡', label:'Imediata',          cor:'#ff6b7a' },
+  outro:       { emoji:'💬', label:'Outro',             cor:'var(--muted)' }
 };
 
 const CT_RETORNOS = {
@@ -21549,6 +21558,9 @@ function renderContatos(){
   const hojeCount    = contatos.filter(c => c.data === hj).length;
   const anivCount    = contatos.filter(c => c.tipo === 'aniversario').length;
   const inativoCount = contatos.filter(c => c.tipo === 'inativo').length;
+  const posVendaCount = contatos.filter(c => c.tipo === 'pos_venda').length;
+  const mensagemCount = contatos.filter(c => c.tipo === 'mensagem').length;
+  const imediataCount = contatos.filter(c => c.tipo === 'imediata').length;
   // KPIs atualizados: contamos "converteu" (comprou/agendou) e "engajou" (respondeu)
   const compraCount   = contatos.filter(c => c.retorno === 'comprou').length;
   const agendouCount  = contatos.filter(c => c.retorno === 'agendou_visita').length;
@@ -21585,6 +21597,18 @@ function renderContatos(){
         <div class="kl">💤 INATIVOS</div>
         <div class="kv" style="font-size:20px;color:#b07cd6">${inativoCount}</div>
       </div>
+      <div class="kcard">
+        <div class="kl">📦 PÓS-VENDA</div>
+        <div class="kv" style="font-size:20px;color:#4ec9ff">${posVendaCount}</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">💌 MENSAGEM</div>
+        <div class="kv" style="font-size:20px;color:#7ac74f">${mensagemCount}</div>
+      </div>
+      <div class="kcard">
+        <div class="kl">⚡ IMEDIATA</div>
+        <div class="kv" style="font-size:20px;color:#ff6b7a">${imediataCount}</div>
+      </div>
       <div class="kcard verde">
         <div class="kl">🛒 COMPRARAM</div>
         <div class="kv" style="font-size:20px">${compraCount}</div>
@@ -21611,12 +21635,16 @@ function renderContatos(){
   if(porVendEl){
     const porVend = {};
     contatos.forEach(c => {
-      if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, comprou:0, engajou:0, semResp:0 };
+      if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, posVenda:0, mensagem:0, imediata:0, outro:0, comprou:0, engajou:0, semResp:0 };
       porVend[c.vendId].total++;
-      if(c.tipo === 'aniversario') porVend[c.vendId].aniv++;
-      else if(c.tipo === 'inativo') porVend[c.vendId].inativo++;
+      // [FIX 13/08] 6 tipos
+      if(c.tipo === 'aniversario')     porVend[c.vendId].aniv++;
+      else if(c.tipo === 'inativo')    porVend[c.vendId].inativo++;
+      else if(c.tipo === 'pos_venda')  porVend[c.vendId].posVenda++;
+      else if(c.tipo === 'mensagem')   porVend[c.vendId].mensagem++;
+      else if(c.tipo === 'imediata')   porVend[c.vendId].imediata++;
       else porVend[c.vendId].outro++;
-      // [FIX 12/08] usa novos status
+      // status
       if(c.retorno === 'comprou') porVend[c.vendId].comprou++;
       if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) porVend[c.vendId].engajou++;
       if(['nao_respondeu','numero_invalido'].includes(c.retorno)) porVend[c.vendId].semResp++;
@@ -21638,9 +21666,12 @@ function renderContatos(){
               <th>Vendedora</th>
               <th>Loja</th>
               <th style="text-align:center">Total</th>
-              <th style="text-align:center">🎂 Aniv.</th>
-              <th style="text-align:center">💤 Inativ.</th>
-              <th style="text-align:center">💬 Outro</th>
+              <th style="text-align:center" title="Aniversariante">🎂</th>
+              <th style="text-align:center" title="Inativo">💤</th>
+              <th style="text-align:center" title="Pós-venda">📦</th>
+              <th style="text-align:center" title="Mensagem">💌</th>
+              <th style="text-align:center" title="Imediata">⚡</th>
+              <th style="text-align:center" title="Outro">💬</th>
               <th style="text-align:center">🛒 Comprou</th>
               <th style="text-align:center">💚 Engajou</th>
               <th style="text-align:center">📵 Sem resp.</th>
@@ -21652,9 +21683,12 @@ function renderContatos(){
                 <td><strong>${l.nome}</strong></td>
                 <td style="color:var(--muted);font-size:11px">${l.lojaN}</td>
                 <td style="text-align:center;font-weight:700;color:var(--ouro)">${l.total}</td>
-                <td style="text-align:center">${l.aniv}</td>
+                <td style="text-align:center;color:#e6a817">${l.aniv}</td>
                 <td style="text-align:center;color:#b07cd6">${l.inativo}</td>
-                <td style="text-align:center">${l.outro}</td>
+                <td style="text-align:center;color:#4ec9ff">${l.posVenda}</td>
+                <td style="text-align:center;color:#7ac74f">${l.mensagem}</td>
+                <td style="text-align:center;color:#ff6b7a">${l.imediata}</td>
+                <td style="text-align:center;color:var(--muted)">${l.outro}</td>
                 <td style="text-align:center;color:var(--verde);font-weight:700">${l.comprou}</td>
                 <td style="text-align:center;color:var(--verde)">${l.engajou}</td>
                 <td style="text-align:center;color:var(--verm)">${l.semResp}</td>
@@ -21773,9 +21807,12 @@ function exportarPDFContatos(){
   // KPIs
   const hj = hoje();
   const hojeCount   = contatos.filter(c => c.data === hj).length;
-  const anivCount   = contatos.filter(c => c.tipo === 'aniversario').length;
-  const inatCount   = contatos.filter(c => c.tipo === 'inativo').length;
-  const outroCount  = contatos.filter(c => c.tipo === 'outro').length;
+  const anivCount     = contatos.filter(c => c.tipo === 'aniversario').length;
+  const inatCount     = contatos.filter(c => c.tipo === 'inativo').length;
+  const posVendaCount = contatos.filter(c => c.tipo === 'pos_venda').length;
+  const mensagemCount = contatos.filter(c => c.tipo === 'mensagem').length;
+  const imediataCount = contatos.filter(c => c.tipo === 'imediata').length;
+  const outroCount    = contatos.filter(c => c.tipo === 'outro').length;
   // [FIX 12/08] KPIs com os novos status
   const compraCount   = contatos.filter(c => c.retorno === 'comprou').length;
   const interesseCount= contatos.filter(c => c.retorno === 'interesse').length;
@@ -21793,10 +21830,13 @@ function exportarPDFContatos(){
   // Agregado por vendedora
   const porVend = {};
   contatos.forEach(c => {
-    if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, outro:0, comprou:0, engajou:0, semResp:0, pendentes:0 };
+    if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, posVenda:0, mensagem:0, imediata:0, outro:0, comprou:0, engajou:0, semResp:0, pendentes:0 };
     porVend[c.vendId].total++;
-    if(c.tipo === 'aniversario') porVend[c.vendId].aniv++;
-    else if(c.tipo === 'inativo') porVend[c.vendId].inativo++;
+    if(c.tipo === 'aniversario')     porVend[c.vendId].aniv++;
+    else if(c.tipo === 'inativo')    porVend[c.vendId].inativo++;
+    else if(c.tipo === 'pos_venda')  porVend[c.vendId].posVenda++;
+    else if(c.tipo === 'mensagem')   porVend[c.vendId].mensagem++;
+    else if(c.tipo === 'imediata')   porVend[c.vendId].imediata++;
     else porVend[c.vendId].outro++;
     if(c.retorno === 'comprou') porVend[c.vendId].comprou++;
     if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) porVend[c.vendId].engajou++;
@@ -21820,6 +21860,9 @@ function exportarPDFContatos(){
     <td style="text-align:center;font-weight:700">${l.total}</td>
     <td style="text-align:center">${l.aniv}</td>
     <td style="text-align:center">${l.inativo}</td>
+    <td style="text-align:center">${l.posVenda}</td>
+    <td style="text-align:center">${l.mensagem}</td>
+    <td style="text-align:center">${l.imediata}</td>
     <td style="text-align:center">${l.outro}</td>
     <td style="text-align:center;color:#28a745;font-weight:700">${l.comprou}</td>
     <td style="text-align:center;color:#28a745">${l.engajou}</td>
@@ -21905,6 +21948,9 @@ function exportarPDFContatos(){
     <div class="kpi"><div class="kpi-l">Hoje</div><div class="kpi-v" style="color:#0d6efd">${hojeCount}</div></div>
     <div class="kpi"><div class="kpi-l">🎂 Aniversariantes</div><div class="kpi-v" style="color:#e6a817">${anivCount}</div></div>
     <div class="kpi"><div class="kpi-l">💤 Inativos</div><div class="kpi-v" style="color:#b07cd6">${inatCount}</div></div>
+    <div class="kpi"><div class="kpi-l">📦 Pós-venda</div><div class="kpi-v" style="color:#0d6efd">${posVendaCount}</div></div>
+    <div class="kpi"><div class="kpi-l">💌 Mensagem</div><div class="kpi-v" style="color:#28a745">${mensagemCount}</div></div>
+    <div class="kpi"><div class="kpi-l">⚡ Imediata</div><div class="kpi-v" style="color:#dc3545">${imediataCount}</div></div>
     <div class="kpi"><div class="kpi-l">💬 Outros</div><div class="kpi-v">${outroCount}</div></div>
     <div class="kpi"><div class="kpi-l">🛒 Compraram</div><div class="kpi-v" style="color:#28a745">${compraCount}</div><div class="kpi-s">${pctConv}% de conversão</div></div>
     <div class="kpi"><div class="kpi-l">💚 Com interesse</div><div class="kpi-v" style="color:#28a745">${interesseCount + pediuCount + agendouCount}</div><div class="kpi-s">${pctEngajou}% engajaram</div></div>
@@ -21919,16 +21965,19 @@ function exportarPDFContatos(){
       <th>Loja</th>
       <th style="text-align:center">Total</th>
       <th style="text-align:center">🎂 Aniv.</th>
-      <th style="text-align:center">💤 Inativ.</th>
-      <th style="text-align:center">💬 Outro</th>
-      <th style="text-align:center">🛒 Comprou</th>
-      <th style="text-align:center">💚 Engajou</th>
-      <th style="text-align:center">📵 Sem resp.</th>
+      <th style="text-align:center">💤 Inat.</th>
+      <th style="text-align:center">📦 Pós</th>
+      <th style="text-align:center">💌 Msg</th>
+      <th style="text-align:center">⚡ Imed.</th>
+      <th style="text-align:center">💬 Out.</th>
+      <th style="text-align:center">🛒 Compr.</th>
+      <th style="text-align:center">💚 Engaj.</th>
+      <th style="text-align:center">📵 S/resp</th>
       <th style="text-align:center">⏳ Aguard.</th>
-      <th style="text-align:center">% Engajou</th>
+      <th style="text-align:center">% Engaj.</th>
       <th style="text-align:center">% Conv.</th>
     </tr></thead>
-    <tbody>${rowsVend || '<tr><td colspan="12" style="text-align:center;color:#999;padding:14px">Nenhum contato no período.</td></tr>'}</tbody>
+    <tbody>${rowsVend || '<tr><td colspan="15" style="text-align:center;color:#999;padding:14px">Nenhum contato no período.</td></tr>'}</tbody>
   </table>
 
   <h2>Registros Detalhados ${contatos.length > 200 ? '(primeiros 200)' : ''}</h2>
