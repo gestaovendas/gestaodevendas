@@ -1498,8 +1498,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
       <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde);cursor:pointer" onclick="forceSyncAdmin()" title="Clique para sincronizar agora"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
-      <button onclick="window.forcarSyncCompleto()" title="Puxar dados novos e enviar dados locais que ainda não subiram"
-        style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--ouro);cursor:pointer;font-weight:600">🔄 Sincronizar agora</button>
+      <button onclick="window.abrirModalDiagnostico()" title="Ver diagnóstico completo, discrepâncias e forçar sincronização"
+        style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--ouro);cursor:pointer;font-weight:600">🔍 Diagnóstico + Sync</button>
     </div>
   </div>
   <!-- [NEW 21/07] Período do dashboard: Dia / Semana / Mês -->
@@ -22594,6 +22594,246 @@ window.autoSyncDadosPresos = async function(){
     }
   } catch(e){
     console.warn('[Avatim] autoSyncDadosPresos falhou:', e.message);
+  }
+};
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 13/08] MODAL DE DIAGNÓSTICO — versão visual do window.diagnosticoSync
+// Aparece na tela em uma janela com o relatório completo. Botão para forçar
+// sync + botão para copiar o texto do relatório (útil para me mandar).
+// ══════════════════════════════════════════════════════════════════════
+window.abrirModalDiagnostico = async function(){
+  // Criar modal se não existe
+  let modal = document.getElementById('modal-diagnostico');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'modal-diagnostico';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;padding:20px;overflow-y:auto';
+    modal.innerHTML = `
+      <div style="max-width:900px;margin:20px auto;background:var(--card);border:2px solid var(--ouro);border-radius:12px;padding:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:var(--ouro)">🔍 Diagnóstico de Sincronização</div>
+          <button onclick="document.getElementById('modal-diagnostico').style.display='none'"
+            style="background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer">✕</button>
+        </div>
+        <div id="diag-status" style="color:var(--muted);font-size:12px;margin-bottom:12px">⏳ Coletando informações...</div>
+        <pre id="diag-relatorio" style="background:#0a0a0a;color:#e0e0e0;border:1px solid var(--borda);border-radius:8px;padding:14px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;max-height:500px;overflow-y:auto;font-family:'Courier New',monospace"></pre>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button onclick="window._copiarDiagnostico()"
+            style="background:rgba(78,201,255,.15);border:1px solid rgba(78,201,255,.5);color:#4ec9ff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">📋 Copiar relatório</button>
+          <button onclick="window._forcarSyncNoModal()"
+            style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);color:var(--ouro);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">🔄 Forçar sincronização agora</button>
+          <button onclick="window.abrirModalDiagnostico()"
+            style="background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">🔁 Re-analisar</button>
+          <button onclick="document.getElementById('modal-diagnostico').style.display='none'"
+            style="background:var(--cinza);border:1px solid var(--borda);color:var(--texto);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">Fechar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'block';
+
+  const rel = document.getElementById('diag-relatorio');
+  const status = document.getElementById('diag-status');
+
+  const linhas = [];
+  const push = (s) => linhas.push(s);
+
+  push('╔═════════════════════════════════════════════════════════╗');
+  push('║  DIAGNÓSTICO DE SYNC — MonAris                          ║');
+  push('║  ' + new Date().toLocaleString('pt-BR').padEnd(53) + '║');
+  push('╚═════════════════════════════════════════════════════════╝');
+  push('');
+  push('🔥 FIREBASE');
+  push('  Conectado: ' + (window._fbOk ? '✅ SIM' : '❌ NÃO'));
+  push('  Usuário logado: ' + (window._currentUser?.email || '(nenhum)'));
+  push('  Perfil: ' + (typeof isAdmin === 'function' && isAdmin() ? '👑 ADMIN' : ('🏪 LOJA (' + (typeof lojaId==='function'?lojaId():'?') + ')')));
+  push('  fsCarregar disponível: ' + (typeof window.fsCarregar === 'function' ? '✅' : '❌'));
+  push('  fsGravar disponível: ' + (typeof window.fsGravar === 'function' ? '✅' : '❌'));
+  push('');
+
+  push('📱 DADOS LOCAIS (neste dispositivo)');
+  push('  Vendedoras cadastradas: ' + (D.vendedoras||[]).length);
+  push('  Lojas com vendas: ' + Object.keys(D.vendas||{}).length);
+  push('  Vendedoras com vendasVend: ' + Object.keys(D.vendasVend||{}).length);
+  push('  Contatos: ' + (D.contatos||[]).length);
+  push('  Fluxo: ' + (D.fluxo||[]).length);
+
+  // Detalhe contatos por loja
+  if((D.contatos||[]).length){
+    const porLoja = {};
+    (D.contatos||[]).forEach(c => {
+      porLoja[c.loja || '(sem loja)'] = (porLoja[c.loja || '(sem loja)'] || 0) + 1;
+    });
+    push('  Contatos por loja:');
+    Object.entries(porLoja).forEach(([l,n]) => push('    - ' + l + ': ' + n));
+  }
+
+  // Detalhe vendasVend por vendedora
+  const nVV = Object.keys(D.vendasVend||{}).length;
+  if(nVV > 0){
+    push('  Detalhe vendasVend:');
+    Object.entries(D.vendasVend||{}).forEach(([vid,dias])=>{
+      const v = (D.vendedoras||[]).find(x=>x.id===vid);
+      const nDias = Object.keys(dias||{}).length;
+      const total = Object.values(dias||{}).reduce((s,d)=>s+(Number(d.val)||0),0);
+      const nome = v?.nome || '?';
+      const loja = v?.loja || 'ÓRFÃ';
+      push('    - ' + nome + ' (' + vid + ', loja=' + loja + '): ' + nDias + ' dias, R$ ' + total.toFixed(2));
+    });
+  }
+  push('');
+
+  // Puxar do Firebase
+  status.textContent = '☁️ Consultando Firebase...';
+  rel.textContent = linhas.join('\n');
+
+  if(typeof window.fsCarregar !== 'function'){
+    push('❌ fsCarregar não disponível');
+    rel.textContent = linhas.join('\n');
+    status.textContent = 'Concluído (Firebase offline)';
+    return;
+  }
+  push('☁️  DADOS REMOTOS (Firebase)');
+  try {
+    const remotoJSON = await window.fsCarregar();
+    if(!remotoJSON){
+      push('  ⚠️ Firebase retornou vazio ou null');
+      rel.textContent = linhas.join('\n');
+      status.textContent = 'Concluído';
+      return;
+    }
+    const remoto = JSON.parse(remotoJSON);
+    push('  Vendedoras remotas: ' + (remoto.vendedoras||[]).length);
+    push('  Lojas com vendas remotas: ' + Object.keys(remoto.vendas||{}).length +
+         (Object.keys(remoto.vendas||{}).length ? ' → ' + Object.keys(remoto.vendas||{}).join(', ') : ''));
+    push('  Vendedoras com vendasVend remoto: ' + Object.keys(remoto.vendasVend||{}).length);
+    push('  Contatos remotos: ' + (remoto.contatos||[]).length);
+    push('  Fluxo remoto: ' + (remoto.fluxo||[]).length);
+
+    // Detalhe contatos remotos por loja
+    if((remoto.contatos||[]).length){
+      const porLoja = {};
+      (remoto.contatos||[]).forEach(c => {
+        porLoja[c.loja || '(sem loja)'] = (porLoja[c.loja || '(sem loja)'] || 0) + 1;
+      });
+      push('  Contatos remotos por loja:');
+      Object.entries(porLoja).forEach(([l,n]) => push('    - ' + l + ': ' + n));
+    }
+    push('');
+
+    // DISCREPÂNCIAS
+    push('🔍 DISCREPÂNCIAS (o que está LOCAL mas NÃO está no Firebase)');
+    let alertas = 0;
+
+    // vendasVend
+    Object.entries(D.vendasVend||{}).forEach(([vid,dias])=>{
+      const remotoVend = (remoto.vendasVend||{})[vid] || {};
+      Object.entries(dias||{}).forEach(([dt,val])=>{
+        if(!remotoVend[dt]){
+          const v = (D.vendedoras||[]).find(x=>x.id===vid);
+          push('  ⚠️ ' + dt + ' | vend=' + (v?.nome||vid) + ' | R$ ' + val.val + ' → SÓ LOCAL');
+          alertas++;
+        }
+      });
+    });
+
+    // vendas por loja
+    Object.entries(D.vendas||{}).forEach(([l,dias])=>{
+      const remotoLoja = (remoto.vendas||{})[l] || {};
+      Object.keys(dias||{}).forEach(dt=>{
+        if(!remotoLoja[dt]){
+          push('  ⚠️ ' + dt + ' | loja=' + l + ' → vendas SÓ LOCAL');
+          alertas++;
+        }
+      });
+    });
+
+    // contatos
+    const idsRemoto = new Set((remoto.contatos||[]).map(c=>c.id));
+    (D.contatos||[]).forEach(c=>{
+      if(!idsRemoto.has(c.id)){
+        push('  ⚠️ Contato "' + c.cliente + '" (loja=' + c.loja + ') → SÓ LOCAL');
+        alertas++;
+      }
+    });
+
+    if(alertas === 0){
+      push('  ✅ TUDO SINCRONIZADO — não há dados locais fora do Firebase');
+    } else {
+      push('');
+      push('  🚨 ' + alertas + ' registros locais NÃO estão no Firebase.');
+      push('     Clique em "🔄 Forçar sincronização agora" para enviá-los.');
+    }
+    push('');
+
+    // Discrepâncias INVERSAS (remoto tem mas local não) — importante pro admin
+    if(isAdmin()){
+      push('🔍 REMOTO tem mas ESTE dispositivo (local) NÃO tem');
+      let ausentes = 0;
+
+      // contatos remotos ausentes localmente
+      const idsLocal = new Set((D.contatos||[]).map(c=>c.id));
+      (remoto.contatos||[]).forEach(c=>{
+        if(!idsLocal.has(c.id)){
+          push('  ⬇️  Contato "' + c.cliente + '" (loja=' + c.loja + ') → precisa PULL');
+          ausentes++;
+        }
+      });
+
+      // vendasVend
+      Object.entries(remoto.vendasVend||{}).forEach(([vid, dias])=>{
+        const localVend = (D.vendasVend||{})[vid] || {};
+        Object.keys(dias||{}).forEach(dt=>{
+          if(!localVend[dt]){
+            const v = (remoto.vendedoras||D.vendedoras||[]).find(x=>x.id===vid);
+            push('  ⬇️  ' + dt + ' | vend=' + (v?.nome||vid) + ' → precisa PULL');
+            ausentes++;
+          }
+        });
+      });
+
+      if(ausentes === 0){
+        push('  ✅ Local está atualizado com o remoto');
+      } else {
+        push('');
+        push('  🚨 ' + ausentes + ' registros remotos AINDA não chegaram neste dispositivo.');
+        push('     Clique em "🔄 Forçar sincronização agora" para puxá-los.');
+      }
+    }
+
+  } catch(e){
+    push('  ❌ Erro ao ler Firestore: ' + e.message);
+  }
+
+  rel.textContent = linhas.join('\n');
+  status.textContent = '✅ Diagnóstico concluído em ' + new Date().toLocaleTimeString('pt-BR');
+  window._ultimoRelatorio = linhas.join('\n');
+};
+
+window._copiarDiagnostico = function(){
+  const txt = window._ultimoRelatorio || document.getElementById('diag-relatorio')?.textContent || '';
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(txt).then(()=>{
+      showToast('Relatório copiado! Cole no chat pra me mandar.','ok');
+    }).catch(()=>{
+      showToast('Não foi possível copiar. Selecione o texto e Ctrl+C.','warn');
+    });
+  } else {
+    showToast('Selecione o texto e Ctrl+C.','warn');
+  }
+};
+
+window._forcarSyncNoModal = async function(){
+  const status = document.getElementById('diag-status');
+  if(status) status.textContent = '🔄 Sincronizando...';
+  const ok = await window.forcarSyncCompleto();
+  if(ok){
+    // Re-analisar automaticamente após sync
+    setTimeout(()=>window.abrirModalDiagnostico(), 1500);
   }
 };
 
