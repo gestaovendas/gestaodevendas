@@ -2929,7 +2929,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </table>
     </div>
     <div id="contatos-vazio" style="display:none;text-align:center;padding:30px;color:var(--muted);font-size:12px">
-      Nenhum contato registrado no filtro selecionado.
+      <div id="contatos-vazio-msg">Nenhum contato registrado no filtro selecionado.</div>
     </div>
   </div>
 </div>
@@ -21601,19 +21601,36 @@ function renderContatos(){
 
   // Popular selects
   const selLoja = document.getElementById('ct-filtro-loja');
-  if(selLoja && isAdmin() && selLoja.options.length <= 1){
+  if(selLoja && isAdmin() && (selLoja.options?.length || 0) <= 1){
     selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>' +
       LOJAS.map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
   }
   const selVend = document.getElementById('ct-filtro-vend');
   if(selVend){
-    const vendsVis = isAdmin()
-      ? (D.vendedoras || [])
-      : (D.vendedoras || []).filter(v => v.loja === lojaId());
+    // [FIX 13/08] filtro de vendedoras respeita loja selecionada no filtro
+    const lojaFiltro = document.getElementById('ct-filtro-loja')?.value || '';
+    let vendsVis;
+    if(isAdmin()){
+      // admin: se selecionou uma loja, mostra só vendedoras dela
+      vendsVis = lojaFiltro
+        ? (D.vendedoras || []).filter(v => v.loja === lojaFiltro)
+        : (D.vendedoras || []);
+    } else {
+      vendsVis = (D.vendedoras || []).filter(v => v.loja === lojaId());
+    }
+    // preservar seleção atual se ainda válida
+    const vendSelAtual = selVend.value;
+    const vendsFiltradas = vendsVis.filter(v => v.ativa !== false)
+        .sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
     selVend.innerHTML = '<option value="">👥 Todas as vendedoras</option>' +
-      vendsVis.filter(v => v.ativa !== false)
-        .sort((a,b) => (a.nome||'').localeCompare(b.nome||''))
-        .map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
+      vendsFiltradas.map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
+    // Restaurar seleção se ainda existir na nova lista
+    if(vendSelAtual && vendsFiltradas.some(v => v.id === vendSelAtual)){
+      selVend.value = vendSelAtual;
+    } else if(vendSelAtual){
+      // Loja mudou e a vendedora antes selecionada não é dessa loja — limpa
+      selVend.value = '';
+    }
   }
 
   const contatos = _filtrarContatos();
@@ -21764,7 +21781,12 @@ function renderContatos(){
           </table>
         </div>`;
     } else {
-      porVendEl.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">Nenhum contato no período selecionado.</div>';
+      // Detectar o motivo: sem dados no D vs filtros muito restritos
+      const totalContatosD = (D.contatos||[]).length;
+      const msgExtra = totalContatosD === 0
+        ? '<br><br><strong style="color:var(--ouro)">⚠️ D.contatos está VAZIO neste dispositivo.</strong><br><span style="font-size:11px">Se as vendedoras já registraram contatos, clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard para forçar a sincronização.</span>'
+        : '<br><span style="font-size:11px">Existem '+totalContatosD+' contato(s) em outros filtros. Tente <strong>Limpar filtros</strong>.</span>';
+      porVendEl.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">Nenhum contato no período/filtros selecionados.' + msgExtra + '</div>';
     }
   }
 
@@ -21776,7 +21798,16 @@ function renderContatos(){
 
   if(contatos.length === 0){
     tbody.innerHTML = '';
-    if(vazio) vazio.style.display = 'block';
+    if(vazio){
+      vazio.style.display = 'block';
+      const msgEl = document.getElementById('contatos-vazio-msg');
+      if(msgEl){
+        const totalContatosD = (D.contatos||[]).length;
+        msgEl.innerHTML = totalContatosD === 0
+          ? '<strong style="color:var(--ouro)">⚠️ Este dispositivo não tem contatos em D.</strong><br><br><span>Se as vendedoras já registraram, os dados podem não ter sincronizado.<br>Clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard.</span>'
+          : 'Nenhum contato no filtro selecionado.<br><span style="font-size:11px">Existem '+totalContatosD+' contato(s) em outros filtros. Tente Limpar filtros.</span>';
+      }
+    }
     if(info) info.textContent = '';
     return;
   }
