@@ -2901,9 +2901,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
-  <!-- Contatos por vendedora (admin) -->
+  <!-- [NEW 13/08] Contatos por LOJA (só admin vê) -->
+  <div class="sc admin-only" style="margin-bottom:14px;display:none">
+    <div class="st">🏪 Contatos por Loja</div>
+    <div id="contatos-por-loja" style="margin-top:10px"></div>
+  </div>
+
+  <!-- [NEW 13/08] Ranking de vendedoras -->
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">👥 Contatos por Vendedora</div>
+    <div class="st">🏆 Ranking de Vendedoras — Contatos Realizados</div>
+    <div id="contatos-ranking" style="margin-top:10px"></div>
+  </div>
+
+  <!-- Contatos por vendedora (detalhado) -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">👥 Detalhamento por Vendedora</div>
     <div id="contatos-por-vend" style="margin-top:10px"></div>
   </div>
 
@@ -2922,8 +2934,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <th>Vendedora</th>
           <th>Loja</th>
           <th>Retorno</th>
-          <th>Observação</th>
-          <th>Ações</th>
+          <th style="width:80px;text-align:center">Ações</th>
         </tr></thead>
         <tbody id="contatos-tbody"></tbody>
       </table>
@@ -21826,32 +21837,36 @@ function renderContatos(){
     const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
     const retInfo = CT_RETORNOS[c.retorno] || CT_RETORNOS.pendente;
     const dataFmt = (c.data||'').split('-').reverse().join('/');
+    // [FIX 13/08] linha 1: dados principais; linha 2 (opcional): observação
+    const linhaObs = c.obs ? `<tr style="background:rgba(255,255,255,.015)"><td colspan="7" style="padding:6px 12px 10px 12px;border-bottom:1px solid rgba(255,255,255,.05)"><span style="font-size:10px;color:var(--muted);letter-spacing:.5px;font-weight:600">💬 OBSERVAÇÃO:</span> <span style="font-size:12px;color:var(--texto);font-style:italic">${c.obs}</span></td></tr>` : '';
     return `<tr>
-      <td style="font-size:11px">${dataFmt}</td>
+      <td style="font-size:11px;white-space:nowrap">${dataFmt}</td>
       <td><strong>${c.cliente}</strong></td>
-      <td><span style="color:${tipoInfo.cor};font-weight:600;font-size:11px">${tipoInfo.emoji} ${tipoInfo.label}</span></td>
+      <td><span style="color:${tipoInfo.cor};font-weight:600;font-size:11px;white-space:nowrap">${tipoInfo.emoji} ${tipoInfo.label}</span></td>
       <td>${vNome}</td>
       <td style="color:var(--muted);font-size:11px">${lNome}</td>
       <td>
         <select onchange="marcarRetornoContato('${c.id}', this.value)"
-          style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer;max-width:180px">
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:4px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer;max-width:200px">
           ${Object.entries(CT_RETORNOS).map(([k,v])=>`<option value="${k}" ${(c.retorno||'pendente')===k?'selected':''}>${v.emoji} ${v.label}</option>`).join('')}
         </select>
-        ${c.proximoContato ? `<div style="font-size:9px;color:var(--ouro);margin-top:2px" title="Data programada para retomar">🔁 ${c.proximoContato.split('-').reverse().join('/')}</div>` : ''}
+        ${c.proximoContato ? `<div style="font-size:9px;color:var(--ouro);margin-top:3px" title="Data programada para retomar">🔁 ${c.proximoContato.split('-').reverse().join('/')}</div>` : ''}
       </td>
-      <td style="font-size:11px;color:var(--muted);max-width:200px;word-wrap:break-word">${c.obs || '—'}</td>
-      <td style="white-space:nowrap">
+      <td style="white-space:nowrap;text-align:center">
         <button onclick="abrirFormContato('${c.id}')" title="Editar"
-          style="background:none;border:none;color:var(--azul);cursor:pointer;font-size:14px">✏️</button>
+          style="background:none;border:none;color:var(--azul);cursor:pointer;font-size:15px;padding:2px 4px">✏️</button>
         <button onclick="excluirContato('${c.id}')" title="Excluir"
-          style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:14px">🗑️</button>
+          style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>
       </td>
-    </tr>`;
+    </tr>${linhaObs}`;
   }).join('');
 
   // [NEW 12/08] Renderizar blocos novos
   if(typeof _renderLembretes === 'function') _renderLembretes();
   if(typeof _renderCalendarioContatos === 'function') _renderCalendarioContatos();
+  // [NEW 13/08] Por Loja (admin) + Ranking
+  if(typeof _renderContatosPorLoja === 'function') _renderContatosPorLoja(contatos);
+  if(typeof _renderContatosRanking === 'function') _renderContatosRanking(contatos);
 }
 
 
@@ -22867,6 +22882,220 @@ window._forcarSyncNoModal = async function(){
     setTimeout(()=>window.abrirModalDiagnostico(), 1500);
   }
 };
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 13/08] CONTATOS POR LOJA (admin) + RANKING DE VENDEDORAS
+// Complementa a visão "Detalhamento por Vendedora" com agregado por loja
+// (visão de rede) e ranking claro de quem fez mais contatos.
+// ══════════════════════════════════════════════════════════════════════
+
+function _renderContatosPorLoja(contatos){
+  const el = document.getElementById('contatos-por-loja');
+  if(!el) return;
+  const wrap = el.closest('.sc');
+  if(!isAdmin()){
+    if(wrap) wrap.style.display = 'none';
+    return;
+  }
+  if(wrap) wrap.style.display = '';
+
+  // Agregar por loja
+  const porLoja = {};
+  LOJAS.forEach(l => {
+    porLoja[l.id] = {
+      lojaId: l.id, lojaN: l.nome,
+      total:0, aniv:0, inativo:0, posVenda:0, mensagem:0, imediata:0, outro:0,
+      comprou:0, engajou:0, semResp:0, pendentes:0, vends: new Set()
+    };
+  });
+  contatos.forEach(c => {
+    const p = porLoja[c.loja];
+    if(!p) return;
+    p.total++;
+    p.vends.add(c.vendId);
+    if(c.tipo === 'aniversario')     p.aniv++;
+    else if(c.tipo === 'inativo')    p.inativo++;
+    else if(c.tipo === 'pos_venda')  p.posVenda++;
+    else if(c.tipo === 'mensagem')   p.mensagem++;
+    else if(c.tipo === 'imediata')   p.imediata++;
+    else p.outro++;
+    if(c.retorno === 'comprou') p.comprou++;
+    if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) p.engajou++;
+    if(['nao_respondeu','numero_invalido'].includes(c.retorno)) p.semResp++;
+    if(!c.retorno || c.retorno === 'pendente') p.pendentes++;
+  });
+
+  const linhas = Object.values(porLoja)
+    .filter(p => p.total > 0)
+    .map(p => ({...p, nVends: p.vends.size,
+      taxa: p.total>0 ? (p.engajou/p.total*100).toFixed(0) : '0',
+      taxaConv: p.total>0 ? (p.comprou/p.total*100).toFixed(0) : '0'
+    }))
+    .sort((a,b) => b.total - a.total);
+
+  if(!linhas.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhuma loja com contatos registrados no filtro.</div>';
+    return;
+  }
+
+  // Total da rede (para linha extra no topo)
+  const totRede = linhas.reduce((acc, l) => ({
+    total: acc.total+l.total, comprou: acc.comprou+l.comprou,
+    engajou: acc.engajou+l.engajou, semResp: acc.semResp+l.semResp,
+    pendentes: acc.pendentes+l.pendentes, aniv: acc.aniv+l.aniv,
+    inativo: acc.inativo+l.inativo, posVenda: acc.posVenda+l.posVenda,
+    mensagem: acc.mensagem+l.mensagem, imediata: acc.imediata+l.imediata, outro: acc.outro+l.outro
+  }), {total:0,comprou:0,engajou:0,semResp:0,pendentes:0,aniv:0,inativo:0,posVenda:0,mensagem:0,imediata:0,outro:0});
+  const taxaRede    = totRede.total>0 ? (totRede.engajou/totRede.total*100).toFixed(0) : '0';
+  const taxaConvRede = totRede.total>0 ? (totRede.comprou/totRede.total*100).toFixed(0) : '0';
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:640px">
+        <thead><tr>
+          <th>Loja</th>
+          <th style="text-align:center">Total</th>
+          <th style="text-align:center" title="Vendedoras ativas nos contatos">👥</th>
+          <th style="text-align:center" title="Aniversariante">🎂</th>
+          <th style="text-align:center" title="Inativo">💤</th>
+          <th style="text-align:center" title="Pós-venda">📦</th>
+          <th style="text-align:center" title="Mensagem">💌</th>
+          <th style="text-align:center" title="Imediata">⚡</th>
+          <th style="text-align:center" title="Outro">💬</th>
+          <th style="text-align:center">🛒 Comprou</th>
+          <th style="text-align:center">💚 Engajou</th>
+          <th style="text-align:center">📵 S/resp</th>
+          <th style="text-align:center">⏳ Aguard.</th>
+          <th style="text-align:center">% Engaj.</th>
+          <th style="text-align:center">% Conv.</th>
+        </tr></thead>
+        <tbody>
+          <tr style="background:rgba(201,168,76,.08);border-top:2px solid var(--ouro)">
+            <td><strong style="color:var(--ouro)">🌐 REDE</strong></td>
+            <td style="text-align:center;font-weight:800;color:var(--ouro)">${totRede.total}</td>
+            <td style="text-align:center;color:var(--muted)">—</td>
+            <td style="text-align:center;color:#e6a817">${totRede.aniv}</td>
+            <td style="text-align:center;color:#b07cd6">${totRede.inativo}</td>
+            <td style="text-align:center;color:#4ec9ff">${totRede.posVenda}</td>
+            <td style="text-align:center;color:#7ac74f">${totRede.mensagem}</td>
+            <td style="text-align:center;color:#ff6b7a">${totRede.imediata}</td>
+            <td style="text-align:center;color:var(--muted)">${totRede.outro}</td>
+            <td style="text-align:center;color:var(--verde);font-weight:700">${totRede.comprou}</td>
+            <td style="text-align:center;color:var(--verde)">${totRede.engajou}</td>
+            <td style="text-align:center;color:var(--verm)">${totRede.semResp}</td>
+            <td style="text-align:center">${totRede.pendentes}</td>
+            <td style="text-align:center;font-weight:700;color:${taxaRede>=50?'var(--verde)':taxaRede>=25?'var(--ouro)':'var(--verm)'}">${taxaRede}%</td>
+            <td style="text-align:center;font-weight:700;color:${taxaConvRede>=20?'var(--verde)':taxaConvRede>=10?'var(--ouro)':'var(--verm)'}">${taxaConvRede}%</td>
+          </tr>
+          ${linhas.map(l => `<tr>
+            <td><strong>${l.lojaN}</strong></td>
+            <td style="text-align:center;font-weight:700;color:var(--ouro)">${l.total}</td>
+            <td style="text-align:center;color:var(--muted);font-size:11px">${l.nVends}</td>
+            <td style="text-align:center;color:#e6a817">${l.aniv}</td>
+            <td style="text-align:center;color:#b07cd6">${l.inativo}</td>
+            <td style="text-align:center;color:#4ec9ff">${l.posVenda}</td>
+            <td style="text-align:center;color:#7ac74f">${l.mensagem}</td>
+            <td style="text-align:center;color:#ff6b7a">${l.imediata}</td>
+            <td style="text-align:center;color:var(--muted)">${l.outro}</td>
+            <td style="text-align:center;color:var(--verde);font-weight:700">${l.comprou}</td>
+            <td style="text-align:center;color:var(--verde)">${l.engajou}</td>
+            <td style="text-align:center;color:var(--verm)">${l.semResp}</td>
+            <td style="text-align:center">${l.pendentes}</td>
+            <td style="text-align:center;font-weight:700;color:${l.taxa>=50?'var(--verde)':l.taxa>=25?'var(--ouro)':'var(--verm)'}">${l.taxa}%</td>
+            <td style="text-align:center;font-weight:700;color:${l.taxaConv>=20?'var(--verde)':l.taxaConv>=10?'var(--ouro)':'var(--verm)'}">${l.taxaConv}%</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function _renderContatosRanking(contatos){
+  const el = document.getElementById('contatos-ranking');
+  if(!el) return;
+
+  // Agregar por vendedora
+  const porVend = {};
+  contatos.forEach(c => {
+    if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, comprou:0, engajou:0, semResp:0 };
+    porVend[c.vendId].total++;
+    if(c.retorno === 'comprou') porVend[c.vendId].comprou++;
+    if(['interesse','pediu_retorno','agendou_visita','comprou'].includes(c.retorno)) porVend[c.vendId].engajou++;
+    if(['nao_respondeu','numero_invalido'].includes(c.retorno)) porVend[c.vendId].semResp++;
+  });
+
+  const linhas = Object.entries(porVend).map(([vid, stats]) => {
+    const v = (D.vendedoras||[]).find(x => x.id === vid);
+    return {
+      vid,
+      nome: v?.nome || vid,
+      lojaN: LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '—',
+      ...stats,
+      taxaConv: stats.total>0 ? (stats.comprou/stats.total*100).toFixed(0) : '0'
+    };
+  }).sort((a,b) => b.total - a.total || b.comprou - a.comprou);
+
+  if(!linhas.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum contato registrado ainda no filtro atual.</div>';
+    return;
+  }
+
+  // Top 3 destacado (pódio)
+  const podio = linhas.slice(0, 3);
+  const restante = linhas.slice(3);
+
+  const medalhas = ['🥇','🥈','🥉'];
+  const podioHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:14px">
+    ${podio.map((l, i) => `
+      <div style="background:${i===0?'linear-gradient(135deg,rgba(201,168,76,.15),rgba(201,168,76,.05))':(i===1?'rgba(200,200,200,.06)':'rgba(205,127,50,.06)')};border:1px solid ${i===0?'rgba(201,168,76,.5)':'var(--borda)'};border-radius:10px;padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:24px">${medalhas[i]}</div>
+          <div style="font-size:11px;color:var(--muted)">${l.total} contato${l.total===1?'':'s'}</div>
+        </div>
+        <div style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;line-height:1.2">${l.nome}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${l.lojaN}</div>
+        <div style="display:flex;gap:12px;margin-top:8px;font-size:11px">
+          <div>🛒 <strong style="color:var(--verde)">${l.comprou}</strong></div>
+          <div>💚 <strong>${l.engajou}</strong></div>
+          <div style="margin-left:auto"><strong style="color:${l.taxaConv>=20?'var(--verde)':l.taxaConv>=10?'var(--ouro)':'var(--verm)'}">${l.taxaConv}%</strong> conv.</div>
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+
+  const restanteHtml = restante.length ? `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:500px">
+        <thead><tr>
+          <th style="text-align:center;width:40px">#</th>
+          <th>Vendedora</th>
+          <th>Loja</th>
+          <th style="text-align:center">Total</th>
+          <th style="text-align:center">🛒</th>
+          <th style="text-align:center">💚</th>
+          <th style="text-align:center">📵</th>
+          <th style="text-align:center">% Conv.</th>
+        </tr></thead>
+        <tbody>
+          ${restante.map((l, i) => `<tr>
+            <td style="text-align:center;color:var(--muted);font-weight:600">${i+4}º</td>
+            <td><strong>${l.nome}</strong></td>
+            <td style="color:var(--muted);font-size:11px">${l.lojaN}</td>
+            <td style="text-align:center;font-weight:700;color:var(--ouro)">${l.total}</td>
+            <td style="text-align:center;color:var(--verde);font-weight:600">${l.comprou}</td>
+            <td style="text-align:center;color:var(--verde)">${l.engajou}</td>
+            <td style="text-align:center;color:var(--verm)">${l.semResp}</td>
+            <td style="text-align:center;font-weight:700;color:${l.taxaConv>=20?'var(--verde)':l.taxaConv>=10?'var(--ouro)':'var(--verm)'}">${l.taxaConv}%</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  ` : '';
+
+  el.innerHTML = podioHtml + restanteHtml;
+}
 
 </script>
 </body>
