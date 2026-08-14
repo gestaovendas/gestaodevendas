@@ -534,6 +534,13 @@ try{
           "| vendas:", Object.keys(vendasLoja).length, "dias",
           "| vendasVend:", Object.keys(vendasVendLoja).length, "vends",
           "| camp:", campLoja.length);
+        // [NEW 13/08] Alerta ALTO se D tem dados mas payload sai vazio
+        const _localTemVendas = D2.vendasVend && Object.keys(D2.vendasVend).some(vid=>Object.keys(D2.vendasVend[vid]||{}).length>0);
+        if(_localTemVendas && Object.keys(vendasVendLoja).length === 0){
+          console.error("[Avatim] 🚨 ALERTA: D LOCAL TEM vendasVend MAS PAYLOAD SAIU VAZIO!");
+          console.error("[Avatim]    D.vendasVend keys:", Object.keys(D2.vendasVend));
+          console.error("[Avatim]    Isso não deveria acontecer com o fix atual — investigar");
+        }
       }
     }catch(e){
       console.error("[Avatim] ❌ fsGravar erro:", e.code||"?", e.message);
@@ -1491,6 +1498,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
       <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde);cursor:pointer" onclick="forceSyncAdmin()" title="Clique para sincronizar agora"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
+      <button onclick="window.forcarSyncCompleto()" title="Puxar dados novos e enviar dados locais que ainda não subiram"
+        style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--ouro);cursor:pointer;font-weight:600">🔄 Sincronizar agora</button>
     </div>
   </div>
   <!-- [NEW 21/07] Período do dashboard: Dia / Semana / Mês -->
@@ -5801,6 +5810,10 @@ async function loadFromFirestore(){
       }
       localStorage.setItem("avatim_v5", JSON.stringify(D));
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
+      // [FIX 13/08] auto-recuperar dados presos que nunca subiram
+      if(typeof window.autoSyncDadosPresos === 'function'){
+        setTimeout(()=>window.autoSyncDadosPresos().catch(_=>{}), 2000);
+      }
       return true;
     }
     console.log("[Avatim] Nenhum dado remoto — mantendo localStorage");
@@ -22370,6 +22383,219 @@ function _renderCalendarioContatos(){
 
   grid.innerHTML = html;
 }
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 13/08] DIAGNÓSTICO DE SYNC — investiga problemas de sincronização
+// window.diagnosticoSync() no console mostra tudo sobre o estado atual:
+// Firebase, D local, docs Firestore, discrepâncias entre local e remoto.
+// window.forcarSyncCompleto() faz PUSH+PULL forçado, útil quando dados
+// ficaram presos localmente.
+// ══════════════════════════════════════════════════════════════════════
+window.diagnosticoSync = async function(){
+  console.log('%c══ DIAGNÓSTICO SYNC ══','background:#c9a84c;color:#000;padding:4px 8px;font-weight:bold;font-size:14px');
+
+  // 1) Firebase status
+  const fbOk = !!window._fbOk;
+  const fbCarregar = typeof window.fsCarregar === 'function';
+  const fbGravar = typeof window.fsGravar === 'function';
+  const authUser = !!(window._currentUser && window._currentUser.email);
+  console.log('%c🔥 FIREBASE','color:#c9a84c;font-weight:bold');
+  console.log('  window._fbOk:', fbOk);
+  console.log('  fsCarregar disponível:', fbCarregar);
+  console.log('  fsGravar disponível:', fbGravar);
+  console.log('  Usuário logado:', window._currentUser?.email || '(nenhum)');
+  console.log('  É admin?', typeof isAdmin === 'function' && isAdmin());
+  console.log('  Loja atual:', typeof lojaId === 'function' ? lojaId() : '?');
+
+  // 2) D LOCAL
+  console.log('\n%c📱 D LOCAL','color:#4ec9ff;font-weight:bold');
+  const nVend = (D.vendedoras||[]).length;
+  const nVendaLojas = Object.keys(D.vendas||{}).length;
+  const nVendVend = Object.keys(D.vendasVend||{}).length;
+  const nContatos = (D.contatos||[]).length;
+  const nFluxo = (D.fluxo||[]).length;
+  console.log('  Vendedoras cadastradas:', nVend);
+  console.log('  Lojas com vendas:', nVendaLojas, '→', Object.keys(D.vendas||{}));
+  console.log('  Vendedoras com vendasVend:', nVendVend);
+  console.log('  Contatos:', nContatos);
+  console.log('  Fluxo:', nFluxo);
+
+  // Detalhar dias por vendedora
+  if(nVendVend > 0){
+    console.log('  Detalhes vendasVend:');
+    Object.entries(D.vendasVend||{}).forEach(([vid,dias])=>{
+      const v = (D.vendedoras||[]).find(x=>x.id===vid);
+      const nDias = Object.keys(dias||{}).length;
+      const total = Object.values(dias||{}).reduce((s,d)=>s+(Number(d.val)||0),0);
+      console.log('    '+vid, '('+(v?.nome||'?')+', loja='+(v?.loja||'ÓRFÃ')+'):',
+        nDias+' dias, R$ '+total.toFixed(2));
+    });
+  }
+
+  // 3) FIRESTORE REMOTO
+  if(!fbCarregar){
+    console.log('\n❌ fsCarregar não disponível — não é possível verificar remoto');
+    return;
+  }
+  console.log('\n%c☁️  FIRESTORE (remoto)','color:#7ac74f;font-weight:bold');
+  try {
+    const remotoJSON = await window.fsCarregar();
+    if(!remotoJSON){
+      console.log('  ⚠️ Firebase retornou vazio ou null');
+      return;
+    }
+    const remoto = JSON.parse(remotoJSON);
+    console.log('  Vendedoras remotas:', (remoto.vendedoras||[]).length);
+    console.log('  Lojas com vendas remotas:', Object.keys(remoto.vendas||{}).length, '→', Object.keys(remoto.vendas||{}));
+    console.log('  Vendedoras com vendasVend remoto:', Object.keys(remoto.vendasVend||{}).length);
+    console.log('  Contatos remotos:', (remoto.contatos||[]).length);
+
+    // 4) DISCREPÂNCIAS
+    console.log('\n%c🔍 DISCREPÂNCIAS LOCAL vs REMOTO','color:#ff6b7a;font-weight:bold');
+
+    // vendas
+    const lojasLocal = Object.keys(D.vendas||{});
+    const lojasRemoto = Object.keys(remoto.vendas||{});
+    const soLocal = lojasLocal.filter(l => !lojasRemoto.includes(l));
+    if(soLocal.length){
+      console.log('  ⚠️ Lojas com vendas SÓ LOCAL (não subiram!):', soLocal);
+    }
+
+    // vendasVend — por vendedora, comparar dias
+    let alertas = 0;
+    Object.entries(D.vendasVend||{}).forEach(([vid,dias])=>{
+      const remotoVend = (remoto.vendasVend||{})[vid] || {};
+      Object.entries(dias||{}).forEach(([dt,val])=>{
+        if(!remotoVend[dt]){
+          const v = (D.vendedoras||[]).find(x=>x.id===vid);
+          console.log('  ⚠️ '+dt+' | vend '+(v?.nome||vid)+' | R$', val.val, '→ SÓ LOCAL');
+          alertas++;
+        }
+      });
+    });
+    if(alertas === 0){
+      console.log('  ✅ Nenhuma discrepância — tudo sincronizado');
+    } else {
+      console.log('  🚨 '+alertas+' registros locais não estão no Firebase.');
+      console.log('     Rode window.forcarSyncCompleto() para tentar enviar.');
+    }
+
+    // Contatos
+    const idsLocal = new Set((D.contatos||[]).map(c=>c.id));
+    const idsRemoto = new Set((remoto.contatos||[]).map(c=>c.id));
+    const ctSoLocal = [...idsLocal].filter(id => !idsRemoto.has(id));
+    if(ctSoLocal.length) console.log('  ⚠️ Contatos SÓ LOCAL:', ctSoLocal.length);
+
+  } catch(e){
+    console.error('  ❌ Erro ao ler Firestore:', e.message);
+  }
+
+  console.log('\n%c══ FIM DIAGNÓSTICO ══','background:#c9a84c;color:#000;padding:4px 8px;font-weight:bold');
+  console.log('Se há dados locais que não subiram, rode: %cwindow.forcarSyncCompleto()','color:#c9a84c;font-weight:bold');
+};
+
+// Força um push completo de tudo que está no D local
+window.forcarSyncCompleto = async function(){
+  console.log('%c🔄 FORÇANDO SYNC COMPLETO','background:#c9a84c;color:#000;padding:4px 8px;font-weight:bold');
+
+  if(!window.fsGravar){
+    console.error('❌ fsGravar não disponível');
+    if(typeof showToast === 'function') showToast('Firebase não conectado.','err');
+    return false;
+  }
+  try {
+    const ok = await waitForFirebase(10000);
+    if(!ok){
+      console.error('❌ Firebase não respondeu em 10s');
+      if(typeof showToast === 'function') showToast('Firebase offline.','err');
+      return false;
+    }
+
+    console.log('  Enviando snapshot completo...');
+    const snap = JSON.stringify(D);
+    await window.fsGravar(snap);
+    console.log('  ✅ PUSH OK — dados enviados');
+
+    // Depois puxar pra confirmar
+    if(window.fsCarregar){
+      const remoto = await window.fsCarregar();
+      if(remoto){
+        console.log('  ✅ PULL OK — dados confirmados no Firebase');
+      }
+    }
+
+    if(typeof showToast === 'function') showToast('✅ Sincronização forçada concluída.','ok');
+    return true;
+  } catch(e){
+    console.error('❌ Erro no sync forçado:', e.message);
+    if(typeof showToast === 'function') showToast('Erro no sync: '+e.message,'err');
+    return false;
+  }
+};
+
+// [NEW 13/08] Detecta se há dados locais que não subiram e faz push automático
+// Roda alguns segundos após loadFromFirestore para corrigir dados presos
+window.autoSyncDadosPresos = async function(){
+  // Só rodar se tem dados locais
+  const temVendasVend = D.vendasVend && Object.keys(D.vendasVend).some(vid =>
+    Object.keys(D.vendasVend[vid]||{}).length > 0
+  );
+  const temVendas = D.vendas && Object.keys(D.vendas).some(l =>
+    Object.keys(D.vendas[l]||{}).length > 0
+  );
+  const temContatos = (D.contatos||[]).length > 0;
+
+  if(!temVendasVend && !temVendas && !temContatos){
+    return; // nada a sincronizar
+  }
+
+  // Verificar se há discrepâncias com remoto
+  if(!window.fsCarregar) return;
+  try {
+    const remotoJSON = await window.fsCarregar();
+    if(!remotoJSON) return;
+    const remoto = JSON.parse(remotoJSON);
+
+    let precisaPush = false;
+
+    // vendasVend: procurar chaves locais que não estão no remoto
+    Object.entries(D.vendasVend||{}).forEach(([vid,dias])=>{
+      const remotoVend = (remoto.vendasVend||{})[vid] || {};
+      Object.keys(dias||{}).forEach(dt=>{
+        if(!remotoVend[dt]) precisaPush = true;
+      });
+    });
+
+    // vendas
+    if(!precisaPush){
+      Object.entries(D.vendas||{}).forEach(([l,dias])=>{
+        const remotoLoja = (remoto.vendas||{})[l] || {};
+        Object.keys(dias||{}).forEach(dt=>{
+          if(!remotoLoja[dt]) precisaPush = true;
+        });
+      });
+    }
+
+    // contatos: IDs locais fora do remoto
+    if(!precisaPush){
+      const idsRemoto = new Set((remoto.contatos||[]).map(c=>c.id));
+      (D.contatos||[]).forEach(c=>{ if(!idsRemoto.has(c.id)) precisaPush = true; });
+    }
+
+    if(precisaPush){
+      console.log('[Avatim] autoSyncDadosPresos: detectados dados locais fora do Firebase — enviando...');
+      if(window.fsGravar){
+        await window.fsGravar(JSON.stringify(D));
+        console.log('[Avatim] ✅ autoSyncDadosPresos: push concluído');
+        if(typeof showToast === 'function') showToast('🔄 Dados sincronizados automaticamente.','ok');
+      }
+    }
+  } catch(e){
+    console.warn('[Avatim] autoSyncDadosPresos falhou:', e.message);
+  }
+};
 
 </script>
 </body>
