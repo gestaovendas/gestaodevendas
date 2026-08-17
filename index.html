@@ -266,6 +266,8 @@ try{
           _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0,
           // [FIX 13/08] contatos NÃO estava subindo — nenhum admin ou loja via os contatos criados em outros dispositivos
           contatos:            D2.contatos             || [],
+          excelDados:          D2.excelDados           || [],
+          _excelImportInfo:    D2._excelImportInfo     || null,
           _contatosExcluidos:  D2._contatosExcluidos   || {}
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
@@ -1459,6 +1461,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('contatos')" id="nav-contatos"><span class="ic">&#128222;</span>Clientes Contatados</button>
+    <button class="ni admin-only" onclick="nav('excel')" id="nav-excel" style="display:none"><span class="ic">&#128202;</span>Análise Excel</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
     <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
     <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
@@ -2808,6 +2811,121 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
      Registro/acompanhamento de contatos com clientes (aniversariantes,
      inativos, outros). Loja registra os contatos; admin acompanha.
      ══════════════════════════════════════════════════════════════════ -->
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     [NEW 13/08] PÁGINA ANÁLISE EXCEL
+     Upload de planilha com histórico de vendas para análises:
+     Melhores Clientes / Inativos / Produtos, com filtros ano/mês/dia
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-excel">
+  <div class="ph">
+    <div>
+      <h1 class="pt">Análise <span>Excel</span></h1>
+      <div class="ps">Suba planilhas de vendas para ver melhores clientes, inativos e produtos</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="document.getElementById('excel-file-input').click()"
+        style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px">📤 Subir planilha</button>
+      <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.excelProcessarUpload(event)">
+      <button class="btn-s" onclick="window.excelLimparDados()" title="Apaga dados do Excel — não afeta vendas/contatos"
+        style="background:rgba(220,53,69,.10);border-color:rgba(220,53,69,.35);color:#ff6b7a;font-size:11px;padding:8px 12px" id="excel-btn-limpar">🗑️ Limpar dados</button>
+    </div>
+  </div>
+
+  <!-- Instruções + status carga -->
+  <div class="sc" style="margin-bottom:14px" id="excel-instrucoes">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+      <div style="flex:1;min-width:300px">
+        <div style="font-size:12px;color:var(--muted);line-height:1.6">
+          <strong style="color:var(--ouro)">📋 Formato esperado da planilha</strong> — colunas (nomes flexíveis):
+          <ul style="margin:6px 0 0 20px;padding:0">
+            <li><strong>Data</strong> (obrigatória) — DD/MM/AAAA ou AAAA-MM-DD</li>
+            <li><strong>Cliente</strong> (nome) — usado para agrupar</li>
+            <li><strong>Loja</strong> — nome ou id da loja</li>
+            <li><strong>Vendedora</strong> — nome</li>
+            <li><strong>Produto</strong> — descrição do item</li>
+            <li><strong>Quantidade</strong> — número</li>
+            <li><strong>Valor</strong> (obrigatória) — total da linha em R$</li>
+            <li><em>Opcional:</em> Categoria, Cupom/Nota</li>
+          </ul>
+          <div style="margin-top:8px;font-size:11px">Aceita .xlsx / .xls / .csv. O sistema detecta os cabeçalhos automaticamente.</div>
+        </div>
+      </div>
+      <div id="excel-status" style="min-width:240px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:12px;font-size:11px">
+        <div style="color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:4px">Base atual</div>
+        <div id="excel-status-body" style="color:var(--muted)">Nenhuma planilha carregada ainda.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="sc" style="margin-bottom:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:11px;color:var(--muted);letter-spacing:.5px">FILTRAR:</label>
+
+      <select id="excel-filtro-ano" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">📅 Todos os anos</option>
+      </select>
+
+      <select id="excel-filtro-mes" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">📆 Todos os meses</option>
+        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
+        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
+        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
+        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+      </select>
+
+      <select id="excel-filtro-dia" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">🗓️ Todos os dias</option>
+      </select>
+
+      <select id="excel-filtro-loja" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">🏪 Todas as lojas</option>
+      </select>
+
+      <button class="btn-s" onclick="window.excelLimparFiltros()" style="font-size:10px;padding:6px 10px">Limpar</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div id="excel-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
+
+  <!-- 3 painéis: Melhores Clientes, Inativos, Produtos -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px" id="excel-graficos-wrap">
+    <div class="sc">
+      <div class="st">🏆 Melhores Clientes</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranking por valor total gasto no filtro atual.</div>
+      <div id="excel-melhores-clientes"></div>
+    </div>
+    <div class="sc">
+      <div class="st">💤 Clientes Inativos</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted)">Sem comprar há mais de</span>
+        <select id="excel-inativo-dias" onchange="window.excelRender()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:3px 8px;color:var(--texto);font-size:11px">
+          <option value="30">30 dias</option>
+          <option value="60" selected>60 dias</option>
+          <option value="90">90 dias</option>
+          <option value="180">180 dias</option>
+          <option value="365">1 ano</option>
+        </select>
+      </div>
+      <div id="excel-inativos"></div>
+    </div>
+  </div>
+
+  <div class="sc">
+    <div class="st">📦 Produtos Mais Vendidos</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranking de produtos por quantidade e faturamento.</div>
+    <div id="excel-produtos"></div>
+  </div>
+</div>
+
+
 <div class="page" id="page-contatos">
   <div class="ph">
     <div>
@@ -5077,6 +5195,7 @@ if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
+if(!D.excelDados) D.excelDados=[];
 if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.historicoMeses[lojaId][mesRef]
@@ -5450,6 +5569,7 @@ function save(){
     const temCampObj   = D.campObjetivos && D.campObjetivos.length>0; // ✅ VERIFICAR OBJETIVOS
     const temFluxo     = D.fluxo && D.fluxo.length>0;
     const temContatos  = D.contatos && D.contatos.length>0;
+    const temExcel     = D.excelDados && D.excelDados.length>0;
     const temVendedoras = D.vendedoras && D.vendedoras.length > 0;
     const temMetasLoja  = D.metasLoja && Object.keys(D.metasLoja).some(lid =>
       Object.keys(D.metasLoja[lid]||{}).some(mr => (D.metasLoja[lid][mr]?.mes||0) > 0)
@@ -5457,7 +5577,7 @@ function save(){
     // [FIX 21/07] histórico contava como "sem dados" e o save era bloqueado
     const temHistMes   = D.historicoMeses && Object.keys(D.historicoMeses).some(l=>Object.keys(D.historicoMeses[l]||{}).length>0);
     const temHistLoja  = D.historicoLojas && Object.keys(D.historicoLojas).some(l=>(D.historicoLojas[l]||[]).length>0);
-    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temContatos || temVendedoras || temMetasLoja || temHistMes || temHistLoja;
+    const temDados     = temVendas || temVendVend || temMetas || temCamp || temCampObj || temFluxo || temContatos || temExcel || temVendedoras || temMetasLoja || temHistMes || temHistLoja;
 
     // Bloquear SOMENTE se não há absolutamente nenhum dado E não é admin
     // (admin sempre pode salvar metas, vendedoras, etc.)
@@ -5729,6 +5849,11 @@ async function loadFromFirestore(){
         remoto.contatos.forEach(c=>{
           if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c);
         });
+      }
+      // [NEW 13/08] excelDados: substitui inteiro (admin é autoridade)
+      if(Array.isArray(remoto.excelDados)){
+        D.excelDados = remoto.excelDados;
+        if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
       }
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
@@ -6821,6 +6946,7 @@ function nav(pg){
     },
     relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
     contatos:()=>{ if(typeof renderContatos==="function") renderContatos(); },
+    excel:()=>{ if(typeof window.excelRender==="function") window.excelRender(); },
     historicoanu:()=>{
       // [NEW] Histórico Anual
       const selAno = document.getElementById('hanu-ano');
@@ -14770,6 +14896,11 @@ async function forceSyncAdmin(){
     if(remoto.contatos?.length){
       if(!D.contatos) D.contatos=[];
       remoto.contatos.forEach(c=>{ if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c); });
+    }
+    // [NEW 13/08] excelDados: replace do remoto (admin authoritative)
+    if(Array.isArray(remoto.excelDados)){
+      D.excelDados = remoto.excelDados;
+      if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
     }
     localStorage.setItem('avatim_v5', JSON.stringify(D));
     const ts = new Date().toLocaleTimeString('pt-BR');
@@ -23095,6 +23226,549 @@ function _renderContatosRanking(contatos){
   ` : '';
 
   el.innerHTML = podioHtml + restanteHtml;
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW 13/08] ANÁLISE EXCEL — upload de planilhas + análises
+// D.excelDados = [{data, cliente, loja, vendedora, produto, categoria,
+//                  qtde, valor, cupom}]
+// Todas as linhas ficam em D.excelDados; painéis filtram por período/loja
+// e agregam para melhores clientes, inativos e produtos mais vendidos.
+// ══════════════════════════════════════════════════════════════════════
+
+if(!D.excelDados) D.excelDados = [];
+
+// Mapa flexível de cabeçalhos → campo interno
+const EXCEL_HEADER_MAP = {
+  data: ['data','dt','date','dia','emissao','emissão','data_venda','data venda'],
+  cliente: ['cliente','nome','nome_cliente','customer','comprador'],
+  loja: ['loja','filial','store','unidade'],
+  vendedora: ['vendedora','vendedor','operador','atendente','seller'],
+  produto: ['produto','item','descricao','descrição','desc','sku','product'],
+  categoria: ['categoria','category','linha','familia','família'],
+  qtde: ['quantidade','qtd','qtde','qty','quant'],
+  valor: ['valor','total','vlr','preco','preço','price','total_venda'],
+  cupom: ['cupom','nota','nf','cf','doc','documento']
+};
+
+// Normalizar texto: minúsculo, sem espaços, sem acento
+function _excelNormHeader(h){
+  return String(h||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,'_');
+}
+
+// Detectar cabeçalhos da planilha e mapear para campos internos
+function _excelDetectarColunas(headers){
+  const map = {};
+  headers.forEach((h, idx) => {
+    const norm = _excelNormHeader(h);
+    for(const [campo, aliases] of Object.entries(EXCEL_HEADER_MAP)){
+      if(map[campo] !== undefined) continue;
+      if(aliases.includes(norm)){
+        map[campo] = idx;
+        break;
+      }
+    }
+  });
+  return map;
+}
+
+// Converter valor de célula para número (aceita "R$ 1.234,56" e "1234.56")
+function _excelParseNumero(v){
+  if(typeof v === 'number') return v;
+  if(v === null || v === undefined || v === '') return 0;
+  const s = String(v).replace(/R\$/g,'').replace(/\s/g,'').trim();
+  // Formato BR: "1.234,56" → separador milhar . e decimal ,
+  if(/,/.test(s) && /\./.test(s)){
+    return parseFloat(s.replace(/\./g,'').replace(',','.')) || 0;
+  }
+  if(/,/.test(s)){
+    return parseFloat(s.replace(',','.')) || 0;
+  }
+  return parseFloat(s) || 0;
+}
+
+// Converter data → "YYYY-MM-DD"
+function _excelParseData(v){
+  if(!v && v !== 0) return '';
+  // Excel serial (numeric)
+  if(typeof v === 'number'){
+    // Excel epoch 1899-12-30
+    const ms = (v - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    if(!isNaN(d.getTime())){
+      return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+    }
+  }
+  const s = String(v).trim();
+  // DD/MM/YYYY
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if(m){
+    let y = m[3].length === 2 ? '20'+m[3] : m[3];
+    return y + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+  }
+  // YYYY-MM-DD
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  // ISO com hora
+  const d = new Date(s);
+  if(!isNaN(d.getTime())){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  return '';
+}
+
+// Tenta identificar loja por nome → id (usa mapa de LOJAS_TODAS)
+function _excelResolverLoja(nomeOrId){
+  if(!nomeOrId) return '';
+  const s = String(nomeOrId).trim().toLowerCase();
+  // Se já é um id conhecido
+  const asIs = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(l => l.id === s);
+  if(asIs) return asIs.id;
+  // Match por parte do nome
+  const src = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS);
+  for(const l of src){
+    const nomeLoja = l.nome.toLowerCase();
+    if(nomeLoja === s || nomeLoja.includes(s) || s.includes(nomeLoja)) return l.id;
+  }
+  // Match apelidos comuns
+  const apelidos = {mooca:['mooca','plaza'], leopoldina:['leopoldina','leop','vila'], perdizes:['perdizes'],
+                    santana:['santana'], jarpaul:['jardim','paulista','lorena','jarpaul'],
+                    pinheiros:['pinheiros','alto'], ibirapuera:['ibirapuera','ibira','shopping']};
+  for(const [id, keys] of Object.entries(apelidos)){
+    if(keys.some(k => s.includes(k))) return id;
+  }
+  // Retorna string original — vai para agregado como loja "desconhecida"
+  return s;
+}
+
+// ── UPLOAD ─────────────────────────────────────────────────────────
+window.excelProcessarUpload = function(event){
+  const file = event.target.files?.[0];
+  if(!file) return;
+
+  // Carregar SheetJS via CDN se ainda não carregado
+  if(typeof XLSX === 'undefined'){
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => window.excelProcessarUpload(event);
+    script.onerror = () => showToast('❌ Não foi possível carregar leitor de Excel (sem internet?).','err');
+    document.head.appendChild(script);
+    showToast('⏳ Carregando leitor de Excel...','ok');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:'array', cellDates:false});
+      const firstSheet = workbook.SheetNames[0];
+      if(!firstSheet){ showToast('Planilha sem abas.','err'); return; }
+      const sheet = workbook.Sheets[firstSheet];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(rows.length < 2){ showToast('Planilha sem dados (só cabeçalho ou vazia).','warn'); return; }
+
+      const headers = rows[0];
+      const colMap = _excelDetectarColunas(headers);
+
+      if(colMap.data === undefined || colMap.valor === undefined){
+        showToast('Não achei colunas "Data" e "Valor" — verifique os cabeçalhos.','err');
+        console.log('[excel] Cabeçalhos detectados:', headers, 'Map:', colMap);
+        return;
+      }
+
+      const dadosProcessados = [];
+      let ignorados = 0;
+      for(let i = 1; i < rows.length; i++){
+        const row = rows[i];
+        if(!row || !row.length) continue;
+        const dt = _excelParseData(row[colMap.data]);
+        const val = _excelParseNumero(row[colMap.valor]);
+        if(!dt || val === 0){ ignorados++; continue; }
+        dadosProcessados.push({
+          data: dt,
+          cliente: String(row[colMap.cliente] || '').trim() || '(sem cliente)',
+          loja: colMap.loja !== undefined ? _excelResolverLoja(row[colMap.loja]) : '',
+          vendedora: String(row[colMap.vendedora] || '').trim(),
+          produto: String(row[colMap.produto] || '').trim() || '(sem produto)',
+          categoria: String(row[colMap.categoria] || '').trim(),
+          qtde: colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1,
+          valor: val,
+          cupom: String(row[colMap.cupom] || '').trim()
+        });
+      }
+
+      if(!dadosProcessados.length){
+        showToast('Nenhuma linha válida encontrada.','warn');
+        return;
+      }
+
+      // Perguntar se substitui ou acrescenta
+      const acao = D.excelDados.length > 0
+        ? (confirm(`Já existem ${D.excelDados.length} linhas no sistema.\n\nOK = ADICIONAR ao existente\nCancelar = SUBSTITUIR tudo pelo novo arquivo`) ? 'adicionar' : 'substituir')
+        : 'substituir';
+
+      if(acao === 'substituir'){
+        D.excelDados = dadosProcessados;
+      } else {
+        D.excelDados = [...(D.excelDados||[]), ...dadosProcessados];
+      }
+
+      // Metadata da última importação
+      D._excelImportInfo = {
+        arquivo: file.name,
+        linhas: dadosProcessados.length,
+        totalBase: D.excelDados.length,
+        importadoEm: Date.now(),
+        colunasDetectadas: Object.keys(colMap)
+      };
+
+      save();
+      const msg = ignorados > 0
+        ? `✅ ${dadosProcessados.length} linhas importadas (${ignorados} ignoradas por falta de data/valor).`
+        : `✅ ${dadosProcessados.length} linhas importadas.`;
+      showToast(msg,'ok');
+      // Reset input para permitir re-upload do mesmo arquivo
+      event.target.value = '';
+      window.excelRender();
+    } catch(err) {
+      console.error('[excel] erro:', err);
+      showToast('Erro ao processar planilha: '+err.message,'err');
+    }
+  };
+  reader.onerror = () => showToast('Erro ao ler o arquivo.','err');
+  reader.readAsArrayBuffer(file);
+};
+
+// ── LIMPAR DADOS ──────────────────────────────────────────────────
+window.excelLimparDados = function(){
+  if(!D.excelDados?.length){ showToast('Sem dados para limpar.','warn'); return; }
+  if(!confirm(`Apagar ${D.excelDados.length} linhas de Excel? Não afeta vendas/contatos.`)) return;
+  D.excelDados = [];
+  D._excelImportInfo = null;
+  save();
+  showToast('Dados de Excel apagados.','ok');
+  window.excelRender();
+};
+
+// ── LIMPAR FILTROS ────────────────────────────────────────────────
+window.excelLimparFiltros = function(){
+  ['excel-filtro-ano','excel-filtro-mes','excel-filtro-dia','excel-filtro-loja'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  window.excelRender();
+};
+
+// ── FILTRAR DADOS ─────────────────────────────────────────────────
+function _excelFiltrar(){
+  if(!D.excelDados) return [];
+  const fAno = document.getElementById('excel-filtro-ano')?.value || '';
+  const fMes = document.getElementById('excel-filtro-mes')?.value || '';
+  const fDia = document.getElementById('excel-filtro-dia')?.value || '';
+  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
+
+  return D.excelDados.filter(r => {
+    if(!r.data) return false;
+    const [y,m,d] = r.data.split('-');
+    if(fAno && y !== fAno) return false;
+    if(fMes && m !== fMes) return false;
+    if(fDia && d !== fDia) return false;
+    if(fLoja && r.loja !== fLoja) return false;
+    return true;
+  });
+}
+
+// ── RENDER PRINCIPAL ──────────────────────────────────────────────
+window.excelRender = function(){
+  if(!D.excelDados) D.excelDados = [];
+
+  // Popular selects de filtro dinamicamente
+  const anos = new Set(), dias = new Set(), lojas = new Set();
+  D.excelDados.forEach(r => {
+    if(!r.data) return;
+    const [y,m,d] = r.data.split('-');
+    anos.add(y);
+    dias.add(d);
+    if(r.loja) lojas.add(r.loja);
+  });
+
+  const selAno = document.getElementById('excel-filtro-ano');
+  if(selAno && (selAno.options?.length || 0) <= 1 + anos.size){
+    const atual = selAno.value;
+    selAno.innerHTML = '<option value="">📅 Todos os anos</option>' +
+      [...anos].sort().reverse().map(a => `<option value="${a}">${a}</option>`).join('');
+    if(atual && [...anos].includes(atual)) selAno.value = atual;
+  }
+  const selDia = document.getElementById('excel-filtro-dia');
+  if(selDia){
+    const atual = selDia.value;
+    selDia.innerHTML = '<option value="">🗓️ Todos os dias</option>' +
+      [...dias].sort().map(d => `<option value="${d}">Dia ${d}</option>`).join('');
+    if(atual && [...dias].includes(atual)) selDia.value = atual;
+  }
+  const selLoja = document.getElementById('excel-filtro-loja');
+  if(selLoja){
+    const atual = selLoja.value;
+    selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>' +
+      [...lojas].sort().map(l => {
+        const nome = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(x => x.id === l)?.nome || l;
+        return `<option value="${l}">${nome}</option>`;
+      }).join('');
+    if(atual && [...lojas].includes(atual)) selLoja.value = atual;
+  }
+
+  // Status da base
+  const statusEl = document.getElementById('excel-status-body');
+  if(statusEl){
+    if(!D.excelDados.length){
+      statusEl.innerHTML = '<span style="color:var(--muted)">Nenhuma planilha carregada ainda.</span>';
+    } else {
+      const info = D._excelImportInfo;
+      statusEl.innerHTML = `
+        <div style="color:var(--verde);font-weight:600;margin-bottom:4px">${D.excelDados.length} linhas na base</div>
+        ${info ? `<div style="font-size:10px;color:var(--muted)">Última importação: <strong>${info.arquivo}</strong></div>
+        <div style="font-size:10px;color:var(--muted)">${new Date(info.importadoEm).toLocaleString('pt-BR')}</div>` : ''}
+      `;
+    }
+  }
+
+  const dados = _excelFiltrar();
+
+  // KPIs
+  const kpiEl = document.getElementById('excel-kpis');
+  if(kpiEl){
+    if(!dados.length){
+      const totalBase = D.excelDados.length;
+      kpiEl.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--muted);font-size:12px">${totalBase === 0 ? 'Sem dados. Suba uma planilha para começar.' : 'Nenhum registro no filtro atual. Total na base: '+totalBase}</div>`;
+    } else {
+      const totalFat = dados.reduce((s,r) => s + (r.valor||0), 0);
+      const clientesUnicos = new Set(dados.map(r => (r.cliente||'').toLowerCase().trim())).size;
+      const nCupons = new Set(dados.filter(r => r.cupom).map(r => r.cupom)).size || dados.length;
+      const nProdutos = new Set(dados.map(r => (r.produto||'').toLowerCase().trim())).size;
+      const tm = nCupons > 0 ? totalFat / nCupons : 0;
+      const dias = new Set(dados.map(r => r.data)).size;
+
+      kpiEl.innerHTML = `
+        <div class="kcard verde"><div class="kl">💰 FATURAMENTO</div><div class="kv" style="font-size:18px">${fmt(totalFat)}</div></div>
+        <div class="kcard"><div class="kl">🧾 LINHAS</div><div class="kv" style="font-size:20px">${dados.length}</div></div>
+        <div class="kcard laranja"><div class="kl">🎫 CUPONS/NOTAS</div><div class="kv" style="font-size:20px">${nCupons}</div></div>
+        <div class="kcard azul"><div class="kl">👥 CLIENTES ÚNICOS</div><div class="kv" style="font-size:20px">${clientesUnicos}</div></div>
+        <div class="kcard"><div class="kl">📦 PRODUTOS</div><div class="kv" style="font-size:20px">${nProdutos}</div></div>
+        <div class="kcard verde"><div class="kl">🎯 TM</div><div class="kv" style="font-size:18px">${fmt(tm)}</div></div>
+        <div class="kcard"><div class="kl">📅 DIAS</div><div class="kv" style="font-size:20px">${dias}</div></div>
+      `;
+    }
+  }
+
+  _excelRenderMelhoresClientes(dados);
+  _excelRenderInativos(dados);
+  _excelRenderProdutos(dados);
+};
+
+// ── PAINEL 1: MELHORES CLIENTES ───────────────────────────────────
+function _excelRenderMelhoresClientes(dados){
+  const el = document.getElementById('excel-melhores-clientes');
+  if(!el) return;
+  if(!dados.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados no filtro.</div>';
+    return;
+  }
+
+  const porCliente = {};
+  dados.forEach(r => {
+    const key = (r.cliente || '').trim();
+    if(!key || key === '(sem cliente)') return;
+    if(!porCliente[key]) porCliente[key] = { nome:key, total:0, compras:new Set(), lojaFreq:{}, ult:'' };
+    porCliente[key].total += r.valor || 0;
+    porCliente[key].compras.add(r.data + '|' + (r.cupom||''));
+    porCliente[key].lojaFreq[r.loja||'?'] = (porCliente[key].lojaFreq[r.loja||'?']||0) + 1;
+    if(!porCliente[key].ult || r.data > porCliente[key].ult) porCliente[key].ult = r.data;
+  });
+
+  const linhas = Object.values(porCliente)
+    .map(c => {
+      const lojaTop = Object.entries(c.lojaFreq).sort((a,b)=>b[1]-a[1])[0]?.[0] || '';
+      const lojaN = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(l => l.id === lojaTop)?.nome || lojaTop;
+      return {
+        nome: c.nome,
+        total: c.total,
+        nCompras: c.compras.size,
+        tm: c.compras.size > 0 ? c.total / c.compras.size : 0,
+        ult: c.ult,
+        lojaN
+      };
+    })
+    .sort((a,b) => b.total - a.total)
+    .slice(0, 30);
+
+  if(!linhas.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum cliente identificado nos dados.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:500px;font-size:11px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Cliente</th>
+          <th style="text-align:center">Compras</th>
+          <th style="text-align:right">Total</th>
+          <th style="text-align:right">TM</th>
+          <th>Loja</th>
+          <th>Última</th>
+        </tr></thead>
+        <tbody>
+          ${linhas.map((l,i) => `<tr>
+            <td style="text-align:center;color:${i<3?'var(--ouro)':'var(--muted)'};font-weight:${i<3?700:400}">${['🥇','🥈','🥉'][i] || (i+1)}</td>
+            <td><strong>${l.nome}</strong></td>
+            <td style="text-align:center">${l.nCompras}</td>
+            <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(l.total)}</td>
+            <td style="text-align:right;color:var(--muted)">${fmt(l.tm)}</td>
+            <td style="color:var(--muted);font-size:10px">${l.lojaN}</td>
+            <td style="color:var(--muted);font-size:10px">${l.ult.split('-').reverse().join('/')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${Object.keys(porCliente).length > 30 ? `<div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">Mostrando top 30 de ${Object.keys(porCliente).length} clientes</div>` : ''}
+  `;
+}
+
+// ── PAINEL 2: CLIENTES INATIVOS ────────────────────────────────────
+function _excelRenderInativos(dados){
+  const el = document.getElementById('excel-inativos');
+  if(!el) return;
+
+  const diasCorte = parseInt(document.getElementById('excel-inativo-dias')?.value || '60', 10);
+  const hoje = new Date();
+  const isoHj = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
+
+  // Considera TODOS os dados da base (não filtrados por período), mas respeita loja
+  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
+  const base = (D.excelDados||[]).filter(r => !fLoja || r.loja === fLoja);
+
+  const porCliente = {};
+  base.forEach(r => {
+    const key = (r.cliente || '').trim();
+    if(!key || key === '(sem cliente)') return;
+    if(!porCliente[key]) porCliente[key] = { nome:key, total:0, compras:0, ult:'', lojaFreq:{} };
+    porCliente[key].total += r.valor || 0;
+    porCliente[key].compras++;
+    if(!porCliente[key].ult || r.data > porCliente[key].ult) porCliente[key].ult = r.data;
+    porCliente[key].lojaFreq[r.loja||'?'] = (porCliente[key].lojaFreq[r.loja||'?']||0) + 1;
+  });
+
+  const _diff = (a,b) => {
+    const [ya,ma,da] = a.split('-').map(Number);
+    const [yb,mb,db] = b.split('-').map(Number);
+    return Math.round((new Date(ya,ma-1,da) - new Date(yb,mb-1,db)) / 86400000);
+  };
+
+  const inativos = Object.values(porCliente)
+    .map(c => ({
+      ...c,
+      diasSem: c.ult ? _diff(isoHj, c.ult) : 999,
+      lojaN: (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(l => l.id === Object.entries(c.lojaFreq).sort((a,b)=>b[1]-a[1])[0]?.[0])?.nome || ''
+    }))
+    .filter(c => c.diasSem >= diasCorte)
+    .sort((a,b) => b.total - a.total)  // maior valor primeiro (vale mais a pena recuperar)
+    .slice(0, 30);
+
+  if(!inativos.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">✅ Nenhum cliente inativo além de ' + diasCorte + ' dias.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:460px;font-size:11px">
+        <thead><tr>
+          <th>Cliente</th>
+          <th style="text-align:center">Dias sem</th>
+          <th style="text-align:right">Histórico</th>
+          <th style="text-align:center">Compras</th>
+          <th>Loja</th>
+        </tr></thead>
+        <tbody>
+          ${inativos.map(c => `<tr>
+            <td><strong>${c.nome}</strong></td>
+            <td style="text-align:center;color:${c.diasSem>=180?'var(--verm)':c.diasSem>=90?'var(--ouro)':'var(--muted)'};font-weight:700">${c.diasSem}d</td>
+            <td style="text-align:right;color:var(--verde)">${fmt(c.total)}</td>
+            <td style="text-align:center;color:var(--muted)">${c.compras}</td>
+            <td style="color:var(--muted);font-size:10px">${c.lojaN}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">
+      ${inativos.length === 30 ? 'Mostrando top 30 (maior valor histórico primeiro)' : inativos.length + ' cliente(s) inativo(s)'}
+    </div>
+  `;
+}
+
+// ── PAINEL 3: PRODUTOS MAIS VENDIDOS ───────────────────────────────
+function _excelRenderProdutos(dados){
+  const el = document.getElementById('excel-produtos');
+  if(!el) return;
+  if(!dados.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados no filtro.</div>';
+    return;
+  }
+
+  const porProd = {};
+  dados.forEach(r => {
+    const key = (r.produto || '').trim();
+    if(!key || key === '(sem produto)') return;
+    if(!porProd[key]) porProd[key] = { nome:key, categoria:r.categoria||'', qtde:0, valor:0, clientes:new Set(), linhas:0 };
+    porProd[key].qtde += Number(r.qtde) || 0;
+    porProd[key].valor += Number(r.valor) || 0;
+    porProd[key].linhas++;
+    if(r.cliente) porProd[key].clientes.add(r.cliente.toLowerCase().trim());
+  });
+
+  const linhasQtde = Object.values(porProd)
+    .map(p => ({...p, nClientes: p.clientes.size}))
+    .sort((a,b) => b.qtde - a.qtde)
+    .slice(0, 30);
+
+  if(!linhasQtde.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum produto identificado.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:600px;font-size:11px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Produto</th>
+          <th>Categoria</th>
+          <th style="text-align:center">Qtde</th>
+          <th style="text-align:right">Faturamento</th>
+          <th style="text-align:center">Clientes</th>
+          <th style="text-align:right">Preço médio</th>
+        </tr></thead>
+        <tbody>
+          ${linhasQtde.map((p,i) => `<tr>
+            <td style="text-align:center;color:${i<3?'var(--ouro)':'var(--muted)'};font-weight:${i<3?700:400}">${['🥇','🥈','🥉'][i] || (i+1)}</td>
+            <td><strong>${p.nome}</strong></td>
+            <td style="color:var(--muted);font-size:10px">${p.categoria || '—'}</td>
+            <td style="text-align:center;font-weight:700;color:var(--ouro)">${p.qtde}</td>
+            <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(p.valor)}</td>
+            <td style="text-align:center;color:var(--muted)">${p.nClientes}</td>
+            <td style="text-align:right;color:var(--muted)">${fmt(p.qtde>0 ? p.valor/p.qtde : 0)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${Object.keys(porProd).length > 30 ? `<div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">Mostrando top 30 de ${Object.keys(porProd).length} produtos</div>` : ''}
+  `;
 }
 
 </script>
