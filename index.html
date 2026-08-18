@@ -1461,7 +1461,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('contatos')" id="nav-contatos"><span class="ic">&#128222;</span>Clientes Contatados</button>
-    <button class="ni admin-only" onclick="nav('excel')" id="nav-excel" style="display:none"><span class="ic">&#128202;</span>Análise Excel</button>
+    <button class="ni" onclick="nav('excel')" id="nav-excel"><span class="ic">&#128202;</span>CRM Clientes</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
     <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
     <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
@@ -2820,20 +2820,19 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-excel">
   <div class="ph">
     <div>
-      <h1 class="pt">Análise <span>Excel</span></h1>
-      <div class="ps">Suba planilhas de vendas para ver melhores clientes, inativos e produtos</div>
+      <h1 class="pt">CRM <span>Clientes</span></h1>
+      <div class="ps" id="excel-subtitulo">Análise da base de clientes por vendedora, produto e recência</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-s" onclick="document.getElementById('excel-file-input').click()"
-        style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px">📤 Subir planilha</button>
+      <button class="btn-s admin-only" onclick="document.getElementById('excel-file-input').click()" id="excel-btn-subir" style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
       <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.excelProcessarUpload(event)">
-      <button class="btn-s" onclick="window.excelLimparDados()" title="Apaga dados do Excel — não afeta vendas/contatos"
-        style="background:rgba(220,53,69,.10);border-color:rgba(220,53,69,.35);color:#ff6b7a;font-size:11px;padding:8px 12px" id="excel-btn-limpar">🗑️ Limpar dados</button>
+      <button class="btn-s admin-only" onclick="window.excelLimparDados()" title="Apaga dados do Excel — não afeta vendas/contatos"
+        style="background:rgba(220,53,69,.10);border-color:rgba(220,53,69,.35);color:#ff6b7a;font-size:11px;padding:8px 12px;display:none" id="excel-btn-limpar">🗑️ Limpar dados</button>
     </div>
   </div>
 
   <!-- Instruções + status carga -->
-  <div class="sc" style="margin-bottom:14px" id="excel-instrucoes">
+  <div class="sc admin-only" style="margin-bottom:14px;display:none" id="excel-instrucoes">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
       <div style="flex:1;min-width:300px">
         <div style="font-size:12px;color:var(--muted);line-height:1.6">
@@ -2882,9 +2881,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <option value="">🗓️ Todos os dias</option>
       </select>
 
-      <select id="excel-filtro-loja" onchange="window.excelRender()"
+      <select id="excel-filtro-loja" onchange="window.excelRender()" class="admin-only-inline"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
         <option value="">🏪 Todas as lojas</option>
+      </select>
+
+      <select id="excel-filtro-vend" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="">👩 Todas as vendedoras</option>
       </select>
 
       <button class="btn-s" onclick="window.excelLimparFiltros()" style="font-size:10px;padding:6px 10px">Limpar</button>
@@ -2918,11 +2922,57 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
-  <div class="sc">
+  <div class="sc" style="margin-bottom:14px">
     <div class="st">📦 Produtos Mais Vendidos</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranking de produtos por quantidade e faturamento.</div>
     <div id="excel-produtos"></div>
   </div>
+
+  <!-- [NEW R39] Ranking de Vendedoras (Excel) -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">🏆 Ranking de Vendedoras</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Performance no período/loja filtrado — cupons, faturamento, TM, P.A. e clientes únicos.</div>
+    <div id="excel-rank-vends"></div>
+  </div>
+
+  <!-- [NEW R39] Cruzamento de Produtos (compra conjunta) -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">🔀 Cruzamento de Produtos — Quem comprou X, também comprou Y</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <label style="font-size:11px;color:var(--muted)">Produto-base:</label>
+      <select id="excel-cross-base" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;min-width:280px;max-width:100%">
+        <option value="">🎯 Top combos automaticamente (todos os produtos)</option>
+      </select>
+      <label style="font-size:11px;color:var(--muted)">Mín. compradores do base:</label>
+      <input type="number" id="excel-cross-minbase" value="5" min="1" max="500" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;width:80px">
+    </div>
+    <div id="excel-cross-produtos"></div>
+  </div>
+
+  <!-- [NEW R39] Base de Clientes por Vendedora -->
+  <div class="sc" style="margin-bottom:14px">
+    <div class="st">👥 Base de Clientes por Vendedora</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <label style="font-size:11px;color:var(--muted)">Vendedora:</label>
+      <select id="excel-carteira-vend" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;min-width:220px">
+        <option value="">Selecione uma vendedora…</option>
+      </select>
+      <label style="font-size:11px;color:var(--muted)">Inativos há mais de:</label>
+      <select id="excel-carteira-dias" onchange="window.excelRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:3px 8px;color:var(--texto);font-size:11px">
+        <option value="30">30 dias</option>
+        <option value="60" selected>60 dias</option>
+        <option value="90">90 dias</option>
+        <option value="180">180 dias</option>
+        <option value="365">1 ano</option>
+      </select>
+    </div>
+    <div id="excel-carteira-vend-box"></div>
+  </div>
+
 </div>
 
 
@@ -23563,7 +23613,7 @@ window.excelLimparDados = function(){
 
 // ── LIMPAR FILTROS ────────────────────────────────────────────────
 window.excelLimparFiltros = function(){
-  ['excel-filtro-ano','excel-filtro-mes','excel-filtro-dia','excel-filtro-loja'].forEach(id=>{
+  ['excel-filtro-ano','excel-filtro-mes','excel-filtro-dia','excel-filtro-loja','excel-filtro-vend','excel-cross-base'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.value = '';
   });
@@ -23592,6 +23642,9 @@ function _excelFiltrar(){
 // ── RENDER PRINCIPAL ──────────────────────────────────────────────
 window.excelRender = function(){
   if(!D.excelDados) D.excelDados = [];
+
+  // [NEW R39] Ajustar visibilidade por perfil (loja fixa quando não é admin)
+  if(typeof _excelAjustarPerfil === 'function') _excelAjustarPerfil();
 
   // Popular selects de filtro dinamicamente
   const anos = new Set(), dias = new Set(), lojas = new Set();
@@ -23643,7 +23696,13 @@ window.excelRender = function(){
     }
   }
 
-  const dados = _excelFiltrar();
+  // [NEW R39] Popular selects de vendedora/produto/carteira ANTES de filtrar
+  if(typeof _excelPopularVendedoras === 'function') _excelPopularVendedoras();
+  if(typeof _excelPopularCarteiraVend === 'function') _excelPopularCarteiraVend();
+  if(typeof _excelPopularProdutoBase === 'function') _excelPopularProdutoBase();
+
+  // [NEW R39] Filtro respeita perfil (loja) e vendedora
+  const dados = (typeof _excelFiltrarComPerfil === 'function' ? _excelFiltrarComPerfil() : _excelFiltrar());
 
   // KPIs
   const kpiEl = document.getElementById('excel-kpis');
@@ -23674,6 +23733,10 @@ window.excelRender = function(){
   _excelRenderMelhoresClientes(dados);
   _excelRenderInativos(dados);
   _excelRenderProdutos(dados);
+  // [NEW R39] 3 novos painéis
+  if(typeof _excelRenderRankingVendedoras === 'function') _excelRenderRankingVendedoras(dados);
+  if(typeof _excelRenderCruzamentoProdutos === 'function') _excelRenderCruzamentoProdutos(dados);
+  if(typeof _excelRenderCarteiraVendedora === 'function') _excelRenderCarteiraVendedora();
 };
 
 // ── PAINEL 1: MELHORES CLIENTES ───────────────────────────────────
@@ -23875,6 +23938,532 @@ function _excelRenderProdutos(dados){
     </div>
     ${Object.keys(porProd).length > 30 ? `<div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">Mostrando top 30 de ${Object.keys(porProd).length} produtos</div>` : ''}
   `;
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW R39] CRM: filtros por perfil (loja/vendedora) + 3 novos painéis
+// - Loja: vê só a própria loja (filtro travado). Admin vê tudo/escolhe.
+// - Vendedora: filtro adicional para focar em uma pessoa da equipe.
+// - Ranking Vendedoras, Cruzamento de Produtos, Base por Vendedora.
+// ══════════════════════════════════════════════════════════════════════
+
+// Normalizador comum (case/acento/espaços) reutilizado em todas as agregações
+function _crmNorm(s){
+  return String(s||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ');
+}
+
+// Popular filtro de VENDEDORAS respeitando loja e perfil
+function _excelPopularVendedoras(){
+  const sel = document.getElementById('excel-filtro-vend');
+  if(!sel) return;
+  const atual = sel.value;
+  const lidPerf = typeof isAdmin === 'function' && isAdmin()
+    ? (document.getElementById('excel-filtro-loja')?.value || '')
+    : (typeof lojaId === 'function' ? lojaId() : '');
+
+  // Vendedoras do Excel filtradas pela loja de contexto
+  const conjunto = new Map(); // norm → nome original
+  (D.excelDados || []).forEach(r => {
+    if(!r.vendedora) return;
+    if(lidPerf && r.loja && r.loja !== lidPerf) return;
+    // Loja: só mostra vendedoras dessa loja (r.loja===lid) ou sem loja definida
+    if(lidPerf && !r.loja) return; // ignora as sem loja quando filtrando
+    const norm = _crmNorm(r.vendedora);
+    if(!conjunto.has(norm)) conjunto.set(norm, r.vendedora);
+  });
+
+  const lista = [...conjunto.entries()].sort((a,b) => a[1].localeCompare(b[1]));
+  sel.innerHTML = '<option value="">👩 Todas as vendedoras</option>' +
+    lista.map(([norm, nome]) => `<option value="${norm}">${nome}</option>`).join('');
+  if(atual && lista.some(([n]) => n === atual)) sel.value = atual;
+  else sel.value = '';
+}
+
+// Popular dropdown de vendedora para Base de Clientes
+function _excelPopularCarteiraVend(){
+  const sel = document.getElementById('excel-carteira-vend');
+  if(!sel) return;
+  const atual = sel.value;
+  const lidPerf = typeof isAdmin === 'function' && isAdmin()
+    ? (document.getElementById('excel-filtro-loja')?.value || '')
+    : (typeof lojaId === 'function' ? lojaId() : '');
+
+  const conjunto = new Map();
+  (D.excelDados || []).forEach(r => {
+    if(!r.vendedora) return;
+    if(lidPerf && r.loja && r.loja !== lidPerf) return;
+    if(lidPerf && !r.loja) return;
+    const norm = _crmNorm(r.vendedora);
+    if(!conjunto.has(norm)) conjunto.set(norm, r.vendedora);
+  });
+  const lista = [...conjunto.entries()].sort((a,b) => a[1].localeCompare(b[1]));
+
+  sel.innerHTML = '<option value="">Selecione uma vendedora…</option>' +
+    lista.map(([norm, nome]) => `<option value="${norm}">${nome}</option>`).join('');
+  if(atual && lista.some(([n]) => n === atual)) sel.value = atual;
+}
+
+// Popular dropdown Produto-base para Cruzamento
+function _excelPopularProdutoBase(){
+  const sel = document.getElementById('excel-cross-base');
+  if(!sel) return;
+  const atual = sel.value;
+  const lidPerf = typeof isAdmin === 'function' && isAdmin()
+    ? (document.getElementById('excel-filtro-loja')?.value || '')
+    : (typeof lojaId === 'function' ? lojaId() : '');
+
+  const conjunto = new Map();
+  (D.excelDados || []).forEach(r => {
+    if(!r.produto) return;
+    if(lidPerf && r.loja && r.loja !== lidPerf) return;
+    if(lidPerf && !r.loja) return;
+    const norm = _crmNorm(r.produto);
+    if(!conjunto.has(norm)) conjunto.set(norm, r.produto);
+  });
+  const lista = [...conjunto.entries()].sort((a,b) => a[1].localeCompare(b[1]));
+
+  sel.innerHTML = '<option value="">🎯 Top combos automaticamente (todos os produtos)</option>' +
+    lista.map(([norm, nome]) => `<option value="${norm}">${nome}</option>`).join('');
+  if(atual && lista.some(([n]) => n === atual)) sel.value = atual;
+}
+
+// ── Wrap do render principal: aplica perfil (loja fixa) e filtros ──
+// Vou monkey-patch _excelFiltrar para incluir filtro de vendedora + perfil
+// Fazer nova versão global chamada por window.excelRender antes dos painéis
+window._excelFiltrarComPerfil = function(){
+  if(!D.excelDados) return [];
+  const isAdm = typeof isAdmin === 'function' && isAdmin();
+  const lidPerfilFixo = !isAdm ? (typeof lojaId === 'function' ? lojaId() : '') : '';
+  const fAno = document.getElementById('excel-filtro-ano')?.value || '';
+  const fMes = document.getElementById('excel-filtro-mes')?.value || '';
+  const fDia = document.getElementById('excel-filtro-dia')?.value || '';
+  const fLoja = isAdm ? (document.getElementById('excel-filtro-loja')?.value || '') : lidPerfilFixo;
+  const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+
+  return D.excelDados.filter(r => {
+    if(!r.data) return false;
+    const [y,m,d] = r.data.split('-');
+    if(fAno && y !== fAno) return false;
+    if(fMes && m !== fMes) return false;
+    if(fDia && d !== fDia) return false;
+    if(fLoja && r.loja !== fLoja) return false;
+    if(fVend && _crmNorm(r.vendedora) !== fVend) return false;
+    return true;
+  });
+};
+
+// ── PAINEL 4: RANKING DE VENDEDORAS ─────────────────────────────
+function _excelRenderRankingVendedoras(dados){
+  const el = document.getElementById('excel-rank-vends');
+  if(!el) return;
+
+  const porVend = {};
+  dados.forEach(r => {
+    if(!r.vendedora) return;
+    const norm = _crmNorm(r.vendedora);
+    if(!porVend[norm]) porVend[norm] = {
+      nome: r.vendedora, loja: r.loja || '',
+      fat: 0, qtde: 0, cupons: new Set(), clientes: new Set(), linhas: 0
+    };
+    porVend[norm].fat += Number(r.valor) || 0;
+    porVend[norm].qtde += Number(r.qtde) || 0;
+    porVend[norm].linhas++;
+    if(r.cupom) porVend[norm].cupons.add(r.cupom);
+    if(r.cliente) porVend[norm].clientes.add(_crmNorm(r.cliente));
+  });
+
+  const linhas = Object.values(porVend).map(v => {
+    const nCup = v.cupons.size || Math.max(1, Math.round(v.linhas / 3)); // fallback: aproximação
+    const nCli = v.clientes.size;
+    return {
+      nome: v.nome, loja: v.loja,
+      lojaN: (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(l => l.id === v.loja)?.nome || v.loja || '—',
+      fat: v.fat, qtde: v.qtde, cupons: nCup, clientes: nCli,
+      tm: nCup > 0 ? v.fat / nCup : 0,
+      pa: nCup > 0 ? v.qtde / nCup : 0
+    };
+  }).sort((a,b) => b.fat - a.fat);
+
+  if(!linhas.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados de vendedoras no filtro atual.</div>';
+    return;
+  }
+
+  const podio = linhas.slice(0, 3);
+  const restante = linhas.slice(3);
+  const medalhas = ['🥇','🥈','🥉'];
+
+  const podioHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px">
+    ${podio.map((l, i) => `
+      <div style="background:${i===0?'linear-gradient(135deg,rgba(201,168,76,.15),rgba(201,168,76,.05))':(i===1?'rgba(200,200,200,.06)':'rgba(205,127,50,.06)')};border:1px solid ${i===0?'rgba(201,168,76,.5)':'var(--borda)'};border-radius:10px;padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:24px">${medalhas[i]}</div>
+          <div style="font-size:11px;color:var(--muted)">${l.cupons} cupom${l.cupons===1?'':'s'}</div>
+        </div>
+        <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;line-height:1.2">${l.nome}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${l.lojaN}</div>
+        <div style="margin-top:8px;color:var(--verde);font-weight:700;font-size:14px">${fmt(l.fat)}</div>
+        <div style="display:flex;gap:10px;margin-top:6px;font-size:10px;color:var(--muted)">
+          <div>TM: <strong style="color:var(--texto)">${fmt(l.tm)}</strong></div>
+          <div>P.A.: <strong style="color:var(--texto)">${l.pa.toFixed(1).replace('.',',')}</strong></div>
+          <div>Cli: <strong style="color:var(--texto)">${l.clientes}</strong></div>
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+
+  const restanteHtml = restante.length ? `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:640px;font-size:11px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Vendedora</th>
+          <th>Loja</th>
+          <th style="text-align:center">Cupons</th>
+          <th style="text-align:right">Faturamento</th>
+          <th style="text-align:right">TM</th>
+          <th style="text-align:center">P.A.</th>
+          <th style="text-align:center">Clientes</th>
+        </tr></thead>
+        <tbody>
+          ${restante.map((l, i) => `<tr>
+            <td style="text-align:center;color:var(--muted);font-weight:600">${i+4}º</td>
+            <td><strong>${l.nome}</strong></td>
+            <td style="color:var(--muted);font-size:10px">${l.lojaN}</td>
+            <td style="text-align:center">${l.cupons}</td>
+            <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(l.fat)}</td>
+            <td style="text-align:right;color:var(--muted)">${fmt(l.tm)}</td>
+            <td style="text-align:center">${l.pa.toFixed(1).replace('.',',')}</td>
+            <td style="text-align:center;color:var(--muted)">${l.clientes}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  ` : '';
+
+  el.innerHTML = podioHtml + restanteHtml;
+}
+
+// ── PAINEL 5: CRUZAMENTO DE PRODUTOS (cross-sell) ────────────────
+function _excelRenderCruzamentoProdutos(dados){
+  const el = document.getElementById('excel-cross-produtos');
+  if(!el) return;
+
+  const baseSel = document.getElementById('excel-cross-base')?.value || '';
+  const minBase = Math.max(1, parseInt(document.getElementById('excel-cross-minbase')?.value || '5', 10));
+
+  if(!dados.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados no filtro atual.</div>';
+    return;
+  }
+
+  // Agrupar por cliente: quais produtos ele comprou (set)
+  const porCliente = {};
+  dados.forEach(r => {
+    if(!r.cliente || !r.produto) return;
+    const cli = _crmNorm(r.cliente);
+    if(!porCliente[cli]) porCliente[cli] = new Set();
+    porCliente[cli].add(_crmNorm(r.produto));
+  });
+
+  // Mapa norm→nome original (só para exibição)
+  const nomeProd = {};
+  dados.forEach(r => {
+    if(r.produto) nomeProd[_crmNorm(r.produto)] = r.produto;
+  });
+
+  // Contagem: quantos clientes compraram cada produto individual
+  const cntProd = {};
+  Object.values(porCliente).forEach(set => {
+    set.forEach(p => { cntProd[p] = (cntProd[p] || 0) + 1; });
+  });
+
+  if(baseSel){
+    // MODO: mostrar tudo que o produto-base "puxa"
+    const totalCompradoresBase = cntProd[baseSel] || 0;
+    if(totalCompradoresBase < minBase){
+      el.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Produto-base tem apenas ${totalCompradoresBase} comprador${totalCompradoresBase===1?'':'es'} no filtro (mínimo configurado: ${minBase}).<br>Reduza o mínimo ou amplie o período.</div>`;
+      return;
+    }
+
+    // Para cada outro produto: quantos dos compradores do base também compraram
+    const conjuntas = {};
+    Object.values(porCliente).forEach(set => {
+      if(!set.has(baseSel)) return;
+      set.forEach(p => {
+        if(p === baseSel) return;
+        conjuntas[p] = (conjuntas[p] || 0) + 1;
+      });
+    });
+
+    const linhas = Object.entries(conjuntas).map(([p, n]) => ({
+      produto: nomeProd[p] || p,
+      juntos: n,
+      taxa: (n / totalCompradoresBase * 100)
+    })).sort((a,b) => b.juntos - a.juntos).slice(0, 30);
+
+    if(!linhas.length){
+      el.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum outro produto foi comprado pelos ${totalCompradoresBase} clientes de "${nomeProd[baseSel]||baseSel}".</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div style="background:rgba(201,168,76,.08);border-left:3px solid var(--ouro);padding:8px 12px;margin-bottom:10px;font-size:12px">
+        <strong>Base:</strong> ${nomeProd[baseSel] || baseSel} · <strong>${totalCompradoresBase}</strong> clientes compraram no filtro atual
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dtable" style="min-width:520px;font-size:11px">
+          <thead><tr>
+            <th style="width:36px;text-align:center">#</th>
+            <th>Também compraram</th>
+            <th style="text-align:center">Clientes</th>
+            <th style="text-align:right">% dos compradores do base</th>
+          </tr></thead>
+          <tbody>
+            ${linhas.map((l, i) => `<tr>
+              <td style="text-align:center;color:${i<3?'var(--ouro)':'var(--muted)'};font-weight:${i<3?700:400}">${['🥇','🥈','🥉'][i] || (i+1)}</td>
+              <td><strong>${l.produto}</strong></td>
+              <td style="text-align:center">${l.juntos}</td>
+              <td style="text-align:right;font-weight:700;color:${l.taxa>=50?'var(--verde)':l.taxa>=25?'var(--ouro)':'var(--muted)'}">${l.taxa.toFixed(0)}%</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    return;
+  }
+
+  // MODO PADRÃO: top combos automaticamente (pares mais fortes da base inteira)
+  const pares = {};
+  Object.values(porCliente).forEach(set => {
+    const arr = [...set];
+    for(let i = 0; i < arr.length; i++){
+      for(let j = i+1; j < arr.length; j++){
+        const a = arr[i], b = arr[j];
+        const chave = a < b ? a+'||'+b : b+'||'+a;
+        pares[chave] = (pares[chave] || 0) + 1;
+      }
+    }
+  });
+
+  const linhas = Object.entries(pares)
+    .filter(([_, n]) => n >= 2) // pelo menos 2 clientes para ser um "combo"
+    .map(([chave, n]) => {
+      const [a, b] = chave.split('||');
+      const cntA = cntProd[a] || 0;
+      const cntB = cntProd[b] || 0;
+      if(cntA < minBase && cntB < minBase) return null;
+      // Taxa considerando o produto MENOR (mais informativa: "de X compradores, N% levaram Y")
+      const menorProd = cntA <= cntB ? a : b;
+      const menorCnt = Math.min(cntA, cntB);
+      const maiorProd = cntA > cntB ? a : b;
+      return {
+        prodA: nomeProd[menorProd] || menorProd,
+        prodB: nomeProd[maiorProd] || maiorProd,
+        juntos: n,
+        totalA: menorCnt,
+        taxa: (n / menorCnt * 100)
+      };
+    })
+    .filter(Boolean)
+    .sort((a,b) => b.taxa - a.taxa || b.juntos - a.juntos)
+    .slice(0, 30);
+
+  if(!linhas.length){
+    el.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum combo com pelo menos ${minBase} compradores do produto-base. Reduza o mínimo ou escolha um produto específico acima.</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:640px;font-size:11px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Produto A</th>
+          <th>Produto B (comprado junto)</th>
+          <th style="text-align:center">Juntos</th>
+          <th style="text-align:right">% dos compradores de A</th>
+        </tr></thead>
+        <tbody>
+          ${linhas.map((l, i) => `<tr>
+            <td style="text-align:center;color:var(--muted);font-weight:600">${i+1}</td>
+            <td><strong>${l.prodA}</strong> <span style="color:var(--muted);font-size:10px">(${l.totalA} clientes)</span></td>
+            <td>${l.prodB}</td>
+            <td style="text-align:center;font-weight:700;color:var(--ouro)">${l.juntos}</td>
+            <td style="text-align:right;font-weight:700;color:${l.taxa>=50?'var(--verde)':l.taxa>=25?'var(--ouro)':'var(--muted)'}">${l.taxa.toFixed(0)}%</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center;padding:8px;font-size:10px;color:var(--muted)">
+      Leitura: "${linhas.length ? linhas[0].taxa.toFixed(0)+'% dos clientes que compraram '+linhas[0].prodA+' também compraram '+linhas[0].prodB : ''}"
+    </div>
+  `;
+}
+
+// ── PAINEL 6: BASE DE CLIENTES POR VENDEDORA + inativos dela ─────
+function _excelRenderCarteiraVendedora(){
+  const el = document.getElementById('excel-carteira-vend-box');
+  if(!el) return;
+
+  const vendNorm = document.getElementById('excel-carteira-vend')?.value || '';
+  const diasCorte = parseInt(document.getElementById('excel-carteira-dias')?.value || '60', 10);
+
+  if(!vendNorm){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">👆 Selecione uma vendedora acima para ver a carteira dela.</div>';
+    return;
+  }
+
+  // Base COMPLETA da vendedora — respeita filtro de loja (perfil) mas ignora período
+  const isAdm = typeof isAdmin === 'function' && isAdmin();
+  const lidPerf = isAdm ? (document.getElementById('excel-filtro-loja')?.value || '')
+                        : (typeof lojaId === 'function' ? lojaId() : '');
+
+  const dados = (D.excelDados || []).filter(r => {
+    if(_crmNorm(r.vendedora) !== vendNorm) return false;
+    if(lidPerf && r.loja !== lidPerf) return false;
+    return true;
+  });
+
+  if(!dados.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem histórico de vendas para esta vendedora.</div>';
+    return;
+  }
+
+  const nomeVend = dados[0].vendedora;
+
+  // Agregar por cliente
+  const porCliente = {};
+  dados.forEach(r => {
+    const key = _crmNorm(r.cliente);
+    if(!key || key === 'sem cliente') return;
+    if(!porCliente[key]) porCliente[key] = {
+      nome: r.cliente, total: 0, compras: new Set(), ult: '', primeira: '', produtos: new Set()
+    };
+    porCliente[key].total += r.valor || 0;
+    porCliente[key].compras.add(r.data + '|' + (r.cupom||''));
+    if(r.produto) porCliente[key].produtos.add(r.produto);
+    if(!porCliente[key].ult || r.data > porCliente[key].ult) porCliente[key].ult = r.data;
+    if(!porCliente[key].primeira || r.data < porCliente[key].primeira) porCliente[key].primeira = r.data;
+  });
+
+  const hoje = new Date();
+  const isoHj = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
+  const _diff = (a,b) => {
+    const [ya,ma,da] = a.split('-').map(Number);
+    const [yb,mb,db] = b.split('-').map(Number);
+    return Math.round((new Date(ya,ma-1,da) - new Date(yb,mb-1,db)) / 86400000);
+  };
+
+  const linhasBase = Object.values(porCliente).map(c => ({
+    ...c,
+    nCompras: c.compras.size,
+    nProdutos: c.produtos.size,
+    diasSem: c.ult ? _diff(isoHj, c.ult) : 999,
+    inativo: c.ult ? _diff(isoHj, c.ult) >= diasCorte : true
+  }));
+
+  const totalClientes = linhasBase.length;
+  const inativos = linhasBase.filter(c => c.inativo).sort((a,b) => b.total - a.total);
+  const ativos = linhasBase.filter(c => !c.inativo).sort((a,b) => b.total - a.total);
+  const totalFat = linhasBase.reduce((s,c) => s + c.total, 0);
+  const totalCompras = linhasBase.reduce((s,c) => s + c.nCompras, 0);
+
+  const banner = `
+    <div style="background:rgba(201,168,76,.08);border-left:3px solid var(--ouro);padding:10px 14px;margin-bottom:12px;font-size:12px;display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+      <div><strong style="color:var(--ouro);font-size:14px">${nomeVend}</strong></div>
+      <div>👥 <strong>${totalClientes}</strong> cliente${totalClientes===1?'':'s'}</div>
+      <div>💰 <strong style="color:var(--verde)">${fmt(totalFat)}</strong> total</div>
+      <div>🧾 <strong>${totalCompras}</strong> compras</div>
+      <div>💤 <strong style="color:${inativos.length>0?'var(--verm)':'var(--verde)'}">${inativos.length}</strong> inativos (>${diasCorte}d)</div>
+    </div>
+  `;
+
+  const tabInativos = inativos.length ? `
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--verm);margin-bottom:6px">💤 INATIVOS — ${inativos.length} cliente${inativos.length===1?'':'s'} (ordenados por valor histórico)</div>
+      <div style="overflow-x:auto">
+        <table class="dtable" style="min-width:560px;font-size:11px">
+          <thead><tr>
+            <th>Cliente</th>
+            <th style="text-align:center">Dias sem</th>
+            <th style="text-align:right">Total gasto</th>
+            <th style="text-align:center">Compras</th>
+            <th style="text-align:center">Produtos</th>
+            <th>Última</th>
+          </tr></thead>
+          <tbody>
+            ${inativos.slice(0, 50).map(c => `<tr>
+              <td><strong>${c.nome}</strong></td>
+              <td style="text-align:center;color:${c.diasSem>=180?'var(--verm)':c.diasSem>=90?'var(--ouro)':'var(--muted)'};font-weight:700">${c.diasSem}d</td>
+              <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(c.total)}</td>
+              <td style="text-align:center">${c.nCompras}</td>
+              <td style="text-align:center;color:var(--muted)">${c.nProdutos}</td>
+              <td style="color:var(--muted);font-size:10px">${c.ult.split('-').reverse().join('/')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${inativos.length > 50 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando top 50 de ${inativos.length}</div>` : ''}
+    </div>
+  ` : '';
+
+  const tabAtivos = ativos.length ? `
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--verde);margin-bottom:6px">✅ ATIVOS — ${ativos.length} cliente${ativos.length===1?'':'s'} (compraram nos últimos ${diasCorte}d)</div>
+      <div style="overflow-x:auto">
+        <table class="dtable" style="min-width:520px;font-size:11px">
+          <thead><tr>
+            <th>Cliente</th>
+            <th style="text-align:right">Total gasto</th>
+            <th style="text-align:center">Compras</th>
+            <th style="text-align:center">Produtos</th>
+            <th>Última</th>
+          </tr></thead>
+          <tbody>
+            ${ativos.slice(0, 50).map(c => `<tr>
+              <td><strong>${c.nome}</strong></td>
+              <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(c.total)}</td>
+              <td style="text-align:center">${c.nCompras}</td>
+              <td style="text-align:center;color:var(--muted)">${c.nProdutos}</td>
+              <td style="color:var(--muted);font-size:10px">${c.ult.split('-').reverse().join('/')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${ativos.length > 50 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando top 50 de ${ativos.length}</div>` : ''}
+    </div>
+  ` : '';
+
+  el.innerHTML = banner + tabInativos + tabAtivos;
+}
+
+// ── AJUSTAR VISIBILIDADE ADMIN vs LOJA ────────────────────────────
+function _excelAjustarPerfil(){
+  const isAdm = typeof isAdmin === 'function' && isAdmin();
+  // Mostrar/esconder elementos com class admin-only-inline (o filtro de loja)
+  document.querySelectorAll('.admin-only-inline').forEach(el => {
+    el.style.display = isAdm ? '' : 'none';
+  });
+  // Se loja, travar filtro de loja no lojaId (para render)
+  if(!isAdm){
+    const selLoja = document.getElementById('excel-filtro-loja');
+    if(selLoja) selLoja.value = typeof lojaId === 'function' ? lojaId() : '';
+  }
+  // Subtítulo diferente para lojas
+  const sub = document.getElementById('excel-subtitulo');
+  if(sub){
+    if(isAdm){
+      sub.textContent = 'Análise da base de clientes por vendedora, produto e recência';
+    } else {
+      const lNome = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).find(l => l.id === lojaId())?.nome || '';
+      sub.textContent = 'CRM da loja ' + lNome + ' — clientes, vendedoras, produtos e inativos';
+    }
+  }
 }
 
 </script>
