@@ -23240,39 +23240,91 @@ function _renderContatosRanking(contatos){
 
 if(!D.excelDados) D.excelDados = [];
 
-// Mapa flexível de cabeçalhos → campo interno
-const EXCEL_HEADER_MAP = {
-  data: ['data','dt','date','dia','emissao','emissão','data_venda','data venda'],
-  cliente: ['cliente','nome','nome_cliente','customer','comprador'],
-  loja: ['loja','filial','store','unidade'],
-  vendedora: ['vendedora','vendedor','operador','atendente','seller'],
-  produto: ['produto','item','descricao','descrição','desc','sku','product'],
-  categoria: ['categoria','category','linha','familia','família'],
-  qtde: ['quantidade','qtd','qtde','qty','quant'],
-  valor: ['valor','total','vlr','preco','preço','price','total_venda'],
-  cupom: ['cupom','nota','nf','cf','doc','documento']
-};
-
-// Normalizar texto: minúsculo, sem espaços, sem acento
+// [REV 13/08] Normalizar texto: minúsculo, sem espaços, sem acento
 function _excelNormHeader(h){
   return String(h||'').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,'_');
+    .replace(/[^a-z0-9]+/g,'_')
+    .replace(/^_|_$/g,'');
 }
 
-// Detectar cabeçalhos da planilha e mapear para campos internos
+// [NEW 13/08] Normalizar nome de vendedora para bater com D.vendedoras
+// (case-insensitive, sem acento, sem espaços duplos)
+function _excelNormNome(n){
+  return String(n||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ');
+}
+
+// [REV 13/08] Detecção robusta — usa regex e resolve conflitos entre colunas
+// parecidas (ex: prefere "VALOR ITEM NA VENDA" sobre "VALOR NF"; "BAIRRO"
+// só é usado como loja se não houver coluna Loja/Filial dedicada)
 function _excelDetectarColunas(headers){
+  const normH = headers.map((h, i) => ({idx: i, raw: h, norm: _excelNormHeader(h)}));
   const map = {};
-  headers.forEach((h, idx) => {
-    const norm = _excelNormHeader(h);
-    for(const [campo, aliases] of Object.entries(EXCEL_HEADER_MAP)){
-      if(map[campo] !== undefined) continue;
-      if(aliases.includes(norm)){
-        map[campo] = idx;
-        break;
-      }
-    }
-  });
+
+  // ── DATA
+  const dataC = normH.find(h => /^(data|dt|date|dia|emissao)$/.test(h.norm))
+             || normH.find(h => /^(data|emissao)_/.test(h.norm))
+             || normH.find(h => /data|emissao/.test(h.norm));
+  if(dataC) map.data = dataC.idx;
+
+  // ── CLIENTE
+  const clC = normH.find(h => /^(cliente|nome|nome_cliente|customer|comprador)$/.test(h.norm))
+           || normH.find(h => /cliente|comprador/.test(h.norm));
+  if(clC) map.cliente = clC.idx;
+
+  // ── LOJA (primeiro coluna dedicada; se não houver, usa BAIRRO)
+  // Loja: só coluna dedicada. BAIRRO NÃO serve — é do endereço do cliente.
+  // Se não houver coluna Loja, a loja é deduzida pela vendedora após parse.
+  const lojaC = normH.find(h => /^(loja|filial|store|unidade)$/.test(h.norm))
+             || normH.find(h => /^loja|filial|unidade/.test(h.norm));
+  if(lojaC) map.loja = lojaC.idx;
+
+  // ── VENDEDORA (aceita vendedor, vendedor(a), operador, atendente)
+  const vendC = normH.find(h => /^(vendedora?|operador|atendente|seller)$/.test(h.norm))
+             || normH.find(h => /vendedor|operador|atendente/.test(h.norm));
+  if(vendC) map.vendedora = vendC.idx;
+
+  // ── PRODUTO
+  const prodC = normH.find(h => /^(produto|item|descricao|desc|sku|product)$/.test(h.norm))
+             || normH.find(h => /^produto|^descricao/.test(h.norm));
+  if(prodC) map.produto = prodC.idx;
+
+  // ── CATEGORIA (aceita LINHA — Avatim usa LINHA CLASSICOS/DESFRUTAR/RITOS/etc)
+  const catC = normH.find(h => /^(categoria|linha|familia|category)$/.test(h.norm))
+            || normH.find(h => /^linha$|^categoria|familia/.test(h.norm));
+  if(catC) map.categoria = catC.idx;
+
+  // ── QTDE (aceita "QUANTIDADE VENDIDA")
+  const qtdC = normH.find(h => /^(quantidade|qtd|qtde|qty|quant)$/.test(h.norm))
+            || normH.find(h => /^quantidade|^qtd|^qtde/.test(h.norm));
+  if(qtdC) map.qtde = qtdC.idx;
+
+  // ── VALOR — PRIORIDADE:
+  //   1º "VALOR ITEM NA VENDA" / "VALOR ITEM" → valor da linha (correto)
+  //   2º "VALOR TOTAL", "TOTAL VENDA" → sem NF no nome
+  //   3º "VALOR" isolado
+  //   NUNCA "VALOR NF" ou "VALOR UNITARIO" (dão totais errados quando somados por linha)
+  const valorItem = normH.find(h => /valor.*(item)/.test(h.norm) || /^valor_item$/.test(h.norm));
+  const valorTotalVenda = !valorItem && normH.find(h => /valor.*(total|venda)/.test(h.norm) && !/nf$|unit/.test(h.norm));
+  const totalGenerico = !valorItem && !valorTotalVenda && normH.find(h => /^total$/.test(h.norm));
+  const valorSozinho = !valorItem && !valorTotalVenda && !totalGenerico &&
+                       normH.find(h => /^(valor|vlr|preco|price)$/.test(h.norm));
+  const escolhido = valorItem || valorTotalVenda || totalGenerico || valorSozinho;
+  if(escolhido) map.valor = escolhido.idx;
+
+  // ── CUPOM/NF (aceita "N° NFE", "NFE", "NF", "CUPOM")
+  const cupomC = normH.find(h => /^(cupom|nota|nf|cf|nfe|doc|documento)$/.test(h.norm))
+              || normH.find(h => /^n_?nfe$|^no_?nfe$|nfe$/.test(h.norm))
+              || normH.find(h => /^cupom|^nota|numero_nf/.test(h.norm));
+  if(cupomC) map.cupom = cupomC.idx;
+
+  // ── OPERACAO (para filtrar só VENDAs, ignorar troca/devolução)
+  const opC = normH.find(h => /^(operacao|op|tipo|tipo_op)$/.test(h.norm))
+           || normH.find(h => /operacao|^tipo_op/.test(h.norm));
+  if(opC) map.operacao = opC.idx;
+
   return map;
 }
 
@@ -23376,19 +23428,30 @@ window.excelProcessarUpload = function(event){
       const colMap = _excelDetectarColunas(headers);
 
       if(colMap.data === undefined || colMap.valor === undefined){
-        showToast('Não achei colunas "Data" e "Valor" — verifique os cabeçalhos.','err');
-        console.log('[excel] Cabeçalhos detectados:', headers, 'Map:', colMap);
+        const faltando = [];
+        if(colMap.data === undefined) faltando.push('Data');
+        if(colMap.valor === undefined) faltando.push('Valor');
+        const detectadas = Object.keys(colMap).map(k => k+'→col'+(colMap[k]+1)).join(', ') || '(nenhuma)';
+        showToast('❌ Faltou coluna: '+faltando.join(', ')+'. Cabeçalhos: '+headers.slice(0,5).join(', ')+'...','err');
+        console.log('[excel] Cabeçalhos:', headers);
+        console.log('[excel] Detectadas:', detectadas);
         return;
       }
 
       const dadosProcessados = [];
-      let ignorados = 0;
+      let ignoradosDadosVazios = 0;
+      let ignoradosNaoVenda = 0;
       for(let i = 1; i < rows.length; i++){
         const row = rows[i];
         if(!row || !row.length) continue;
+        // [FIX 13/08] Filtrar OPERACAO: só VENDA (ignora troca/devolução/etc)
+        if(colMap.operacao !== undefined){
+          const op = String(row[colMap.operacao] || '').trim().toUpperCase();
+          if(op && op !== 'VENDA' && op !== 'V'){ ignoradosNaoVenda++; continue; }
+        }
         const dt = _excelParseData(row[colMap.data]);
         const val = _excelParseNumero(row[colMap.valor]);
-        if(!dt || val === 0){ ignorados++; continue; }
+        if(!dt || val === 0){ ignoradosDadosVazios++; continue; }
         dadosProcessados.push({
           data: dt,
           cliente: String(row[colMap.cliente] || '').trim() || '(sem cliente)',
@@ -23405,6 +23468,46 @@ window.excelProcessarUpload = function(event){
       if(!dadosProcessados.length){
         showToast('Nenhuma linha válida encontrada.','warn');
         return;
+      }
+
+      // [FIX 13/08] Se não veio Loja da planilha, deduzir pela vendedora
+      // (bate nome normalizado com D.vendedoras cadastradas)
+      const _semLoja = dadosProcessados.filter(r => !r.loja).length;
+      if(_semLoja > 0){
+        const _mapaVendLoja = {};
+        (D.vendedoras || []).forEach(v => {
+          const _n = _excelNormNome(v.nome);
+          if(_n) _mapaVendLoja[_n] = v.loja;
+        });
+        let deduzidas = 0;
+        dadosProcessados.forEach(r => {
+          if(r.loja) return;
+          if(!r.vendedora) return;
+          const _nv = _excelNormNome(r.vendedora);
+          if(_mapaVendLoja[_nv]){
+            r.loja = _mapaVendLoja[_nv];
+            deduzidas++;
+          }
+        });
+        const semLojaFinal = dadosProcessados.filter(r => !r.loja).length;
+        console.log('[excel] Loja deduzida pela vendedora:', deduzidas, '· ainda sem loja:', semLojaFinal);
+        // Se ainda restam linhas sem loja, perguntar loja padrão
+        if(semLojaFinal > 0){
+          const _lojasIds = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).map(l => l.id+' ('+l.nome+')').join('\n');
+          const _lojaPadrao = prompt(
+            semLojaFinal+' linha(s) ficaram sem loja identificada.\n\n' +
+            'Digite o ID da loja para aplicar a essas linhas (ou deixe vazio para ignorar):\n\n' + _lojasIds
+          );
+          if(_lojaPadrao){
+            const _lidVal = String(_lojaPadrao).trim().toLowerCase();
+            const _existe = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).some(l => l.id === _lidVal);
+            if(_existe){
+              dadosProcessados.forEach(r => { if(!r.loja) r.loja = _lidVal; });
+            } else {
+              showToast('Loja "'+_lojaPadrao+'" não reconhecida — linhas sem loja ficarão sem loja.','warn');
+            }
+          }
+        }
       }
 
       // Perguntar se substitui ou acrescenta
@@ -23428,8 +23531,11 @@ window.excelProcessarUpload = function(event){
       };
 
       save();
-      const msg = ignorados > 0
-        ? `✅ ${dadosProcessados.length} linhas importadas (${ignorados} ignoradas por falta de data/valor).`
+      const partes = [];
+      if(ignoradosDadosVazios > 0) partes.push(ignoradosDadosVazios+' sem data/valor');
+      if(ignoradosNaoVenda > 0) partes.push(ignoradosNaoVenda+' não-venda (troca/devolução)');
+      const msg = partes.length
+        ? `✅ ${dadosProcessados.length} linhas importadas (${partes.join(', ')} ignoradas).`
         : `✅ ${dadosProcessados.length} linhas importadas.`;
       showToast(msg,'ok');
       // Reset input para permitir re-upload do mesmo arquivo
