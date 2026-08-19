@@ -268,6 +268,7 @@ try{
           contatos:            D2.contatos             || [],
           excelDados:          D2.excelDados           || [],
           _excelImportInfo:    D2._excelImportInfo     || null,
+          _excelImportacoes:   D2._excelImportacoes    || [],
           _contatosExcluidos:  D2._contatosExcluidos   || {}
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
@@ -2857,6 +2858,22 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
+
+  <!-- [NEW R40] Gerenciamento de importações — só admin -->
+  <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="excel-gestao-imports">
+    <div class="st">📥 Gestão de Importações</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Cada upload é registrado como uma importação. Você pode excluir uma sem apagar as outras.</div>
+    <div id="excel-imports-lista"></div>
+  </div>
+
+  <!-- [NEW R40] Alerta de vendedoras órfãs — só admin -->
+  <div class="sc admin-only" style="margin-bottom:14px;display:none;background:rgba(255,107,122,.06);border:1px solid rgba(255,107,122,.35)" id="excel-orfas-box">
+    <div class="st" style="color:#ff6b7a">⚠️ Vendedoras sem loja identificada</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Essas vendedoras não estão cadastradas no sistema (ou o nome não bate), então as vendas delas <strong style="color:#ff6b7a">não aparecem para nenhuma loja</strong>. Selecione a loja de cada uma e clique em Atribuir.</div>
+    <div id="excel-orfas-lista"></div>
+  </div>
+
+
   <!-- Filtros -->
   <div class="sc" style="margin-bottom:14px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -5246,6 +5263,7 @@ if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
 if(!D.excelDados) D.excelDados=[];
+if(!D._excelImportacoes) D._excelImportacoes=[];
 if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
 if(!D.historicoMeses) D.historicoMeses={}; // Histórico de meses POR LOJA: D.historicoMeses[lojaId][mesRef]
@@ -5905,6 +5923,7 @@ async function loadFromFirestore(){
         D.excelDados = remoto.excelDados;
         if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
       }
+      if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
@@ -14952,6 +14971,7 @@ async function forceSyncAdmin(){
       D.excelDados = remoto.excelDados;
       if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
     }
+    if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
     localStorage.setItem('avatim_v5', JSON.stringify(D));
     const ts = new Date().toLocaleTimeString('pt-BR');
     if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
@@ -23511,7 +23531,8 @@ window.excelProcessarUpload = function(event){
           categoria: String(row[colMap.categoria] || '').trim(),
           qtde: colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1,
           valor: val,
-          cupom: String(row[colMap.cupom] || '').trim()
+          cupom: String(row[colMap.cupom] || '').trim(),
+          _importId: '' // preenchido logo abaixo
         });
       }
 
@@ -23562,16 +23583,34 @@ window.excelProcessarUpload = function(event){
 
       // Perguntar se substitui ou acrescenta
       const acao = D.excelDados.length > 0
-        ? (confirm(`Já existem ${D.excelDados.length} linhas no sistema.\n\nOK = ADICIONAR ao existente\nCancelar = SUBSTITUIR tudo pelo novo arquivo`) ? 'adicionar' : 'substituir')
+        ? (confirm(`Já existem ${D.excelDados.length} linhas no sistema (${(D._excelImportacoes||[]).length} importação(ões)).\n\nOK = ADICIONAR esta nova ao existente (recomendado para atualização mês a mês)\nCancelar = SUBSTITUIR tudo pelo novo arquivo (apaga todas as importações anteriores)`) ? 'adicionar' : 'substituir')
         : 'substituir';
+
+      // [NEW R40] Criar registro da importação e marcar linhas
+      const _impId = _importIdGerar();
+      const _refMes = _importDeduzirRefMes(dadosProcessados);
+      const _cLojas = _importContarLojas(dadosProcessados);
+      dadosProcessados.forEach(r => { r._importId = _impId; });
 
       if(acao === 'substituir'){
         D.excelDados = dadosProcessados;
+        D._excelImportacoes = [];
       } else {
         D.excelDados = [...(D.excelDados||[]), ...dadosProcessados];
       }
 
-      // Metadata da última importação
+      if(!D._excelImportacoes) D._excelImportacoes = [];
+      D._excelImportacoes.push({
+        id: _impId,
+        arquivo: file.name,
+        importadoEm: Date.now(),
+        linhas: dadosProcessados.length,
+        refMes: _refMes,
+        lojaCounts: _cLojas.lojaCounts,
+        orfas: _cLojas.orfas,
+        colunasDetectadas: Object.keys(colMap)
+      });
+
       D._excelImportInfo = {
         arquivo: file.name,
         linhas: dadosProcessados.length,
@@ -23645,6 +23684,22 @@ window.excelRender = function(){
 
   // [NEW R39] Ajustar visibilidade por perfil (loja fixa quando não é admin)
   if(typeof _excelAjustarPerfil === 'function') _excelAjustarPerfil();
+
+  // [FIX R40] Re-deduzir loja de linhas órfãs (vendedora cadastrada depois)
+  if(typeof _excelRededuzirOrfas === 'function'){
+    const _corrig = _excelRededuzirOrfas();
+    if(_corrig > 0){
+      console.log('[Excel] Re-deduzida loja de', _corrig, 'linha(s) órfãs');
+      (D._excelImportacoes || []).forEach(imp => {
+        const linhasImp = (D.excelDados||[]).filter(r => r._importId === imp.id);
+        const c = _importContarLojas(linhasImp);
+        imp.lojaCounts = c.lojaCounts;
+        imp.orfas = c.orfas;
+      });
+    }
+  }
+  if(typeof _excelRenderImportacoes === 'function') _excelRenderImportacoes();
+  if(typeof _excelRenderOrfas === 'function') _excelRenderOrfas();
 
   // Popular selects de filtro dinamicamente
   const anos = new Set(), dias = new Set(), lojas = new Set();
@@ -24464,6 +24519,237 @@ function _excelAjustarPerfil(){
       sub.textContent = 'CRM da loja ' + lNome + ' — clientes, vendedoras, produtos e inativos';
     }
   }
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW R40] GESTÃO DE IMPORTAÇÕES + REATRIBUIÇÃO DE ÓRFÃS
+// - D._excelImportacoes = [{id, arquivo, importadoEm, linhas, refMes,
+//                          lojaCounts:{lid:n}, orfas:n}]
+// - Cada linha em D.excelDados ganha _importId (string) e refMes ("2026-08")
+// - Admin pode listar, excluir (por id) e ver detalhes de cada importação
+// - Órfãs (r.loja==='') podem ser reatribuídas em massa a uma loja
+// ══════════════════════════════════════════════════════════════════════
+
+if(!D._excelImportacoes) D._excelImportacoes = [];
+
+// Gerar ID único curto de importação
+function _importIdGerar(){
+  return 'imp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
+}
+
+// Deduzir refMes de uma importação (mês mais frequente nas linhas)
+function _importDeduzirRefMes(linhas){
+  const cnt = {};
+  linhas.forEach(r => {
+    if(!r.data) return;
+    const mr = r.data.slice(0,7);
+    cnt[mr] = (cnt[mr] || 0) + 1;
+  });
+  return Object.entries(cnt).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
+}
+
+// Contagem por loja dentro de linhas
+function _importContarLojas(linhas){
+  const cnt = {};
+  let orfas = 0;
+  linhas.forEach(r => {
+    if(!r.loja){ orfas++; return; }
+    cnt[r.loja] = (cnt[r.loja] || 0) + 1;
+  });
+  return { lojaCounts: cnt, orfas };
+}
+
+// [FIX R40] RE-DEDUZIR loja das linhas órfãs sempre que excelRender rodar
+// Se admin cadastrou a vendedora DEPOIS do upload, agora os dados aparecem
+function _excelRededuzirOrfas(){
+  if(!D.excelDados?.length) return 0;
+  const mapa = {};
+  (D.vendedoras || []).forEach(v => {
+    const norm = _crmNorm(v.nome);
+    if(norm && v.loja) mapa[norm] = v.loja;
+  });
+  let corrigidas = 0;
+  D.excelDados.forEach(r => {
+    if(r.loja) return;
+    if(!r.vendedora) return;
+    const norm = _crmNorm(r.vendedora);
+    if(mapa[norm]){
+      r.loja = mapa[norm];
+      corrigidas++;
+    }
+  });
+  return corrigidas;
+}
+
+// Listar vendedoras órfãs (agrupa por nome normalizado)
+function _excelListarOrfas(){
+  const mapa = new Map(); // norm → {nome, linhas, valorTotal, primeiraData, ultimaData}
+  (D.excelDados || []).forEach(r => {
+    if(r.loja) return;
+    const nome = (r.vendedora || '').trim() || '(sem vendedora)';
+    const norm = _crmNorm(nome);
+    if(!mapa.has(norm)) mapa.set(norm, {nome, linhas:0, valor:0, primeira:'', ultima:''});
+    const o = mapa.get(norm);
+    o.linhas++;
+    o.valor += Number(r.valor) || 0;
+    if(!o.primeira || r.data < o.primeira) o.primeira = r.data;
+    if(!o.ultima || r.data > o.ultima) o.ultima = r.data;
+  });
+  return [...mapa.values()].sort((a,b) => b.linhas - a.linhas);
+}
+
+// Atribuir loja a todas as linhas de uma vendedora órfã
+window.excelAtribuirLojaOrfa = function(nomeNorm, lid){
+  if(!lid){ showToast('Escolha uma loja.','warn'); return; }
+  const src = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS);
+  if(!src.some(l => l.id === lid)){ showToast('Loja inválida.','err'); return; }
+  let n = 0;
+  (D.excelDados || []).forEach(r => {
+    if(r.loja) return;
+    if(_crmNorm(r.vendedora) === nomeNorm){
+      r.loja = lid;
+      n++;
+    }
+  });
+  if(n === 0){ showToast('Nenhuma linha atualizada.','warn'); return; }
+  // Também atualizar contagens das importações
+  (D._excelImportacoes || []).forEach(imp => {
+    const linhasImp = (D.excelDados||[]).filter(r => r._importId === imp.id);
+    const c = _importContarLojas(linhasImp);
+    imp.lojaCounts = c.lojaCounts;
+    imp.orfas = c.orfas;
+    imp.linhas = linhasImp.length;
+  });
+  save();
+  showToast('✅ '+n+' linha(s) atribuídas à loja '+(src.find(l=>l.id===lid)?.nome||lid),'ok');
+  window.excelRender();
+};
+
+// Excluir uma importação inteira (todas as linhas com aquele _importId)
+window.excelExcluirImportacao = function(impId){
+  const imp = (D._excelImportacoes || []).find(i => i.id === impId);
+  if(!imp){ showToast('Importação não encontrada.','err'); return; }
+  const antes = (D.excelDados || []).length;
+  if(!confirm(`Excluir a importação "${imp.arquivo}" (${imp.linhas} linhas de ${imp.refMes || '?'})? Esta ação não pode ser desfeita.`)) return;
+  D.excelDados = (D.excelDados || []).filter(r => r._importId !== impId);
+  D._excelImportacoes = (D._excelImportacoes || []).filter(i => i.id !== impId);
+  const removidas = antes - D.excelDados.length;
+  save();
+  showToast('🗑️ Importação excluída — '+removidas+' linhas removidas.','ok');
+  window.excelRender();
+};
+
+// Render do painel de importações
+function _excelRenderImportacoes(){
+  const el = document.getElementById('excel-imports-lista');
+  const wrap = document.getElementById('excel-gestao-imports');
+  if(!el || !wrap) return;
+  if(!(typeof isAdmin === 'function' && isAdmin())){ wrap.style.display = 'none'; return; }
+  const imps = D._excelImportacoes || [];
+  if(!imps.length){
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+
+  const linhasOrdenadas = [...imps].sort((a,b) => (b.importadoEm||0) - (a.importadoEm||0));
+  const src = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS);
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:640px;font-size:11px">
+        <thead><tr>
+          <th>Arquivo</th>
+          <th style="text-align:center">Mês ref.</th>
+          <th style="text-align:center">Linhas</th>
+          <th>Por loja</th>
+          <th style="text-align:center">Órfãs</th>
+          <th>Importado em</th>
+          <th style="width:60px;text-align:center">Ação</th>
+        </tr></thead>
+        <tbody>
+          ${linhasOrdenadas.map(imp => {
+            const dtImp = imp.importadoEm ? new Date(imp.importadoEm).toLocaleString('pt-BR') : '—';
+            const detLojas = Object.entries(imp.lojaCounts || {})
+              .sort((a,b) => b[1] - a[1])
+              .map(([lid,n]) => {
+                const nome = src.find(l => l.id === lid)?.nome || lid;
+                return `<span style="display:inline-block;background:var(--cinza);padding:2px 6px;border-radius:4px;margin:1px;font-size:10px">${nome}: <strong>${n}</strong></span>`;
+              }).join('');
+            return `<tr>
+              <td><strong>${imp.arquivo || '—'}</strong></td>
+              <td style="text-align:center;color:var(--ouro);font-weight:600">${imp.refMes || '—'}</td>
+              <td style="text-align:center;font-weight:700">${imp.linhas || 0}</td>
+              <td style="line-height:1.6">${detLojas || '<span style="color:var(--muted)">—</span>'}</td>
+              <td style="text-align:center;color:${imp.orfas>0?'var(--verm)':'var(--muted)'};font-weight:${imp.orfas>0?700:400}">${imp.orfas || 0}</td>
+              <td style="color:var(--muted);font-size:10px">${dtImp}</td>
+              <td style="text-align:center">
+                <button onclick="window.excelExcluirImportacao('${imp.id}')" title="Excluir esta importação"
+                  style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// Render do painel de órfãs (com dropdown pra reatribuir)
+function _excelRenderOrfas(){
+  const el = document.getElementById('excel-orfas-lista');
+  const wrap = document.getElementById('excel-orfas-box');
+  if(!el || !wrap) return;
+  if(!(typeof isAdmin === 'function' && isAdmin())){ wrap.style.display = 'none'; return; }
+  const orfas = _excelListarOrfas();
+  if(!orfas.length){
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+  const src = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS);
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:600px;font-size:11px">
+        <thead><tr>
+          <th>Vendedora (não cadastrada)</th>
+          <th style="text-align:center">Linhas</th>
+          <th style="text-align:right">Faturamento</th>
+          <th>Período</th>
+          <th>Atribuir loja</th>
+        </tr></thead>
+        <tbody>
+          ${orfas.map(o => {
+            const nomeNorm = _crmNorm(o.nome);
+            const selId = 'orfa-sel-' + nomeNorm.replace(/[^a-z0-9]/g,'');
+            const periodo = o.primeira === o.ultima
+              ? o.primeira.split('-').reverse().join('/')
+              : o.primeira.split('-').reverse().join('/') + ' → ' + o.ultima.split('-').reverse().join('/');
+            return `<tr>
+              <td><strong>${o.nome}</strong></td>
+              <td style="text-align:center">${o.linhas}</td>
+              <td style="text-align:right;color:var(--verde);font-weight:700">${fmt(o.valor)}</td>
+              <td style="color:var(--muted);font-size:10px">${periodo}</td>
+              <td>
+                <select id="${selId}" style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:var(--texto);font-size:11px">
+                  <option value="">— escolher —</option>
+                  ${src.map(l => `<option value="${l.id}">${l.nome}</option>`).join('')}
+                </select>
+                <button onclick="window.excelAtribuirLojaOrfa('${nomeNorm}', document.getElementById('${selId}').value)"
+                  style="background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:4px;font-weight:600">Atribuir</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
+      💡 <strong>Dica:</strong> cadastre a vendedora em Metas → Vendedoras com a loja dela ANTES de subir a planilha. Assim o sistema deduz a loja automaticamente. Se cadastrar depois, atualize a página para rededuzir.
+    </div>
+  `;
 }
 
 </script>
