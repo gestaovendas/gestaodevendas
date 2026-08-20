@@ -251,6 +251,7 @@ try{
           metasProd:     D2.metasProd     || [],
           realProd:      D2.realProd      || {},
           configCom:     D2.configCom     || {},
+          configModalidades: D2.configModalidades || {},
           fluxo:         D2.fluxo         || [],
           saldosOverride:D2.saldosOverride|| {},
           produtosExtras:D2.produtosExtras|| [],
@@ -1881,6 +1882,48 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <div class="page" id="page-metas">
+  <!-- [NEW R41] Configuração de Modalidades — só admin -->
+  <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="cfg-modalidades-box">
+    <div class="st">🎁 Configuração de Modalidades (Gift Back / Desconto / Cash Back)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Percentual aplicado automaticamente quando a vendedora escolhe uma modalidade ao registrar um atendimento. A vendedora <strong>não altera</strong> — só admin.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">🎁 Gift Back (% da compra)</label>
+        <input type="number" id="cfg-mod-giftback" step="0.5" min="0" max="100" value="15"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:13px"
+          onchange="window.salvarConfigModalidades()">
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">Ex: R$ 180 × 15% = R$ 27</div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">💸 Desconto na Compra (%)</label>
+        <input type="number" id="cfg-mod-desconto" step="0.5" min="0" max="100" value="12"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:13px"
+          onchange="window.salvarConfigModalidades()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">💰 Cash Back (%)</label>
+        <input type="number" id="cfg-mod-cashback" step="0.5" min="0" max="100" value="0"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:13px"
+          onchange="window.salvarConfigModalidades()">
+      </div>
+    </div>
+
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--borda)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;color:var(--ouro)">📦 Faixas de Produtos (Gift Back)</div>
+          <div style="font-size:11px;color:var(--muted)">Configure faixas de valor de compra e os produtos que o cliente pode escolher em cada faixa.</div>
+        </div>
+        <button class="btn-s" onclick="window.gbFaixaAdicionar()"
+          style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:11px;padding:6px 12px">+ Nova faixa</button>
+      </div>
+      <div id="cfg-mod-faixas-lista" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
+        💡 Exemplo: uma faixa de <strong>R$ 150 a R$ 199</strong> com "Sabonete Glicerinado, Creme de Mãos Sensore, Álcool Gel". Outra de <strong>R$ 200 a R$ 299</strong> com "Gel de Banho Linha Sensore". A vendedora vê as opções conforme o valor da compra digitado.
+      </div>
+    </div>
+  </div>
+
   <div class="ph">
     <div><h1 class="pt">Metas &amp; <span>KPIs</span></h1><div class="ps" id="metas-subtitulo">Performance da sua loja</div></div>
     <button class="btn-p" onclick="exportarPDFRelatorio()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
@@ -2155,7 +2198,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <input type="text" id="fx-nome" placeholder="Nome completo" autocomplete="off">
         </div>
         <div class="ig"><label>Valor da Venda (R$)</label>
-          <input type="text" inputmode="decimal" id="fx-valor" placeholder="0,00">
+          <input type="text" inputmode="decimal" id="fx-valor" placeholder="0,00" oninput="if(document.getElementById('fx-modalidade')?.value) _fxModalidadeMudou()">
         </div>
         <div class="ig"><label>Data</label>
           <input type="date" id="fx-data">
@@ -2190,6 +2233,31 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
             <option value="retorno">🔄 Retorno</option>
             <option value="inativo">♻️ Reativação</option>
           </select>
+        </div>
+        <div class="ig"><label>Modalidade</label>
+          <select id="fx-modalidade" onchange="_fxModalidadeMudou()">
+            <option value="">— nenhuma —</option>
+            <option value="gift_back">🎁 Gift Back</option>
+            <option value="desconto">💸 Desconto na Compra</option>
+            <option value="cash_back">💰 Cash Back</option>
+          </select>
+        </div>
+        <div class="ig"><label>Nº do Ticket</label>
+          <input type="text" id="fx-ticket" placeholder="Ex: 10334" autocomplete="off">
+        </div>
+        <div class="ig" id="fx-benef-box" style="display:none">
+          <label id="fx-benef-lbl">Benefício calculado</label>
+          <div style="background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--ouro);font-weight:700" id="fx-benef-valor">R$ 0,00</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px" id="fx-benef-help">Percentual configurado pelo administrador</div>
+        </div>
+        <div class="ig" id="fx-produtos-box" style="display:none;grid-column:1/-1">
+          <label id="fx-produtos-lbl">🎁 Produtos que o cliente pode escolher (faixa aplicável)</label>
+          <div id="fx-produtos-lista" style="background:rgba(122,199,79,.06);border:1px solid rgba(122,199,79,.35);border-radius:8px;padding:10px;font-size:12px;max-height:220px;overflow-y:auto"></div>
+          <div style="margin-top:6px">
+            <label style="font-size:11px;color:var(--muted)">Produto(s) escolhido(s) pelo cliente:</label>
+            <input type="text" id="fx-produto-escolhido" placeholder="Ex: Gel de banho Sensore" autocomplete="off"
+              style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px;margin-top:2px">
+          </div>
         </div>
         <div class="ig"><label>Vendedora</label>
           <select id="fx-vend"><option value="">Selecione...</option></select>
@@ -5260,6 +5328,7 @@ if(!D.arquivos)   D.arquivos=[];
 if(!D.metasProd)  D.metasProd=[];
 if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
+if(!D.configModalidades) D.configModalidades={giftback:15, desconto:12, cashback:0, faixasGiftBack:[]};
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
 if(!D.excelDados) D.excelDados=[];
@@ -5925,6 +5994,7 @@ async function loadFromFirestore(){
       }
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
       if(remoto.configCom)   D.configCom   = remoto.configCom;
+      if(remoto.configModalidades) D.configModalidades = remoto.configModalidades;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
       // Tombstones: carregar do remoto (preservar exclusoes feitas em qualquer dispositivo)
@@ -6939,7 +7009,7 @@ function nav(pg){
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
   document.getElementById("nav-"+pg)?.classList.add("active");
-  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
+  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:()=>{renderMetas(); if(typeof window._configModalidadesRender==="function") window._configModalidadesRender();},
     performance:renderPerformance,
     controle:renderControle,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
@@ -24751,6 +24821,217 @@ function _excelRenderOrfas(){
     </div>
   `;
 }
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [NEW R41] GIFT BACK / MODALIDADES na Origem do Fluxo
+// - Vendedora escolhe modalidade → sistema calcula benefício com % do admin
+// - Gift Back mostra produtos disponíveis conforme faixa de valor
+// - Admin configura em Metas: % + faixas de valor → produtos
+// ══════════════════════════════════════════════════════════════════════
+
+// Init defensivo
+if(typeof D !== 'undefined' && !D.configModalidades){
+  D.configModalidades = {giftback:15, desconto:12, cashback:0, faixasGiftBack:[]};
+}
+
+// Achar faixa aplicável ao valor de compra
+function _gbFaixaParaValor(valor){
+  const faixas = (D.configModalidades && D.configModalidades.faixasGiftBack) || [];
+  return faixas.find(f => valor >= (Number(f.min)||0) && valor <= (Number(f.max)||Infinity));
+}
+
+// Reagir a mudança de modalidade OU valor: mostra benefício + produtos
+window._fxModalidadeMudou = function(){
+  const mod = document.getElementById("fx-modalidade")?.value || "";
+  const box = document.getElementById("fx-benef-box");
+  const val = document.getElementById("fx-benef-valor");
+  const lbl = document.getElementById("fx-benef-lbl");
+  const help = document.getElementById("fx-benef-help");
+  const prodBox = document.getElementById("fx-produtos-box");
+  if(!box) return;
+  if(!mod){
+    box.style.display = "none";
+    if(prodBox) prodBox.style.display = "none";
+    return;
+  }
+  const cfg = D.configModalidades || {};
+  const valor = parseBR(document.getElementById("fx-valor")?.value)||0;
+  let pct = 0, nome = "Benefício";
+  if(mod === "gift_back"){    pct = Number(cfg.giftback) || 0; nome = "🎁 Gift Back"; }
+  if(mod === "desconto"){     pct = Number(cfg.desconto) || 0; nome = "💸 Desconto"; }
+  if(mod === "cash_back"){    pct = Number(cfg.cashback) || 0; nome = "💰 Cash Back"; }
+  const beneficio = Math.round((valor * pct / 100) * 100) / 100;
+  box.style.display = "";
+  if(lbl) lbl.textContent = nome + " calculado (" + pct + "%)";
+  if(val) val.textContent = "R$ " + beneficio.toFixed(2).replace(".",",");
+  if(help) help.textContent = valor > 0
+    ? "R$ " + valor.toFixed(2).replace(".",",") + " × " + pct + "% = R$ " + beneficio.toFixed(2).replace(".",",")
+    : "Digite o valor da venda acima para calcular";
+
+  // Lista de produtos disponíveis — APENAS para Gift Back
+  if(prodBox){
+    if(mod === "gift_back" && valor > 0){
+      const faixa = _gbFaixaParaValor(valor);
+      const listaEl = document.getElementById("fx-produtos-lista");
+      const lblProd = document.getElementById("fx-produtos-lbl");
+      if(faixa){
+        prodBox.style.display = "";
+        if(lblProd) lblProd.innerHTML = '🎁 Produtos disponíveis para R$ <strong>'+ valor.toFixed(2).replace(".",",") +'</strong> — faixa R$ '+ Number(faixa.min).toFixed(2).replace(".",",") +' a R$ '+ Number(faixa.max).toFixed(2).replace(".",",");
+        const prods = (faixa.produtos || []);
+        if(prods.length){
+          listaEl.innerHTML = prods.map(p => '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)">✓ '+p+'</div>').join('');
+        } else {
+          listaEl.innerHTML = '<div style="color:var(--muted)">Nenhum produto configurado nesta faixa.</div>';
+        }
+      } else {
+        prodBox.style.display = "";
+        if(lblProd) lblProd.textContent = "🎁 Sem faixa configurada para R$ " + valor.toFixed(2).replace(".",",");
+        const listaElN = document.getElementById("fx-produtos-lista");
+        if(listaElN) listaElN.innerHTML = '<div style="color:var(--muted)">Nenhuma faixa cadastrada cobre este valor. Peça ao administrador para configurar.</div>';
+      }
+    } else {
+      prodBox.style.display = "none";
+    }
+  }
+};
+
+// [NEW R41] REESCREVER salvarFluxo — sobrescrever a versão original para incluir modalidade
+window.salvarFluxo = function(){
+  const nome=document.getElementById("fx-nome").value.trim();
+  const origem=document.getElementById("fx-origem").value;
+  const vendId=document.getElementById("fx-vend").value;
+  const valor=parseBR(document.getElementById("fx-valor").value)||0;
+  const data=document.getElementById("fx-data").value||hoje();
+  const obs=document.getElementById("fx-obs").value.trim();
+  const nomeF = nome || "Cliente Anônimo";
+  const vend=D.vendedoras.find(v=>v.id===vendId);
+  const loja=vend?vend.loja:lojaId();
+  if(!D.fluxo) D.fluxo=[];
+  const canal = document.getElementById("fx-canal")?.value||"loja";
+  const tipoCliente = document.getElementById("fx-novo")?.value||"novo";
+
+  // Modalidade + Ticket + Benefício + Produto escolhido
+  const modalidade = document.getElementById("fx-modalidade")?.value || "";
+  const ticket = (document.getElementById("fx-ticket")?.value || "").trim();
+  const produtoEscolhido = (document.getElementById("fx-produto-escolhido")?.value || "").trim();
+  let modalidadePct = 0;
+  let beneficioValor = 0;
+  if(modalidade && valor > 0){
+    const cfg = D.configModalidades || {};
+    if(modalidade === "gift_back")    modalidadePct = Number(cfg.giftback) || 0;
+    else if(modalidade === "desconto") modalidadePct = Number(cfg.desconto) || 0;
+    else if(modalidade === "cash_back")modalidadePct = Number(cfg.cashback) || 0;
+    beneficioValor = Math.round((valor * modalidadePct / 100) * 100) / 100;
+  }
+
+  D.fluxo.push({
+    id:"fx"+Date.now(),
+    nome:nomeF, origem, canal, tipoCliente, vendId, loja, valor, data, obs,
+    modalidade, modalidadePct, beneficioValor, ticket, produtoEscolhido,
+    ts:Date.now()
+  });
+  save();
+  showToast("✅ "+nome+" registrado como "+( ORIGENS[origem]?.label||origem)+(modalidade?" · benefício R$ "+beneficioValor.toFixed(2).replace(".",","):""));
+  toggleFormFluxo();
+  renderFluxo();
+};
+
+// Salvar os 3 percentuais
+window.salvarConfigModalidades = function(){
+  const gb = parseFloat(document.getElementById("cfg-mod-giftback")?.value || "0");
+  const de = parseFloat(document.getElementById("cfg-mod-desconto")?.value || "0");
+  const cb = parseFloat(document.getElementById("cfg-mod-cashback")?.value || "0");
+  if(!D.configModalidades) D.configModalidades = {};
+  D.configModalidades.giftback = gb;
+  D.configModalidades.desconto = de;
+  D.configModalidades.cashback = cb;
+  D.configModalidades._savedAt = Date.now();
+  save();
+  showToast("Configuração de modalidades salva.", "ok");
+};
+
+// CRUD de faixas
+window.gbFaixaAdicionar = function(){
+  if(!D.configModalidades) D.configModalidades = {};
+  if(!Array.isArray(D.configModalidades.faixasGiftBack)) D.configModalidades.faixasGiftBack = [];
+  D.configModalidades.faixasGiftBack.push({id:"gb"+Date.now(), min:0, max:0, produtos:[]});
+  D.configModalidades._savedAt = Date.now();
+  save();
+  window._configModalidadesRender();
+};
+
+window.gbFaixaRemover = function(id){
+  if(!confirm("Remover esta faixa?")) return;
+  const cfg = D.configModalidades || {};
+  cfg.faixasGiftBack = (cfg.faixasGiftBack||[]).filter(f => f.id !== id);
+  cfg._savedAt = Date.now();
+  save();
+  window._configModalidadesRender();
+};
+
+window.gbFaixaAtualizar = function(id){
+  const cfg = D.configModalidades || {};
+  const f = (cfg.faixasGiftBack||[]).find(x => x.id === id);
+  if(!f) return;
+  const mn = parseFloat(document.getElementById("gbf-min-"+id)?.value || "0");
+  const mx = parseFloat(document.getElementById("gbf-max-"+id)?.value || "0");
+  const pt = (document.getElementById("gbf-prods-"+id)?.value || "").trim();
+  f.min = mn;
+  f.max = mx;
+  f.produtos = pt ? pt.split(/\n+/).map(s=>s.trim()).filter(Boolean) : [];
+  cfg._savedAt = Date.now();
+  save();
+};
+
+// Renderizar toda a config admin
+window._configModalidadesRender = function(){
+  const cfg = D.configModalidades || {};
+  const setV = (id, v) => { const e = document.getElementById(id); if(e && v !== undefined) e.value = v; };
+  setV("cfg-mod-giftback", cfg.giftback !== undefined ? cfg.giftback : 15);
+  setV("cfg-mod-desconto", cfg.desconto !== undefined ? cfg.desconto : 12);
+  setV("cfg-mod-cashback", cfg.cashback !== undefined ? cfg.cashback : 0);
+
+  const box = document.getElementById("cfg-modalidades-box");
+  if(box) box.style.display = (typeof isAdmin === "function" && isAdmin()) ? "" : "none";
+
+  const lista = document.getElementById("cfg-mod-faixas-lista");
+  if(!lista) return;
+  const faixas = Array.isArray(cfg.faixasGiftBack) ? cfg.faixasGiftBack : [];
+  if(!faixas.length){
+    lista.innerHTML = '<div style="color:var(--muted);font-size:11px;text-align:center;padding:16px;border:1px dashed var(--borda);border-radius:8px">Nenhuma faixa cadastrada ainda. Clique em "+ Nova faixa" para começar.</div>';
+    return;
+  }
+  const ordenadas = [...faixas].sort((a,b) => (Number(a.min)||0) - (Number(b.min)||0));
+  lista.innerHTML = ordenadas.map(f => {
+    const produtosTxt = (f.produtos || []).join("\n");
+    return '<div style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:12px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">' +
+        '<div>' +
+          '<label style="font-size:10px;color:var(--muted);display:block">De (R$)</label>' +
+          '<input type="number" id="gbf-min-'+f.id+'" value="'+(f.min||0)+'" step="0.01" min="0" ' +
+            'style="width:100%;background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:12px" ' +
+            'onchange="window.gbFaixaAtualizar(\''+f.id+'\')">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;color:var(--muted);display:block">Até (R$)</label>' +
+          '<input type="number" id="gbf-max-'+f.id+'" value="'+(f.max||0)+'" step="0.01" min="0" ' +
+            'style="width:100%;background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:12px" ' +
+            'onchange="window.gbFaixaAtualizar(\''+f.id+'\')">' +
+        '</div>' +
+        '<button onclick="window.gbFaixaRemover(\''+f.id+'\')" title="Remover faixa" ' +
+          'style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:16px;padding:0 6px">🗑️</button>' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">Produtos disponíveis (um por linha)</label>' +
+        '<textarea id="gbf-prods-'+f.id+'" rows="3" placeholder="Sabonete Glicerinado&#10;Creme de Mãos Sensore&#10;Álcool Gel" ' +
+          'style="width:100%;background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;font-family:inherit;resize:vertical" ' +
+          'onchange="window.gbFaixaAtualizar(\''+f.id+'\')">'+produtosTxt+'</textarea>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+};
 
 </script>
 </body>
