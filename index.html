@@ -2161,7 +2161,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <label style="font-size:10px;color:var(--muted)">Até</label>
         <input type="date" id="fluxo-per-ate" onchange="renderFluxo()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
       </div>
-      <button class="btn-s" onclick="exportarPDFFluxo()" style="font-size:11px;padding:7px 14px">📄 PDF</button>
+      <button class="btn-s" onclick="exportarPDFFluxo()" style="font-size:11px;padding:7px 14px" title="Relatório categorizado em PDF">📄 PDF</button>
+      <button class="btn-s" onclick="exportarExcelFluxo()" style="font-size:11px;padding:7px 14px;background:rgba(33,115,70,.15);border-color:rgba(33,115,70,.5);color:#4caf7d" title="Relatório categorizado em Excel (.xlsx), uma aba por categoria">📊 Excel</button>
+      <button class="btn-s" onclick="exportarModoDivulgacaoFluxo()" style="font-size:11px;padding:7px 14px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="PDF para publicar com a equipe — destaques e pódio, sem valores em R$">📢 Divulgação</button>
       <button class="btn-p" onclick="toggleFormFluxo()" style="font-size:11px">+ Registrar</button>
     </div>
   </div>
@@ -9770,8 +9772,20 @@ function exportarPDFFluxo(){
 
   if(!regs.length){ showToast("Nenhum registro no período para exportar.","err"); return; }
 
-  const periodo = document.getElementById("fx-periodo-label")?.textContent || "";
+  // [FIX R44] lia o elemento "fx-periodo-label", que não existe no HTML —
+  // o cabeçalho do PDF dizia "Período: todos" mesmo com filtro aplicado.
+  // Agora usa a mesma apuração de período do Excel e da Divulgação.
+  const _perRel = window._fluxoPeriodoAtual();
+  const _dPt = d => d.split("-").reverse().join("/");
+  const periodo = _perRel.label + " (" + _dPt(_perRel.ini) + " a " + _dPt(_perRel.fim) + ")";
   const lojaNm  = lojaFiltro ? (LOJAS.find(l=>l.id===lojaFiltro)?.nome||lojaFiltro) : "Rede Completa";
+  // [R45] O navegador usa o <title> como nome sugerido do arquivo ao salvar
+  // em PDF. Antes era sempre "Origem do Fluxo — Rede Completa", então todo
+  // relatório saía com o mesmo nome. Agora carrega o período.
+  // Barra vira separador de pasta em alguns sistemas — usar hífen na data.
+  const _dArq = d => d.split("-").reverse().join("-");
+  const _tituloArquivoPDF = "Origem do Fluxo — " + lojaNm
+                          + " — " + _dArq(_perRel.ini) + " a " + _dArq(_perRel.fim);
   const hj = hoje();
 
   const totalClientes = regs.length;
@@ -9869,6 +9883,69 @@ function exportarPDFFluxo(){
     <td style="text-align:right">${o.val>0?fmt(o.val):"—"}</td>
   </tr>`).join("");
 
+  // [R44] Categorização por perfil (aniversariante, inativo, novo, retorno)
+  // com modalidade e produtos de cada um. Usa a MESMA apuração do Excel.
+  const catPDF = window._fluxoCategorizar(regs);
+  const secoesCategoria = catPDF.porPerfil.filter(pf => pf.n > 0).map(pf => {
+    const linhasMod = pf.porModalidade.length
+      ? pf.porModalidade.map(m => `<tr>
+          <td>${m.label}</td>
+          <td style="text-align:center">${m.n}</td>
+          <td style="text-align:right">${m.pctMedio ? m.pctMedio.toFixed(1)+"%" : "—"}</td>
+          <td style="text-align:right">${fmt(m.faturamento)}</td>
+          <td style="text-align:right"><strong>${fmt(m.beneficio)}</strong></td>
+        </tr>`).join("")
+      : `<tr><td colspan="5" style="text-align:center;color:#999">Nenhuma modalidade aplicada.</td></tr>`;
+    const linhasProd = pf.produtos.length
+      ? pf.produtos.map(pr => `<tr>
+          <td style="color:#777;font-size:12.5px">${pr.c || "—"}</td>
+          <td>${pr.n}</td>
+          <td style="text-align:center">${pr.qtd}×</td>
+          <td style="text-align:right">${fmt(pr.valor)}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4" style="text-align:center;color:#999">Nenhum produto entregue neste perfil.</td></tr>`;
+    return `
+<h2>${pf.nome} — ${pf.n} atendimento${pf.n===1?"":"s"}</h2>
+<table>
+  <thead><tr>
+    <th style="text-align:right">Atendimentos</th>
+    <th style="text-align:right">Compraram</th>
+    <th style="text-align:right">Conversão</th>
+    <th style="text-align:right">Faturamento</th>
+    <th style="text-align:right">Ticket Médio</th>
+    <th style="text-align:right">Benefício Concedido</th>
+  </tr></thead>
+  <tbody><tr>
+    <td style="text-align:right"><strong>${pf.n}</strong></td>
+    <td style="text-align:right">${pf.comCompra}</td>
+    <td style="text-align:right">${pf.taxaConversao.toFixed(1)}%</td>
+    <td style="text-align:right">${fmt(pf.faturamento)}</td>
+    <td style="text-align:right">${fmt(pf.ticketMedio)}</td>
+    <td style="text-align:right"><strong>${fmt(pf.beneficio)}</strong></td>
+  </tr></tbody>
+</table>
+<h3 style="font-size:14.5px;margin:16px 0 6px;color:#555">Modalidades aplicadas${pf.semModalidade ? ` — ${pf.semModalidade} sem modalidade` : ""}</h3>
+<table>
+  <thead><tr>
+    <th>Modalidade</th>
+    <th style="text-align:center">Qtd</th>
+    <th style="text-align:right">% médio</th>
+    <th style="text-align:right">Faturamento</th>
+    <th style="text-align:right">Benefício</th>
+  </tr></thead>
+  <tbody>${linhasMod}</tbody>
+</table>
+<h3 style="font-size:14.5px;margin:16px 0 6px;color:#555">Produtos entregues</h3>
+<table>
+  <thead><tr>
+    <th>Código</th><th>Produto</th>
+    <th style="text-align:center">Vezes</th>
+    <th style="text-align:right">Valor total</th>
+  </tr></thead>
+  <tbody>${linhasProd}</tbody>
+</table>`;
+  }).join("");
+
   // [R43] PDF passa a levar modalidade, benefício e produtos escolhidos —
   // antes esses dados existiam no registro mas sumiam na exportação.
   const _MOD_PDF = {gift_back:"Gift Back", desconto:"Desconto", cash_back:"Cash Back"};
@@ -9890,34 +9967,37 @@ function exportarPDFFluxo(){
       <td>${vend?.nome||"—"}</td>
       <td>${loja?.nome||r.loja||"—"}</td>
       <td style="text-align:right">${r.valor>0?fmt(r.valor):"—"}</td>
-      <td>${modTxt}${prods?`<br><span style="font-size:9px;color:#888">${prods}</span>`:""}</td>
+      <td>${modTxt}${prods?`<br><span style="font-size:12.5px;color:#777">${prods}</span>`:""}</td>
       <td style="text-align:right">${r.beneficioValor>0?fmt(r.beneficioValor):"—"}</td>
     </tr>`;
   }).join("");
 
   const win = window.open("","_blank","width=960,height=700");
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
-<meta charset="UTF-8"><title>Origem do Fluxo — ${lojaNm}</title>
+<meta charset="UTF-8"><title>${_tituloArquivoPDF}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;font-size:11px}
-.logo{font-size:18px;font-weight:900;color:#0a0a0a;letter-spacing:1px}
+/* [R45] Corpo dimensionado para leitura confortável em papel.
+   Base 15px, tabelas 14px — um relatório impresso é lido de longe e
+   por gente cansada, não de perto num monitor. */
+body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;font-size:15px;line-height:1.45}
+.logo{font-size:30px;font-weight:900;color:#0a0a0a;letter-spacing:1px}
 .logo span{color:#C9A84C}
-.sub{font-size:10px;color:#666;margin-bottom:2px}
-.periodo{font-size:11px;color:#555;border-bottom:2px solid #C9A84C;padding-bottom:6px;margin-bottom:14px;font-weight:600}
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
-.kcard{background:#f9f7ef;border:1px solid #e8ddb8;border-radius:6px;padding:10px;text-align:center}
-.kl{font-size:8px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
-.kv{font-size:16px;font-weight:700;color:#333}
-h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;color:#555;border-bottom:1px solid #e0e0e0;padding-bottom:4px}
-table{width:100%;border-collapse:collapse;margin-bottom:14px}
-th{background:#f5f0e0;padding:6px 8px;text-align:left;font-size:10px;font-weight:700;color:#333;border-bottom:2px solid #C9A84C}
-td{padding:5px 8px;border-bottom:1px solid #eee;font-size:10px}
+.sub{font-size:15px;color:#555;margin-bottom:3px}
+.periodo{font-size:14px;color:#444;border-bottom:2px solid #C9A84C;padding-bottom:8px;margin-bottom:18px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+.kcard{background:#f9f7ef;border:1px solid #e8ddb8;border-radius:6px;padding:14px 10px;text-align:center}
+.kl{font-size:11px;color:#777;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px}
+.kv{font-size:26px;font-weight:700;color:#222}
+h2{font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;color:#444;border-bottom:1px solid #ddd;padding-bottom:5px}
+table{width:100%;border-collapse:collapse;margin-bottom:18px}
+th{background:#f5f0e0;padding:8px 10px;text-align:left;font-size:14px;font-weight:700;color:#222;border-bottom:2px solid #C9A84C}
+td{padding:7px 10px;border-bottom:1px solid #eee;font-size:14px}
 tr:nth-child(even){background:#fafafa}
-.foot{margin-top:12px;font-size:9px;color:#999;text-align:center}
+.foot{margin-top:16px;font-size:12px;color:#888;text-align:center}
 @media print{body{padding:12px}.foot{display:none}}
 </style></head><body>
-<div class="logo">Mon<span>Aris</span> <span style="font-size:12px;font-weight:400">SALES CONTROL</span></div>
+<div class="logo">Mon<span>Aris</span> <span style="font-size:19px;font-weight:400">SALES CONTROL</span></div>
 <div class="sub">Origem do Fluxo — ${lojaNm}</div>
 <div class="periodo">Período: ${periodo||"todos"} &nbsp;|&nbsp; Gerado em ${new Date().toLocaleString("pt-BR")}</div>
 
@@ -9957,6 +10037,11 @@ tr:nth-child(even){background:#fafafa}
   </tr></thead>
   <tbody>${rowsRecorrentes || '<tr><td colspan="6" style="text-align:center;color:#999">Nenhum cliente com 2 ou mais visitas no período.</td></tr>'}</tbody>
 </table>
+
+<h2>Categorias de Cliente</h2>
+<p style="font-size:13.5px;color:#555;margin:0 0 10px">Cada perfil abaixo traz a modalidade aplicada (Gift Back, Desconto, Cash Back) e os produtos entregues.</p>
+${secoesCategoria || '<p style="color:#999;font-size:14px">Nenhum atendimento categorizado no período.</p>'}
+${catPDF.orfaos.length ? `<p style="font-size:13.5px;color:#a00;margin-top:8px">⚠️ ${catPDF.orfaos.length} registro(s) com perfil de cliente não reconhecido — confira o cadastro.</p>` : ''}
 
 <h2>Registros Detalhados${regs.length>100?" (primeiros 100)":""}</h2>
 <table>
@@ -21589,7 +21674,7 @@ function exportarRelatorioPDF(){
 // apenas posição, nome, % da meta e (para vendedoras) TM.
 // ══════════════════════════════════════════════════════════════════════
 
-function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody){
+function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody, tituloArquivo){
   const w = window.open('', '_blank', 'width=1024,height=768');
   if(!w){
     showToast('Bloqueio de pop-up — libere para exportar.','err');
@@ -21598,28 +21683,37 @@ function _abrirJanelaDivulgacao(titulo, subtitulo, htmlBody){
   const hj = hoje();
   const dataFmt = hj.split('-').reverse().join('/');
   w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>${titulo} — MonAris</title>
+<title>${tituloArquivo || (titulo + " — MonAris")}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}
   body{font-family:'DM Sans',Arial,sans-serif;background:#faf8f0;color:#1a1611;padding:36px 24px;min-height:100vh}
+  /* [R46] Tipografia dimensionada para leitura em papel e telão —
+     este PDF é feito para ser publicado para a equipe, então nada aqui
+     pode depender de aproximar o olho da folha. */
   .cover{max-width:820px;margin:0 auto}
   .brand{text-align:center;margin-bottom:8px}
-  .brand-name{font-family:'Playfair Display',Georgia,serif;font-size:36px;font-weight:800;color:#1a1611;letter-spacing:2px}
+  .brand-name{font-family:'Playfair Display',Georgia,serif;font-size:38px;font-weight:800;color:#1a1611;letter-spacing:2px}
   .brand-name span{color:#c9a84c}
-  .brand-tag{font-size:11px;color:#8a7f5f;letter-spacing:4px;text-transform:uppercase;margin-top:4px}
-  h1{font-family:'Playfair Display',Georgia,serif;font-size:44px;font-weight:800;text-align:center;margin:28px 0 8px;color:#c9a84c;letter-spacing:1px}
-  .sub{text-align:center;font-size:14px;color:#8a7f5f;margin-bottom:32px;letter-spacing:1px;font-weight:600}
-  .podio{display:flex;justify-content:center;align-items:flex-end;gap:16px;margin:40px auto;max-width:640px}
-  .lugar{background:#fff;border:2px solid #c9a84c;border-radius:16px;padding:22px 12px;text-align:center;flex:1;position:relative;box-shadow:0 4px 12px rgba(0,0,0,.08)}
-  .lugar.p1{flex:1.3;padding-top:34px;background:linear-gradient(180deg,#fff8dc,#fff);border-color:#c9a84c;border-width:3px;box-shadow:0 6px 18px rgba(201,168,76,.25)}
+  .brand-tag{font-size:13px;color:#8a7f5f;letter-spacing:4px;text-transform:uppercase;margin-top:5px}
+  h1{font-family:'Playfair Display',Georgia,serif;font-size:46px;font-weight:800;text-align:center;margin:28px 0 8px;color:#c9a84c;letter-spacing:1px;line-height:1.15}
+  .sub{text-align:center;font-size:17px;color:#8a7f5f;margin-bottom:32px;letter-spacing:1px;font-weight:600;line-height:1.35}
+  /* Antes: max-width 640px deixava ~186px por card, e o texto de apoio
+     quebrava em 3 linhas. Agora o pódio usa a largura útil da página. */
+  .podio{display:flex;justify-content:center;align-items:flex-end;gap:14px;margin:36px auto;max-width:100%}
+  /* min-width:0 é o que permite o card encolher e o texto quebrar direito
+     dentro do flex; min-height mantém o pódio com o degrau certo — antes o
+     card do 1º lugar podia ficar MAIS BAIXO que o 2º e o 3º quando o texto
+     deles ocupava mais linhas, invertendo a leitura do pódio. */
+  .lugar{background:#fff;border:2px solid #c9a84c;border-radius:16px;padding:22px 14px;text-align:center;flex:1;min-width:0;min-height:215px;display:flex;flex-direction:column;justify-content:flex-start;position:relative;box-shadow:0 4px 12px rgba(0,0,0,.08)}
+  .lugar.p1{flex:1.3;padding-top:32px;min-height:258px;background:linear-gradient(180deg,#fff8dc,#fff);border-color:#c9a84c;border-width:3px;box-shadow:0 6px 18px rgba(201,168,76,.25)}
   .lugar.p2{background:linear-gradient(180deg,#f5f5f5,#fff);border-color:#a8a8a8}
   .lugar.p3{background:linear-gradient(180deg,#faf0e6,#fff);border-color:#cd7f32}
   .lugar.vazio{opacity:.45;background:#f0ede4;border-color:#d4cfbf;border-style:dashed}
-  .medalha{font-size:52px;line-height:1;margin-bottom:12px}
-  .lugar-nome{font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:700;color:#1a1611;margin-bottom:6px;line-height:1.2}
-  .lugar-info{font-size:12px;color:#8a7f5f;letter-spacing:.5px;font-weight:600}
-  h2{font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:700;color:#c9a84c;text-align:center;margin:56px 0 24px;letter-spacing:1px;border-bottom:1px solid rgba(201,168,76,.3);padding-bottom:8px}
-  .footer{text-align:center;font-size:10px;color:#8a7f5f;margin-top:60px;letter-spacing:1px;border-top:1px solid rgba(201,168,76,.2);padding-top:12px}
+  .medalha{font-size:54px;line-height:1;margin-bottom:12px}
+  .lugar-nome{font-family:'Playfair Display',Georgia,serif;font-size:23px;font-weight:700;color:#1a1611;margin-bottom:8px;line-height:1.22;overflow-wrap:anywhere;hyphens:auto}
+  .lugar-info{font-size:15px;color:#8a7f5f;letter-spacing:.3px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+  h2{font-family:'Playfair Display',Georgia,serif;font-size:26px;font-weight:700;color:#c9a84c;text-align:center;margin:50px 0 22px;letter-spacing:1px;border-bottom:1px solid rgba(201,168,76,.3);padding-bottom:8px;line-height:1.25}
+  .footer{text-align:center;font-size:12.5px;color:#8a7f5f;margin-top:56px;letter-spacing:1px;border-top:1px solid rgba(201,168,76,.2);padding-top:14px}
   .footer strong{color:#c9a84c}
   @media print{
     @page{margin:12mm}
@@ -21734,6 +21828,120 @@ function exportarModoDivulgacaoRanking(){
     ${_htmlPodio(vendsRank)}
   `;
   _abrirJanelaDivulgacao('Resultados', perLbl + ' — ' + hoje().split('-').reverse().join('/'), body);
+}
+
+
+// ── DIVULGAÇÃO — ORIGEM DO FLUXO ────────────────────────────────────
+// Segue a mesma regra dos outros modos de divulgação: material para
+// publicar para a equipe, então NUNCA mostra valor em R$ — só posição,
+// nome, contagem e percentual.
+function exportarModoDivulgacaoFluxo(){
+  const {regs, lojaFiltro, lojaNm, periodoLabel} = window._fluxoRegistrosFiltrados();
+  if(!regs.length){ showToast('Nenhum registro no período para divulgar.','err'); return; }
+
+  const cat = window._fluxoCategorizar(regs);
+  const tot = cat.total;
+
+  // Pódio de vendedoras por clientes registrados (contagem, não R$)
+  const porVend = {};
+  regs.forEach(r => {
+    if(!r.vendId) return;
+    if(!porVend[r.vendId]) porVend[r.vendId] = {n:0, comprou:0};
+    porVend[r.vendId].n++;
+    if((Number(r.valor)||0) > 0) porVend[r.vendId].comprou++;
+  });
+  const vendsRank = Object.entries(porVend).map(([id,d]) => {
+    const v = (D.vendedoras||[]).find(x => x.id === id);
+    if(!v) return null;
+    const conv = d.n > 0 ? d.comprou/d.n*100 : 0;
+    const lj = LOJAS.find(l => l.id === v.loja)?.nome || '';
+    // Uma informação por linha. Concatenado com " · " o texto quebrava no
+    // meio da frase dentro do card do pódio — quebra deliberada lê melhor
+    // e mantém todos os cards com a mesma altura.
+    const linhas = [d.n + ' cliente' + (d.n===1?'':'s')];
+    if(conv > 0) linhas.push(conv.toFixed(0) + '% converteram');
+    if(!lojaFiltro && lj) linhas.push(lj);
+    return { nome: v.nome, n: d.n, info: linhas.join('<br>') };
+  }).filter(Boolean).sort((a,b) => b.n - a.n);
+
+  // Pódio de lojas — só faz sentido quando o relatório é da rede
+  const lojasRank = LOJAS.map(l => {
+    const rs = regs.filter(r => r.loja === l.id);
+    const conv = rs.length ? rs.filter(r => (Number(r.valor)||0) > 0).length/rs.length*100 : 0;
+    const linhasL = [rs.length + ' cliente' + (rs.length===1?'':'s')];
+    if(conv > 0) linhasL.push(conv.toFixed(0) + '% converteram');
+    return {nome: l.nome, n: rs.length, info: linhasL.join('<br>')};
+  }).filter(l => l.n > 0).sort((a,b) => b.n - a.n);
+
+  // Canal que mais trouxe cliente
+  const origRank = Object.entries(ORIGENS).map(([k,v]) => ({
+    label: v.label, emoji: v.emoji, n: regs.filter(r => r.origem === k).length
+  })).filter(o => o.n > 0).sort((a,b) => b.n - a.n);
+
+  const aniv = cat.porPerfil.find(p => p.id === 'aniversario') || {n:0, produtos:[]};
+  const inat = cat.porPerfil.find(p => p.id === 'inativo')     || {n:0, produtos:[]};
+
+  const destaque = (valor, rotulo) =>
+    '<div style="flex:1 1 165px;min-width:165px;max-width:230px;background:#fff;border:2px solid #c9a84c;border-radius:14px;padding:18px 12px;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.06);display:flex;flex-direction:column;justify-content:center">'
+    + '<div style="font-family:\'Playfair Display\',Georgia,serif;font-size:40px;font-weight:800;color:#c9a84c;line-height:1.05">' + valor + '</div>'
+    + '<div style="font-size:13.5px;color:#8a7f5f;letter-spacing:.6px;text-transform:uppercase;font-weight:700;margin-top:8px;line-height:1.3">' + rotulo + '</div>'
+    + '</div>';
+
+  const listaProdutos = (produtos) => produtos.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:14px">'
+      + produtos.slice(0,8).map(p =>
+          '<span style="background:#fff;border:1px solid #c9a84c;border-radius:99px;padding:8px 16px;font-size:14.5px;color:#1a1611;line-height:1.35;max-width:100%;overflow-wrap:anywhere">'
+          + p.n + ' <strong style="color:#c9a84c">' + p.qtd + '×</strong></span>').join('')
+      + '</div>'
+    : '';
+
+  let body = ''
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;justify-content:center;margin:8px auto 30px;max-width:100%">'
+      + destaque(tot.n, 'Clientes atendidos')
+      + destaque(tot.taxaConversao.toFixed(0) + '%', 'Converteram em compra')
+      + destaque(aniv.n, 'Aniversariantes')
+      + destaque(inat.n, 'Reativados')
+    + '</div>';
+
+  if(!lojaFiltro && lojasRank.length){
+    body += '<h2>Lojas que mais atenderam</h2>' + _htmlPodio(lojasRank);
+  }
+  if(vendsRank.length){
+    body += '<h2>Destaques da equipe</h2>' + _htmlPodio(vendsRank);
+  }
+  if(origRank.length){
+    body += '<h2>De onde vieram os clientes</h2>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;justify-content:center;max-width:100%;margin:0 auto">'
+      + origRank.slice(0,6).map(o => {
+          const pct = tot.n > 0 ? (o.n/tot.n*100).toFixed(0) : '0';
+          return '<div style="background:#fff;border:1px solid #c9a84c;border-radius:12px;padding:14px 18px;text-align:center;min-width:145px;max-width:210px;display:flex;flex-direction:column;justify-content:center">'
+            + '<div style="font-size:26px;line-height:1">' + o.emoji + '</div>'
+            + '<div style="font-family:\'Playfair Display\',Georgia,serif;font-size:23px;font-weight:700;color:#1a1611;margin-top:4px;line-height:1.1">' + o.n + '</div>'
+            + '<div style="font-size:13.5px;color:#8a7f5f;font-weight:600;line-height:1.3;margin-top:3px;overflow-wrap:anywhere">' + o.label + ' · ' + pct + '%</div>'
+          + '</div>';
+        }).join('')
+      + '</div>';
+  }
+
+  const prodAniv = listaProdutos(aniv.produtos);
+  const prodInat = listaProdutos(inat.produtos);
+  if(prodAniv || prodInat){
+    body += '<h2>Presentes entregues</h2>';
+    if(prodAniv) body += '<div style="text-align:center;font-size:15px;color:#8a7f5f;font-weight:700;letter-spacing:1px;margin-top:16px">🎂 ANIVERSARIANTES</div>' + prodAniv;
+    if(prodInat) body += '<div style="text-align:center;font-size:15px;color:#8a7f5f;font-weight:700;letter-spacing:1px;margin-top:20px">♻️ REATIVADOS</div>' + prodInat;
+  }
+
+  // [R45] nome do arquivo com loja e período — antes todo PDF de
+  // divulgação saía com o mesmo nome, impossível de distinguir na pasta.
+  const per = window._fluxoPeriodoAtual();
+  const dArq = d => d.split('-').reverse().join('-');
+  _abrirJanelaDivulgacao(
+    'Origem do Fluxo',
+    (lojaFiltro ? lojaNm : 'Rede Completa') + ' — ' + periodoLabel,
+    body,
+    'Divulgacao — Origem do Fluxo — ' + (lojaFiltro ? lojaNm : 'Rede Completa')
+      + ' — ' + dArq(per.ini) + ' a ' + dArq(per.fim)
+  );
 }
 
 // ── DIVULGAÇÃO — CAMPANHAS ──────────────────────────────────────────
@@ -25742,6 +25950,334 @@ window._fxNovoRegistroAniv = function(nome, aniv){
     if(typeof _fxModalidadeMudou === 'function') _fxModalidadeMudou();
   }, 100);
 };
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R44] RELATÓRIO CATEGORIZADO DA ORIGEM DO FLUXO — PDF e Excel
+// PDF e Excel partem EXATAMENTE do mesmo recorte e da mesma apuração:
+// se divergirem, é bug. Por isso filtro e categorização ficam aqui,
+// numa função só, em vez de duplicados nos dois exportadores.
+// ══════════════════════════════════════════════════════════════════════
+
+const _MOD_LABEL = {gift_back:'Gift Back', desconto:'Desconto', cash_back:'Cash Back'};
+const _MOD_ORDEM = ['gift_back','desconto','cash_back'];
+
+// Rótulos para relatório. Os nomes de _PERFIS_MODALIDADE carregam emoji e
+// vêm no singular ("🎂 Aniversariante"); em aba de planilha e título de
+// seção lê melhor no plural e sem emoji.
+const _PERFIL_REL = {
+  aniversario: 'Aniversariantes',
+  inativo:     'Inativos',
+  novo:        'Clientes Novos',
+  retorno:     'Clientes de Retorno'
+};
+function _perfilRotulo(id, fallback){
+  return _PERFIL_REL[id] || String(fallback||id||'').replace(/[^\wÀ-ÿ ]/g,'').trim() || id;
+}
+
+// Período vigente na tela (mesma regra usada pelo PDF desde sempre)
+window._fluxoPeriodoAtual = function(){
+  const de  = document.getElementById('fluxo-per-de')?.value  || '';
+  const ate = document.getElementById('fluxo-per-ate')?.value || '';
+  if(de || ate) return {ini: de || '2020-01-01', fim: ate || hoje(), label: 'Período personalizado'};
+  if(typeof _tabFluxo !== 'undefined' && _tabFluxo === 'mes'){
+    const mes = hoje().slice(0,7);
+    const [y,m] = mes.split('-').map(Number);
+    return {ini: mes+'-01', fim: mes+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0'), label:'Mês atual'};
+  }
+  if(typeof _tabFluxo !== 'undefined' && _tabFluxo === 'semana'){
+    const h = new Date(); h.setHours(0,0,0,0);
+    const ds = h.getDay(), diff = ds===0?6:ds-1;
+    const seg = new Date(h); seg.setDate(h.getDate()-diff);
+    const f = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    return {ini: f(seg), fim: hoje(), label:'Semana atual'};
+  }
+  return {ini:'2020-01-01', fim: hoje(), label:'Todo o histórico'};
+};
+
+// Registros do fluxo já filtrados por loja e período
+window._fluxoRegistrosFiltrados = function(){
+  const lojaFiltro = isAdmin() ? (document.getElementById('fx-sel-loja')?.value || '') : lojaId();
+  let regs = D.fluxo ? D.fluxo.filter(r => !lojaFiltro || r.loja === lojaFiltro) : [];
+  regs = filtrarFluxoData(regs);
+  regs.sort((a,b) => String(b.data).localeCompare(String(a.data)));
+  const per = window._fluxoPeriodoAtual();
+  return {
+    regs, lojaFiltro,
+    lojaNm: lojaFiltro ? (LOJAS.find(l=>l.id===lojaFiltro)?.nome || lojaFiltro) : 'Rede Completa',
+    ini: per.ini, fim: per.fim, periodoLabel: per.label
+  };
+};
+
+// Produtos entregues num conjunto de registros, consolidados
+function _fluxoProdutosDe(regs){
+  const mapa = new Map();
+  regs.forEach(r => {
+    const lista = Array.isArray(r.produtosSel) && r.produtosSel.length
+      ? r.produtosSel
+      : (r.produtoEscolhido
+          ? String(r.produtoEscolhido).split(',').map(n => ({c:'', n:n.trim(), preco:0})).filter(x=>x.n)
+          : []);
+    lista.forEach(p => {
+      const chave = p.c || p.n;
+      if(!chave) return;
+      if(!mapa.has(chave)) mapa.set(chave, {c:p.c||'', n:p.n, qtd:0, valor:0});
+      const alvo = mapa.get(chave);
+      alvo.qtd++;
+      alvo.valor += Number(p.preco) || 0;
+    });
+  });
+  return [...mapa.values()].sort((a,b) => b.qtd - a.qtd || b.valor - a.valor);
+}
+
+// Apura um bloco de registros (usado por perfil e pelo total)
+function _fluxoApurar(regs){
+  const n = regs.length;
+  const faturamento = regs.reduce((s,r) => s + (Number(r.valor)||0), 0);
+  const beneficio   = regs.reduce((s,r) => s + (Number(r.beneficioValor)||0), 0);
+  const comCompra   = regs.filter(r => (Number(r.valor)||0) > 0).length;
+
+  const porModalidade = _MOD_ORDEM.map(m => {
+    const rs = regs.filter(r => r.modalidade === m);
+    const pcts = rs.map(r => Number(r.modalidadePct)||0).filter(p => p > 0);
+    return {
+      id: m, label: _MOD_LABEL[m],
+      n: rs.length,
+      faturamento: rs.reduce((s,r) => s + (Number(r.valor)||0), 0),
+      beneficio:   rs.reduce((s,r) => s + (Number(r.beneficioValor)||0), 0),
+      pctMedio: pcts.length ? pcts.reduce((a,b)=>a+b,0)/pcts.length : 0,
+      produtos: m === 'gift_back' ? _fluxoProdutosDe(rs) : []
+    };
+  }).filter(x => x.n > 0);
+
+  const semModalidade = regs.filter(r => !r.modalidade).length;
+
+  return {
+    n, faturamento, beneficio, comCompra,
+    ticketMedio: n > 0 ? faturamento/n : 0,
+    ticketMedioComprou: comCompra > 0 ? faturamento/comCompra : 0,
+    taxaConversao: n > 0 ? comCompra/n*100 : 0,
+    porModalidade, semModalidade,
+    produtos: _fluxoProdutosDe(regs)
+  };
+}
+
+/**
+ * Categoriza o fluxo por perfil de cliente (aniversariante, inativo,
+ * novo, retorno) e, dentro de cada um, por modalidade e produtos.
+ */
+window._fluxoCategorizar = function(regs){
+  const perfis = (typeof _PERFIS_MODALIDADE !== 'undefined' ? _PERFIS_MODALIDADE : [
+    {id:'inativo',nome:'Inativos'},{id:'aniversario',nome:'Aniversariante'},
+    {id:'novo',nome:'Novo'},{id:'retorno',nome:'Retorno'}
+  ]);
+
+  const porPerfil = perfis.map(p => {
+    const rs = regs.filter(r => (r.tipoCliente || 'novo') === p.id);
+    return Object.assign({id:p.id, nome:_perfilRotulo(p.id, p.nome), hint:p.hint||'', registros:rs}, _fluxoApurar(rs));
+  });
+
+  // Registros com tipoCliente fora da lista conhecida não podem sumir
+  const conhecidos = new Set(perfis.map(p => p.id));
+  const orfaos = regs.filter(r => !conhecidos.has(r.tipoCliente || 'novo'));
+
+  return { total: _fluxoApurar(regs), porPerfil, orfaos };
+};
+
+// Data YYYY-MM-DD → DD/MM/AAAA
+function _dBR(d){ return d ? String(d).split('-').reverse().join('/') : '—'; }
+
+// ══════════════════════════════════════════════════════════════════════
+// [R44] EXPORTAÇÃO EXCEL (.xlsx) DA ORIGEM DO FLUXO
+// Uma aba por categoria: Resumo, uma por perfil (Aniversariantes,
+// Inativos, Novos, Retorno), Modalidades, Produtos, Origens e Registros.
+// SheetJS é carregado sob demanda — mesmo CDN já usado na importação.
+// ══════════════════════════════════════════════════════════════════════
+
+window.exportarExcelFluxo = function(){
+  // SheetJS sob demanda (mesmo padrão do excelProcessarUpload)
+  if(typeof XLSX === 'undefined'){
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload  = () => window.exportarExcelFluxo();
+    sc.onerror = () => showToast('❌ Não foi possível carregar o gerador de Excel (sem internet?).','err');
+    document.head.appendChild(sc);
+    showToast('⏳ Carregando gerador de Excel...','ok');
+    return;
+  }
+
+  const {regs, lojaNm, ini, fim, periodoLabel} = window._fluxoRegistrosFiltrados();
+  if(!regs.length){ showToast('Nenhum registro no período para exportar.','err'); return; }
+
+  const cat = window._fluxoCategorizar(regs);
+  const wb  = XLSX.utils.book_new();
+  const nomeVend = id => (D.vendedoras||[]).find(v=>v.id===id)?.nome || '—';
+  const nomeLoja = id => LOJAS.find(l=>l.id===id)?.nome || id || '—';
+  const add = (nome, linhas, larguras) => {
+    const ws = XLSX.utils.aoa_to_sheet(linhas);
+    if(larguras) ws['!cols'] = larguras.map(w => ({wch:w}));
+    // Nome de aba no Excel: máx 31 chars, sem : \ / ? * [ ]
+    XLSX.utils.book_append_sheet(wb, ws, nome.replace(/[:\\\/?*\[\]]/g,'').slice(0,31));
+  };
+
+  // ── Aba 1: Resumo ──────────────────────────────────────────────────
+  const t = cat.total;
+  const resumo = [
+    ['ORIGEM DO FLUXO — RELATÓRIO CATEGORIZADO'],
+    [],
+    ['Loja', lojaNm],
+    ['Período', periodoLabel + ' (' + _dBR(ini) + ' a ' + _dBR(fim) + ')'],
+    ['Gerado em', new Date().toLocaleString('pt-BR')],
+    [],
+    ['VISÃO GERAL'],
+    ['Atendimentos registrados', t.n],
+    ['Converteram em compra', t.comCompra],
+    ['Taxa de conversão (%)', Number(t.taxaConversao.toFixed(1))],
+    ['Faturamento total (R$)', Number(t.faturamento.toFixed(2))],
+    ['Ticket médio geral (R$)', Number(t.ticketMedio.toFixed(2))],
+    ['Ticket médio de quem comprou (R$)', Number(t.ticketMedioComprou.toFixed(2))],
+    ['Benefício concedido (R$)', Number(t.beneficio.toFixed(2))],
+    ['Sem modalidade aplicada', t.semModalidade],
+    [],
+    ['POR PERFIL DE CLIENTE'],
+    ['Perfil','Atendimentos','Compraram','Conversão %','Faturamento R$','Ticket Médio R$','Benefício R$']
+  ];
+  cat.porPerfil.forEach(p => resumo.push([
+    p.nome, p.n, p.comCompra, Number(p.taxaConversao.toFixed(1)),
+    Number(p.faturamento.toFixed(2)), Number(p.ticketMedio.toFixed(2)), Number(p.beneficio.toFixed(2))
+  ]));
+  resumo.push(['TOTAL', t.n, t.comCompra, Number(t.taxaConversao.toFixed(1)),
+    Number(t.faturamento.toFixed(2)), Number(t.ticketMedio.toFixed(2)), Number(t.beneficio.toFixed(2))]);
+  add('Resumo', resumo, [34,14,12,12,16,16,14]);
+
+  // ── Abas 2..5: uma por perfil, com modalidade e produtos ───────────
+  cat.porPerfil.forEach(p => {
+    const L = [];
+    L.push([p.nome.toUpperCase() + (p.hint ? ' — ' + p.hint : '')]);
+    L.push([]);
+    L.push(['Atendimentos', p.n]);
+    L.push(['Compraram', p.comCompra]);
+    L.push(['Conversão %', Number(p.taxaConversao.toFixed(1))]);
+    L.push(['Faturamento R$', Number(p.faturamento.toFixed(2))]);
+    L.push(['Ticket médio R$', Number(p.ticketMedio.toFixed(2))]);
+    L.push(['Benefício concedido R$', Number(p.beneficio.toFixed(2))]);
+    L.push([]);
+
+    L.push(['MODALIDADES APLICADAS']);
+    L.push(['Modalidade','Qtd','% médio','Faturamento R$','Benefício R$']);
+    if(p.porModalidade.length){
+      p.porModalidade.forEach(m => L.push([
+        m.label, m.n, Number(m.pctMedio.toFixed(2)),
+        Number(m.faturamento.toFixed(2)), Number(m.beneficio.toFixed(2))
+      ]));
+    } else L.push(['Nenhuma modalidade aplicada','','','','']);
+    if(p.semModalidade > 0) L.push(['Sem modalidade', p.semModalidade,'','','']);
+    L.push([]);
+
+    L.push(['PRODUTOS ENTREGUES (GIFT BACK)']);
+    L.push(['Código','Produto','Vezes escolhido','Valor total R$']);
+    if(p.produtos.length){
+      p.produtos.forEach(pr => L.push([pr.c || '—', pr.n, pr.qtd, Number(pr.valor.toFixed(2))]));
+    } else L.push(['—','Nenhum produto registrado','','']);
+    L.push([]);
+
+    L.push(['REGISTROS DETALHADOS']);
+    const cab = ['Data','Cliente','Origem','Canal','Vendedora','Loja','Valor R$',
+                 'Modalidade','% aplicado','Benefício R$','Produtos escolhidos','Ticket','Observação'];
+    if(p.id === 'aniversario') cab.splice(2, 0, 'Aniversário');
+    L.push(cab);
+    p.registros.forEach(r => {
+      const prods = Array.isArray(r.produtosSel) && r.produtosSel.length
+        ? r.produtosSel.map(x => x.n).join(' | ')
+        : (r.produtoEscolhido || '');
+      const linha = [
+        _dBR(r.data), r.nome || '',
+        (ORIGENS[r.origem]?.label) || r.origem || '',
+        r.canal || '', nomeVend(r.vendId), nomeLoja(r.loja),
+        Number((r.valor||0).toFixed(2)),
+        _MOD_LABEL[r.modalidade] || '', Number(r.modalidadePct||0),
+        Number((r.beneficioValor||0).toFixed(2)),
+        prods, r.ticket || '', r.obs || ''
+      ];
+      if(p.id === 'aniversario') linha.splice(2, 0, _dBR(r.aniversarioCliente));
+      L.push(linha);
+    });
+    add(p.nome, L,
+        p.id === 'aniversario' ? [12,26,12,20,12,18,16,12,14,11,13,38,10,26]
+                               : [12,26,20,12,18,16,12,14,11,13,38,10,26]);
+  });
+
+  // ── Aba: Modalidades (cruzamento perfil × modalidade) ──────────────
+  const mod = [['MODALIDADES POR PERFIL'],[],
+    ['Perfil','Modalidade','Qtd','% médio','Faturamento R$','Benefício R$','Benefício médio R$']];
+  cat.porPerfil.forEach(p => p.porModalidade.forEach(m => mod.push([
+    p.nome, m.label, m.n, Number(m.pctMedio.toFixed(2)),
+    Number(m.faturamento.toFixed(2)), Number(m.beneficio.toFixed(2)),
+    Number((m.n ? m.beneficio/m.n : 0).toFixed(2))
+  ])));
+  mod.push([]);
+  mod.push(['PERCENTUAIS CONFIGURADOS PELO ADMINISTRADOR']);
+  mod.push(['Perfil','Gift Back %','Desconto %','Cash Back %']);
+  if(typeof _migrarConfigModalidades === 'function') _migrarConfigModalidades();
+  const pp = (D.configModalidades && D.configModalidades.porPerfil) || {};
+  (typeof _PERFIS_MODALIDADE !== 'undefined' ? _PERFIS_MODALIDADE : []).forEach(p => {
+    const c = pp[p.id] || {};
+    mod.push([p.nome, Number(c.giftback)||0, Number(c.desconto)||0, Number(c.cashback)||0]);
+  });
+  add('Modalidades', mod, [22,16,10,12,16,14,18]);
+
+  // ── Aba: Produtos entregues (consolidado, com perfil) ──────────────
+  const prod = [['PRODUTOS ENTREGUES EM GIFT BACK'],[],
+    ['Código','Produto','Perfil','Vezes escolhido','Valor total R$']];
+  let algumProduto = false;
+  cat.porPerfil.forEach(p => p.produtos.forEach(pr => {
+    algumProduto = true;
+    prod.push([pr.c || '—', pr.n, p.nome, pr.qtd, Number(pr.valor.toFixed(2))]);
+  }));
+  if(!algumProduto) prod.push(['—','Nenhum produto registrado no período','','','']);
+  prod.push([]);
+  prod.push(['CONSOLIDADO (todos os perfis)']);
+  prod.push(['Código','Produto','Vezes escolhido','Valor total R$']);
+  const consolidado = t.produtos;
+  if(consolidado.length) consolidado.forEach(pr => prod.push([pr.c||'—', pr.n, pr.qtd, Number(pr.valor.toFixed(2))]));
+  else prod.push(['—','Nenhum produto registrado','','']);
+  add('Produtos', prod, [14,44,22,16,16]);
+
+  // ── Aba: Origens ───────────────────────────────────────────────────
+  const orig = [['ORIGEM DOS CLIENTES'],[],['Origem','Qtd','% do total','Faturamento R$']];
+  Object.entries(ORIGENS).map(([k,v]) => {
+    const rs = regs.filter(r => r.origem === k);
+    return {label:v.label, n:rs.length, val:rs.reduce((s,r)=>s+(r.valor||0),0)};
+  }).filter(o => o.n > 0).sort((a,b) => b.n - a.n)
+    .forEach(o => orig.push([o.label, o.n, Number((o.n/t.n*100).toFixed(1)), Number(o.val.toFixed(2))]));
+  add('Origens', orig, [30,10,12,16]);
+
+  // ── Aba: Registros (tudo, sem corte) ───────────────────────────────
+  const todos = [['TODOS OS REGISTROS DO PERÍODO'],[],
+    ['Data','Cliente','Perfil','Aniversário','Origem','Canal','Vendedora','Loja','Valor R$',
+     'Modalidade','% aplicado','Benefício R$','Produtos escolhidos','Ticket','Observação']];
+  const nomePerfil = id => (typeof _PERFIS_MODALIDADE !== 'undefined'
+    ? (_PERFIS_MODALIDADE.find(x=>x.id===(id||'novo'))?.nome || id || '') : (id||''));
+  regs.forEach(r => {
+    const prods = Array.isArray(r.produtosSel) && r.produtosSel.length
+      ? r.produtosSel.map(x => x.n).join(' | ')
+      : (r.produtoEscolhido || '');
+    todos.push([
+      _dBR(r.data), r.nome||'', nomePerfil(r.tipoCliente), _dBR(r.aniversarioCliente),
+      (ORIGENS[r.origem]?.label) || r.origem || '', r.canal||'',
+      nomeVend(r.vendId), nomeLoja(r.loja), Number((r.valor||0).toFixed(2)),
+      _MOD_LABEL[r.modalidade]||'', Number(r.modalidadePct||0),
+      Number((r.beneficioValor||0).toFixed(2)), prods, r.ticket||'', r.obs||''
+    ]);
+  });
+  add('Registros', todos, [12,26,18,12,20,12,18,16,12,14,11,13,38,10,26]);
+
+  const slug = lojaNm.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w]+/g,'-').toLowerCase();
+  XLSX.writeFile(wb, 'origem-fluxo-' + slug + '-' + ini + '-a-' + fim + '.xlsx');
+  showToast('📊 Excel gerado com ' + wb.SheetNames.length + ' abas.','ok');
+};
+
 
 // Chamar render dos lembretes sempre que renderFluxo rodar
 (function wrapRenderFluxo(){
