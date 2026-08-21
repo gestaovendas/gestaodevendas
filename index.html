@@ -5786,6 +5786,18 @@ function _atendLancamento(r){
 let _savePending = false;
 
 function save(){
+  // [FIX R44] GUARDIÃO ANTI-PERDA: antes de salvar, se D tem dados substanciais,
+  // guardar um backup. Se numa próxima vez D vier vazio (bug/sync ruim), restaura.
+  try {
+    const _temDadosAgora = (D.vendedoras?.length > 0) || (D.contatos?.length > 0) ||
+      (D.fluxo?.length > 0) || (D.excelDados?.length > 0) ||
+      (D.metasLoja && Object.keys(D.metasLoja).length > 0) ||
+      (D.vendasVend && Object.keys(D.vendasVend).length > 0);
+    if(_temDadosAgora){
+      localStorage.setItem("avatim_v5_backup", JSON.stringify(D));
+      localStorage.setItem("avatim_v5_backup_ts", String(Date.now()));
+    }
+  } catch(e){ /* backup best-effort */ }
   localStorage.setItem("avatim_v5", JSON.stringify(D));
   if(_savePending) return;
   _savePending = true;
@@ -6092,7 +6104,17 @@ async function loadFromFirestore(){
       }
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
       if(remoto.configCom)   D.configCom   = remoto.configCom;
-      if(remoto.configModalidades) D.configModalidades = remoto.configModalidades;
+      if(remoto.configModalidades){
+        // [FIX R44] Não deixar remoto flat antigo apagar porPerfil já migrado localmente
+        const _remTemPerfil = remoto.configModalidades.porPerfil && typeof remoto.configModalidades.porPerfil === 'object';
+        const _locTemPerfil = D.configModalidades && D.configModalidades.porPerfil && typeof D.configModalidades.porPerfil === 'object';
+        if(_remTemPerfil || !_locTemPerfil){
+          D.configModalidades = remoto.configModalidades;
+        } else {
+          // Remoto é flat antigo, local já migrado: preservar porPerfil, mesclar faixas se vierem
+          if(remoto.configModalidades.faixasGiftBack) D.configModalidades.faixasGiftBack = remoto.configModalidades.faixasGiftBack;
+        }
+      }
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
       // Tombstones: carregar do remoto (preservar exclusoes feitas em qualquer dispositivo)
@@ -6415,6 +6437,8 @@ function forcarSincronizacao(){
   console.log("[Avatim] forcarSincronizacao: iniciado");
   
   loadFromFirestore().then(sucesso => {
+    // [FIX R44] Guardião: se o sync deixou D vazio, restaura do backup ANTES de renderizar
+    if(typeof window._verificarIntegridadeDados === 'function') window._verificarIntegridadeDados();
     if(sucesso){
       console.log("[Avatim] ✅ Sincronização completa!");
       carregarVendsForm();
@@ -6943,6 +6967,8 @@ function showApp(){
   // [CRÍTICO] Sincronizar com Firebase ANTES de renderizar qualquer coisa
   console.log("[Avatim] showApp: iniciando carregamento de dados...");
   loadFromFirestore().then(sincronizado => {
+    // [FIX R44] Guardião: restaura do backup se o sync zerou D
+    if(typeof window._verificarIntegridadeDados === 'function') window._verificarIntegridadeDados();
     console.log("[Avatim] showApp: dados carregados");
     carregarVendsForm();
     preencherSelectVends();
@@ -6950,6 +6976,7 @@ function showApp(){
     console.log("[Avatim] showApp: telas renderizadas");
   }).catch(e => {
     console.error("[Avatim] showApp: erro ao carregar", e.message);
+    if(typeof window._verificarIntegridadeDados === 'function') window._verificarIntegridadeDados();
     carregarVendsForm();
     preencherSelectVends();
     carregarDash();
@@ -7107,7 +7134,7 @@ function nav(pg){
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
   document.getElementById("nav-"+pg)?.classList.add("active");
-  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:()=>{renderMetas(); if(typeof window._configModalidadesRender==="function") window._configModalidadesRender(); if(typeof window._calcAjusteRender==="function") window._calcAjusteRender(); if(typeof _calcAjustePopularLinhas==="function") _calcAjustePopularLinhas();},
+  const _navDispatch = {historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:()=>{renderMetas(); if(typeof window._configModalidadesRender==="function") window._configModalidadesRender(); if(typeof window._calcAjusteRender==="function") window._calcAjusteRender(); if(typeof _calcAjustePopularLinhas==="function") _calcAjustePopularLinhas();},
     performance:renderPerformance,
     controle:renderControle,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
@@ -7216,7 +7243,26 @@ function nav(pg){
       // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
       const lDataEl=document.getElementById('l-data');
       if(lDataEl) lDataEl.value=hoje();
-      renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
+      renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}};
+  // [FIX R44] Blindar chamada de render: erro num render NUNCA deixa tela preta
+  try {
+    const _renderFn = _navDispatch[pg];
+    if(typeof _renderFn === 'function') _renderFn();
+  } catch(_navErr){
+    console.error('[MonAris] Erro ao renderizar página "'+pg+'":', _navErr);
+    // Mostrar mensagem amigável em vez de tela preta
+    const _pageEl = document.getElementById('page-'+pg);
+    if(_pageEl){
+      const _errBox = document.createElement('div');
+      _errBox.style.cssText = 'margin:20px;padding:20px;background:rgba(255,107,122,.1);border:1px solid rgba(255,107,122,.4);border-radius:12px;color:#ff6b7a;font-size:14px';
+      _errBox.innerHTML = '<div style="font-weight:700;margin-bottom:8px">⚠️ Erro ao carregar esta tela</div>' +
+        '<div style="color:var(--muted);font-size:12px">Seus dados estão seguros. Tente recarregar a página (F5) ou trocar de aba e voltar.</div>' +
+        '<div style="color:var(--muted);font-size:11px;margin-top:8px;font-family:monospace">' + (_navErr.message||'') + '</div>' +
+        '<button onclick="location.reload()" style="margin-top:12px;background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px">🔄 Recarregar</button>';
+      // Não apagar conteúdo existente da página, adicionar no topo
+      _pageEl.insertBefore(_errBox, _pageEl.firstChild);
+    }
+  }
 }
 
 // ============================================================
@@ -25612,6 +25658,41 @@ function _calcAjustePopularLinhas(){
   sel.innerHTML = '<option value="">Todas as linhas</option>' +
     linhas.map(l => '<option value="'+l+'">'+l+'</option>').join('');
 }
+
+// [FIX R44] GUARDIÃO DE DADOS — detecta perda e restaura do backup
+window._verificarIntegridadeDados = function(){
+  try {
+    const temDados = (D.vendedoras?.length > 0) || (D.contatos?.length > 0) ||
+      (D.fluxo?.length > 0) || (D.excelDados?.length > 0) ||
+      (D.metasLoja && Object.keys(D.metasLoja).length > 0) ||
+      (D.vendasVend && Object.keys(D.vendasVend).length > 0);
+    if(temDados) return true; // tudo certo
+
+    // D está vazio — tentar restaurar do backup
+    const backupStr = localStorage.getItem("avatim_v5_backup");
+    if(!backupStr) return false;
+    const backup = JSON.parse(backupStr);
+    const backupTemDados = (backup.vendedoras?.length > 0) || (backup.contatos?.length > 0) ||
+      (backup.fluxo?.length > 0) || (backup.excelDados?.length > 0) ||
+      (backup.metasLoja && Object.keys(backup.metasLoja).length > 0) ||
+      (backup.vendasVend && Object.keys(backup.vendasVend).length > 0);
+    if(!backupTemDados) return false;
+
+    // Restaurar!
+    console.warn("[MonAris] ⚠️ D estava vazio — restaurando do backup automático");
+    const backupTs = localStorage.getItem("avatim_v5_backup_ts");
+    Object.keys(backup).forEach(k => { D[k] = backup[k]; });
+    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    if(typeof showToast === 'function'){
+      const quando = backupTs ? new Date(parseInt(backupTs)).toLocaleString('pt-BR') : '';
+      showToast("♻️ Dados restaurados do backup" + (quando ? " ("+quando+")" : ""), "ok");
+    }
+    return true;
+  } catch(e){
+    console.error("[MonAris] Erro no guardião de dados:", e);
+    return false;
+  }
+};
 </script>
 </body>
 </html>
