@@ -254,6 +254,7 @@ try{
           configModalidades: D2.configModalidades || {},
           fluxo:         D2.fluxo         || [],
           saldosOverride:D2.saldosOverride|| {},
+          precosOverride:D2.precosOverride|| {},
           produtosExtras:D2.produtosExtras|| [],
           // [FIX 22/07] histórico NUNCA era gravado — só existia em localStorage
           historicoMeses:D2.historicoMeses|| {},
@@ -1340,6 +1341,24 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 .ig input,.ig select,.ig textarea{width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.15);border-radius:8px;padding:9px 12px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:13px;outline:none;transition:all .2s}
 .ig input:focus,.ig select:focus{border-color:var(--ouro);box-shadow:0 0 0 2px rgba(201,168,76,.1)}
 .ig select option{background:var(--card2)}.ig textarea{resize:vertical;min-height:60px}
+/* [FIX R43] `.ig input{width:100%;padding:9px 12px}` também pegava checkbox e
+   radio, que viravam caixas gigantes ocupando a linha toda. */
+.ig input[type=checkbox],.ig input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:0 0 auto;border-radius:3px}
+/* Seletor de produtos do Gift Back: não é um campo de formulário comum, então
+   sai das regras de `.ig label` (maiúsculas, letter-spacing, cor apagada). */
+#fx-produtos-lista label{display:flex;align-items:center;gap:9px;margin:0;padding:7px 6px;
+  font-size:11.5px;letter-spacing:normal;text-transform:none;color:var(--texto);
+  border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;border-radius:5px}
+#fx-produtos-lista label:last-child{border-bottom:none}
+#fx-produtos-lista label:hover{background:rgba(255,255,255,.04)}
+#fx-produtos-lista input[type=checkbox]{width:16px;height:16px;flex:0 0 16px;accent-color:#7ac74f;cursor:pointer}
+#fx-produtos-lista .fxp-nome{flex:1;min-width:0}
+#fx-produtos-lista .fxp-nome b{display:block;font-weight:500;line-height:1.3;overflow-wrap:anywhere}
+#fx-produtos-lista .fxp-nome small{display:block;font-size:9.5px;color:var(--muted);letter-spacing:normal;text-transform:none}
+#fx-produtos-lista .fxp-preco{flex:0 0 auto;text-align:right;white-space:nowrap}
+#fx-produtos-lista .fxp-preco b{display:block;font-size:11.5px;font-weight:700;color:var(--ouro)}
+#fx-produtos-lista .fxp-preco small{display:block;font-size:9.5px;color:var(--muted);letter-spacing:normal;text-transform:none}
+#fx-produtos-sel label{text-transform:none;letter-spacing:normal;font-size:11px;color:var(--texto);margin:0}
 .btn-p{background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:8px;padding:10px 22px;color:var(--preto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s}
 .btn-p:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(201,168,76,.3)}
 .btn-s{background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px 18px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s}
@@ -1882,42 +1901,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 <div class="page" id="page-metas">
-  <!-- [NEW R41] Configuração de Modalidades — só admin -->
-  <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="cfg-modalidades-box">
-    <div class="st">🎁 Configuração de Modalidades (Gift Back / Desconto / Cash Back)</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Percentual aplicado automaticamente quando a vendedora escolhe uma modalidade ao registrar um atendimento. A vendedora <strong>não altera</strong> — só admin.</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Configure percentuais DIFERENTES para cada perfil de cliente. Ex: aniversariantes podem ter Gift Back de 15%, inativos de 16% para incentivo maior.</div>
-    <div style="overflow-x:auto">
-      <table class="dtable" style="min-width:520px;font-size:12px">
-        <thead><tr>
-          <th style="text-align:left">Perfil do cliente</th>
-          <th style="text-align:center">🎁 Gift Back (%)</th>
-          <th style="text-align:center">💸 Desconto (%)</th>
-          <th style="text-align:center">💰 Cash Back (%)</th>
-        </tr></thead>
-        <tbody id="cfg-mod-matriz-body"></tbody>
-      </table>
-    </div>
-    <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
-      💡 Ao registrar um atendimento, se a vendedora escolher <strong>🎂 Aniversariante</strong> + <strong>🎁 Gift Back</strong>, o sistema usa o % da linha "Aniversariante × Gift Back" automaticamente.
-    </div>
-
-    <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--borda)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-        <div>
-          <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;color:var(--ouro)">📦 Faixas de Produtos (Gift Back)</div>
-          <div style="font-size:11px;color:var(--muted)">Configure faixas de valor de compra e os produtos que o cliente pode escolher em cada faixa.</div>
-        </div>
-        <button class="btn-s" onclick="window.gbFaixaAdicionar()"
-          style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:11px;padding:6px 12px">+ Nova faixa</button>
-      </div>
-      <div id="cfg-mod-faixas-lista" style="display:flex;flex-direction:column;gap:10px"></div>
-      <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
-        💡 Exemplo: uma faixa de <strong>R$ 150 a R$ 199</strong> com "Sabonete Glicerinado, Creme de Mãos Sensore, Álcool Gel". Outra de <strong>R$ 200 a R$ 299</strong> com "Gel de Banho Linha Sensore". A vendedora vê as opções conforme o valor da compra digitado.
-      </div>
-    </div>
-  </div>
-
   <div class="ph">
     <div><h1 class="pt">Metas &amp; <span>KPIs</span></h1><div class="ps" id="metas-subtitulo">Performance da sua loja</div></div>
     <button class="btn-p" onclick="exportarPDFRelatorio()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
@@ -2183,6 +2166,43 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
+  <!-- [R43] Configuração de Modalidades — só admin. Movido de Metas para cá:
+       o admin ajusta aqui mesmo, na tela onde a modalidade é usada. -->
+  <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="cfg-modalidades-box">
+    <div class="st">🎁 Configuração de Modalidades (Gift Back / Desconto / Cash Back)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Percentual aplicado automaticamente quando a vendedora escolhe uma modalidade ao registrar um atendimento. A vendedora <strong>não altera</strong> — só admin.</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Configure percentuais DIFERENTES para cada perfil de cliente. Ex: aniversariantes podem ter Gift Back de 15%, inativos de 16% para incentivo maior.</div>
+    <div style="overflow-x:auto">
+      <table class="dtable" style="min-width:520px;font-size:12px">
+        <thead><tr>
+          <th style="text-align:left">Perfil do cliente</th>
+          <th style="text-align:center">🎁 Gift Back (%)</th>
+          <th style="text-align:center">💸 Desconto (%)</th>
+          <th style="text-align:center">💰 Cash Back (%)</th>
+        </tr></thead>
+        <tbody id="cfg-mod-matriz-body"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
+      💡 Ao registrar um atendimento, se a vendedora escolher <strong>🎂 Aniversariante</strong> + <strong>🎁 Gift Back</strong>, o sistema usa o % da linha "Aniversariante × Gift Back" automaticamente.
+    </div>
+
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--borda)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;color:var(--ouro)">📦 Faixas de Produtos (Gift Back)</div>
+          <div style="font-size:11px;color:var(--muted)">Opcional. Sem faixa cadastrada, o sistema sugere automaticamente os produtos do catálogo cujo preço cabe no valor do Gift Back. Use faixas para <strong>restringir</strong> a escolha a itens específicos.</div>
+        </div>
+        <button class="btn-s" onclick="window.gbFaixaAdicionar()"
+          style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:11px;padding:6px 12px">+ Nova faixa</button>
+      </div>
+      <div id="cfg-mod-faixas-lista" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
+        💡 Os nomes digitados são casados com o catálogo de estoque (por código ou nome). Itens que não existirem no catálogo aparecem marcados em vermelho para a vendedora. Deixe vazio para usar a sugestão automática por preço.
+      </div>
+    </div>
+  </div>
+
   <!-- [NEW R42] Lembretes de aniversariantes próximos -->
   <div class="sc" style="margin-bottom:14px;border-left:3px solid var(--ouro)">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -2267,13 +2287,21 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <div style="font-size:10px;color:var(--muted);margin-top:2px" id="fx-benef-help">Percentual configurado pelo administrador</div>
         </div>
         <div class="ig" id="fx-produtos-box" style="display:none;grid-column:1/-1">
-          <label id="fx-produtos-lbl">🎁 Produtos que o cliente pode escolher (faixa aplicável)</label>
-          <div id="fx-produtos-lista" style="background:rgba(122,199,79,.06);border:1px solid rgba(122,199,79,.35);border-radius:8px;padding:10px;font-size:12px;max-height:220px;overflow-y:auto"></div>
-          <div style="margin-top:6px">
-            <label style="font-size:11px;color:var(--muted)">Produto(s) escolhido(s) pelo cliente:</label>
-            <input type="text" id="fx-produto-escolhido" placeholder="Ex: Gel de banho Sensore" autocomplete="off"
-              style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px;margin-top:2px">
+          <label id="fx-produtos-lbl">🎁 Produtos que o cliente pode levar</label>
+          <!-- Filtros da sugestão -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 6px">
+            <input type="text" id="fx-prod-busca" placeholder="Buscar por nome, grupo ou código..." autocomplete="off"
+              oninput="window._fxRenderProdutos()"
+              style="flex:1;min-width:180px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+            <select id="fx-prod-linha" onchange="window._fxRenderProdutos()"
+              style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px;max-width:100%">
+              <option value="">Todas as linhas</option>
+            </select>
           </div>
+          <div id="fx-produtos-lista" style="background:rgba(122,199,79,.06);border:1px solid rgba(122,199,79,.35);border-radius:8px;padding:4px 8px;font-size:12px;max-height:260px;overflow-y:auto"></div>
+          <div id="fx-produtos-sel" style="margin-top:8px"></div>
+          <!-- Espelho legado: mantém compatibilidade com registros antigos -->
+          <input type="hidden" id="fx-produto-escolhido" value="">
         </div>
         <div class="ig"><label>Vendedora</label>
           <select id="fx-vend"><option value="">Selecione...</option></select>
@@ -2338,8 +2366,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc">
     <div class="st">📋 Registros</div>
     <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th>Valor</th><th></th></tr></thead>
+      <table class="dtable" style="min-width:900px">
+        <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade</th><th style="text-align:right">Benefício</th><th></th></tr></thead>
         <tbody id="tbody-fluxo"></tbody>
       </table>
     </div>
@@ -3000,7 +3028,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div id="excel-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
 
   <!-- 3 painéis: Melhores Clientes, Inativos, Produtos -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px" id="excel-graficos-wrap">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:14px" id="excel-graficos-wrap">
     <div class="sc">
       <div class="st">🏆 Melhores Clientes</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranking por valor total gasto no filtro atual.</div>
@@ -3091,6 +3119,24 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
   <!-- KPIs -->
   <div id="contatos-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
+
+  <!-- [R43] ALERTA MENSAL: aniversariantes e inativos contatados no mês vs meta -->
+  <div class="sc" id="ct-alerta-mes-box" style="margin-bottom:14px;border-left:3px solid var(--ouro)">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div class="st" style="margin:0">🔔 Contatos do mês — Aniversariantes &amp; Inativos</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="ctAlertaNavMes(-1)" title="Mês anterior"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);cursor:pointer;font-size:14px">‹</button>
+        <div id="ct-alerta-mes-label" style="font-size:12px;font-weight:600;color:var(--ouro);min-width:120px;text-align:center"></div>
+        <button onclick="ctAlertaNavMes(1)" title="Próximo mês"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);cursor:pointer;font-size:14px">›</button>
+        <button onclick="ctAlertaIrHoje()"
+          style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.4);border-radius:6px;padding:4px 10px;color:var(--ouro);cursor:pointer;font-size:11px;font-weight:600">Mês atual</button>
+      </div>
+    </div>
+    <div id="ct-alerta-mes-resumo" style="margin-bottom:10px"></div>
+    <div id="ct-alerta-mes-corpo"></div>
+  </div>
 
   <!-- [NEW 12/08] Lembretes: contatos a retomar + clientes sem follow-up -->
   <div class="sc" style="margin-bottom:14px;border-left:3px solid #e6a817">
@@ -3596,6 +3642,27 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
               autocomplete="off">
           </div>
           <div id="camp-prod-sugest" style="margin-top:4px;max-height:160px;overflow-y:auto"></div>
+
+          <!-- [R43] Sugestão por valor: quais produtos cabem no brinde/benefício da campanha -->
+          <div style="margin-top:10px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.25);border-radius:8px;padding:10px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:11px;color:var(--ouro);font-weight:600;white-space:nowrap">🎁 Sugerir por valor</span>
+              <input type="number" id="camp-sug-valor" placeholder="Ex: 80" min="0" step="0.01"
+                oninput="window._campSugerirPorValor()"
+                style="width:100px;background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:5px 9px;color:var(--texto);font-size:12px">
+              <select id="camp-sug-linha" onchange="window._campSugerirPorValor()"
+                style="background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:5px 9px;color:var(--texto);font-size:12px;max-width:100%">
+                <option value="">Todas as linhas</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);white-space:nowrap;cursor:pointer">
+                <input type="checkbox" id="camp-sug-saldo" checked onchange="window._campSugerirPorValor()" style="accent-color:var(--ouro)">
+                só com estoque
+              </label>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:4px">Lista os produtos do catálogo cujo preço cabe nesse valor — útil para definir o brinde da campanha.</div>
+            <div id="camp-sug-lista" style="margin-top:6px;max-height:190px;overflow-y:auto"></div>
+          </div>
+
           <div id="camp-prods-sel" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
         </div>
         <div class="ig" style="grid-column:span 2"><label>Orientação para equipe</label>
@@ -3791,20 +3858,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           </div>
           <div class="ig"><label>Linha</label>
             <select id="nprod-linha">
-              <option>LINHA CLASSICOS</option>
-              <option>LINHA ESPLENDOR</option>
-              <option>LINHA RITOS</option>
-              <option>EQUIPAMENTOS E ACESSORIOS</option>
-              <option>LINHA RESERVA</option>
-              <option>LINHA DIA DIA</option>
-              <option>LINHA DESFRUTAR</option>
-              <option>SENSORE</option>
-              <option>LINHA GIGI</option>
-              <option>LINHA SELETO</option>
-              <option>ATELIE</option>
-              <option>MATERIAL CONSUMO</option>
-              <option>LANÇAMENTO</option>
+              <!-- [R43] preenchido dinamicamente a partir do catálogo -->
             </select>
+          </div>
+          <div class="ig"><label>Preço Unitário (R$)</label>
+            <input type="number" id="nprod-preco" placeholder="0,00" min="0" step="0.01" value="0">
           </div>
           <div class="ig"><label>Saldo Inicial</label>
             <input type="number" id="nprod-saldo" placeholder="0" min="0" value="0">
@@ -3837,20 +3895,16 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
         <input class="search-bar" type="text" placeholder="Buscar produto..." style="flex:1;min-width:180px" oninput="filtrarProd(this.value)">
-        <select onchange="filtrarLinha(this.value)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none;min-width:180px">
+        <select id="filtro-linha-prod" onchange="filtrarLinha(this.value)" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none;min-width:180px">
           <option value="">Todas as Linhas</option>
-          <option>LINHA CLASSICOS</option><option>LINHA ESPLENDOR</option><option>LINHA RITOS</option>
-          <option>EQUIPAMENTOS E ACESSORIOS</option><option>LINHA RESERVA</option><option>LINHA DIA DIA</option>
-          <option>LINHA DESFRUTAR</option><option>SENSORE</option><option>LINHA GIGI</option>
-          <option>LINHA SELETO</option><option>ATELIE</option><option>MATERIAL CONSUMO</option>
-          <option>LANÇAMENTO</option>
+          <!-- [R43] preenchido dinamicamente a partir do catálogo (33 linhas) -->
         </select>
       </div>
       <div style="overflow-x:auto">
         <table class="dtable">
           <thead><tr>
             <th>Código</th><th>Produto</th><th>Grupo</th><th>Linha</th>
-            <th>Saldo</th><th>Status</th><th></th>
+            <th style="text-align:right">Preço</th><th>Saldo</th><th>Status</th><th></th>
           </tr></thead>
           <tbody id="tbody-prod"></tbody>
         </table>
@@ -4356,7 +4410,7 @@ service cloud.firestore {
     </div>
 
     <!-- DIAGNÓSTICO: ALAVANCA vs ÂNCORA -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:14px">
       <div class="rcard" style="border-color:rgba(46,204,135,.3)">
         <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🚀 Lojas que ALAVANCAM o Grupo</div>
         <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Acima da média · puxando o resultado para CIMA</div>
@@ -4673,553 +4727,550 @@ const VENDEDORAS_PADRAO=[
 ];
 
 const PRODUTOS=[
-  {c:"1020111100",n:"PERFUME PARA INTERIORES CURUMIM 1100 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:5},
-  {c:"1020110200",n:"PERFUME PARA INTERIORES CURUMIM 200 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1020171100",n:"PERFUME PARA INTERIORES GABRIELA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1020251100",n:"PERFUME PARA INTERIORES MARRUA 1100 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:11},
-  {c:"1020250200",n:"PERFUME PARA INTERIORES MARRUA 200 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:9},
-  {c:"1030251100",n:"AGUA PERFUMADA PARA ROUPAS MARRUA 1100 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:8},
-  {c:"1010009025",n:"VALVULA DISPERSORA AVATIM",g:"VALVULA DISPERSORA",l:"EQUIPAMENTOS E ACESSORIOS",s:2},
-  {c:"1020254600",n:"PERFUME PARA INTERIORES MARRUA 4600 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:0},
-  {c:"1020024600",n:"PERFUME PARA INTERIORES CASCAS e FOLHAS 4600 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:3},
-  {c:"1020021100",n:"PERFUME PARA INTERIORES CASCAS e FOLHAS 1100 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:5},
-  {c:"1020020200",n:"PERFUME PARA INTERIORES CASCAS e FOLHAS 200 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:9},
-  {c:"1020231100",n:"PERFUME PARA INTERIORES PITANGA 1100 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:5},
-  {c:"1020230200",n:"PERFUME PARA INTERIORES PITANGA 200 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:21},
-  {c:"1020441100",n:"PERFUME PARA INTERIORES ORIENTAL 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1030111100",n:"AGUA PERFUMADA PARA ROUPAS CURUMIM 1100 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1040490030",n:"ESSENCIA CONCENTRADA FLOR DE ALGODAO 30 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:12},
-  {c:"1040020030",n:"ESSENCIA CONCENTRADA CASCAS e FOLHAS 30 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:0},
-  {c:"1020521100",n:"PERFUME PARA INTERIORES VERBENA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1020554600",n:"PERFUME PARA INTERIORES ALECRIM 4600 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1020551100",n:"PERFUME PARA INTERIORES ALECRIM 1100 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:8},
-  {c:"1020550200",n:"PERFUME PARA INTERIORES ALECRIM 200 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:20},
-  {c:"1030551100",n:"AGUA PERFUMADA PARA ROUPAS ALECRIM 1100 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1030021100",n:"AGUA PERFUMADA PARA ROUPAS CASCAS e FOLHAS 1100 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:14},
-  {c:"1030231100",n:"AGUA PERFUMADA PARA ROUPAS PITANGA 1100 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:6},
-  {c:"1030491100",n:"AGUA PERFUMADA PARA ROUPAS FLOR DE ALGODAO 1100 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-1},
-  {c:"1020491100",n:"PERFUME PARA INTERIORES FLOR DE ALGODAO 1100 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:12},
-  {c:"1020490200",n:"PERFUME PARA INTERIORES FLOR DE ALGODAO 200 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:15},
-  {c:"1020494600",n:"PERFUME PARA INTERIORES FLOR DE ALGODAO 4600 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:0},
-  {c:"1020581100",n:"PERFUME PARA INTERIORES AMBAR 1100 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:13},
-  {c:"1020580200",n:"PERFUME PARA INTERIORES AMBAR 200 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:20},
-  {c:"1030581100",n:"AGUA PERFUMADA PARA ROUPAS AMBAR 1100 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:-1},
-  {c:"1020584600",n:"PERFUME PARA INTERIORES AMBAR 4600 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:1},
-  {c:"1040550030",n:"ESSENCIA CONCENTRADA ALECRIM 30 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:-1},
-  {c:"1020640200",n:"PERFUME PARA INTERIORES PROVENCE 200 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:9},
-  {c:"1030641100",n:"AGUA PERFUMADA PARA ROUPAS PROVENCE 1100 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:1},
-  {c:"1020641100",n:"PERFUME PARA INTERIORES PROVENCE 1100 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:12},
-  {c:"1020644600",n:"PERFUME PARA INTERIORES PROVENCE 4600 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:0},
-  {c:"3020640025",n:"PROVENCE 25ML PERSONALIZADO",g:"EXCLUSIVIDADES",l:"EXCLUSIVIDADE",s:0},
-  {c:"1100589077",n:"SACHE MINI ALMOFADA AMBAR (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:7},
-  {c:"1100029077",n:"SACHE MINI ALMOFADA CASCAS e FOLHAS (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:9},
-  {c:"1100649077",n:"SACHE MINI ALMOFADA PROVENCE (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:-3},
-  {c:"1071030300",n:"OLEO EM CREME CUPUACU e CASTANHA DO BRASIL 300 G",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:1},
-  {c:"1091030180",n:"SABONETE LIQUIDO ESFOLIANTE CUPUACU e CASTANHA DO BRASI",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:1},
-  {c:"1040580030",n:"ESSENCIA CONCENTRADA AMBAR 30 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:2},
-  {c:"1040250030",n:"ESSENCIA CONCENTRADA MARRUA 30 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:3},
-  {c:"1040640030",n:"ESSENCIA CONCENTRADA PROVENCE 30 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:7},
-  {c:"1040110030",n:"ESSENCIA CONCENTRADA CURUMIM 30 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:2},
-  {c:"1010009007",n:"BUCHA VEGETAL REDONDA",g:"BANHO",l:"ATELIE",s:14},
-  {c:"1010009014",n:"MASSAGEADOR MADEIRA P 14 X 7 X 7 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:0},
-  {c:"1010009011",n:"ESCOVA COM PEDRA POMES 10,5 X 5,5 X 4 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:0},
-  {c:"1010009013",n:"ESCOVAO DE MADEIRA P/ BANHO 45,5 X 6,7 X 4,0 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1},
-  {c:"1091050350",n:"SABONETE LIQUIDO AMORA e PITANGA 350 ML",g:"AMORA e PITANGA",l:"LINHA TATO e OLFATO",s:1},
-  {c:"1021074600",n:"PERFUME PARA INTERIORES BAMBU 4600 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:-2},
-  {c:"1021070201",n:"PERFUME PARA INTERIORES BAMBU 200 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:22},
-  {c:"1061050060",n:"PROVADOR AMORA e PITANGA 60 ML",g:"AMORA e PITANGA",l:"LINHA TATO e OLFATO",s:1},
-  {c:"1070760200",n:"EMULSAO HIDRATANTE FLOR DE CEREJEIRA 200 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:4},
-  {c:"1070780200",n:"EMULSAO HIDRATANTE MARINA 200 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:10},
-  {c:"1040009028",n:"VARETAS CARACOL",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:14},
-  {c:"1021054600",n:"PERFUME PARA INTERIORES AMORA E PITANGA 4600 ML",g:"AMORA e PITANGA",l:"LINHA TATO e OLFATO",s:0},
-  {c:"1091050100",n:"SABONETE EM BARRA AMORA e PITANGA 100 G (CX/3 UNI)",g:"AMORA e PITANGA",l:"LINHA TATO e OLFATO",s:-1},
-  {c:"1091040100",n:"SABONETE EM BARRA LAVANDA e AMBAR 100 G (CX/3 UNID)",g:"LAVANDA e AMBAR",l:"LINHA TATO e OLFATO",s:0},
-  {c:"1090800100",n:"SABONETE EM BARRA ALECRIM e CAPIM LIMAO 100 G (CX/ 3 UN",g:"ALECRIM e CAPIM LIMAO",l:"LINHA TATO e OLFATO",s:0},
-  {c:"1040230030",n:"ESSENCIA CONCENTRADA PITANGA 30 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:9},
-  {c:"1040009032",n:"VARETAS ROSA LILAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:65},
-  {c:"1040009031",n:"VARETAS PALITO",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:41},
-  {c:"1010009012",n:"ESCOVA DE BANHO COM MASSAGEADOR 30 X 7,5 X 5 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1},
-  {c:"1071270220",n:"OLEO EM CREME MARACUJA e LIMA 220 G",g:"MARACUJA e LIMA",l:"LINHA RESERVA",s:4},
-  {c:"1071280220",n:"OLEO EM CREME PERA e LIMAO 220 G",g:"PERA e LIMAO",l:"LINHA RESERVA",s:2},
-  {c:"1010009022",n:"BOLSA BAG",g:"ECOBAGS",l:"ATELIE",s:-3},
-  {c:"1010009010",n:"COLHER DE MADEIRA (PCT C/ 10)",g:"COLHER DE MADEIRA E TIGELA",l:"EQUIPAMENTOS E ACESSORIOS",s:21},
-  {c:"1070740121",n:"OLEO DE MASSAGEM CORPORAL YLANG YLANG 120 ML",g:"OLEOS DE MASSAGEM",l:"LINHA RITOS",s:1},
-  {c:"1071340121",n:"OLEO DE MASSAGEM CORPORAL LEMONGRASS 120 ML",g:"OLEOS DE MASSAGEM",l:"LINHA RITOS",s:1},
-  {c:"1070730050",n:"EMULSAO SUAVIZANTE MAOS MANGA VERDE 50G AUTOCUIDADO",g:"MANGA VERDE",l:"LINHA AUTOCUIDADO",s:4},
-  {c:"1070680050",n:"EMULSAO SUAVIZANTE MAOS AMORA SILVESTRE 50G AUTOCUIDADO",g:"AMORA SILVESTRE",l:"LINHA AUTOCUIDADO",s:1},
-  {c:"1071360050",n:"EMULSAO SUAVIZANTE MAOS CUPUACU 50G AUTOCUIDADO",g:"CUPUACU",l:"LINHA AUTOCUIDADO",s:6},
-  {c:"1090550500",n:"SABONETE LIQUIDO ALECRIM 500 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:9},
-  {c:"1090580500",n:"SABONETE LIQUIDO AMBAR 500 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:16},
-  {c:"1090020500",n:"SABONETE LIQUIDO CASCAS e FOLHAS 500 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:8},
-  {c:"1090490500",n:"SABONETE LIQUIDO FLOR DE ALGODAO 500 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-5},
-  {c:"1090250500",n:"SABONETE LIQUIDO MARRUA 500 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:4},
-  {c:"1090230500",n:"SABONETE LIQUIDO PITANGA 500 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:12},
-  {c:"1090640500",n:"SABONETE LIQUIDO PROVENCE 500 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:9},
-  {c:"1091070120",n:"SABONETE EM BARRA BAMBU 120 G",g:"BAMBU",l:"LINHA CLASSICOS",s:19},
-  {c:"2090020500",n:"REFIL SABONETE LIQUIDO CASCAS e FOLHAS 500 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:4},
-  {c:"2040640210",n:"ESSENCIA PARA DIFUSOR PROVENCE 210 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:8},
-  {c:"2040020210",n:"ESSENCIA PARA DIFUSOR CASCAS e FOLHAS 210 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:17},
-  {c:"2040230210",n:"ESSENCIA PARA DIFUSOR PITANGA 210 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:12},
-  {c:"2040550210",n:"ESSENCIA PARA DIFUSOR ALECRIM 210 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:27},
-  {c:"2040490210",n:"ESSENCIA PARA DIFUSOR FLOR DE ALGODAO 210 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-4},
-  {c:"2040580210",n:"ESSENCIA PARA DIFUSOR AMBAR 210 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:22},
-  {c:"2041290210",n:"ESSENCIA PARA DIFUSOR AVADORE 210 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:9},
-  {c:"2040190210",n:"ESSENCIA PARA DIFUSOR TERRA MADRE 210 ML",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:20},
-  {c:"2090640500",n:"REFIL SABONETE LIQUIDO PROVENCE 500ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:12},
-  {c:"2090110500",n:"REFIL SABONETE LIQUIDO CURUMIM 500ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:4},
-  {c:"2090580500",n:"REFIL SABONETE LIQUIDO AMBAR 500ML",g:"AMBAR",l:"LINHA CLASSICOS",s:-2},
-  {c:"2090230500",n:"REFIL SABONETE LIQUIDO PITANGA 500ML",g:"PITANGA",l:"LINHA CLASSICOS",s:9},
-  {c:"2090490500",n:"REFIL SABONETE LIQUIDO FLOR DE ALGODAO 500ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:7},
-  {c:"2090550500",n:"REFIL SABONETE LIQUIDO ALECRIM 500ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0},
-  {c:"2090250500",n:"REFIL SABONETE LIQUIDO MARRUA 500ML",g:"MARRUA",l:"LINHA CLASSICOS",s:12},
-  {c:"1071110080",n:"BONISSIMO SHAVE - CREME PARA BARBEAR 80 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:33},
-  {c:"1071030501",n:"ACUCAR EM OLEO CUPUACU E CASTANHA DO BRASIL 500 G - SER",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:1},
-  {c:"1091119128",n:"SABONETE EM BARRA BONISSIMO 100 G (CX/3 UNID)",g:"BONISSIMO",l:"LINHA BONISSIMO",s:4},
-  {c:"1050009130",n:"KIT EMULSAO SUAVIZANTE PARA AS MAOS",g:"KIT CREME PARA MAOS",l:"LINHA AUTOCUIDADO",s:-8},
-  {c:"1040009133",n:"VARETAS MINI FLORES LILAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-1},
-  {c:"1040009134",n:"VARETAS MINI FLORES LARANJAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:0},
-  {c:"1040009135",n:"VARETAS MINI FLORES ROSAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:1},
-  {c:"2040670210",n:"ESSENCIA PARA DIFUSOR CEDRO e CIPRESTE 210 ML",g:"CEDRO e CIPRESTE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1040009136",n:"VARETAS ESCURAS M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-1},
-  {c:"1141480150",n:"PASTA AGRIDOCE ESFOLIANTE PARA OS PES - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:7},
-  {c:"1141480100",n:"CREME HIDRATANTE QUERATOLITICO PARA OS PES 100 G - SANT",g:"SANTO PE",l:"LINHA SANTO PE",s:21},
-  {c:"1141480160",n:"DESODORANTE PARA OS PES 150 ML - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:0},
-  {c:"1141480080",n:"TALCO EM CREME PARA OS PES 80 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:0},
-  {c:"1141480130",n:"GEL RELAXANTE PARA OS PES E PERNAS 130 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:11},
-  {c:"1141489197",n:"PEDILUVIO BANHO RELAXANTE PARA OS PES 150 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:-3},
-  {c:"1090760301",n:"GEL DE BANHO FLOR DE CEREJEIRA 300 ML",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:2},
-  {c:"1090790301",n:"GEL DE BANHO TAPAJOS 300 ML",g:"TAPAJOS",l:"LINHA DIA DIA",s:4},
-  {c:"1051039137",n:"KIT BANHO DE BEM ESTAR - CUPUACU E CASTANHA DO BRASIL",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:-4},
-  {c:"1041089145",n:"VARETAS BRANCAS M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:14},
-  {c:"1071580200",n:"CREME DE MANTEIGAS CACAU e UCUUBA 200 G",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:7},
-  {c:"1091609195",n:"SABONETE EM BARRA BONISSIMO BLACK (CX. C/ 3 UND.)",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:13},
-  {c:"1131600180",n:"SHAMPOO BONISSIMO BLACK 180 ML",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:19},
-  {c:"1161600150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE BONISSIMO BLACK 15",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:7},
-  {c:"1100499077",n:"SACHE MINI ALMOFADA FLOR DE ALGODAO (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:4},
-  {c:"1051559252",n:"KIT BANHO DE BEM ESTAR - COPAIBA E ANDIROBA",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:-2},
-  {c:"1091550180",n:"SABONETE LIQUIDO ESFOLIANTE COPAIBA e ANDIROBA 180 ML",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:-14},
-  {c:"1071550500",n:"ACUCAR EM OLEO COPAIBA E ANDIROBA 500 G",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:3},
-  {c:"1010009253",n:"CAIXA PARA PRESENTE P",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:-275},
-  {c:"1091660100",n:"CALDA ESFOLIANTE 100 ML - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:0},
-  {c:"1071660100",n:"HIDRATANTE FACIAL 100 G - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:0},
-  {c:"1071669271",n:"MOUSSE DE LIMPEZA 100 G - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:0},
-  {c:"1131520370",n:"MASCARA CAPILAR MURU MURU e PATAUA 350G",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:1},
-  {c:"1091340300",n:"GEL DE BANHO LEMONGRASS 300 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:12},
-  {c:"1091330300",n:"GEL DE BANHO ZIMBRO 300 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:24},
-  {c:"1110740190",n:"SAIS DE BANHO E ESPUMA YLANG YLANG 190 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:7},
-  {c:"1110620190",n:"SAIS DE BANHO E ESPUMA MURU MURU 190 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:2},
-  {c:"1111340190",n:"SAIS DE BANHO E ESPUMA LEMONGRASS 190 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:10},
-  {c:"1111330190",n:"SAIS DE BANHO E ESPUMA ZIMBRO 190 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:7},
-  {c:"2110740190",n:"REFIL SAIS DE BANHO E ESPUMA YLANG YLANG 190 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:0},
-  {c:"2110620190",n:"REFIL SAIS DE BANHO E ESPUMA MURU MURU 190 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:0},
-  {c:"2111340190",n:"REFIL SAIS DE BANHO E ESPUMA LEMONGRASS 190 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:0},
-  {c:"2111330190",n:"REFIL SAIS DE BANHO E ESPUMA ZIMBRO 190 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:0},
-  {c:"1070620120",n:"OLEO DE BANHO E MASSAGEM MURU MURU 120 ML - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:19},
-  {c:"1090740300",n:"GEL DE BANHO YLANG YLANG 300 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:39},
-  {c:"1090620300",n:"GEL DE BANHO MURU MURU 300 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:21},
-  {c:"1070740120",n:"OLEO DE BANHO E MASSAGEM YLANG YLANG 120 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:12},
-  {c:"1071340120",n:"OLEO DE BANHO E MASSAGEM LEMONGRASS 120 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:36},
-  {c:"1071330120",n:"OLEO DE BANHO E MASSAGEM ZIMBRO 120 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:33},
-  {c:"1120740160",n:"VELA AROMATICA E MASSAGEM YLANG YLANG 160 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:16},
-  {c:"1120620160",n:"VELA AROMATICA E MASSAGEM MURU MURU 160 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:6},
-  {c:"1121340160",n:"VELA AROMATICA E MASSAGEM LEMONGRASS 160 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:11},
-  {c:"1121330160",n:"VELA AROMATICA E MASSAGEM ZIMBRO 160 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:14},
-  {c:"1080760300",n:"BANHO REFRESCANTE FLOR DE CEREJEIRA 300 ML - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:3},
-  {c:"1080780300",n:"BANHO REFRESCANTE MARINA 300 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:3},
-  {c:"1080830300",n:"BANHO REFRESCANTE CHA VERDE e ERVAS 300 ML - DIA DIA",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:2},
-  {c:"1080010300",n:"BANHO REFRESCANTE LAVANDA 300 ML - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:6},
-  {c:"1070760300",n:"EMULSAO HIDRATANTE FLOR DE CEREJEIRA 300 ML - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:12},
-  {c:"1070780300",n:"EMULSAO HIDRATANTE MARINA 300 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:30},
-  {c:"1070830300",n:"EMULSAO HIDRATANTE CHA VERDE e ERVAS 300 ML - DIA DIA",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:30},
-  {c:"1090760300",n:"GEL DE BANHO FLOR DE CEREJEIRA 300 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:3},
-  {c:"1090780300",n:"GEL DE BANHO MARINA 300 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:12},
-  {c:"1090830300",n:"GEL DE BANHO CHA VERDE e ERVAS 300 G - DIA DIA",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:24},
-  {c:"1090010300",n:"GEL DE BANHO LAVANDA 300 G - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:9},
-  {c:"1090760200",n:"SABONETE EM BARRA FLOR DE CEREJEIRA 200 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:1},
-  {c:"1090780200",n:"SABONETE EM BARRA MARINA 200 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:-1},
-  {c:"1090830200",n:"SABONETE EM BARRA CHA VERDE e ERVAS 200 G - DIA DIA",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:0},
-  {c:"1090010200",n:"SABONETE EM BARRA LAVANDA 200 G - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:1},
-  {c:"1070010300",n:"EMULSAO HIDRATANTE LAVANDA 300 ML - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:16},
-  {c:"81141480100",n:"CREME HIDRATANTE QUERATOLITICO PARA OS PES 100 G - SANT",g:"SANTO PE",l:"LINHA SANTO PE",s:-2},
-  {c:"2120749079",n:"REFIL INCENSO YLANG YLANG (CX. 12 UNID.) - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:2},
-  {c:"2120629079",n:"REFIL INCENSO MURU MURU (CX. 12 UNID.) - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:0},
-  {c:"2121349079",n:"REFIL INCENSO LEMONGRASS (CX. 12 UNID.) - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:-16},
-  {c:"2121339079",n:"REFIL INCENSO ZIMBRO (CX. 12 UNID.) - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:9},
-  {c:"1091109294",n:"SABONETE EM BARRA VERBENA e BAMBU 100 G (PC COM 3 UNID)",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:0},
-  {c:"1071500200",n:"OLEO DE BANHO GIGI 210 ML",g:"GIGI",l:"LINHA GIGI",s:2},
-  {c:"1091500200",n:"GEL DE BANHO GIGI 210 G",g:"GIGI",l:"LINHA GIGI",s:11},
-  {c:"1091500100",n:"SABONETE EM BARRA GIGI 100 G (CX COM 2 UNID.)",g:"GIGI",l:"LINHA GIGI",s:8},
-  {c:"1050009302",n:"KIT SABONETE EM BARRA DIA DIA 100 G (3 UNID)",g:"KIT SABONETE EM BARRA DIA DIA",l:"LINHA DIA DIA",s:4},
-  {c:"1131110140",n:"BONISSIMO BEARD - SHAMPOO PARA BARBA 140 ML",g:"BONISSIMO",l:"LINHA BONISSIMO",s:14},
-  {c:"1091119301",n:"BONISSIMO SHAVING - GEL PARA BARBEAR 100 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:30},
-  {c:"1021631100",n:"PERFUME PARA INTERIORES FAVA TONKA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1021701100",n:"PERFUME PARA INTERIORES CARDAMOMO 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1051509309",n:"KIT MINI GIGI",g:"GIGI",l:"LINHA GIGI",s:13},
-  {c:"1050769310",n:"KIT DIA DIA FLOR DE CEREJEIRA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:-2},
-  {c:"1050019310",n:"KIT DIA DIA LAVANDA",g:"LAVANDA",l:"LINHA DIA DIA",s:-1},
-  {c:"1050839310",n:"KIT DIA DIA CHA VERDE e ERVAS",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:0},
-  {c:"1050789310",n:"KIT DIA DIA MARINA",g:"MARINA",l:"LINHA DIA DIA",s:0},
-  {c:"1010009311",n:"AVENTAL SABOR e AR",g:"GENGIBRE E ROMA",l:"LINHA SABOR e AR",s:0},
-  {c:"1040000150",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:20},
-  {c:"1040000250",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:6},
-  {c:"1040000500",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:6},
-  {c:"1040009314",n:"VARETAS RATTAN M (PCT COM 12 UNID)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:19},
-  {c:"1070680055",n:"ALCOOL EM GEL AMORA SILVESTRE 55 G - AUTOCUIDADO",g:"AMORA SILVESTRE",l:"LINHA AUTOCUIDADO",s:9},
-  {c:"1070730055",n:"ALCOOL EM GEL MANGA VERDE 55 G - AUTOCUIDADO",g:"MANGA VERDE",l:"LINHA AUTOCUIDADO",s:0},
-  {c:"1071360055",n:"ALCOOL EM GEL CUPUACU 55 G - AUTOCUIDADO",g:"CUPUACU",l:"LINHA AUTOCUIDADO",s:1},
-  {c:"1071500040",n:"SERUM PARA AS MAOS GIGI 40 G",g:"GIGI",l:"LINHA GIGI",s:8},
-  {c:"1010009330",n:"BALDE CINZA METAL AVATIM M",g:"BALDES",l:"EQUIPAMENTOS E ACESSORIOS",s:1},
-  {c:"1010009332",n:"NECESSAIRE BEGE AVATIM P",g:"NECESSAIRES",l:"ATELIE",s:0},
-  {c:"3070000050",n:"ALCOOL EM GEL PARA AS MAOS 70% - 50 G",g:"EXCLUSIVIDADES",l:"EXCLUSIVIDADE",s:0},
-  {c:"2040800210",n:"ESSENCIA PARA DIFUSOR ALECRIM e CAPIM LIMAO 210 ML",g:"ALECRIM e CAPIM LIMAO",l:"LINHA TATO e OLFATO",s:-7},
-  {c:"2041050210",n:"ESSENCIA PARA DIFUSOR AMORA e PITANGA 210 ML",g:"AMORA e PITANGA",l:"LINHA TATO e OLFATO",s:0},
-  {c:"2041040210",n:"ESSENCIA PARA DIFUSOR LAVANDA e AMBAR 210 ML",g:"LAVANDA e AMBAR",l:"LINHA TATO e OLFATO",s:-1},
-  {c:"1081600100",n:"DEO COLONIA BONISSIMO BLACK 100 ML",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:1},
-  {c:"1081810100",n:"DEO COLONIA ACUCENA 100 ML",g:"ACUCENA",l:"LINHA ACUCENA",s:5},
-  {c:"1091810210",n:"GEL DE BANHO ACUCENA 210 G",g:"ACUCENA",l:"LINHA ACUCENA",s:21},
-  {c:"1071810210",n:"OLEO DE BANHO ACUCENA 210 ML",g:"ACUCENA",l:"LINHA ACUCENA",s:14},
-  {c:"1071810200",n:"CREME ACETINADO HIDRATANTE CORPORAL ACUCENA 200 G",g:"ACUCENA",l:"LINHA ACUCENA",s:1},
-  {c:"1051819349",n:"KIT MINI ACUCENA",g:"ACUCENA",l:"LINHA ACUCENA",s:2},
-  {c:"1131490200",n:"SHOWER GEL SELETO - CABELO e CORPO 200 G",g:"SELETO",l:"LINHA SELETO",s:-5},
-  {c:"1091490100",n:"SABONETE EM BARRA SELETO 2 EM 1 - 100 G (CX COM 2 UNID.",g:"SELETO",l:"LINHA SELETO",s:5},
-  {c:"1071500201",n:"CREME ACETINADO HIDRATANTE CORPORAL GIGI 200 G",g:"GIGI",l:"LINHA GIGI",s:1},
-  {c:"1161490150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE SELETO 150 ML",g:"SELETO",l:"LINHA SELETO",s:2},
-  {c:"1050009358",n:"DIFUSOR DE ESSENCIAS JARDIM BRASIL",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:9},
-  {c:"2041830210",n:"ESSENCIA PARA DIFUSOR ORQUIDEA CATTLEYA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:2},
-  {c:"2041840210",n:"ESSENCIA PARA DIFUSOR BROMELIA DO CERRADO 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:7},
-  {c:"2041850210",n:"ESSENCIA PARA DIFUSOR MANACA DA SERRA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0},
-  {c:"1040009098",n:"DIFUSOR AQUECIDO A VELA",g:"DIFUSOR A VELA E REFIL",l:"EQUIPAMENTOS E ACESSORIOS",s:9},
-  {c:"1010009365",n:"BASE DE MADEIRA NATURAL PARA FRASCO DIFUSOR",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:0},
-  {c:"1010009366",n:"BASE DE MADEIRA ESCURA PARA FRASCO DIFUSOR",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:-1},
-  {c:"1040000151",n:"FRASCO VERDE PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:15},
-  {c:"1040000251",n:"FRASCO VERDE PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:5},
-  {c:"1040000501",n:"FRASCO VERDE PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:8},
-  {c:"1040000152",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:4},
-  {c:"1040000252",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:11},
-  {c:"1040000502",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:2},
-  {c:"1040009369",n:"VARETAS MARROM M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:18},
-  {c:"1040009370",n:"VARETAS MARROM G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:12},
-  {c:"1040009371",n:"VARETAS ESCURAS G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:4},
-  {c:"1040009372",n:"VARETAS RATTAN G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:7},
-  {c:"1040009373",n:"VARETAS BRANCAS G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-8},
-  {c:"1090020400",n:"SABONETE LIQUIDO CASCAS e FOLHAS 400 ML",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:16},
-  {c:"1090550400",n:"SABONETE LIQUIDO ALECRIM 400 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1090580400",n:"SABONETE LIQUIDO AMBAR 400 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:20},
-  {c:"1090230400",n:"SABONETE LIQUIDO PITANGA 400 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:14},
-  {c:"1090490400",n:"SABONETE LIQUIDO FLOR DE ALGODAO 400 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:16},
-  {c:"1090640400",n:"SABONETE LIQUIDO PROVENCE 400 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:14},
-  {c:"1090250400",n:"SABONETE LIQUIDO MARRUA 400 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:6},
-  {c:"1090110400",n:"SABONETE LIQUIDO CURUMIM 400 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0},
-  {c:"1041920120",n:"DIFUSOR DE ESSENCIAS COCO e ROMA 120 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:43},
-  {c:"1091920380",n:"SABONETE LIQUIDO COCO e ROMA 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:19},
-  {c:"1091920100",n:"SABONETE EM BARRA COCO e ROMA 100 G (CX/ 3 ) SENSORE",g:"SENSORE",l:"SENSORE",s:5},
-  {c:"1081780100",n:"DEO PARFUM SELETO OCEAN 100 ML",g:"SELETO OCEAN",l:"LINHA SELETO",s:11},
-  {c:"1091170200",n:"GEL DE BANHO SERENA 200 G",g:"SERENA",l:"LINHA SERENA",s:5},
-  {c:"1071170210",n:"OLEO DE BANHO SERENA 210 ML",g:"SERENA",l:"LINHA SERENA",s:7},
-  {c:"1071170200",n:"CREME ACETINADO HIDRATANTE CORPORAL SERENA 200 G",g:"SERENA",l:"LINHA SERENA",s:-2},
-  {c:"1081870200",n:"AGUA REFRESCANTE RELAXAMENTO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:6},
-  {c:"1081880200",n:"AGUA REFRESCANTE ACONCHEGO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:11},
-  {c:"1081890200",n:"AGUA REFRESCANTE ENERGIA 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:9},
-  {c:"1081900200",n:"AGUA REFRESCANTE CONCENTRACAO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:4},
-  {c:"1081170101",n:"DEO PARFUM SERENA 100 ML",g:"SERENA",l:"LINHA SERENA",s:-1},
-  {c:"1091780200",n:"SHOWER GEL SELETO OCEAN - CABELO e CORPO 200 G",g:"SELETO OCEAN",l:"LINHA SELETO",s:3},
-  {c:"1091780100",n:"SABONETE EM BARRA SELETO OCEAN 2 EM 1 - 100 G (CX COM 2",g:"SELETO OCEAN",l:"LINHA SELETO",s:12},
-  {c:"1161780150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE SELETO OCEAN 150 M",g:"SELETO OCEAN",l:"LINHA SELETO",s:5},
-  {c:"1090230120",n:"SABONETE EM BARRA PITANGA 120 G",g:"PITANGA",l:"LINHA CLASSICOS",s:1},
-  {c:"1010009348",n:"NECESSAIRE SELETO OCEAN",g:"SELETO OCEAN",l:"LINHA SELETO",s:1},
-  {c:"1100239077",n:"SACHE MINI ALMOFADA PITANGA (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:12},
-  {c:"1071320140",n:"MASCARA FACIAL VERDE 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:10},
-  {c:"1071300140",n:"MASCARA FACIAL BRANCA 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:12},
-  {c:"1071910140",n:"MASCARA FACIAL PRETA 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:4},
-  {c:"2120009098",n:"VELAS PARA DIFUSOR AQUECIDO (CX COM 2 UNID)",g:"DIFUSOR A VELA E REFIL",l:"EQUIPAMENTOS E ACESSORIOS",s:0},
-  {c:"2071660100",n:"HIDRATANTE FACIAL 100 G - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:12},
-  {c:"2071669271",n:"MOUSSE DE LIMPEZA 100 G - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:0},
-  {c:"2091660100",n:"CALDA ESFOLIANTE 100 ML - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:-1},
-  {c:"1131100200",n:"SHAMPOO VERBENA e BAMBU 200 ML",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:7},
-  {c:"1131100201",n:"CONDICIONADOR VERBENA e BAMBU 200 ML",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:7},
-  {c:"2071550500",n:"REFIL ACUCAR EM OLEO COPAIBA e ANDIROBA 500 G",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:4},
-  {c:"1071920050",n:"CREME HIDRATANTE PARA MAOS COCO e ROMA 50 G SENSORE",g:"SENSORE",l:"SENSORE",s:26},
-  {c:"1091920200",n:"GEL DE BANHO COCO e ROMA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:11},
-  {c:"1071920200",n:"HIDRATANTE CORPORAL COCO e ROMA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:11},
-  {c:"1041930120",n:"DIFUSOR DE ESSENCIAS ROSAS e DAMASCO 120 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:41},
-  {c:"1091930380",n:"SABONETE LIQUIDO ROSAS e DAMASCO 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:2},
-  {c:"1091930100",n:"SABONETE EM BARRA ROSAS e DAMASCO 100 G (CX/3) SENSORE",g:"SENSORE",l:"SENSORE",s:3},
-  {c:"1071930050",n:"CREME HIDRATANTE PARA MAOS ROSAS e DAMASCO 50 G SENSORE",g:"SENSORE",l:"SENSORE",s:4},
-  {c:"1091930200",n:"GEL DE BANHO ROSAS e DAMASCO 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:-6},
-  {c:"1071930200",n:"HIDRATANTE CORPORAL ROSAS e DAMASCO 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:5},
-  {c:"1041940120",n:"DIFUSOR DE ESSENCIAS SICILIANO e BAUNILHA 120 ML - SENS",g:"SENSORE",l:"SENSORE",s:11},
-  {c:"1091940380",n:"SABONETE LIQUIDO SICILIANO e BAUNILHA 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:-7},
-  {c:"1091940100",n:"SABONETE EM BARRA SICILIANO e BAUNILHA 100 G (CX/ 3) SE",g:"SENSORE",l:"SENSORE",s:-1},
-  {c:"1071940050",n:"CREME HIDRATANTE PARA MAOS SICILIANO e BAUNILHA 50 G SE",g:"SENSORE",l:"SENSORE",s:5},
-  {c:"1091940200",n:"GEL DE BANHO SICILIANO e BAUNILHA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:49},
-  {c:"1071940200",n:"HIDRATANTE CORPORAL SICILIANO e BAUNILHA 200 G - SENSOR",g:"SENSORE",l:"SENSORE",s:14},
-  {c:"1081490101",n:"DEO PARFUM SELETO 100 ML - SERIE 2",g:"SELETO",l:"LINHA SELETO",s:1},
-  {c:"1071110060",n:"BONISSIMO BALM - POS BARBA 60 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:31},
-  {c:"1090550120",n:"SABONETE EM BARRA ALECRIM 120 G",g:"ALECRIM",l:"LINHA CLASSICOS",s:8},
-  {c:"1090580120",n:"SABONETE EM BARRA AMBAR 120 G",g:"AMBAR",l:"LINHA CLASSICOS",s:13},
-  {c:"1090020120",n:"SABONETE EM BARRA CASCAS e FOLHAS 120 G",g:"CASCAS e FOLHAS",l:"LINHA CLASSICOS",s:8},
-  {c:"1090490120",n:"SABONETE EM BARRA FLOR DE ALGODAO 120 G",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:2},
-  {c:"1090640120",n:"SABONETE EM BARRA PROVENCE 120 G",g:"PROVENCE",l:"LINHA CLASSICOS",s:1},
-  {c:"1071980010",n:"OLEO ESSENCIAL MELALEUCA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:5},
-  {c:"1071990010",n:"OLEO ESSENCIAL AMAZONGRASS 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:6},
-  {c:"1072010010",n:"OLEO ESSENCIAL ALECRIM 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7},
-  {c:"1072020010",n:"OLEO ESSENCIAL MENTA PIPERITA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7},
-  {c:"1072030010",n:"OLEO ESSENCIAL LAVANDA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7},
-  {c:"1021071101",n:"PERFUME PARA INTERIORES BAMBU 1100 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:16},
-  {c:"1031071101",n:"AGUA PERFUMADA PARA ROUPAS BAMBU 1100 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:-5},
-  {c:"1091070400",n:"SABONETE LIQUIDO BAMBU 400 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:15},
-  {c:"1091070500",n:"SABONETE LIQUIDO BAMBU 500 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:10},
-  {c:"1041070030",n:"ESSENCIA CONCENTRADA BAMBU 30 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:5},
-  {c:"2041070211",n:"ESSENCIA PARA DIFUSOR BAMBU 210 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:12},
-  {c:"2091070500",n:"REFIL SABONETE LIQUIDO BAMBU 500 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:6},
-  {c:"1050009387",n:"KIT MINI AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:14},
-  {c:"1081570101",n:"DEO COLONIA AMAU 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:6},
-  {c:"1081530100",n:"DEO COLONIA EM FLOR 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:5},
-  {c:"1070000120",n:"OLEO VEGETAL DE SEMENTE DE UVA 120 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:9},
-  {c:"1010009388",n:"TIGELA PARA MISTURA - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7},
-  {c:"1071100201",n:"LOCAO HIDRATANTE CORPORAL VERBENA e BAMBU 200 ML",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:130},
-  {c:"1091100200",n:"GEL DE BANHO VERBENA e BAMBU 200 G",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:58},
-  {c:"1021831100",n:"PERFUME PARA INTERIORES ORQUIDEA CATTLEYA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1021851100",n:"PERFUME PARA INTERIORES MANACA DA SERRA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0},
-  {c:"1021841100",n:"PERFUME PARA INTERIORES BROMELIA DO CERRADO 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:5},
-  {c:"1090250120",n:"SABONETE EM BARRA MARRUA 120 G",g:"MARRUA",l:"LINHA CLASSICOS",s:5},
-  {c:"1071780130",n:"LOCAO HIDRATANTE SELETO OCEAN 130 ML",g:"SELETO OCEAN",l:"LINHA SELETO",s:1},
-  {c:"1081150101",n:"DEO COLONIA APOENA 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:8},
-  {c:"1082040100",n:"DEO PARFUM SELETO HERBO 100 ML",g:"SELETO HERBO",l:"LINHA SELETO",s:6},
-  {c:"1081100300",n:"AGUA REFRESCANTE VERBENA e BAMBU 300 ML",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:1},
-  {c:"1010009419",n:"TOUCA ECO",g:"BANHO",l:"ATELIE",s:0},
-  {c:"1010009420",n:"TIARA ECO",g:"BANHO",l:"ATELIE",s:0},
-  {c:"1010009026",n:"COLHER DE MADEIRA",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1},
-  {c:"1040009423",n:"VARETAS PINUS BOLA NATURAL 30 CM",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:32},
-  {c:"1130110200",n:"XAMPU CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:0},
-  {c:"1130110201",n:"CONDICIONADOR CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:2},
-  {c:"1090110200",n:"SABONETE LIQUIDO CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:-5},
-  {c:"1080110100",n:"DEO COLONIA CURUMIM 100 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:0},
-  {c:"2130110200",n:"REFIL XAMPU CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:10},
-  {c:"2130110201",n:"REFIL CONDICIONADOR CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:5},
-  {c:"2090110200",n:"REFIL SABONETE LIQUIDO CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:5},
-  {c:"1090110100",n:"SABONETE EM BARRA CURUMIM 100 G",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:2},
-  {c:"1092040100",n:"SABONETE EM BARRA SELETO HERBO 100G (CX C/ 2 UND)",g:"SELETO HERBO",l:"LINHA SELETO",s:0},
-  {c:"1162040150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE SELETO HERBO 150M",g:"SELETO HERBO",l:"LINHA SELETO",s:9},
-  {c:"1092040200",n:"SHOWER GEL 2 EM 1 SELETO HERBO - 200 G",g:"SELETO HERBO",l:"LINHA SELETO",s:8},
-  {c:"1082060100",n:"DEO PARFUM IRIS 100 ML",g:"IRIS",l:"LINHA IRIS",s:0},
-  {c:"1052049448",n:"KIT MINI SELETO HERBO",g:"SELETO HERBO",l:"LINHA SELETO",s:0},
-  {c:"3050010100",n:"KIT DIA DIA LAVANDA 100 G - VERSAO 100 G",g:"EXCLUSIVIDADES",l:"EXCLUSIVIDADE",s:0},
-  {c:"1072040130",n:"LOCAO HIDRATANTE SELETO HERBO 130 ML",g:"SELETO HERBO",l:"LINHA SELETO",s:12},
-  {c:"1082070101",n:"DEO COLONIA OZARA 100 ML",g:"OZARA",l:"LINHA OZARA",s:1},
-  {c:"1051109460",n:"KIT AMENIDADES VERBENA e BAMBU - SERIE 1",g:"VERBENA e BAMBU",l:"LINHA VERBENA e BAMBU",s:3},
-  {c:"1161860150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE SUBLIME 150ML/G",g:"SUBLIME",l:"LINHA SUBLIME",s:8},
-  {c:"1161810150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE ACUCENA 150 ML/G",g:"ACUCENA",l:"LINHA ACUCENA",s:4},
-  {c:"1072080200",n:"CREME ACETINADO HIDRATANTE GIGI LAZULI 200 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:4},
-  {c:"1072080210",n:"OLEO DE BANHO GIGI LAZULI 210 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:5},
-  {c:"1092080210",n:"GEL DE BANHO GIGI LAZULI 210 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:5},
-  {c:"1072080040",n:"SERUM PARA AS MAOS GIGI LAZULI 40 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:3},
-  {c:"1092080100",n:"SABONETE EM BARRA GIGI LAZULI 100 G (CX COM 2 UNID.)",g:"GIGI LAZULI",l:"LINHA GIGI",s:3},
-  {c:"1082080100",n:"DEO PARFUM GIGI LAZULI 100 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:13},
-  {c:"1072140010",n:"OLEO ESSENCIAL LIMAO SICILIANO 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:8},
-  {c:"1051529470",n:"KIT MURU MURU e PATAUA - SERIE 1",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:10},
-  {c:"1090009467",n:"CHEIROS DA BAHIA - SERIE 1 - CX COM 5 SABONETES",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:5},
-  {c:"1092090120",n:"SABONETE EM BARRA PROFUNDO OCEANO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:11},
-  {c:"1092100120",n:"SABONETE EM BARRA BRISA COSTEIRA 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:22},
-  {c:"1092110120",n:"SABONETE EM BARRA RIQUEZAS DA MATA 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:17},
-  {c:"1092120120",n:"SABONETE EM BARRA CASTANHA DO CERRADO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:24},
-  {c:"1092130120",n:"SABONETE EM BARRA FLOR DO SERTAO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:9},
-  {c:"1081500101",n:"DEO PARFUM GIGI 100 ML",g:"GIGI",l:"LINHA GIGI",s:13},
-  {c:"1091030090",n:"SABONETE EM BARRA CUPUACU e CASTANHA DO BRASIL 80 G (CX",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:0},
-  {c:"1091550090",n:"SABONETE EM BARRA COPAIBA e ANDIROBA 80 G (CX 2 UND)",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:-10},
-  {c:"1091520090",n:"SABONETE EM BARRA MURU MURU e PATAUA 80 G (CX 2 UND)",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:0},
-  {c:"1091580080",n:"SABONETE EM BARRA CACAU e UCUUBA 80 G (CX 2 UND)",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:0},
-  {c:"1050839330",n:"KIT BANHO CHA VERDE e ERVAS DIA DIA - SERIE 1",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:8},
-  {c:"1050019330",n:"KIT BANHO LAVANDA DIA DIA - SERIE 1",g:"LAVANDA",l:"LINHA DIA DIA",s:11},
-  {c:"1010009474",n:"CESTA VERDE PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0},
-  {c:"1010009475",n:"CESTA LARANJA PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0},
-  {c:"1010009476",n:"ENVELOPE VERDE PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0},
-  {c:"1010009477",n:"ENVELOPE LARANJA PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0},
-  {c:"1071500202",n:"HIDRATANTE ILUMINADOR GIGI 200 G",g:"GIGI",l:"LINHA GIGI",s:0},
-  {c:"1072080201",n:"HIDRATANTE ILUMINADOR GIGI LAZULI 200 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:1},
-  {c:"1042260350",n:"DIFUSOR DE ESSENCIAS AQUAMARE 350 ML",g:"AQUAMARE",l:"LINHA ESPLENDOR",s:-6},
-  {c:"1092260350",n:"SABONETE LIQUIDO AQUAMARE 350 ML",g:"AQUAMARE",l:"LINHA ESPLENDOR",s:-11},
-  {c:"1022260150",n:"PERFUME PARA INTERIORES AQUAMARE 150 ML",g:"AQUAMARE",l:"LINHA ESPLENDOR",s:-4},
-  {c:"1042270100",n:"DIFUSOR DE ESSENCIAS ESCARLATE 100 ML",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1072150050",n:"SERUM NUTRITIVO PARA AS MAOS FIGO 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5},
-  {c:"1072170050",n:"SERUM NUTRITIVO PARA AS MAOS CARAMBOLA 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:14},
-  {c:"1072200050",n:"SERUM NUTRITIVO PARA AS MAOS SERIGUELA 50 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:24},
-  {c:"1072180050",n:"SERUM NUTRITIVO PARA AS MAOS COCO 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12},
-  {c:"1072160050",n:"SERUM NUTRITIVO PARA AS MAOS JABUTICABA 50 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:13},
-  {c:"1072190050",n:"SERUM NUTRITIVO PARA AS MAOS MARACUJA 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:7},
-  {c:"1072150300",n:"HIDRATANTE CORPORAL BIFASICO FIGO 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:0},
-  {c:"1072170300",n:"HIDRATANTE CORPORAL BIFASICO CARAMBOLA 300 G - DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:1},
-  {c:"1072200300",n:"HIDRATANTE CORPORAL BIFASICO SERIGUELA 300 G - DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:19},
-  {c:"1072180300",n:"HIDRATANTE CORPORAL BIFASICO COCO 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:4},
-  {c:"1072160300",n:"HIDRATANTE CORPORAL BIFASICO JABUTICABA 300 G -DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16},
-  {c:"1072190300",n:"HIDRATANTE CORPORAL BIFASICO MARACUJA 300 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5},
-  {c:"2042270210",n:"ESSENCIA PARA DIFUSOR ESCARLATE 210 ML",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1072070150",n:"OLEO DE MASSAGEM OZARA 150 ML",g:"OZARA",l:"LINHA OZARA",s:0},
-  {c:"1082290100",n:"DEO COLONIA BONISSIMO URBAN 100ML",g:"BONISSIMO URBAN",l:"LINHA BONISSIMO",s:1},
-  {c:"1082300100",n:"DEO COLONIA ACUCENA ROUGE 100ML",g:"ACUCENA ROUGE",l:"LINHA ACUCENA",s:9},
-  {c:"1092150090",n:"SABONETE EM BARRA GLICERINADO FIGO 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12},
-  {c:"1092160090",n:"SABONETE EM BARRA GLICERINADO JABUTICABA 90G - DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:2},
-  {c:"1092170090",n:"SABONETE EM BARRA GLICERINADO CARAMBOLA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:3},
-  {c:"1092180090",n:"SABONETE EM BARRA GLICERINADO COCO 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:30},
-  {c:"1092190090",n:"SABONETE EM BARRA GLICERINADO MARACUJA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:-3},
-  {c:"1092200090",n:"SABONETE EM BARRA GLICERINADO SERIGUELA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5},
-  {c:"1092160500",n:"ESPUMA DE LIMPEZA MAOS E CORPO JABUTICABA 500 ML - DESF",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16},
-  {c:"1092170500",n:"ESPUMA DE LIMPEZA MAOS E CORPO CARAMBOLA 500 ML - DESFR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:19},
-  {c:"1092180500",n:"ESPUMA DE LIMPEZA MAOS E CORPO COCO 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:4},
-  {c:"1092190500",n:"ESPUMA DE LIMPEZA MAOS E CORPO MARACUJA 500 ML - DESFRU",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:9},
-  {c:"1092200500",n:"ESPUMA DE LIMPEZA MAOS E CORPO SERIGUELA 500 ML - DESFR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16},
-  {c:"1092150500",n:"ESPUMA DE LIMPEZA MAOS E CORPO FIGO 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:11},
-  {c:"1091290310",n:"SABONETE LIQUIDO AVADORE 310 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:9},
-  {c:"1041290200",n:"DIFUSOR DE ESSENCIAS AVADORE 200 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:8},
-  {c:"1021290110",n:"PERFUME PARA INTERIORES AVADORE 110 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:13},
-  {c:"1121290065",n:"VELA AROMATICA AVADORE 65 G",g:"AVADORE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1072200055",n:"GEL ANTISSEPTICO PARA AS MAOS SERIGUELA 55 G - DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12},
-  {c:"1072190055",n:"GEL ANTISSEPTICO PARA AS MAOS MARACUJA 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5},
-  {c:"1072180055",n:"GEL ANTISSEPTICO PARA AS MAOS COCO 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:17},
-  {c:"1072170055",n:"GEL ANTISSEPTICO PARA AS MAOS CARAMBOLA 55 G - DESFRUTA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:20},
-  {c:"1072160055",n:"GEL ANTISSEPTICO PARA AS MAOS JABUTICABA 55 G - DESFRUT",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:14},
-  {c:"1072150055",n:"GEL ANTISSEPTICO PARA AS MAOS FIGO 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12},
-  {c:"1050009495",n:"KIT CREME PARA AS MAOS SENSORE - VERDE",g:"SENSORE",l:"SENSORE",s:0},
-  {c:"1071580500",n:"ACUCAR EM OLEO CACAU E UCUUBA 500 G",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:16},
-  {c:"2071580500",n:"REFIL ACUCAR EM OLEO CACAU e UCUUBA 500 G",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:1},
-  {c:"1092310500",n:"SABONETE LIQUIDO APOGEU 500 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:18},
-  {c:"1071580210",n:"SABONETE EM OLEO CACAU e UCUUBA 210ML",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:41},
-  {c:"1022310230",n:"PERFUME PARA INTERIORES APOGEU 230 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:8},
-  {c:"1051509501",n:"KIT MINI GIGI- SERIE 3",g:"GIGI",l:"LINHA GIGI",s:-13},
-  {c:"1052089502",n:"KIT MINI GIGI LAZULI",g:"GIGI LAZULI",l:"LINHA GIGI",s:-11},
-  {c:"1010009508",n:"ENVELOPE PARA PRESENTE - SERIE 1",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:-102},
-  {c:"1050789498",n:"KIT BANHO REFRESCANTE DIA DIA MARINA - SERIE 2",g:"MARINA",l:"LINHA DIA DIA",s:-1},
-  {c:"1050839499",n:"KIT BANHO REFRESCANTE DIA DIA CHA VERDE E ERVAS - SERIE",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:-10},
-  {c:"1050019500",n:"KIT BANHO REFRESCANTE DIA DIA LAVANDA - SERIE 2",g:"LAVANDA",l:"LINHA DIA DIA",s:-13},
-  {c:"1050769501",n:"KIT BANHO REFRESCANTE DIA DIA FLOR DE CEREJEIRA - SERIE",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:0},
-  {c:"1052279509",n:"KIT ESCARLATE",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1122310190",n:"VELA AROMATICA APOGEU 190G",g:"APOGEU",l:"LINHA ESPLENDOR",s:10},
-  {c:"1042310420",n:"DIFUSOR DE ESSENCIAS APOGEU 420 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:1},
-  {c:"1081920260",n:"AGUA REFRESC COCO e ROMA 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:-1},
-  {c:"1081930260",n:"AGUA REFRESC ROSAS e DAMASCO 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:21},
-  {c:"1081940260",n:"AGUA REFRESC SICILIANO e BAUNILHA 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:32},
-  {c:"1120190160",n:"VELA AROMATICA TERRA MADRE 160 G",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:1},
-  {c:"1050009511",n:"KIT CREME PARA AS MAOS SENSORE - VERMELHA",g:"SENSORE",l:"SENSORE",s:-1},
-  {c:"1091580180",n:"SABONETE LIQUIDO ESFOLIANTE CACAU e UCUUBA 180ML",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:5},
-  {c:"1051589512",n:"KIT BANHO DE BEM ESTAR - CACAU e UCUUBA",g:"CACAU e UCUUBA",l:"LINHA RESERVA",s:5},
-  {c:"1010009515",n:"NECESSAIRE BOAS SENSACOES - KIT COM 02 AMARELO",g:"NECESSAIRES",l:"ATELIE",s:2},
-  {c:"1010009518",n:"NECESSAIRE BOAS SENSACOES - KIT COM 02 VERDE",g:"NECESSAIRES",l:"ATELIE",s:0},
-  {c:"1072070151",n:"MOUSSE DE BANHO OZARA 150 ML",g:"OZARA",l:"LINHA OZARA",s:0},
-  {c:"1042340100",n:"DIFUSOR DE ESSENCIAS VANILLA NOIR 100 ML",g:"VANILLA NOIR",l:"LINHA ESPLENDOR",s:16},
-  {c:"1020190151",n:"PERFUME PARA INTERIORES TERRA MADRE 150 ML - SERIE 1",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1040190351",n:"DIFUSOR DE ESSENCIAS TERRA MADRE 350 ML - SERIE 1",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:1},
-  {c:"1082280100",n:"DEO COLONIA SUBLIME LUME 100 ML",g:"SUBLIME LUME",l:"LINHA SUBLIME",s:8},
-  {c:"1081860100",n:"DEO COLONIA SUBLIME 100 ML",g:"SUBLIME",l:"LINHA SUBLIME",s:9},
-  {c:"1081500035",n:"PERFUME CABELO GIGI 30 ML",g:"GIGI",l:"LINHA GIGI",s:0},
-  {c:"1082080035",n:"PERFUME CABELO GIGI LAZULI 30 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:0},
-  {c:"1081860035",n:"PERFUME CABELO SUBLIME 30 ML",g:"SUBLIME",l:"LINHA SUBLIME",s:1},
-  {c:"1082280035",n:"PERFUME CABELO SUBLIME LUME 30 ML",g:"SUBLIME LUME",l:"LINHA SUBLIME",s:2},
-  {c:"1051559621",n:"KIT BANHO DE BEM ESTAR COPAIBA E ANDIROBA - SERIE 1",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:43},
-  {c:"1051039622",n:"KIT BANHO DE BEM ESTAR - CUPUACU CASTANHA DO BRASIL SER",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:12},
-  {c:"1071030230",n:"OLEO EM CREME CUPUACU e CASTANHA DO BRASIL 230 G",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:-30},
-  {c:"1071550230",n:"OLEO EM CREME COPAIBA e ANDIROBA 230G",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:1},
-  {c:"1071030211",n:"SABONETE EM OLEO CUPUACU e CASTANHA DO BRASIL 210 ML",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:13},
-  {c:"1071550211",n:"SABONETE EM OLEO COPAIBA e ANDIROBA 210 ML",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:21},
-  {c:"2071030501",n:"REFIL ACUCAR EM OLEO CUPUAAU e CASTANHA 500 G - SERIE ",g:"CUPUACU e CASTANHA DO BRASIL",l:"LINHA RESERVA",s:-1},
-  {c:"1071550501",n:"ACUCAR EM OLEO COPAIBA e ANDIROBA 500 G - SERIE 1",g:"COPAIBA e ANDIROBA",l:"LINHA RESERVA",s:18},
-  {c:"1082370100",n:"DEO PARFUM ALIRA 100 ML",g:"ALIRA",l:"LINHA ALIRA",s:-2},
-  {c:"1041330150",n:"DIFUSOR DE ESSENCIAS ZIMBRO 150 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:2},
-  {c:"1041340150",n:"DIFUSOR DE ESSENCIAS LEMONGRASS 150 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:16},
-  {c:"1040620150",n:"DIFUSOR DE ESSENCIAS MURU MURU 150 ML - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:4},
-  {c:"1040740150",n:"DIFUSOR DE ESSENCIAS YLANG YLANG 150 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:14},
-  {c:"1042380350",n:"DIFUSOR DE ESSENCIAS LAGUNA 350 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:16},
-  {c:"1022380150",n:"PERFUME PARA INTERIORES LAGUNA 150 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:7},
-  {c:"1092380350",n:"SABONETE LIQUIDO LAGUNA 350 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:8},
-  {c:"1122380190",n:"VELA AROMATICA LAGUNA 190 G",g:"LAGUNA",l:"LINHA ESPLENDOR",s:0},
-  {c:"1050009626",n:"DIFUSOR JARDIM BRASIL - COLECAO FASCINIO",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:-18},
-  {c:"1052309627",n:"KIT ACUCENA ROUGE",g:"ACUCENA ROUGE",l:"LINHA ACUCENA",s:-1},
-  {c:"1051819628",n:"KIT ACUCENA - SERIE 1",g:"ACUCENA",l:"LINHA ACUCENA",s:-2},
-  {c:"2042390210",n:"ESSENCIA P/ DIFUSOR FLOR DE MARACUJA 210 ML - JARDIM BR",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:8},
-  {c:"2042400210",n:"ESSENCIA P/ DIF FLOR DE VITORIA REGIA 210 ML - JARDIM B",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:8},
-  {c:"2042410210",n:"ESSENCIA P/ DIFUSOR FLOR DE SAO JOAO 210 ML - JARDIM BR",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0},
-  {c:"1022420090",n:"PERFUME PARA INTERIORES BERGAMO 90 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:0},
-  {c:"1042420100",n:"DIFUSOR DE ESSENCIAS BERGAMO 100 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:5},
-  {c:"1042430250",n:"DIFUSOR DE ESSENCIAS AMANE 250 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:8},
-  {c:"1122430250",n:"VELA AROMATICA AMANE 250 G",g:"AMANE",l:"LINHA ESPLENDOR",s:0},
-  {c:"1092430250",n:"SABONETE LIQUIDO AMANE 250 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:9},
-  {c:"1022430100",n:"PERFUME PARA INTERIORES AMANE 100 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:7},
-  {c:"1131520400",n:"XAMPU MURU MURU e PATAUA 400 ML",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:2},
-  {c:"1131520401",n:"CONDICIONADOR MURU MURU e PATAUA 400 ML",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:3},
-  {c:"1082460100",n:"DEO PARFUM IRIS ROSE 100ML",g:"IRIS ROSE",l:"LINHA IRIS",s:1},
-  {c:"2042310210",n:"ESSENCIA PARA DIFUSOR APOGEU 210 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:8},
-  {c:"2042430210",n:"ESSENCIA PARA DIFUSOR AMANE 210 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:5},
-  {c:"2042470210",n:"ESSENCIA PARA DIFUSOR SILVESTRE 210 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:16},
-  {c:"1092470250",n:"SABONETE LIQUIDO SILVESTRE 250 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11},
-  {c:"1022470100",n:"PERFUME PARA INTERIORES SILVESTRE 100 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:16},
-  {c:"1122470250",n:"VELA AROMATICA SILVESTRE 250 G",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:10},
-  {c:"1042470250",n:"DIFUSOR DE ESSENCIAS SILVESTRE 250 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11},
-  {c:"1082480100",n:"DEO PARFUM BAKARI 100 ML",g:"BAKARI",l:"LINHA BAKARI",s:3},
-  {c:"1081600101",n:"DEO COLONIA BONISSIMO BLACK 100 ML - SERIE 1",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:10},
-  {c:"1082290101",n:"DEO COLONIA BONISSIMO URBAN 100 ML - SERIE 1",g:"BONISSIMO URBAN",l:"LINHA BONISSIMO",s:3},
-  {c:"1081110101",n:"DEO COLONIA BONISSIMO 100 ML - SERIE 1",g:"BONISSIMO",l:"LINHA BONISSIMO",s:5},
-  {c:"1051499663",n:"KIT MINI SELETO",g:"SELETO",l:"LINHA SELETO",s:0},
-  {c:"2092470500",n:"REFIL SABONETE LIQUIDO SILVESTRE 500 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11},
-  {c:"2092310500",n:"REFIL SABONETE LIQUIDO APOGEU 500 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:5},
-  {c:"2092430500",n:"REFIL SABONETE LIQUIDO AMANE 500 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:9},
-  {c:"1052049664",n:"KIT MINI SELETO HERBO SERIE 1",g:"SELETO HERBO",l:"LINHA SELETO",s:0},
-  {c:"1051789665",n:"KIT MINI SELETO OCEAN SERIE 1",g:"SELETO OCEAN",l:"LINHA SELETO",s:0},
-  {c:"1052499667",n:"KIT DESFRUTAR - CEREJA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:-1},
-  {c:"1022450110",n:"PERFUME PARA INTERIORES VELVET 110 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:4},
-  {c:"1042450200",n:"DIFUSOR DE ESSENCIAS VELVET 200 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:8},
-  {c:"1092450310",n:"SABONETE LIQUIDO VELVET 310 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:7},
-  {c:"1122450065",n:"VELA AROMATICA VELVET 65 G",g:"VELVET",l:"LINHA ESPLENDOR",s:10},
-  {c:"1082520100",n:"DEO PARFUM SERENA INTENSE 100 ML",g:"SERENA INTENSE",l:"LINHA SERENA",s:8},
-  {c:"1082080040",n:"DEO PARFUM GIGI LAZULI 40 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:0},
-  {c:"1090190351",n:"SABONETE LIQUIDO TERRA MADRE 350 ML SERIE 2",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:5},
-  {c:"1020190152",n:"PERFUME PARA INTERIORES TERRA MADRE 150 ML SERIE 2",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:7},
-  {c:"1120190190",n:"VELA AROMATICA TERRA MADRE 190 G",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:1},
-  {c:"2042530210",n:"ESSENCIA PARA DIFUSOR FLOR DE MANDACARU 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:4},
-  {c:"2042540210",n:"ESSENCIA PARA DIFUSOR FLOR DE PETUNIA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:6},
-  {c:"2042550210",n:"ESSENCIA PARA DIFUSOR FLOR DE IPE AMARELO 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:2},
-  {c:"1092560300",n:"GEL DE BANHO OLIBANO 300 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:0},
-  {c:"1072560120",n:"OLEO DE BANHO E MASSAGEM OLIBANO 120 ML - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:23},
-  {c:"1112560190",n:"SAIS DE BANHO E ESPUMA OLIBANO 190 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:0},
-  {c:"1122560160",n:"VELA AROMATICA E MASSAGEM OLIBANO 160 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:16},
-  {c:"2042450210",n:"ESSENCIA PARA DIFUSOR VELVET 210 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:7},
-  {c:"2092450500",n:"REFIL SABONETE LIQUIDO VELVET 500 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:16},
-  {c:"2042380210",n:"ESSENCIA PARA DIFUSOR LAGUNA 210 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:19},
-  {c:"1131520302",n:"XAMPU MURU MURU e PATAUA 300 ML SERIE 1",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:-1},
-  {c:"1131520303",n:"CONDICIONADOR MURU MURU e PATAUA 300 ML SERIE 1",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:13},
-  {c:"1131520304",n:"MASCARA CAPILAR MURU MURU e PATAUA 350 G SERIE 1",g:"MURUMURU (LINHA RESERVA)",l:"LINHA RESERVA",s:17},
-  {c:"1050009675",n:"KIT MINI CLASSICOS",g:"CLASSICOS",l:"LINHA CLASSICOS",s:59},
-  {c:"1050009676",n:"KIT MINI AGUAS REFRESCANTES - SENSORE",g:"SENSORE",l:"SENSORE",s:0},
-  {c:"1070010200",n:"EMULSAO HIDRATANTE LAVANDA 200 ML - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:5},
-  {c:"1090780202",n:"GEL DE BANHO MARINA 200 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:8},
-  {c:"1070830200",n:"EMULSAO HIDRATANTE CHA VERDE e ERVAS 200 ML - DIA DIA",g:"CHA VERDE e ERVAS",l:"LINHA DIA DIA",s:11},
-  {c:"1050009671",n:"KIT DIFUSOR JARDIM BRASIL - COLECAO VIVACE",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0},
-  {c:"1081500040",n:"DEO PARFUM GIGI 40 ML",g:"GIGI",l:"LINHA GIGI",s:0},
-  {c:"1071520201",n:"CREME DE MANTEIGAS MURU MURU e PATAUA 200 G SERIE 1",g:"MURU MURU e PATAUA",l:"LINHA RESERVA",s:-12},
-  {c:"2090190501",n:"REFIL SABONETE LIQUIDO TERRA MADRE 500 ML - SERIE 1",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:14},
-  {c:"1082230050",n:"DEO COLONIA ROSA BRASILIS 50 ML",g:"ROSA BRASILIS",l:"LINHA ROSA BRASILIS",s:1},
-  {c:"2041940210",n:"ESSENCIA PARA DIFUSOR SICILIANO e BAUNILHA 210 ML",g:"SENSORE",l:"SENSORE",s:9},
-  {c:"2041930210",n:"ESSENCIA PARA DIFUSOR ROSAS e DAMASCO 210 ML",g:"SENSORE",l:"SENSORE",s:14},
-  {c:"2041920210",n:"ESSENCIA PARA DIFUSOR COCO e ROMA 210 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:10},
-  {c:"2042340210",n:"ESSENCIA PARA DIFUSOR VANILLA NOIR 210 ML",g:"VANILLA NOIR",l:"LINHA ESPLENDOR",s:11},
-  {c:"2042420210",n:"ESSENCIA PARA DIFUSOR BERGAMO 210 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:16},
-  {c:"2041340210",n:"ESSENCIA PARA DIFUSOR LEMONGRASS 210 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:8},
-  {c:"2041330210",n:"ESSENCIA PARA DIFUSOR ZIMBRO 210 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:4},
-  {c:"2040740211",n:"ESSENCIA PARA DIFUSOR YLANG YLANG 210 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:8}
+  {c:"1020111100",n:"PERFUME PARA INTERIORES CURUMIM 1100 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:5,v:142},
+  {c:"1020110200",n:"PERFUME PARA INTERIORES CURUMIM 200 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0,v:53},
+  {c:"1020171100",n:"PERFUME PARA INTERIORES GABRIELA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1020251100",n:"PERFUME PARA INTERIORES MARRUA 1100 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:11,v:142},
+  {c:"1020250200",n:"PERFUME PARA INTERIORES MARRUA 200 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:9,v:53},
+  {c:"1030251100",n:"AGUA PERFUMADA PARA ROUPAS MARRUA 1100 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:8,v:48},
+  {c:"1010009025",n:"VALVULA DISPERSORA AVATIM",g:"VALVULA DISPERSORA",l:"EQUIPAMENTOS E ACESSORIOS",s:2,v:8},
+  {c:"1020021100",n:"PERFUME PARA INTERIORES CASCAS & FOLHAS 1100 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:5,v:142},
+  {c:"1020020200",n:"PERFUME PARA INTERIORES CASCAS & FOLHAS 200 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:9,v:53},
+  {c:"1020231100",n:"PERFUME PARA INTERIORES PITANGA 1100 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:5,v:142},
+  {c:"1020230200",n:"PERFUME PARA INTERIORES PITANGA 200 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:21,v:53},
+  {c:"1020441100",n:"PERFUME PARA INTERIORES ORIENTAL 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1030111100",n:"AGUA PERFUMADA PARA ROUPAS CURUMIM 1100 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0,v:48},
+  {c:"1040490030",n:"ESSENCIA CONCENTRADA FLOR DE ALGODAO 30 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:12,v:45},
+  {c:"1040020030",n:"ESSENCIA CONCENTRADA CASCAS & FOLHAS 30 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:0,v:45},
+  {c:"1020521100",n:"PERFUME PARA INTERIORES VERBENA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1020551100",n:"PERFUME PARA INTERIORES ALECRIM 1100 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:8,v:142},
+  {c:"1020550200",n:"PERFUME PARA INTERIORES ALECRIM 200 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:20,v:53},
+  {c:"1030551100",n:"AGUA PERFUMADA PARA ROUPAS ALECRIM 1100 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0,v:48},
+  {c:"1030021100",n:"AGUA PERFUMADA PARA ROUPAS CASCAS & FOLHAS 1100 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:14,v:48},
+  {c:"1030231100",n:"AGUA PERFUMADA PARA ROUPAS PITANGA 1100 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:6,v:48},
+  {c:"1030491100",n:"AGUA PERFUMADA PARA ROUPAS FLOR DE ALGODAO 1100 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-1,v:48},
+  {c:"1020491100",n:"PERFUME PARA INTERIORES FLOR DE ALGODAO 1100 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:12,v:142},
+  {c:"1020490200",n:"PERFUME PARA INTERIORES FLOR DE ALGODAO 200 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:15,v:53},
+  {c:"1020581100",n:"PERFUME PARA INTERIORES AMBAR 1100 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:13,v:142},
+  {c:"1020580200",n:"PERFUME PARA INTERIORES AMBAR 200 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:20,v:53},
+  {c:"1030581100",n:"AGUA PERFUMADA PARA ROUPAS AMBAR 1100 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:-1,v:48},
+  {c:"1040550030",n:"ESSENCIA CONCENTRADA ALECRIM 30 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:-1,v:45},
+  {c:"1020640200",n:"PERFUME PARA INTERIORES PROVENCE 200 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:9,v:53},
+  {c:"1030641100",n:"AGUA PERFUMADA PARA ROUPAS PROVENCE 1100 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:1,v:48},
+  {c:"1020641100",n:"PERFUME PARA INTERIORES PROVENCE 1100 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:12,v:142},
+  {c:"1020644600",n:"PERFUME PARA INTERIORES PROVENCE 4600 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:0,v:485},
+  {c:"3020640025",n:"PROVENCE 25ML PERSONALIZADO",g:"EXCLUSIVIDADES",l:"EXCLUSIVIDADE",s:0,v:485},
+  {c:"1100589077",n:"SACHE MINI ALMOFADA AMBAR (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:7,v:67},
+  {c:"1100029077",n:"SACHE MINI ALMOFADA CASCAS & FOLHAS (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:9,v:67},
+  {c:"1100649077",n:"SACHE MINI ALMOFADA PROVENCE (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:-3,v:67},
+  {c:"1091030180",n:"SABONETE LIQUIDO ESFOLIANTE CUPUACU & CASTANHA DO BRASIL 180",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:1,v:35},
+  {c:"1040580030",n:"ESSENCIA CONCENTRADA AMBAR 30 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:2,v:45},
+  {c:"1040250030",n:"ESSENCIA CONCENTRADA MARRUA 30 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:3,v:45},
+  {c:"1040640030",n:"ESSENCIA CONCENTRADA PROVENCE 30 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:7,v:45},
+  {c:"1040110030",n:"ESSENCIA CONCENTRADA CURUMIM 30 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:2,v:45},
+  {c:"1010009007",n:"BUCHA VEGETAL REDONDA",g:"BANHO",l:"ATELIE",s:14,v:19},
+  {c:"1010009014",n:"MASSAGEADOR MADEIRA P 14 X 7 X 7 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:45},
+  {c:"1010009011",n:"ESCOVA COM PEDRA POMES 10,5 X 5,5 X 4 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:38},
+  {c:"1010009013",n:"ESCOVAO DE MADEIRA P/ BANHO 45,5 X 6,7 X 4,0 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1,v:59},
+  {c:"1091040350",n:"SABONETE LIQUIDO LAVANDA & AMBAR 350 ML",g:"LAVANDA & AMBAR",l:"LINHA TATO & OLFATO",s:0,v:36},
+  {c:"1021050500",n:"PERFUME PARA INTERIORES AMORA & PITANGA 500ML",g:"AMORA & PITANGA",l:"LINHA TATO & OLFATO",s:0,v:66},
+  {c:"1021074600",n:"PERFUME PARA INTERIORES BAMBU 4600 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:-2,v:485},
+  {c:"1021070201",n:"PERFUME PARA INTERIORES BAMBU 200 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:22,v:53},
+  {c:"1071030500",n:"ACUCAR EM OLEO CUPUACU & CASTANHA DO BRASIL 500 G",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:0,v:157},
+  {c:"1070760200",n:"EMULSAO HIDRATANTE FLOR DE CEREJEIRA 200 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:4,v:45},
+  {c:"1070780200",n:"EMULSAO HIDRATANTE MARINA 200 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:10,v:45},
+  {c:"1040009028",n:"VARETAS CARACOL",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:14,v:33},
+  {c:"1091050100",n:"SABONETE EM BARRA AMORA & PITANGA 100 G (CX/3 UNI)",g:"AMORA & PITANGA",l:"LINHA TATO & OLFATO",s:-1,v:49},
+  {c:"1091040100",n:"SABONETE EM BARRA LAVANDA & AMBAR 100 G (CX/3 UNID)",g:"LAVANDA & AMBAR",l:"LINHA TATO & OLFATO",s:0,v:49},
+  {c:"1090800100",n:"SABONETE EM BARRA ALECRIM & CAPIM LIMAO 100 G (CX/ 3 UND)",g:"ALECRIM & CAPIM LIMAO",l:"LINHA TATO & OLFATO",s:0,v:49},
+  {c:"1040230030",n:"ESSENCIA CONCENTRADA PITANGA 30 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:9,v:45},
+  {c:"1040009032",n:"VARETAS ROSA LILAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:65,v:29},
+  {c:"1040009031",n:"VARETAS PALITO",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:41,v:12},
+  {c:"1010009012",n:"ESCOVA DE BANHO COM MASSAGEADOR 30 X 7,5 X 5 CM",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1,v:74},
+  {c:"1010009022",n:"BOLSA BAG",g:"ECOBAGS",l:"ATELIE",s:-3,v:169},
+  {c:"1010009010",n:"COLHER DE MADEIRA (PCT C/ 10)",g:"COLHER DE MADEIRA E TIGELA",l:"EQUIPAMENTOS E ACESSORIOS",s:21,v:80},
+  {c:"1070730050",n:"EMULSAO SUAVIZANTE MAOS MANGA VERDE 50G AUTOCUIDADO",g:"MANGA VERDE",l:"LINHA AUTOCUIDADO",s:4,v:22},
+  {c:"1070680050",n:"EMULSAO SUAVIZANTE MAOS AMORA SILVESTRE 50G AUTOCUIDADO",g:"AMORA SILVESTRE",l:"LINHA AUTOCUIDADO",s:1,v:22},
+  {c:"1071360050",n:"EMULSAO SUAVIZANTE MAOS CUPUACU 50G AUTOCUIDADO",g:"CUPUACU",l:"LINHA AUTOCUIDADO",s:6,v:22},
+  {c:"1090550500",n:"SABONETE LIQUIDO ALECRIM 500 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:9,v:102},
+  {c:"1090580500",n:"SABONETE LIQUIDO AMBAR 500 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:16,v:102},
+  {c:"1090020500",n:"SABONETE LIQUIDO CASCAS & FOLHAS 500 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:8,v:102},
+  {c:"1090490500",n:"SABONETE LIQUIDO FLOR DE ALGODAO 500 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-5,v:102},
+  {c:"1090250500",n:"SABONETE LIQUIDO MARRUA 500 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:4,v:102},
+  {c:"1090230500",n:"SABONETE LIQUIDO PITANGA 500 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:12,v:102},
+  {c:"1090640500",n:"SABONETE LIQUIDO PROVENCE 500 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:9,v:102},
+  {c:"1091070120",n:"SABONETE EM BARRA BAMBU 120 G",g:"BAMBU",l:"LINHA CLASSICOS",s:19,v:22},
+  {c:"2090020500",n:"REFIL SABONETE LIQUIDO CASCAS & FOLHAS 500 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:4,v:47},
+  {c:"2040640210",n:"ESSENCIA PARA DIFUSOR PROVENCE 210 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:8,v:65},
+  {c:"2040020210",n:"ESSENCIA PARA DIFUSOR CASCAS & FOLHAS 210 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:17,v:65},
+  {c:"2040230210",n:"ESSENCIA PARA DIFUSOR PITANGA 210 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:12,v:65},
+  {c:"2040550210",n:"ESSENCIA PARA DIFUSOR ALECRIM 210 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:27,v:65},
+  {c:"2040490210",n:"ESSENCIA PARA DIFUSOR FLOR DE ALGODAO 210 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:-4,v:65},
+  {c:"2040580210",n:"ESSENCIA PARA DIFUSOR AMBAR 210 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:22,v:65},
+  {c:"2041290210",n:"ESSENCIA PARA DIFUSOR AVADORE 210 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:9,v:65},
+  {c:"2040190210",n:"ESSENCIA PARA DIFUSOR TERRA MADRE 210 ML",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:20,v:65},
+  {c:"2090640500",n:"REFIL SABONETE LIQUIDO PROVENCE 500ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:12,v:47},
+  {c:"2090110500",n:"REFIL SABONETE LIQUIDO CURUMIM 500ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:4,v:47},
+  {c:"2090580500",n:"REFIL SABONETE LIQUIDO AMBAR 500ML",g:"AMBAR",l:"LINHA CLASSICOS",s:-2,v:47},
+  {c:"2090230500",n:"REFIL SABONETE LIQUIDO PITANGA 500ML",g:"PITANGA",l:"LINHA CLASSICOS",s:9,v:47},
+  {c:"2090490500",n:"REFIL SABONETE LIQUIDO FLOR DE ALGODAO 500ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:7,v:47},
+  {c:"2090550500",n:"REFIL SABONETE LIQUIDO ALECRIM 500ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0,v:47},
+  {c:"2090250500",n:"REFIL SABONETE LIQUIDO MARRUA 500ML",g:"MARRUA",l:"LINHA CLASSICOS",s:12,v:47},
+  {c:"1071110080",n:"BONISSIMO SHAVE - CREME PARA BARBEAR 80 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:33,v:38},
+  {c:"1071030501",n:"ACUCAR EM OLEO CUPUACU E CASTANHA DO BRASIL 500 G - SERIE 1",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:1,v:157},
+  {c:"1091119128",n:"SABONETE EM BARRA BONISSIMO 100 G (CX/3 UNID)",g:"BONISSIMO",l:"LINHA BONISSIMO",s:4,v:58},
+  {c:"1050009130",n:"KIT EMULSAO SUAVIZANTE PARA AS MAOS",g:"KIT CREME PARA MAOS",l:"LINHA AUTOCUIDADO",s:-8,v:48},
+  {c:"1040009133",n:"VARETAS MINI FLORES LILAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-1,v:51},
+  {c:"1040009134",n:"VARETAS MINI FLORES LARANJAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:51},
+  {c:"1040009135",n:"VARETAS MINI FLORES ROSAS",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:1,v:51},
+  {c:"2040670210",n:"ESSENCIA PARA DIFUSOR CEDRO & CIPRESTE 210 ML",g:"CEDRO & CIPRESTE",l:"LINHA ESPLENDOR",s:0,v:61},
+  {c:"1040009136",n:"VARETAS ESCURAS M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-1,v:31},
+  {c:"1141480150",n:"PASTA AGRIDOCE ESFOLIANTE PARA OS PES - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:7,v:46},
+  {c:"1141480100",n:"CREME HIDRATANTE QUERATOLITICO PARA OS PES 100 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:21,v:32},
+  {c:"1141480160",n:"DESODORANTE PARA OS PES 150 ML - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:0,v:37},
+  {c:"1141480080",n:"TALCO EM CREME PARA OS PES 80 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:0,v:33},
+  {c:"1141480130",n:"GEL RELAXANTE PARA OS PES E PERNAS 130 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:11,v:42},
+  {c:"1141489197",n:"PEDILUVIO BANHO RELAXANTE PARA OS PES 150 G - SANTO PE",g:"SANTO PE",l:"LINHA SANTO PE",s:-3,v:36},
+  {c:"1071520200",n:"CREME DE MANTEIGAS MURU MURU & PATAUA 200 G",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:0,v:135},
+  {c:"1041089145",n:"VARETAS BRANCAS M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:14,v:30},
+  {c:"1071580200",n:"CREME DE MANTEIGAS CACAU & UCUUBA 200 G",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:7,v:135},
+  {c:"1091609195",n:"SABONETE EM BARRA BONISSIMO BLACK (CX. C/ 3 UND.)",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:13,v:58},
+  {c:"1131600180",n:"SHAMPOO BONISSIMO BLACK 180 ML",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:19,v:32},
+  {c:"1161600150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE BONISSIMO BLACK 150 ML",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:7,v:44},
+  {c:"1100499077",n:"SACHE MINI ALMOFADA FLOR DE ALGODAO (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:4,v:67},
+  {c:"1041050100",n:"DIFUSOR DE ESSENCIAS AMORA & PITANGA 100 ML",g:"AMORA & PITANGA",l:"LINHA TATO & OLFATO",s:0,v:79},
+  {c:"1051559252",n:"KIT BANHO DE BEM ESTAR - COPAIBA E ANDIROBA",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:-2,v:120},
+  {c:"1091550180",n:"SABONETE LIQUIDO ESFOLIANTE COPAIBA & ANDIROBA 180 ML",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:-14,v:35},
+  {c:"1010009253",n:"CAIXA PARA PRESENTE P",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:-275,v:29},
+  {c:"1091340300",n:"GEL DE BANHO LEMONGRASS 300 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:12,v:39},
+  {c:"1091330300",n:"GEL DE BANHO ZIMBRO 300 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:24,v:39},
+  {c:"1110740190",n:"SAIS DE BANHO E ESPUMA YLANG YLANG 190 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:7,v:64},
+  {c:"1110620190",n:"SAIS DE BANHO E ESPUMA MURU MURU 190 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:2,v:64},
+  {c:"1111340190",n:"SAIS DE BANHO E ESPUMA LEMONGRASS 190 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:10,v:64},
+  {c:"1111330190",n:"SAIS DE BANHO E ESPUMA ZIMBRO 190 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:7,v:64},
+  {c:"2110740190",n:"REFIL SAIS DE BANHO E ESPUMA YLANG YLANG 190 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:0,v:34},
+  {c:"2110620190",n:"REFIL SAIS DE BANHO E ESPUMA MURU MURU 190 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:0,v:34},
+  {c:"2111340190",n:"REFIL SAIS DE BANHO E ESPUMA LEMONGRASS 190 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:0,v:34},
+  {c:"2111330190",n:"REFIL SAIS DE BANHO E ESPUMA ZIMBRO 190 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:0,v:34},
+  {c:"1070620120",n:"OLEO DE BANHO E MASSAGEM MURU MURU 120 ML - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:19,v:36},
+  {c:"1090740300",n:"GEL DE BANHO YLANG YLANG 300 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:39,v:39},
+  {c:"1090620300",n:"GEL DE BANHO MURU MURU 300 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:21,v:39},
+  {c:"1070740120",n:"OLEO DE BANHO E MASSAGEM YLANG YLANG 120 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:12,v:36},
+  {c:"1071340120",n:"OLEO DE BANHO E MASSAGEM LEMONGRASS 120 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:36,v:36},
+  {c:"1071330120",n:"OLEO DE BANHO E MASSAGEM ZIMBRO 120 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:33,v:36},
+  {c:"1120740160",n:"VELA AROMATICA E MASSAGEM YLANG YLANG 160 G - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:16,v:98},
+  {c:"1120620160",n:"VELA AROMATICA E MASSAGEM MURU MURU 160 G - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:6,v:98},
+  {c:"1121340160",n:"VELA AROMATICA E MASSAGEM LEMONGRASS 160 G - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:11,v:98},
+  {c:"1121330160",n:"VELA AROMATICA E MASSAGEM ZIMBRO 160 G - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:14,v:98},
+  {c:"1080760300",n:"BANHO REFRESCANTE FLOR DE CEREJEIRA 300 ML - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:3,v:120},
+  {c:"1080780300",n:"BANHO REFRESCANTE MARINA 300 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:3,v:120},
+  {c:"1080830300",n:"BANHO REFRESCANTE CHA VERDE & ERVAS 300 ML - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:2,v:120},
+  {c:"1080010300",n:"BANHO REFRESCANTE LAVANDA 300 ML - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:6,v:120},
+  {c:"1070760300",n:"EMULSAO HIDRATANTE FLOR DE CEREJEIRA 300 ML - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:12,v:62},
+  {c:"1070780300",n:"EMULSAO HIDRATANTE MARINA 300 ML - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:30,v:62},
+  {c:"1070830300",n:"EMULSAO HIDRATANTE CHA VERDE & ERVAS 300 ML - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:30,v:62},
+  {c:"1090760300",n:"GEL DE BANHO FLOR DE CEREJEIRA 300 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:3,v:41},
+  {c:"1090780300",n:"GEL DE BANHO MARINA 300 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:12,v:41},
+  {c:"1090830300",n:"GEL DE BANHO CHA VERDE & ERVAS 300 G - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:24,v:41},
+  {c:"1090010300",n:"GEL DE BANHO LAVANDA 300 G - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:9,v:41},
+  {c:"1090760200",n:"SABONETE EM BARRA FLOR DE CEREJEIRA 200 G - DIA DIA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:1,v:34},
+  {c:"1090780200",n:"SABONETE EM BARRA MARINA 200 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:-1,v:34},
+  {c:"1090830200",n:"SABONETE EM BARRA CHA VERDE & ERVAS 200 G - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:0,v:34},
+  {c:"1090010200",n:"SABONETE EM BARRA LAVANDA 200 G - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:1,v:34},
+  {c:"1070010300",n:"EMULSAO HIDRATANTE LAVANDA 300 ML - DIA DIA",g:"LAVANDA",l:"LINHA DIA DIA",s:16,v:62},
+  {c:"1121339079",n:"INCENSO ZIMBRO (CX. 12 UNID.) - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:0,v:58},
+  {c:"2120749079",n:"REFIL INCENSO YLANG YLANG (CX. 12 UNID.) - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:2,v:28},
+  {c:"2120629079",n:"REFIL INCENSO MURU MURU (CX. 12 UNID.) - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:0,v:28},
+  {c:"2121349079",n:"REFIL INCENSO LEMONGRASS (CX. 12 UNID.) - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:-16,v:28},
+  {c:"2121339079",n:"REFIL INCENSO ZIMBRO (CX. 12 UNID.) - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:9,v:28},
+  {c:"1091109294",n:"SABONETE EM BARRA VERBENA & BAMBU 100 G (PC COM 3 UNID)",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:0,v:58},
+  {c:"1071500200",n:"OLEO DE BANHO GIGI 210 ML",g:"GIGI",l:"LINHA GIGI",s:2,v:75},
+  {c:"1091500200",n:"GEL DE BANHO GIGI 210 G",g:"GIGI",l:"LINHA GIGI",s:11,v:45},
+  {c:"1091500100",n:"SABONETE EM BARRA GIGI 100 G (CX COM 2 UNID.)",g:"GIGI",l:"LINHA GIGI",s:8,v:47},
+  {c:"1050009302",n:"KIT SABONETE EM BARRA DIA DIA 100 G (3 UNID)",g:"KIT SABONETE EM BARRA DIA DIA",l:"LINHA DIA DIA",s:4,v:55},
+  {c:"1131110140",n:"BONISSIMO BEARD - SHAMPOO PARA BARBA 140 ML",g:"BONISSIMO",l:"LINHA BONISSIMO",s:14,v:32},
+  {c:"1091119301",n:"BONISSIMO SHAVING - GEL PARA BARBEAR 100 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:30,v:34},
+  {c:"1021631100",n:"PERFUME PARA INTERIORES FAVA TONKA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1021701100",n:"PERFUME PARA INTERIORES CARDAMOMO 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1050769310",n:"KIT DIA DIA FLOR DE CEREJEIRA",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:-2,v:68},
+  {c:"1050019310",n:"KIT DIA DIA LAVANDA",g:"LAVANDA",l:"LINHA DIA DIA",s:-1,v:68},
+  {c:"1050839310",n:"KIT DIA DIA CHA VERDE & ERVAS",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:0,v:68},
+  {c:"1050789310",n:"KIT DIA DIA MARINA",g:"MARINA",l:"LINHA DIA DIA",s:0,v:68},
+  {c:"1040000150",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:20,v:47},
+  {c:"1040000250",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:6,v:49},
+  {c:"1040000500",n:"FRASCO CRISTAL PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:6,v:62},
+  {c:"1040009314",n:"VARETAS RATTAN M (PCT COM 12 UNID)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:19,v:30},
+  {c:"1070680055",n:"ALCOOL EM GEL AMORA SILVESTRE 55 G - AUTOCUIDADO",g:"AMORA SILVESTRE",l:"LINHA AUTOCUIDADO",s:9,v:14},
+  {c:"1070730055",n:"ALCOOL EM GEL MANGA VERDE 55 G - AUTOCUIDADO",g:"MANGA VERDE",l:"LINHA AUTOCUIDADO",s:0,v:14},
+  {c:"1071360055",n:"ALCOOL EM GEL CUPUACU 55 G - AUTOCUIDADO",g:"CUPUACU",l:"LINHA AUTOCUIDADO",s:1,v:14},
+  {c:"1071500040",n:"SERUM PARA AS MAOS GIGI 40 G",g:"GIGI",l:"LINHA GIGI",s:8,v:69},
+  {c:"1050839329",n:"KIT BANHO CHA VERDE & ERVAS DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:0,v:46},
+  {c:"1010009329",n:"BALDE CINZA METAL AVATIM P",g:"BALDES",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:27},
+  {c:"1010009331",n:"BALDE CINZA METAL AVATIM G",g:"BALDES",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:43},
+  {c:"2040800210",n:"ESSENCIA PARA DIFUSOR ALECRIM & CAPIM LIMAO 210 ML",g:"ALECRIM & CAPIM LIMAO",l:"LINHA TATO & OLFATO",s:-7,v:65},
+  {c:"2041050210",n:"ESSENCIA PARA DIFUSOR AMORA & PITANGA 210 ML",g:"AMORA & PITANGA",l:"LINHA TATO & OLFATO",s:0,v:65},
+  {c:"2041040210",n:"ESSENCIA PARA DIFUSOR LAVANDA & AMBAR 210 ML",g:"LAVANDA & AMBAR",l:"LINHA TATO & OLFATO",s:-1,v:65},
+  {c:"1081110100",n:"DEO COLONIA BONISSIMO 100 ML",g:"BONISSIMO",l:"LINHA BONISSIMO",s:0,v:145},
+  {c:"1081600100",n:"DEO COLONIA BONISSIMO BLACK 100 ML",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:1,v:145},
+  {c:"1081810100",n:"DEO COLONIA ACUCENA 100 ML",g:"ACUCENA",l:"LINHA ACUCENA",s:5,v:185},
+  {c:"1091810210",n:"GEL DE BANHO ACUCENA 210 G",g:"ACUCENA",l:"LINHA ACUCENA",s:21,v:42},
+  {c:"1071810210",n:"OLEO DE BANHO ACUCENA 210 ML",g:"ACUCENA",l:"LINHA ACUCENA",s:14,v:75},
+  {c:"1071810200",n:"CREME ACETINADO HIDRATANTE CORPORAL ACUCENA 200 G",g:"ACUCENA",l:"LINHA ACUCENA",s:1,v:165},
+  {c:"1131490200",n:"SHOWER GEL SELETO - CABELO & CORPO 200 G",g:"SELETO",l:"LINHA SELETO",s:-5,v:37},
+  {c:"1091490100",n:"SABONETE EM BARRA SELETO 2 EM 1 - 100 G (CX COM 2 UNID.)",g:"SELETO",l:"LINHA SELETO",s:5,v:44},
+  {c:"1071500201",n:"CREME ACETINADO HIDRATANTE CORPORAL GIGI 200 G",g:"GIGI",l:"LINHA GIGI",s:1,v:165},
+  {c:"1161490150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE SELETO 150 ML",g:"SELETO",l:"LINHA SELETO",s:2,v:44},
+  {c:"1050009358",n:"DIFUSOR DE ESSENCIAS JARDIM BRASIL",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:9,v:128},
+  {c:"2041830210",n:"ESSENCIA PARA DIFUSOR ORQUIDEA CATTLEYA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:2,v:65},
+  {c:"2041840210",n:"ESSENCIA PARA DIFUSOR BROMELIA DO CERRADO 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:7,v:65},
+  {c:"2041850210",n:"ESSENCIA PARA DIFUSOR MANACA DA SERRA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0,v:65},
+  {c:"1040009098",n:"DIFUSOR AQUECIDO A VELA",g:"DIFUSOR A VELA E REFIL",l:"EQUIPAMENTOS E ACESSORIOS",s:9,v:115},
+  {c:"1010009365",n:"BASE DE MADEIRA NATURAL PARA FRASCO DIFUSOR",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:0,v:52},
+  {c:"1010009366",n:"BASE DE MADEIRA ESCURA PARA FRASCO DIFUSOR",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:-1,v:52},
+  {c:"1081860060",n:"DEO COLONIA SUBLIME 60 ML",g:"SUBLIME",l:"LINHA SUBLIME",s:0,v:118},
+  {c:"1040000151",n:"FRASCO VERDE PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:15,v:54},
+  {c:"1040000251",n:"FRASCO VERDE PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:5,v:58},
+  {c:"1040000501",n:"FRASCO VERDE PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:8,v:69},
+  {c:"1040000152",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 150 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:4,v:54},
+  {c:"1040000252",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 250 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:11,v:58},
+  {c:"1040000502",n:"FRASCO AMBAR PARA DIFUSOR AVATIM 500 ML",g:"FRASCOS DIFUSORES E DISPENSER",l:"EQUIPAMENTOS E ACESSORIOS",s:2,v:69},
+  {c:"1040009369",n:"VARETAS MARROM M (PCT COM 12 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:18,v:30},
+  {c:"1040009370",n:"VARETAS MARROM G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:12,v:30},
+  {c:"1040009371",n:"VARETAS ESCURAS G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:4,v:30},
+  {c:"1040009372",n:"VARETAS RATTAN G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:7,v:30},
+  {c:"1040009373",n:"VARETAS BRANCAS G (PCT COM 8 UND)",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:-8,v:30},
+  {c:"1090020400",n:"SABONETE LIQUIDO CASCAS & FOLHAS 400 ML",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:16,v:46},
+  {c:"1090550400",n:"SABONETE LIQUIDO ALECRIM 400 ML",g:"ALECRIM",l:"LINHA CLASSICOS",s:0,v:46},
+  {c:"1090580400",n:"SABONETE LIQUIDO AMBAR 400 ML",g:"AMBAR",l:"LINHA CLASSICOS",s:20,v:46},
+  {c:"1090230400",n:"SABONETE LIQUIDO PITANGA 400 ML",g:"PITANGA",l:"LINHA CLASSICOS",s:14,v:46},
+  {c:"1090490400",n:"SABONETE LIQUIDO FLOR DE ALGODAO 400 ML",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:16,v:46},
+  {c:"1090640400",n:"SABONETE LIQUIDO PROVENCE 400 ML",g:"PROVENCE",l:"LINHA CLASSICOS",s:14,v:46},
+  {c:"1090250400",n:"SABONETE LIQUIDO MARRUA 400 ML",g:"MARRUA",l:"LINHA CLASSICOS",s:6,v:46},
+  {c:"1090110400",n:"SABONETE LIQUIDO CURUMIM 400 ML",g:"CURUMIM",l:"LINHA CLASSICOS",s:0,v:46},
+  {c:"1041920120",n:"DIFUSOR DE ESSENCIAS COCO & ROMA 120 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:43,v:82},
+  {c:"1091920380",n:"SABONETE LIQUIDO COCO & ROMA 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:19,v:36},
+  {c:"1091920100",n:"SABONETE EM BARRA COCO & ROMA 100 G (CX/ 3 ) SENSORE",g:"SENSORE",l:"SENSORE",s:5,v:46},
+  {c:"1081780100",n:"DEO PARFUM SELETO OCEAN 100 ML",g:"SELETO OCEAN",l:"LINHA SELETO",s:11,v:165},
+  {c:"1091170200",n:"GEL DE BANHO SERENA 200 G",g:"SERENA",l:"LINHA SERENA",s:5,v:45},
+  {c:"1071170210",n:"OLEO DE BANHO SERENA 210 ML",g:"SERENA",l:"LINHA SERENA",s:7,v:75},
+  {c:"1071170200",n:"CREME ACETINADO HIDRATANTE CORPORAL SERENA 200 G",g:"SERENA",l:"LINHA SERENA",s:-2,v:165},
+  {c:"1081870200",n:"AGUA REFRESCANTE RELAXAMENTO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:6,v:118},
+  {c:"1081880200",n:"AGUA REFRESCANTE ACONCHEGO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:11,v:118},
+  {c:"1081890200",n:"AGUA REFRESCANTE ENERGIA 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:9,v:118},
+  {c:"1081900200",n:"AGUA REFRESCANTE CONCENTRACAO 200 ML - AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:4,v:118},
+  {c:"1081170101",n:"DEO PARFUM SERENA 100 ML",g:"SERENA",l:"LINHA SERENA",s:-1,v:168},
+  {c:"1091780200",n:"SHOWER GEL SELETO OCEAN - CABELO & CORPO 200 G",g:"SELETO OCEAN",l:"LINHA SELETO",s:3,v:35},
+  {c:"1091780100",n:"SABONETE EM BARRA SELETO OCEAN 2 EM 1 - 100 G (CX COM 2 UND)",g:"SELETO OCEAN",l:"LINHA SELETO",s:12,v:44},
+  {c:"1161780150",n:"DESODORANTE AEROSOL ANTITRANSPIRANTE SELETO OCEAN 150 ML",g:"SELETO OCEAN",l:"LINHA SELETO",s:5,v:44},
+  {c:"1090230120",n:"SABONETE EM BARRA PITANGA 120 G",g:"PITANGA",l:"LINHA CLASSICOS",s:1,v:22},
+  {c:"1010009348",n:"NECESSAIRE SELETO OCEAN",g:"SELETO OCEAN",l:"LINHA SELETO",s:1,v:82},
+  {c:"1100239077",n:"SACHE MINI ALMOFADA PITANGA (CX C/ 6 UNID.)",g:"MINI ALMOFADA",l:"ATELIE",s:12,v:67},
+  {c:"1071320140",n:"MASCARA FACIAL VERDE 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:10,v:38},
+  {c:"1071300140",n:"MASCARA FACIAL BRANCA 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:12,v:38},
+  {c:"1071910140",n:"MASCARA FACIAL PRETA 140 G",g:"MASCARAS FACIAIS",l:"LINHA AUTOCUIDADO",s:4,v:38},
+  {c:"2071660100",n:"HIDRATANTE FACIAL 100 G - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:12,v:46},
+  {c:"2071669271",n:"MOUSSE DE LIMPEZA 100 G - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:0,v:44},
+  {c:"2091660100",n:"CALDA ESFOLIANTE 100 ML - BISNAGA - MEL TERAPIA",g:"MEL TERAPIA",l:"LINHA TERAPIA",s:-1,v:42},
+  {c:"1131100200",n:"SHAMPOO VERBENA & BAMBU 200 ML",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:7,v:32},
+  {c:"1131100201",n:"CONDICIONADOR VERBENA & BAMBU 200 ML",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:7,v:34},
+  {c:"2071030500",n:"REFIL ACUCAR EM OLEO CUPUACU & CASTANHA 500 G",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:0,v:76},
+  {c:"2071550500",n:"REFIL ACUCAR EM OLEO COPAIBA & ANDIROBA 500 G",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:4,v:76},
+  {c:"1071920050",n:"CREME HIDRATANTE PARA MAOS COCO & ROMA 50 G SENSORE",g:"SENSORE",l:"SENSORE",s:26,v:18},
+  {c:"1091920200",n:"GEL DE BANHO COCO & ROMA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:11,v:23},
+  {c:"1071920200",n:"HIDRATANTE CORPORAL COCO & ROMA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:11,v:44},
+  {c:"1041930120",n:"DIFUSOR DE ESSENCIAS ROSAS & DAMASCO 120 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:41,v:82},
+  {c:"1091930380",n:"SABONETE LIQUIDO ROSAS & DAMASCO 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:2,v:36},
+  {c:"1091930100",n:"SABONETE EM BARRA ROSAS & DAMASCO 100 G (CX/3) SENSORE",g:"SENSORE",l:"SENSORE",s:3,v:46},
+  {c:"1071930050",n:"CREME HIDRATANTE PARA MAOS ROSAS & DAMASCO 50 G SENSORE",g:"SENSORE",l:"SENSORE",s:4,v:18},
+  {c:"1091930200",n:"GEL DE BANHO ROSAS & DAMASCO 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:-6,v:23},
+  {c:"1071930200",n:"HIDRATANTE CORPORAL ROSAS & DAMASCO 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:5,v:44},
+  {c:"1041940120",n:"DIFUSOR DE ESSENCIAS SICILIANO & BAUNILHA 120 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:11,v:82},
+  {c:"1091940380",n:"SABONETE LIQUIDO SICILIANO & BAUNILHA 370 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:-7,v:36},
+  {c:"1091940100",n:"SABONETE EM BARRA SICILIANO & BAUNILHA 100 G (CX/ 3) SENSORE",g:"SENSORE",l:"SENSORE",s:-1,v:46},
+  {c:"1071940050",n:"CREME HIDRATANTE PARA MAOS SICILIANO & BAUNILHA 50 G SENSORE",g:"SENSORE",l:"SENSORE",s:5,v:18},
+  {c:"1091940200",n:"GEL DE BANHO SICILIANO & BAUNILHA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:49,v:23},
+  {c:"1071940200",n:"HIDRATANTE CORPORAL SICILIANO & BAUNILHA 200 G - SENSORE",g:"SENSORE",l:"SENSORE",s:14,v:44},
+  {c:"1081490101",n:"DEO PARFUM SELETO 100 ML - SERIE 2",g:"SELETO",l:"LINHA SELETO",s:1,v:165},
+  {c:"1071110060",n:"BONISSIMO BALM - POS BARBA 60 G",g:"BONISSIMO",l:"LINHA BONISSIMO",s:31,v:38},
+  {c:"1090550120",n:"SABONETE EM BARRA ALECRIM 120 G",g:"ALECRIM",l:"LINHA CLASSICOS",s:8,v:22},
+  {c:"1090580120",n:"SABONETE EM BARRA AMBAR 120 G",g:"AMBAR",l:"LINHA CLASSICOS",s:13,v:22},
+  {c:"1090020120",n:"SABONETE EM BARRA CASCAS & FOLHAS 120 G",g:"CASCAS & FOLHAS",l:"LINHA CLASSICOS",s:8,v:22},
+  {c:"1090490120",n:"SABONETE EM BARRA FLOR DE ALGODAO 120 G",g:"FLOR DE ALGODAO",l:"LINHA CLASSICOS",s:2,v:22},
+  {c:"1090640120",n:"SABONETE EM BARRA PROVENCE 120 G",g:"PROVENCE",l:"LINHA CLASSICOS",s:1,v:22},
+  {c:"1071980010",n:"OLEO ESSENCIAL MELALEUCA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:5,v:51},
+  {c:"1071990010",n:"OLEO ESSENCIAL AMAZONGRASS 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:6,v:61},
+  {c:"1072010010",n:"OLEO ESSENCIAL ALECRIM 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7,v:64},
+  {c:"1072020010",n:"OLEO ESSENCIAL MENTA PIPERITA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7,v:49},
+  {c:"1072030010",n:"OLEO ESSENCIAL LAVANDA 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7,v:82},
+  {c:"1021070200",n:"PERFUME PARA INTERIORES BAMBU 200 ML",g:"PERFUME PARA INTERIORES 200",l:"LINHA BULEVAR",s:0,v:49},
+  {c:"1021071101",n:"PERFUME PARA INTERIORES BAMBU 1100 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:16,v:142},
+  {c:"1031071101",n:"AGUA PERFUMADA PARA ROUPAS BAMBU 1100 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:-5,v:48},
+  {c:"1091070400",n:"SABONETE LIQUIDO BAMBU 400 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:15,v:46},
+  {c:"1091070500",n:"SABONETE LIQUIDO BAMBU 500 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:10,v:102},
+  {c:"1041070030",n:"ESSENCIA CONCENTRADA BAMBU 30 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:5,v:45},
+  {c:"2041070211",n:"ESSENCIA PARA DIFUSOR BAMBU 210 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:12,v:65},
+  {c:"2091070500",n:"REFIL SABONETE LIQUIDO BAMBU 500 ML",g:"BAMBU",l:"LINHA CLASSICOS",s:6,v:47},
+  {c:"1050009387",n:"KIT MINI AGUAS NATURAIS",g:"AGUAS NATURAIS",l:"LINHA AGUAS NATURAIS",s:14,v:174},
+  {c:"1081570101",n:"DEO COLONIA AMAU 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:6,v:140},
+  {c:"1081530100",n:"DEO COLONIA EM FLOR 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:5,v:140},
+  {c:"1020000120",n:"BASE PARA AROMATIZANTE 120 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:0,v:27},
+  {c:"1070000120",n:"OLEO VEGETAL DE SEMENTE DE UVA 120 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:9,v:39},
+  {c:"1010009388",n:"TIGELA PARA MISTURA - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:7,v:42},
+  {c:"1071100201",n:"LOCAO HIDRATANTE CORPORAL VERBENA & BAMBU 200 ML",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:130,v:36},
+  {c:"1091100200",n:"GEL DE BANHO VERBENA & BAMBU 200 G",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:58,v:27},
+  {c:"1021831100",n:"PERFUME PARA INTERIORES ORQUIDEA CATTLEYA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1021851100",n:"PERFUME PARA INTERIORES MANACA DA SERRA 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:0,v:142},
+  {c:"1021841100",n:"PERFUME PARA INTERIORES BROMELIA DO CERRADO 1100 ML",g:"PERFUME PARA INTERIORES 1100",l:"LINHA BULEVAR",s:5,v:142},
+  {c:"1090250120",n:"SABONETE EM BARRA MARRUA 120 G",g:"MARRUA",l:"LINHA CLASSICOS",s:5,v:22},
+  {c:"1071780130",n:"LOCAO HIDRATANTE SELETO OCEAN 130 ML",g:"SELETO OCEAN",l:"LINHA SELETO",s:1,v:39},
+  {c:"1081150101",n:"DEO COLONIA APOENA 100 ML - RELICARIO",g:"RELICARIO",l:"LINHA RELICARIO",s:8,v:140},
+  {c:"1082040100",n:"DEO PARFUM SELETO HERBO 100 ML",g:"SELETO HERBO",l:"LINHA SELETO",s:6,v:165},
+  {c:"1081100300",n:"AGUA REFRESCANTE VERBENA & BAMBU 300 ML",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:1,v:120},
+  {c:"1010009419",n:"TOUCA ECO",g:"BANHO",l:"ATELIE",s:0,v:69},
+  {c:"1010009420",n:"TIARA ECO",g:"BANHO",l:"ATELIE",s:0,v:24},
+  {c:"1010009026",n:"COLHER DE MADEIRA",g:"ACESSORIOS BANHO",l:"EQUIPAMENTOS E ACESSORIOS",s:1,v:8},
+  {c:"1040009423",n:"VARETAS PINUS BOLA NATURAL 30 CM",g:"VARETAS DIFUSORAS",l:"EQUIPAMENTOS E ACESSORIOS",s:32,v:44},
+  {c:"1130110200",n:"XAMPU CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:0,v:42},
+  {c:"1130110201",n:"CONDICIONADOR CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:2,v:44},
+  {c:"1090110200",n:"SABONETE LIQUIDO CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:-5,v:39},
+  {c:"1080110100",n:"DEO COLONIA CURUMIM 100 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:0,v:76},
+  {c:"2130110200",n:"REFIL XAMPU CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:10,v:30},
+  {c:"2090110200",n:"REFIL SABONETE LIQUIDO CURUMIM 200 ML",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:5,v:26},
+  {c:"1090110100",n:"SABONETE EM BARRA CURUMIM 100 G",g:"CURUMIM - INFANTIL",l:"CURUMIM - INFANTIL",s:2,v:23},
+  {c:"1092040100",n:"SABONETE EM BARRA SELETO HERBO 100G (CX C/ 2 UND)",g:"SELETO HERBO",l:"LINHA SELETO",s:0,v:44},
+  {c:"1162040150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE SELETO HERBO 150ML",g:"SELETO HERBO",l:"LINHA SELETO",s:9,v:44},
+  {c:"1092040200",n:"SHOWER GEL 2 EM 1 SELETO HERBO - 200 G",g:"SELETO HERBO",l:"LINHA SELETO",s:8,v:35},
+  {c:"1082060100",n:"DEO PARFUM IRIS 100 ML",g:"IRIS",l:"LINHA IRIS",s:0,v:162},
+  {c:"1052049448",n:"KIT MINI SELETO HERBO",g:"SELETO HERBO",l:"LINHA SELETO",s:0,v:148},
+  {c:"1072040130",n:"LOCAO HIDRATANTE SELETO HERBO 130 ML",g:"SELETO HERBO",l:"LINHA SELETO",s:12,v:39},
+  {c:"1082070101",n:"DEO COLONIA OZARA 100 ML",g:"OZARA",l:"LINHA OZARA",s:1,v:146},
+  {c:"1051109460",n:"KIT AMENIDADES VERBENA & BAMBU - SERIE 1",g:"VERBENA & BAMBU",l:"LINHA VERBENA & BAMBU",s:3,v:65},
+  {c:"1161860150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE SUBLIME 150ML/G",g:"SUBLIME",l:"LINHA SUBLIME",s:8,v:44},
+  {c:"1161810150",n:"DESODORANTE AEROSSOL ANTITRANSPIRANTE ACUCENA 150 ML/G",g:"ACUCENA",l:"LINHA ACUCENA",s:4,v:44},
+  {c:"1072080200",n:"CREME ACETINADO HIDRATANTE GIGI LAZULI 200 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:4,v:165},
+  {c:"1072080210",n:"OLEO DE BANHO GIGI LAZULI 210 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:5,v:75},
+  {c:"1092080210",n:"GEL DE BANHO GIGI LAZULI 210 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:5,v:45},
+  {c:"1072080040",n:"SERUM PARA AS MAOS GIGI LAZULI 40 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:3,v:69},
+  {c:"1092080100",n:"SABONETE EM BARRA GIGI LAZULI 100 G (CX COM 2 UNID.)",g:"GIGI LAZULI",l:"LINHA GIGI",s:3,v:47},
+  {c:"1082080100",n:"DEO PARFUM GIGI LAZULI 100 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:13,v:245},
+  {c:"1072140010",n:"OLEO ESSENCIAL LIMAO SICILIANO 10 ML - RITOS",g:"RITOS ESSENCIAIS",l:"LINHA RITOS",s:8,v:48},
+  {c:"1051529470",n:"KIT MURU MURU & PATAUA - SERIE 1",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:10,v:69},
+  {c:"1090009467",n:"CHEIROS DA BAHIA - SERIE 1 - CX COM 5 SABONETES",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:5,v:114},
+  {c:"1092090120",n:"SABONETE EM BARRA PROFUNDO OCEANO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:11,v:22},
+  {c:"1092100120",n:"SABONETE EM BARRA BRISA COSTEIRA 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:22,v:22},
+  {c:"1092110120",n:"SABONETE EM BARRA RIQUEZAS DA MATA 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:17,v:22},
+  {c:"1092120120",n:"SABONETE EM BARRA CASTANHA DO CERRADO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:24,v:22},
+  {c:"1092130120",n:"SABONETE EM BARRA FLOR DO SERTAO 120 G",g:"CHEIROS DA BAHIA",l:"LINHA CHEIROS DA BAHIA",s:9,v:22},
+  {c:"1081500101",n:"DEO PARFUM GIGI 100 ML",g:"GIGI",l:"LINHA GIGI",s:13,v:245},
+  {c:"1071550210",n:"OLEO DE BANHO EMULSIONANTE COPAIBA & ANDIROBA 210 ML",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:0,v:73},
+  {c:"1091030090",n:"SABONETE EM BARRA CUPUACU & CASTANHA DO BRASIL 80 G (CX 2 UN",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:0,v:38},
+  {c:"1091550090",n:"SABONETE EM BARRA COPAIBA & ANDIROBA 80 G (CX 2 UND)",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:-10,v:38},
+  {c:"1091520090",n:"SABONETE EM BARRA MURU MURU & PATAUA 80 G (CX 2 UND)",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:0,v:36},
+  {c:"1091580080",n:"SABONETE EM BARRA CACAU & UCUUBA 80 G (CX 2 UND)",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:0,v:36},
+  {c:"1050789330",n:"KIT BANHO MARINA DIA DIA - SERIE 1",g:"MARINA",l:"LINHA DIA DIA",s:0,v:63},
+  {c:"1010009474",n:"CESTA VERDE PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0,v:63},
+  {c:"1010009475",n:"CESTA LARANJA PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0,v:63},
+  {c:"1010009476",n:"ENVELOPE VERDE PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0,v:63},
+  {c:"1010009477",n:"ENVELOPE LARANJA PARA PRESENTE (PCT. C/10)",g:"EMBALAGENS PARA PRESENTE",l:"MATERIAL CONSUMO",s:0,v:63},
+  {c:"1071500202",n:"HIDRATANTE ILUMINADOR GIGI 200 G",g:"GIGI",l:"LINHA GIGI",s:0,v:162},
+  {c:"1072080201",n:"HIDRATANTE ILUMINADOR GIGI LAZULI 200 G",g:"GIGI LAZULI",l:"LINHA GIGI",s:1,v:162},
+  {c:"1042260350",n:"DIFUSOR DE ESSENCIAS AQUAMARE 350 ML",g:"AQUAMARE",l:"LINHA ESPLENDOR",s:-6,v:188},
+  {c:"1092260350",n:"SABONETE LIQUIDO AQUAMARE 350 ML",g:"AQUAMARE",l:"LINHA ESPLENDOR",s:-11,v:128},
+  {c:"1042270100",n:"DIFUSOR DE ESSENCIAS ESCARLATE 100 ML",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0,v:128},
+  {c:"1022270090",n:"PERFUME PARA INTERIORES ESCARLATE 90 ML",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0,v:79},
+  {c:"1072150050",n:"SERUM NUTRITIVO PARA AS MAOS FIGO 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5,v:22},
+  {c:"1072170050",n:"SERUM NUTRITIVO PARA AS MAOS CARAMBOLA 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:14,v:22},
+  {c:"1072200050",n:"SERUM NUTRITIVO PARA AS MAOS SERIGUELA 50 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:24,v:22},
+  {c:"1072180050",n:"SERUM NUTRITIVO PARA AS MAOS COCO 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12,v:22},
+  {c:"1072160050",n:"SERUM NUTRITIVO PARA AS MAOS JABUTICABA 50 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:13,v:22},
+  {c:"1072190050",n:"SERUM NUTRITIVO PARA AS MAOS MARACUJA 50 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:7,v:22},
+  {c:"1072150300",n:"HIDRATANTE CORPORAL BIFASICO FIGO 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:0,v:89},
+  {c:"1072170300",n:"HIDRATANTE CORPORAL BIFASICO CARAMBOLA 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:1,v:89},
+  {c:"1072200300",n:"HIDRATANTE CORPORAL BIFASICO SERIGUELA 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:19,v:89},
+  {c:"1072180300",n:"HIDRATANTE CORPORAL BIFASICO COCO 300 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:4,v:89},
+  {c:"1072160300",n:"HIDRATANTE CORPORAL BIFASICO JABUTICABA 300 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16,v:89},
+  {c:"1072190300",n:"HIDRATANTE CORPORAL BIFASICO MARACUJA 300 G -DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5,v:89},
+  {c:"2042270210",n:"ESSENCIA PARA DIFUSOR ESCARLATE 210 ML",g:"ESCARLATE",l:"LINHA ESPLENDOR",s:0,v:65},
+  {c:"1072070150",n:"OLEO DE MASSAGEM OZARA 150 ML",g:"OZARA",l:"LINHA OZARA",s:0,v:62},
+  {c:"1082290100",n:"DEO COLONIA BONISSIMO URBAN 100ML",g:"BONISSIMO URBAN",l:"LINHA BONISSIMO",s:1,v:145},
+  {c:"1082300100",n:"DEO COLONIA ACUCENA ROUGE 100ML",g:"ACUCENA ROUGE",l:"LINHA ACUCENA",s:9,v:185},
+  {c:"1092150090",n:"SABONETE EM BARRA GLICERINADO FIGO 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12,v:19},
+  {c:"1092160090",n:"SABONETE EM BARRA GLICERINADO JABUTICABA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:2,v:19},
+  {c:"1092170090",n:"SABONETE EM BARRA GLICERINADO CARAMBOLA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:3,v:19},
+  {c:"1092180090",n:"SABONETE EM BARRA GLICERINADO COCO 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:30,v:19},
+  {c:"1092190090",n:"SABONETE EM BARRA GLICERINADO MARACUJA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:-3,v:19},
+  {c:"1092200090",n:"SABONETE EM BARRA GLICERINADO SERIGUELA 90G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5,v:19},
+  {c:"1092160500",n:"ESPUMA DE LIMPEZA MAOS E CORPO JABUTICABA 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16,v:73},
+  {c:"1092170500",n:"ESPUMA DE LIMPEZA MAOS E CORPO CARAMBOLA 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:19,v:73},
+  {c:"1092180500",n:"ESPUMA DE LIMPEZA MAOS E CORPO COCO 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:4,v:73},
+  {c:"1092190500",n:"ESPUMA DE LIMPEZA MAOS E CORPO MARACUJA 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:9,v:73},
+  {c:"1092200500",n:"ESPUMA DE LIMPEZA MAOS E CORPO SERIGUELA 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:16,v:73},
+  {c:"1092150500",n:"ESPUMA DE LIMPEZA MAOS E CORPO FIGO 500 ML - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:11,v:73},
+  {c:"1091290310",n:"SABONETE LIQUIDO AVADORE 310 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:9,v:123},
+  {c:"1041290200",n:"DIFUSOR DE ESSENCIAS AVADORE 200 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:8,v:180},
+  {c:"1021290110",n:"PERFUME PARA INTERIORES AVADORE 110 ML",g:"AVADORE",l:"LINHA ESPLENDOR",s:13,v:108},
+  {c:"1121290065",n:"VELA AROMATICA AVADORE 65 G",g:"AVADORE",l:"LINHA ESPLENDOR",s:0,v:68},
+  {c:"1072200055",n:"GEL ANTISSEPTICO PARA AS MAOS SERIGUELA 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12,v:14},
+  {c:"1072190055",n:"GEL ANTISSEPTICO PARA AS MAOS MARACUJA 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:5,v:14},
+  {c:"1072180055",n:"GEL ANTISSEPTICO PARA AS MAOS COCO 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:17,v:14},
+  {c:"1072170055",n:"GEL ANTISSEPTICO PARA AS MAOS CARAMBOLA 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:20,v:14},
+  {c:"1072160055",n:"GEL ANTISSEPTICO PARA AS MAOS JABUTICABA 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:14,v:14},
+  {c:"1072150055",n:"GEL ANTISSEPTICO PARA AS MAOS FIGO 55 G - DESFRUTAR",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:12,v:14},
+  {c:"1050009495",n:"KIT CREME PARA AS MAOS SENSORE - VERDE",g:"SENSORE",l:"SENSORE",s:0,v:52},
+  {c:"1071580500",n:"ACUCAR EM OLEO CACAU E UCUUBA 500 G",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:16,v:192},
+  {c:"2071580500",n:"REFIL ACUCAR EM OLEO CACAU & UCUUBA 500 G",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:1,v:94},
+  {c:"1092310500",n:"SABONETE LIQUIDO APOGEU 500 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:18,v:132},
+  {c:"1071580210",n:"SABONETE EM OLEO CACAU & UCUUBA 210ML",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:41,v:79},
+  {c:"1022310230",n:"PERFUME PARA INTERIORES APOGEU 230 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:8,v:106},
+  {c:"1051509501",n:"KIT MINI GIGI- SERIE 3",g:"GIGI",l:"LINHA GIGI",s:-13,v:168},
+  {c:"1052089502",n:"KIT MINI GIGI LAZULI",g:"GIGI LAZULI",l:"LINHA GIGI",s:-11,v:168},
+  {c:"1050789498",n:"KIT BANHO REFRESCANTE DIA DIA MARINA - SERIE 2",g:"MARINA",l:"LINHA DIA DIA",s:-1,v:82},
+  {c:"1050839499",n:"KIT BANHO REFRESCANTE DIA DIA CHA VERDE E ERVAS - SERIE 2",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:-10,v:82},
+  {c:"1050019500",n:"KIT BANHO REFRESCANTE DIA DIA LAVANDA - SERIE 2",g:"LAVANDA",l:"LINHA DIA DIA",s:-13,v:82},
+  {c:"1050769501",n:"KIT BANHO REFRESCANTE DIA DIA FLOR DE CEREJEIRA - SERIE 2",g:"FLOR DE CEREJEIRA",l:"LINHA DIA DIA",s:0,v:82},
+  {c:"1122310190",n:"VELA AROMATICA APOGEU 190G",g:"APOGEU",l:"LINHA ESPLENDOR",s:10,v:132},
+  {c:"1042310420",n:"DIFUSOR DE ESSENCIAS APOGEU 420 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:1,v:196},
+  {c:"1081920260",n:"AGUA REFRESC COCO & ROMA 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:-1,v:62},
+  {c:"1081930260",n:"AGUA REFRESC ROSAS & DAMASCO 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:21,v:62},
+  {c:"1081940260",n:"AGUA REFRESC SICILIANO & BAUNILHA 260 ML SENSORE",g:"SENSORE",l:"SENSORE",s:32,v:62},
+  {c:"1050009511",n:"KIT CREME PARA AS MAOS SENSORE - VERMELHA",g:"SENSORE",l:"SENSORE",s:-1,v:52},
+  {c:"1091580180",n:"SABONETE LIQUIDO ESFOLIANTE CACAU & UCUUBA 180ML",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:5,v:35},
+  {c:"1051589512",n:"KIT BANHO DE BEM ESTAR - CACAU & UCUUBA",g:"CACAU & UCUUBA",l:"LINHA RESERVA",s:5,v:118},
+  {c:"1072070151",n:"MOUSSE DE BANHO OZARA 150 ML",g:"OZARA",l:"LINHA OZARA",s:0,v:69},
+  {c:"1020190151",n:"PERFUME PARA INTERIORES TERRA MADRE 150 ML - SERIE 1",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:0,v:93},
+  {c:"1040190351",n:"DIFUSOR DE ESSENCIAS TERRA MADRE 350 ML - SERIE 1",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:1,v:198},
+  {c:"1082280100",n:"DEO COLONIA SUBLIME LUME 100 ML",g:"SUBLIME LUME",l:"LINHA SUBLIME",s:8,v:148},
+  {c:"1081860100",n:"DEO COLONIA SUBLIME 100 ML",g:"SUBLIME",l:"LINHA SUBLIME",s:9,v:148},
+  {c:"1082080035",n:"PERFUME CABELO GIGI LAZULI 30 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:0,v:47},
+  {c:"1081860035",n:"PERFUME CABELO SUBLIME 30 ML",g:"SUBLIME",l:"LINHA SUBLIME",s:1,v:47},
+  {c:"1082280035",n:"PERFUME CABELO SUBLIME LUME 30 ML",g:"SUBLIME LUME",l:"LINHA SUBLIME",s:2,v:47},
+  {c:"1051559621",n:"KIT BANHO DE BEM ESTAR COPAIBA E ANDIROBA - SERIE 1",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:43,v:118},
+  {c:"1051039622",n:"KIT BANHO DE BEM ESTAR - CUPUACU CASTANHA DO BRASIL SERIE1",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:12,v:118},
+  {c:"1071030230",n:"OLEO EM CREME CUPUACU & CASTANHA DO BRASIL 230 G",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:-30,v:69},
+  {c:"1071550230",n:"OLEO EM CREME COPAIBA & ANDIROBA 230G",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:1,v:69},
+  {c:"1071030211",n:"SABONETE EM OLEO CUPUACU & CASTANHA DO BRASIL 210 ML",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:13,v:79},
+  {c:"1071550211",n:"SABONETE EM OLEO COPAIBA & ANDIROBA 210 ML",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:21,v:79},
+  {c:"2071030501",n:"REFIL ACUCAR EM OLEO CUPUAÃ‡U & CASTANHA 500 G - SERIE 1",g:"CUPUACU & CASTANHA DO BRASIL",l:"LINHA RESERVA",s:-1,v:94},
+  {c:"1071550501",n:"ACUCAR EM OLEO COPAIBA & ANDIROBA 500 G - SERIE 1",g:"COPAIBA & ANDIROBA",l:"LINHA RESERVA",s:18,v:157},
+  {c:"1082370100",n:"DEO PARFUM ALIRA 100 ML",g:"ALIRA",l:"LINHA ALIRA",s:-2,v:185},
+  {c:"1041330150",n:"DIFUSOR DE ESSENCIAS ZIMBRO 150 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:2,v:112},
+  {c:"1041340150",n:"DIFUSOR DE ESSENCIAS LEMONGRASS 150 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:16,v:112},
+  {c:"1040620150",n:"DIFUSOR DE ESSENCIAS MURU MURU 150 ML - RITOS",g:"MURU MURU",l:"LINHA RITOS",s:4,v:112},
+  {c:"1040740150",n:"DIFUSOR DE ESSENCIAS YLANG YLANG 150 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:14,v:112},
+  {c:"1042380350",n:"DIFUSOR DE ESSENCIAS LAGUNA 350 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:16,v:198},
+  {c:"1022380150",n:"PERFUME PARA INTERIORES LAGUNA 150 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:7,v:93},
+  {c:"1092380350",n:"SABONETE LIQUIDO LAGUNA 350 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:8,v:145},
+  {c:"1122380190",n:"VELA AROMATICA LAGUNA 190 G",g:"LAGUNA",l:"LINHA ESPLENDOR",s:0,v:132},
+  {c:"1050009626",n:"DIFUSOR JARDIM BRASIL - COLECAO FASCINIO",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:-18,v:128},
+  {c:"1052309627",n:"KIT ACUCENA ROUGE",g:"ACUCENA ROUGE",l:"LINHA ACUCENA",s:-1,v:132},
+  {c:"1051819628",n:"KIT ACUCENA - SERIE 1",g:"ACUCENA",l:"LINHA ACUCENA",s:-2,v:142},
+  {c:"1051869630",n:"KIT MINI SUBLIME",g:"SUBLIME",l:"LINHA SUBLIME",s:0,v:171},
+  {c:"1052289629",n:"KIT MINI SUBLIME LUME",g:"SUBLIME LUME",l:"LINHA SUBLIME",s:0,v:171},
+  {c:"2042390210",n:"ESSENCIA P/ DIFUSOR FLOR DE MARACUJA 210 ML - JARDIM BRASIL",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:8,v:61},
+  {c:"2042400210",n:"ESSENCIA P/ DIF FLOR DE VITORIA REGIA 210 ML - JARDIM BRASIL",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:8,v:61},
+  {c:"2042410210",n:"ESSENCIA P/ DIFUSOR FLOR DE SAO JOAO 210 ML - JARDIM BRASIL",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0,v:61},
+  {c:"1022420090",n:"PERFUME PARA INTERIORES BERGAMO 90 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:0,v:79},
+  {c:"1042420100",n:"DIFUSOR DE ESSENCIAS BERGAMO 100 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:5,v:118},
+  {c:"1042430250",n:"DIFUSOR DE ESSENCIAS AMANE 250 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:8,v:180},
+  {c:"1122430250",n:"VELA AROMATICA AMANE 250 G",g:"AMANE",l:"LINHA ESPLENDOR",s:0,v:135},
+  {c:"1092430250",n:"SABONETE LIQUIDO AMANE 250 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:9,v:113},
+  {c:"1022430100",n:"PERFUME PARA INTERIORES AMANE 100 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:7,v:106},
+  {c:"1131520400",n:"XAMPU MURU MURU & PATAUA 400 ML",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:2,v:64},
+  {c:"1131520401",n:"CONDICIONADOR MURU MURU & PATAUA 400 ML",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:3,v:65},
+  {c:"1082460100",n:"DEO PARFUM IRIS ROSE 100ML",g:"IRIS ROSE",l:"LINHA IRIS",s:1,v:162},
+  {c:"2042310210",n:"ESSENCIA PARA DIFUSOR APOGEU 210 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:8,v:65},
+  {c:"2042430210",n:"ESSENCIA PARA DIFUSOR AMANE 210 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:5,v:65},
+  {c:"2042470210",n:"ESSENCIA PARA DIFUSOR SILVESTRE 210 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:16,v:65},
+  {c:"1092470250",n:"SABONETE LIQUIDO SILVESTRE 250 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11,v:113},
+  {c:"1022470100",n:"PERFUME PARA INTERIORES SILVESTRE 100 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:16,v:115},
+  {c:"1122470250",n:"VELA AROMATICA SILVESTRE 250 G",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:10,v:135},
+  {c:"1042470250",n:"DIFUSOR DE ESSENCIAS SILVESTRE 250 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11,v:180},
+  {c:"1082480100",n:"DEO PARFUM BAKARI 100 ML",g:"BAKARI",l:"LINHA BAKARI",s:3,v:165},
+  {c:"1081600101",n:"DEO COLONIA BONISSIMO BLACK 100 ML - SERIE 1",g:"BONISSIMO BLACK",l:"LINHA BONISSIMO",s:10,v:159},
+  {c:"1082290101",n:"DEO COLONIA BONISSIMO URBAN 100 ML - SERIE 1",g:"BONISSIMO URBAN",l:"LINHA BONISSIMO",s:3,v:159},
+  {c:"1081110101",n:"DEO COLONIA BONISSIMO 100 ML - SERIE 1",g:"BONISSIMO",l:"LINHA BONISSIMO",s:5,v:159},
+  {c:"1051499663",n:"KIT MINI SELETO",g:"SELETO",l:"LINHA SELETO",s:0,v:146},
+  {c:"2092470500",n:"REFIL SABONETE LIQUIDO SILVESTRE 500 ML",g:"SILVESTRE",l:"LINHA ESPLENDOR",s:11,v:47},
+  {c:"2092310500",n:"REFIL SABONETE LIQUIDO APOGEU 500 ML",g:"APOGEU",l:"LINHA ESPLENDOR",s:5,v:47},
+  {c:"2092430500",n:"REFIL SABONETE LIQUIDO AMANE 500 ML",g:"AMANE",l:"LINHA ESPLENDOR",s:9,v:47},
+  {c:"1052049664",n:"KIT MINI SELETO HERBO SERIE 1",g:"SELETO HERBO",l:"LINHA SELETO",s:0,v:146},
+  {c:"1051789665",n:"KIT MINI SELETO OCEAN SERIE 1",g:"SELETO OCEAN",l:"LINHA SELETO",s:0,v:146},
+  {c:"1052499667",n:"KIT DESFRUTAR - CEREJA",g:"DESFRUTAR",l:"LINHA DESFRUTAR",s:-1,v:48},
+  {c:"1022450110",n:"PERFUME PARA INTERIORES VELVET 110 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:4,v:104},
+  {c:"1042450200",n:"DIFUSOR DE ESSENCIAS VELVET 200 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:8,v:174},
+  {c:"1092450310",n:"SABONETE LIQUIDO VELVET 310 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:7,v:130},
+  {c:"1122450065",n:"VELA AROMATICA VELVET 65 G",g:"VELVET",l:"LINHA ESPLENDOR",s:10,v:72},
+  {c:"1082520100",n:"DEO PARFUM SERENA INTENSE 100 ML",g:"SERENA INTENSE",l:"LINHA SERENA",s:8,v:168},
+  {c:"1082080040",n:"DEO PARFUM GIGI LAZULI 40 ML",g:"GIGI LAZULI",l:"LINHA GIGI",s:0,v:103},
+  {c:"1090190351",n:"SABONETE LIQUIDO TERRA MADRE 350 ML SERIE 2",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:5,v:128},
+  {c:"1020190152",n:"PERFUME PARA INTERIORES TERRA MADRE 150 ML SERIE 2",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:7,v:93},
+  {c:"1120190190",n:"VELA AROMATICA TERRA MADRE 190 G",g:"TERRA MADRE",l:"LINHA ESPLENDOR",s:1,v:132},
+  {c:"2042530210",n:"ESSENCIA PARA DIFUSOR FLOR DE MANDACARU 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:4,v:65},
+  {c:"2042540210",n:"ESSENCIA PARA DIFUSOR FLOR DE PETUNIA 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:6,v:65},
+  {c:"2042550210",n:"ESSENCIA PARA DIFUSOR FLOR DE IPE AMARELO 210 ML",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:2,v:65},
+  {c:"1092560300",n:"GEL DE BANHO OLIBANO 300 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:0,v:39},
+  {c:"1072560120",n:"OLEO DE BANHO E MASSAGEM OLIBANO 120 ML - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:23,v:36},
+  {c:"1112560190",n:"SAIS DE BANHO E ESPUMA OLIBANO 190 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:0,v:64},
+  {c:"1122560160",n:"VELA AROMATICA E MASSAGEM OLIBANO 160 G - RITOS",g:"OLIBANO",l:"LINHA RITOS",s:16,v:98},
+  {c:"2042450210",n:"ESSENCIA PARA DIFUSOR VELVET 210 ML",g:"VELVET",l:"LINHA ESPLENDOR",s:7,v:65},
+  {c:"2042380210",n:"ESSENCIA PARA DIFUSOR LAGUNA 210 ML",g:"LAGUNA",l:"LINHA ESPLENDOR",s:19,v:65},
+  {c:"1131520302",n:"XAMPU MURU MURU & PATAUA 300 ML SERIE 1",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:-1,v:49},
+  {c:"1131520303",n:"CONDICIONADOR MURU MURU & PATAUA 300 ML SERIE 1",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:13,v:50},
+  {c:"1131520304",n:"MASCARA CAPILAR MURU MURU & PATAUA 350 G SERIE 1",g:"MURUMURU (LINHA RESERVA)",l:"LINHA RESERVA",s:17,v:67},
+  {c:"1050009675",n:"KIT MINI CLASSICOS",g:"CLASSICOS",l:"LINHA CLASSICOS",s:59,v:58},
+  {c:"1050009676",n:"KIT MINI AGUAS REFRESCANTES - SENSORE",g:"SENSORE",l:"SENSORE",s:0,v:55},
+  {c:"1090780202",n:"GEL DE BANHO MARINA 200 G - DIA DIA",g:"MARINA",l:"LINHA DIA DIA",s:8,v:23},
+  {c:"1090830201",n:"GEL DE BANHO CHA VERDE & ERVAS 200 G - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:0,v:23},
+  {c:"1070830200",n:"EMULSAO HIDRATANTE CHA VERDE & ERVAS 200 ML - DIA DIA",g:"CHA VERDE & ERVAS",l:"LINHA DIA DIA",s:11,v:45},
+  {c:"1050009671",n:"KIT DIFUSOR JARDIM BRASIL - COLECAO VIVACE",g:"JARDIM BRASIL",l:"LINHA JARDIM BRASIL",s:0,v:128},
+  {c:"1081500040",n:"DEO PARFUM GIGI 40 ML",g:"GIGI",l:"LINHA GIGI",s:0,v:103},
+  {c:"1071520201",n:"CREME DE MANTEIGAS MURU MURU & PATAUA 200 G SERIE 1",g:"MURU MURU & PATAUA",l:"LINHA RESERVA",s:-12,v:135},
+  {c:"1082230050",n:"DEO COLONIA ROSA BRASILIS 50 ML",g:"ROSA BRASILIS",l:"LINHA ROSA BRASILIS",s:1,v:85},
+  {c:"2041940210",n:"ESSENCIA PARA DIFUSOR SICILIANO & BAUNILHA 210 ML",g:"SENSORE",l:"SENSORE",s:9,v:65},
+  {c:"2041930210",n:"ESSENCIA PARA DIFUSOR ROSAS & DAMASCO 210 ML",g:"SENSORE",l:"SENSORE",s:14,v:65},
+  {c:"2041920210",n:"ESSENCIA PARA DIFUSOR COCO & ROMA 210 ML - SENSORE",g:"SENSORE",l:"SENSORE",s:10,v:65},
+  {c:"2042340210",n:"ESSENCIA PARA DIFUSOR VANILLA NOIR 210 ML",g:"VANILLA NOIR",l:"LINHA ESPLENDOR",s:11,v:65},
+  {c:"2042420210",n:"ESSENCIA PARA DIFUSOR BERGAMO 210 ML",g:"BERGAMO",l:"LINHA ESPLENDOR",s:16,v:65},
+  {c:"2041340210",n:"ESSENCIA PARA DIFUSOR LEMONGRASS 210 ML - RITOS",g:"LEMONGRASS",l:"LINHA RITOS",s:8,v:65},
+  {c:"2041330210",n:"ESSENCIA PARA DIFUSOR ZIMBRO 210 ML - RITOS",g:"ZIMBRO",l:"LINHA RITOS",s:4,v:65},
+  {c:"2040740211",n:"ESSENCIA PARA DIFUSOR YLANG YLANG 210 ML - RITOS",g:"YLANG YLANG",l:"LINHA RITOS",s:8,v:65}
 ];
 
-// Restaurar saldos e produtos extras salvos pelo admin (executado após PRODUTOS ser definido)
-(function(){
+// ══════════════════════════════════════════════════════════════════
+// Overrides do catálogo (saldo, preço, produtos extras).
+// [FIX] Antes isto era uma IIFE que rodava UMA vez lendo o localStorage.
+// Depois de um sync do Firebase, D.saldosOverride era atualizado mas o
+// array PRODUTOS em memória continuava com os valores antigos — a tela
+// mostrava estoque/preço defasado até dar F5. Agora é uma função
+// reaproveitável, chamada no boot E depois de cada carga remota.
+// ══════════════════════════════════════════════════════════════════
+window.aplicarOverridesProdutos = function(fonte){
   try {
-    const d = JSON.parse(localStorage.getItem('avatim_v5')||'{}');
+    const d = fonte || (typeof D !== 'undefined' && D) ||
+              JSON.parse(localStorage.getItem('avatim_v5')||'{}');
+    if(!d) return;
+    // Produtos extras primeiro (para que overrides abaixo os alcancem)
+    if(Array.isArray(d.produtosExtras)){
+      d.produtosExtras.forEach(px=>{ if(!PRODUTOS.find(x=>x.c===px.c)) PRODUTOS.push({...px}); });
+    }
     if(d.saldosOverride){
       Object.entries(d.saldosOverride).forEach(([cod,saldo])=>{
-        const p = PRODUTOS.find(x=>x.c===cod); if(p) p.s=saldo;
+        const pr = PRODUTOS.find(x=>x.c===cod);
+        if(pr && saldo !== null && saldo !== undefined && !isNaN(Number(saldo))) pr.s = Number(saldo);
       });
     }
-    if(d.produtosExtras && Array.isArray(d.produtosExtras)){
-      d.produtosExtras.forEach(p=>{ if(!PRODUTOS.find(x=>x.c===p.c)) PRODUTOS.push(p); });
+    if(d.precosOverride){
+      Object.entries(d.precosOverride).forEach(([cod,preco])=>{
+        const pr = PRODUTOS.find(x=>x.c===cod);
+        if(pr && preco !== null && preco !== undefined && !isNaN(Number(preco))) pr.v = Number(preco);
+      });
     }
-  } catch(e){}
-})();
+  } catch(e){ console.warn('[Avatim] aplicarOverridesProdutos:', e.message); }
+};
+// Boot: aplicar o que já estiver no localStorage
+window.aplicarOverridesProdutos(
+  (function(){ try{ return JSON.parse(localStorage.getItem('avatim_v5')||'{}'); }catch(e){ return {}; } })()
+);
 
 // ============================================================
 // UTILITARIO: permite digitar virgula em inputs numericos
@@ -5345,6 +5396,13 @@ if(!D.metasProd)  D.metasProd=[];
 if(!D.realProd)   D.realProd={};
 if(!D.configCom)  D.configCom={p1:2,p2:3,p3:4.5,bonus1:0,bonus2:0};
 if(!D.configModalidades) D.configModalidades={giftback:15, desconto:12, cashback:0, faixasGiftBack:[]};
+// [R43] overrides do catálogo — inicializados aqui para que save()/sync
+// sempre encontrem a chave, mesmo antes da primeira edição do admin.
+if(!D.saldosOverride) D.saldosOverride={};
+if(!D.precosOverride) D.precosOverride={};
+if(!D.produtosExtras) D.produtosExtras=[];
+// Reaplicar no catálogo em memória agora que D está montado
+if(typeof window.aplicarOverridesProdutos === 'function') window.aplicarOverridesProdutos(D);
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
 if(!D.excelDados) D.excelDados=[];
@@ -6012,7 +6070,11 @@ async function loadFromFirestore(){
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.configModalidades) D.configModalidades = remoto.configModalidades;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
+      if(remoto.precosOverride) D.precosOverride = remoto.precosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
+      // [FIX] reaplicar no array PRODUTOS em memória — antes só D era atualizado
+      // e o catálogo na tela ficava defasado até um F5.
+      if(typeof window.aplicarOverridesProdutos === 'function') window.aplicarOverridesProdutos(D);
       // Tombstones: carregar do remoto (preservar exclusoes feitas em qualquer dispositivo)
       if(remoto._vendasExcluidas){
         if(!D._vendasExcluidas) D._vendasExcluidas={};
@@ -7025,7 +7087,7 @@ function nav(pg){
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
   document.getElementById("nav-"+pg)?.classList.add("active");
-  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:()=>{renderMetas(); if(typeof window._configModalidadesRender==="function") window._configModalidadesRender();},
+  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
     performance:renderPerformance,
     controle:renderControle,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
@@ -7082,7 +7144,8 @@ function nav(pg){
         renderEstqCritico();
       }
     },
-    fluxo:renderFluxo,metaslojas:()=>{_metaNavAtiva=false;renderMetasLojas();},
+    fluxo:()=>{renderFluxo(); if(typeof window._configModalidadesRender==="function") window._configModalidadesRender();},
+    metaslojas:()=>{_metaNavAtiva=false;renderMetasLojas();},
     gestao:()=>{_gestaoPer='hoje';document.querySelectorAll('#page-gestao .tab').forEach((e,i)=>{e.classList.toggle('active',i===0);});renderGestao();},
     prospec:()=>{
       // [NEW] Prospecção B2B
@@ -9405,7 +9468,21 @@ function toggleFormFluxo(){
     document.getElementById("fx-nome").value="";
     document.getElementById("fx-valor").value="";
     document.getElementById("fx-obs").value="";
+    // [FIX R43] estes campos ficavam com o valor do registro anterior:
+    // a vendedora abria o form de novo e o ticket/aniversário/modalidade
+    // do cliente passado continuavam preenchidos.
+    ["fx-ticket","fx-aniversario","fx-prod-busca"].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.value="";
+    });
+    const mod=document.getElementById("fx-modalidade"); if(mod) mod.value="";
+    const tipo=document.getElementById("fx-novo");      if(tipo) tipo.value="novo";
+    const pl=document.getElementById("fx-prod-linha");  if(pl) pl.value="";
+    window._fxSelecionados = [];
+    const bx=document.getElementById("fx-benef-box");    if(bx) bx.style.display="none";
+    const pb=document.getElementById("fx-produtos-box"); if(pb) pb.style.display="none";
     preencherSelectVends();
+  } else {
+    window._fxSelecionados = [];
   }
 }
 
@@ -9656,13 +9733,30 @@ function renderFluxo(){
     const o=ORIGENS[r.origem]||{emoji:"📌",label:r.origem,cor:"var(--muted)"};
     const vend=D.vendedoras.find(v=>v.id===r.vendId);
     const loja=LOJAS.find(l=>l.id===r.loja);
+    // [R43] modalidade, benefício e produtos escolhidos eram gravados mas
+    // nunca apareciam na listagem — o admin não tinha como conferir.
+    const MOD_LBL = {gift_back:"🎁 Gift Back", desconto:"💸 Desconto", cash_back:"💰 Cash Back"};
+    const perfLbl = (typeof _PERFIS_MODALIDADE!=="undefined"
+      ? (_PERFIS_MODALIDADE.find(x=>x.id===r.tipoCliente)?.nome||"") : "");
+    const modTxt = r.modalidade
+      ? `${MOD_LBL[r.modalidade]||r.modalidade}<div style="font-size:9px;color:var(--muted)">${perfLbl}${r.modalidadePct?" · "+r.modalidadePct+"%":""}${r.ticket?" · ticket "+r.ticket:""}</div>`
+      : `<span style="color:var(--muted)">--</span>`;
+    const prodLista = Array.isArray(r.produtosSel) && r.produtosSel.length
+      ? r.produtosSel.map(x=>x.n).join(", ")
+      : (r.produtoEscolhido||"");
+    const benefTxt = r.beneficioValor>0
+      ? `<span style="font-weight:700;color:var(--ouro)">${fmt(r.beneficioValor)}</span>`
+        + (prodLista?`<div style="font-size:9px;color:var(--muted);max-width:220px;white-space:normal">🎁 ${prodLista}</div>`:"")
+      : `<span style="color:var(--muted)">--</span>`;
     return `<tr>
       <td style="font-size:11px">${nomeDia(r.data)}</td>
       <td style="font-weight:600">${r.nome}${r.obs?`<div style="font-size:9px;color:var(--muted)">${r.obs}</div>`:""}</td>
       <td><span style="display:inline-flex;align-items:center;gap:4px;background:var(--cinza);padding:3px 8px;border-radius:10px;font-size:11px;color:${o.cor}">${o.emoji} ${o.label}</span></td>
       <td style="font-size:11px">${vend?.nome||"--"}</td>
       <td style="font-size:11px">${loja?.nome||r.loja||"--"}</td>
-      <td style="font-weight:700;color:var(--verde)">${r.valor>0?fmt(r.valor):"--"}</td>
+      <td style="font-weight:700;color:var(--verde);text-align:right">${r.valor>0?fmt(r.valor):"--"}</td>
+      <td style="font-size:11px">${modTxt}</td>
+      <td style="text-align:right">${benefTxt}</td>
       <td><button onclick="excluirFluxo('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:2px 6px" title="Excluir">✕</button></td>
     </tr>`;
   }).join("");
@@ -9775,11 +9869,20 @@ function exportarPDFFluxo(){
     <td style="text-align:right">${o.val>0?fmt(o.val):"—"}</td>
   </tr>`).join("");
 
+  // [R43] PDF passa a levar modalidade, benefício e produtos escolhidos —
+  // antes esses dados existiam no registro mas sumiam na exportação.
+  const _MOD_PDF = {gift_back:"Gift Back", desconto:"Desconto", cash_back:"Cash Back"};
   const rowsRegs = regs.slice(0,100).map(r=>{
     const o    = ORIGENS[r.origem]||{emoji:"📌",label:r.origem};
     const vend = D.vendedoras.find(v=>v.id===r.vendId);
     const loja = LOJAS.find(l=>l.id===r.loja);
     const dFmt = r.data.split("-").reverse().join("/");
+    const modTxt = r.modalidade
+      ? (_MOD_PDF[r.modalidade]||r.modalidade) + (r.modalidadePct ? " "+r.modalidadePct+"%" : "")
+      : "—";
+    const prods = Array.isArray(r.produtosSel) && r.produtosSel.length
+      ? r.produtosSel.map(x=>x.n).join(", ")
+      : (r.produtoEscolhido||"");
     return `<tr>
       <td>${dFmt}</td>
       <td>${r.nome}</td>
@@ -9787,6 +9890,8 @@ function exportarPDFFluxo(){
       <td>${vend?.nome||"—"}</td>
       <td>${loja?.nome||r.loja||"—"}</td>
       <td style="text-align:right">${r.valor>0?fmt(r.valor):"—"}</td>
+      <td>${modTxt}${prods?`<br><span style="font-size:9px;color:#888">${prods}</span>`:""}</td>
+      <td style="text-align:right">${r.beneficioValor>0?fmt(r.beneficioValor):"—"}</td>
     </tr>`;
   }).join("");
 
@@ -9855,7 +9960,7 @@ tr:nth-child(even){background:#fafafa}
 
 <h2>Registros Detalhados${regs.length>100?" (primeiros 100)":""}</h2>
 <table>
-  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th></tr></thead>
+  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade / Produtos</th><th style="text-align:right">Benefício</th></tr></thead>
   <tbody>${rowsRegs}</tbody>
 </table>
 <div class="foot">MonAris Sales Control — ${new Date().toLocaleString("pt-BR")}</div>
@@ -10999,9 +11104,16 @@ function renderProdutos(q,linha){
   const camp=new Set(D.campanhas.filter(c=>c.ativa!==false).map(c=>c.cod));
   document.getElementById("tbody-prod").innerHTML=pagina.map(p=>{
     const sc=p.s<=0?"zero":p.s<=5?"bad":p.s<=15?"warn":"ok";
-    const st=p.s<=0?"Zerado":p.s<=5?"Critico":p.s<=15?"Baixo":"OK";
+    const st=p.s<0?"Negativo":p.s===0?"Zerado":p.s<=5?"Critico":p.s<=15?"Baixo":"OK";
     const cp=camp.has(p.c)?`<span class="sbadge gold" style="margin-left:4px;font-size:9px">Camp</span>`:"";
-    return `<tr><td style="font-size:10px;color:var(--muted)">${p.c}</td><td>${p.n}${cp}</td><td style="font-size:10px;color:var(--muted)">${p.g}</td><td style="font-size:10px;color:var(--muted)">${p.l}</td><td style="font-weight:600">${p.s}</td><td><span class="sbadge ${sc}">${st}</span></td><td><button onclick="selecionarProdCamp('${p.c}','${p.n.replace(/'/g,"")}')" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:5px;color:var(--ouro);font-size:10px;padding:3px 7px;cursor:pointer">+Camp</button></td></tr>`;
+    // [R43] preço vem do catálogo, com override do admin quando houver
+    const preco = _precoProduto(p);
+    const celPreco = isAdmin()
+      ? `<td style="text-align:right"><input type="number" value="${preco}" min="0" step="0.01"
+           onchange="atualizarPrecoProd('${p.c}', this.value)"
+           style="width:78px;background:var(--card);border:1px solid var(--borda);border-radius:5px;padding:3px 6px;color:var(--ouro);font-size:11px;font-weight:600;text-align:right"></td>`
+      : `<td style="text-align:right;font-weight:600;color:var(--ouro)">${fmt(preco)}</td>`;
+    return `<tr><td style="font-size:10px;color:var(--muted)">${p.c}</td><td>${p.n}${cp}</td><td style="font-size:10px;color:var(--muted)">${p.g}</td><td style="font-size:10px;color:var(--muted)">${p.l}</td>${celPreco}<td style="font-weight:600">${p.s}</td><td><span class="sbadge ${sc}">${st}</span></td><td><button onclick="selecionarProdCamp('${p.c}','${p.n.replace(/'/g,"")}')" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:5px;color:var(--ouro);font-size:10px;padding:3px 7px;cursor:pointer">+Camp</button></td></tr>`;
   }).join("");
   const totalPg=Math.ceil(total/PER_PG);
   const pag=document.getElementById("prod-pag");
@@ -11035,6 +11147,7 @@ function trocarAbaEstoque(aba){
     estqBtn.style.borderBottomColor = isCamp ? 'transparent' : 'var(--ouro)';
   }
   if(!isCamp){
+    popularFiltroLinhas();
     renderEstqCritico();
     renderProdutos(_pfiltro, _plinha);
     atualizarTotalCatalogo();
@@ -11048,6 +11161,12 @@ function atualizarTotalCatalogo(){
 
 // ── NOVO PRODUTO (Admin) ─────────────────────────────────────
 function abrirFormNovoProd(){
+  // [R43] popular o select de linhas com o catálogo real
+  const selL = document.getElementById('nprod-linha');
+  if(selL && !selL.options.length){
+    selL.innerHTML = window._linhasCatalogo().map(l=>`<option>${l}</option>`).join('')
+      + '<option>LANÇAMENTO</option>';
+  }
   document.getElementById('form-novo-prod').style.display = 'block';
 }
 function fecharFormNovoProd(){
@@ -11056,6 +11175,7 @@ function fecharFormNovoProd(){
     const el=document.getElementById(id); if(el) el.value='';
   });
   const s=document.getElementById('nprod-saldo'); if(s) s.value='0';
+  const pv=document.getElementById('nprod-preco'); if(pv) pv.value='0';
 }
 function salvarNovoProd(){
   const cod   = document.getElementById('nprod-cod').value.trim();
@@ -11063,6 +11183,7 @@ function salvarNovoProd(){
   const grupo = document.getElementById('nprod-grupo').value.trim().toUpperCase();
   const linha = document.getElementById('nprod-linha').value;
   const saldo = parseInt(document.getElementById('nprod-saldo').value)||0;
+  const preco = parseFloat(String(document.getElementById('nprod-preco')?.value||'0').replace(',','.'))||0;
   if(!cod){ showToast('Informe o código do produto','err'); return; }
   if(!nome){ showToast('Informe o nome do produto','err'); return; }
   // Verificar se código já existe
@@ -11070,7 +11191,7 @@ function salvarNovoProd(){
     showToast('Código já cadastrado!','err'); return;
   }
   // Adicionar ao array PRODUTOS (em memória + salvar em D.produtosExtras)
-  const novo = {c:cod, n:nome, g:grupo, l:linha, s:saldo, extra:true};
+  const novo = {c:cod, n:nome, g:grupo, l:linha, s:saldo, v:preco, extra:true};
   PRODUTOS.push(novo);
   if(!D.produtosExtras) D.produtosExtras=[];
   D.produtosExtras.push(novo);
@@ -11078,6 +11199,7 @@ function salvarNovoProd(){
   showToast('Produto adicionado!');
   fecharFormNovoProd();
   atualizarTotalCatalogo();
+  popularFiltroLinhas();
   renderProdutos(_pfiltro, _plinha);
   renderEstqCritico();
 }
@@ -11108,6 +11230,29 @@ function buscarProdSaldo(q){
         </button>
       </div>
     </div>`).join('');
+}
+
+// [R43] Atualizar PREÇO de um produto (admin) — persiste em D.precosOverride
+function atualizarPrecoProd(cod, valorStr){
+  const novoPreco = parseFloat(String(valorStr).replace(',','.'));
+  if(isNaN(novoPreco) || novoPreco < 0){ showToast('Preço inválido','err'); return; }
+  const idx = PRODUTOS.findIndex(p=>p.c===cod);
+  if(idx<0){ showToast('Produto não encontrado','err'); return; }
+  PRODUTOS[idx].v = novoPreco;
+  if(!D.precosOverride) D.precosOverride={};
+  D.precosOverride[cod] = novoPreco;
+  save();
+  showToast('Preço atualizado: '+fmt(novoPreco));
+}
+
+// [R43] Preencher o filtro de linhas a partir do catálogo real
+function popularFiltroLinhas(){
+  const sel = document.getElementById('filtro-linha-prod');
+  if(!sel) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todas as Linhas</option>' +
+    window._linhasCatalogo().map(l=>`<option value="${l}">${l}</option>`).join('');
+  if(atual) sel.value = atual;
 }
 
 function atualizarSaldoProd(cod){
@@ -11759,7 +11904,9 @@ function buscarProdCampObj(q){
       + (jaTem?' checked disabled':'')
       + ' style="width:15px;height:15px;accent-color:var(--ouro);cursor:pointer;flex-shrink:0">'
       + '<div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:500">'+(jaTem?'<span style="opacity:.5">':'')+p.n+(jaTem?'</span>':'')+'</div>'
-      + '<div style="font-size:9px;color:var(--muted)">'+p.c+(p.g?' · '+p.g:'')+(p.s<=5?' <span style="color:var(--verm)">⚠️ Saldo '+p.s+'</span>':'')+'</div></div>'
+      + '<div style="font-size:9px;color:var(--muted)">'+p.c+(p.g?' · '+p.g:'')
+      + ' · <span style="color:var(--ouro);font-weight:600">'+fmt(_precoProduto(p))+'</span>'
+      + (p.s<=5?' <span style="color:var(--verm)">⚠️ Saldo '+p.s+'</span>':' · saldo '+p.s)+'</div></div>'
       + (jaTem?'<span style="font-size:9px;color:var(--ouro)">já adicionado</span>':'')
       + '</label>';
   }).join('');
@@ -11900,6 +12047,9 @@ function fecharFormCampObj(){
   const b=document.getElementById('camp-prod-busca'); if(b) b.value='';
   const s=document.getElementById('camp-prod-sugest'); if(s) s.innerHTML='';
   const p=document.getElementById('camp-prods-sel'); if(p) p.innerHTML='';
+  // [R43] limpar também o painel de sugestão por valor
+  const sv=document.getElementById('camp-sug-valor'); if(sv) sv.value='';
+  const sl=document.getElementById('camp-sug-lista'); if(sl) sl.innerHTML='';
   const titulo=document.getElementById('camp-form-titulo'); if(titulo) titulo.textContent='Novo Objetivo de Campanha';
   const btn=document.getElementById('camp-salvar-btn'); if(btn) btn.textContent='Criar Objetivo';
 }
@@ -12863,7 +13013,9 @@ function toggleCamp(){ abrirFormCampObj(); }
 function renderCampAtivas(){ renderCampLista(); }
 
 function renderEstqCritico(){
-  const criticos=PRODUTOS.filter(p=>p.s>=0&&p.s<=5).sort((a,b)=>a.s-b.s).slice(0,12);
+  // [FIX R43] o filtro exigia p.s>=0, então saldo NEGATIVO (divergência de
+  // inventário, hoje 54 itens) ficava fora do alerta — justamente o pior caso.
+  const criticos=PRODUTOS.filter(p=>p.s<=5).sort((a,b)=>a.s-b.s).slice(0,12);
   document.getElementById("estq-critico").innerHTML=criticos.length?criticos.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.03)"><div style="width:6px;height:6px;border-radius:50%;background:${p.s===0?"var(--verm)":"var(--laranja)"};flex-shrink:0"></div><div style="flex:1"><div style="font-size:11px;font-weight:500">${p.n}</div><div style="font-size:9px;color:var(--muted)">${p.g}</div></div><div style="font-size:13px;font-weight:700;color:${p.s===0?"var(--verm)":"var(--laranja)"}">${p.s}</div></div>`).join(""):"<div style='color:var(--verde);font-size:12px'>Sem alertas criticos.</div>";
 }
 
@@ -24908,56 +25060,380 @@ function _gbFaixaParaValor(valor){
 }
 
 // Reagir a mudança de modalidade, tipo cliente ou valor
-window._fxModalidadeMudou = function(){
+// ══════════════════════════════════════════════════════════════════════
+// [R43] MOTOR DE SUGESTÃO DE PRODUTOS POR VALOR DE BENEFÍCIO
+// Usa o catálogo real (PRODUTOS: código, nome, grupo, linha, saldo, preço)
+// para dizer QUAIS itens o cliente consegue levar com o valor de Gift Back
+// (ou de qualquer outra modalidade) que ele tem direito.
+// Usado em: Origem do Fluxo (modalidades) e Campanhas (brinde por faixa).
+// ══════════════════════════════════════════════════════════════════════
+
+// Normalizador de texto para busca (sem acento, minúsculo)
+function _normTxt(s){
+  return String(s||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ');
+}
+
+// Preço vigente de um produto (override do admin tem prioridade)
+function _precoProduto(p){
+  if(!p) return 0;
+  const ov = (D.precosOverride||{})[p.c];
+  const v = (ov !== undefined && ov !== null && !isNaN(Number(ov))) ? Number(ov) : Number(p.v);
+  return isNaN(v) ? 0 : v;
+}
+
+// Saldo vigente de um produto
+function _saldoProduto(p){
+  if(!p) return 0;
+  const ov = (D.saldosOverride||{})[p.c];
+  const s = (ov !== undefined && ov !== null && !isNaN(Number(ov))) ? Number(ov) : Number(p.s);
+  return isNaN(s) ? 0 : s;
+}
+
+// Resolve os nomes livres digitados numa faixa contra o catálogo real.
+// Aceita código exato OU nome (match por substring normalizada).
+function _resolverProdutosFaixa(listaNomes){
+  const out = [];
+  (listaNomes||[]).forEach(txt => {
+    const q = _normTxt(txt);
+    if(!q) return;
+    let achado = PRODUTOS.find(p => p.c === String(txt).trim());
+    if(!achado) achado = PRODUTOS.find(p => _normTxt(p.n) === q);
+    if(!achado) achado = PRODUTOS.find(p => _normTxt(p.n).includes(q));
+    if(achado){ if(!out.find(x => x.c === achado.c)) out.push(achado); }
+    else out.push({c:'', n:String(txt).trim(), g:'', l:'', s:null, v:null, _naoCatalogado:true});
+  });
+  return out;
+}
+
+/**
+ * Núcleo: quais produtos cabem dentro de um valor de benefício.
+ * @param {number} beneficio  valor em R$ que o cliente tem direito
+ * @param {object} opts {busca, linha, somenteComSaldo, limite, faixaProdutos}
+ * @returns {{itens:Array, totalElegiveis:number, semEstoque:number, origem:string}}
+ */
+window.sugerirProdutosPorValor = function(beneficio, opts){
+  opts = opts || {};
+  const valor    = Number(beneficio) || 0;
+  const busca    = _normTxt(opts.busca);
+  const linha    = opts.linha || '';
+  // Estoque NÃO entra na elegibilidade por padrão: o que decide é o preço.
+  // Quem quiser filtrar por saldo precisa pedir explicitamente (opt-in).
+  const soSaldo  = opts.somenteComSaldo === true;
+  const limite   = Number(opts.limite) || 60;
+
+  // Universo: faixa curada pelo admin (se houver) ou catálogo inteiro
+  let universo, origem;
+  if(Array.isArray(opts.faixaProdutos) && opts.faixaProdutos.length){
+    universo = _resolverProdutosFaixa(opts.faixaProdutos);
+    origem = 'faixa';
+  } else {
+    universo = PRODUTOS;
+    origem = 'catalogo';
+  }
+
+  let semEstoque = 0;
+  const elegiveis = [];
+
+  universo.forEach(p => {
+    const preco = p._naoCatalogado ? null : _precoProduto(p);
+    const saldo = p._naoCatalogado ? null : _saldoProduto(p);
+
+    // Item digitado à mão que não existe no catálogo: mostra mas sinaliza
+    if(p._naoCatalogado){
+      elegiveis.push({...p, preco:null, saldo:null, aproveita:0, cabe:true});
+      return;
+    }
+    // Preço tem de caber no benefício. Preço 0/ausente = não dá para avaliar.
+    // [FIX] com valor 0 a comparação era pulada e a função devolvia o
+    // catálogo inteiro como "elegível" — benefício zero não dá direito a nada.
+    if(preco <= 0) return;
+    if(preco > valor) return;
+    if(saldo <= 0){
+      semEstoque++;
+      if(soSaldo) return;
+    }
+    if(linha && p.l !== linha) return;
+    if(busca && !(_normTxt(p.n).includes(busca) || _normTxt(p.g).includes(busca) || p.c.includes(busca))) return;
+
+    elegiveis.push({
+      ...p, preco, saldo,
+      aproveita: valor > 0 ? (preco / valor) : 0,
+      cabe: true
+    });
+  });
+
+  // Melhor aproveitamento primeiro: item mais caro que ainda cabe no valor.
+  // Desempate por nome, para a ordem ficar estável entre renders.
+  elegiveis.sort((a,b) => (b.preco||0) - (a.preco||0) || String(a.n).localeCompare(String(b.n)));
+
+  return {
+    itens: elegiveis.slice(0, limite),
+    totalElegiveis: elegiveis.length,
+    semEstoque,
+    origem
+  };
+};
+
+// Linhas distintas do catálogo (para o filtro)
+window._linhasCatalogo = function(){
+  return [...new Set(PRODUTOS.map(p => p.l).filter(Boolean))].sort();
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R43] Sugestão de produtos por valor no formulário de CAMPANHA
+// Mesmo motor usado no Origem do Fluxo. Ajuda o admin a escolher o
+// brinde/produto foco que cabe dentro de um valor de benefício.
+// ══════════════════════════════════════════════════════════════════════
+window._campSugerirPorValor = function(){
+  const lista = document.getElementById('camp-sug-lista');
+  if(!lista) return;
+
+  // Popular filtro de linhas uma única vez
+  const selLinha = document.getElementById('camp-sug-linha');
+  if(selLinha && selLinha.options.length <= 1){
+    selLinha.innerHTML = '<option value="">Todas as linhas</option>'
+      + window._linhasCatalogo().map(l => '<option value="'+l+'">'+l+'</option>').join('');
+  }
+
+  const valor = parseFloat(String(document.getElementById('camp-sug-valor')?.value||'').replace(',','.')) || 0;
+  if(valor <= 0){
+    lista.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">Digite um valor para ver os produtos que cabem nele.</div>';
+    return;
+  }
+
+  const res = window.sugerirProdutosPorValor(valor, {
+    linha: document.getElementById('camp-sug-linha')?.value || '',
+    somenteComSaldo: document.getElementById('camp-sug-saldo')?.checked !== false,
+    limite: 40
+  });
+
+  if(!res.itens.length){
+    lista.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">'
+      + 'Nenhum produto custa até ' + fmt(valor) + ' com esses filtros.'
+      + (res.semEstoque ? '<br>' + res.semEstoque + ' item(ns) caberiam mas estão zerados.' : '')
+      + '</div>';
+    return;
+  }
+
+  lista.innerHTML = res.itens.map(p => {
+    const jaTem = (typeof _campProdsObj !== 'undefined') && _campProdsObj.find(x => x.c === p.c);
+    const corSaldo = p.saldo <= 0 ? 'var(--verm)' : p.saldo <= 5 ? 'var(--ouro)' : 'var(--verde)';
+    return '<div style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05)">'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:11px;font-weight:500">' + p.n + '</div>'
+        + '<div style="font-size:9px;color:var(--muted)">' + p.c + ' · ' + p.l
+        + ' · <span style="color:' + corSaldo + '">saldo ' + p.saldo + '</span></div>'
+      + '</div>'
+      + '<div style="font-size:11px;font-weight:700;color:var(--ouro);white-space:nowrap">' + fmt(p.preco) + '</div>'
+      + (jaTem
+          ? '<span style="font-size:9px;color:var(--ouro);white-space:nowrap">já add</span>'
+          : '<button type="button" onclick="window._campAddSugerido(\'' + p.c + '\')" '
+            + 'style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.45);color:var(--ouro);border-radius:5px;font-size:10px;padding:3px 9px;cursor:pointer;white-space:nowrap">+ Add</button>')
+    + '</div>';
+  }).join('')
+  + (res.totalElegiveis > res.itens.length
+      ? '<div style="text-align:center;padding:5px;font-size:10px;color:var(--muted)">Mostrando ' + res.itens.length + ' de ' + res.totalElegiveis + '</div>'
+      : '');
+};
+
+// Adicionar um produto sugerido à lista de destaques da campanha
+window._campAddSugerido = function(cod){
+  const p = PRODUTOS.find(x => x.c === cod);
+  if(!p) return;
+  if(typeof adicionarProdCampObj === 'function'){
+    adicionarProdCampObj(p.c, p.n, p.g || '');
+  }
+  window._campSugerirPorValor();
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R43] UI de modalidade no Origem do Fluxo
+// Mostra o benefício calculado e a lista de produtos do ESTOQUE que o
+// cliente consegue levar com esse valor. Seleção por clique (não é mais
+// texto livre) — grava código, nome e preço de cada item escolhido.
+// ══════════════════════════════════════════════════════════════════════
+
+window._fxSelecionados = window._fxSelecionados || [];   // [{c,n,preco}]
+
+// Benefício vigente na tela (valor da venda × % do perfil)
+function _fxBeneficioAtual(){
   const mod = document.getElementById("fx-modalidade")?.value || "";
+  if(!mod) return {mod:"", pct:0, valor:0, beneficio:0, perfil:"novo"};
   const perfil = document.getElementById("fx-novo")?.value || "novo";
-  const box = document.getElementById("fx-benef-box");
-  const val = document.getElementById("fx-benef-valor");
-  const lbl = document.getElementById("fx-benef-lbl");
-  const help = document.getElementById("fx-benef-help");
+  const valor  = parseBR(document.getElementById("fx-valor")?.value) || 0;
+  const pct    = _getModalidadePct(mod, perfil);
+  return {mod, pct, valor, perfil, beneficio: Math.round((valor * pct / 100) * 100) / 100};
+}
+
+// Reagir a mudança de modalidade, tipo de cliente ou valor
+window._fxModalidadeMudou = function(){
+  const box     = document.getElementById("fx-benef-box");
+  const val     = document.getElementById("fx-benef-valor");
+  const lbl     = document.getElementById("fx-benef-lbl");
+  const help    = document.getElementById("fx-benef-help");
   const prodBox = document.getElementById("fx-produtos-box");
   if(!box) return;
+
+  const {mod, pct, valor, perfil, beneficio} = _fxBeneficioAtual();
   if(!mod){
     box.style.display = "none";
     if(prodBox) prodBox.style.display = "none";
     return;
   }
-  const valor = parseBR(document.getElementById("fx-valor")?.value)||0;
-  const pct = _getModalidadePct(mod, perfil);
-  const nomeMod = mod === 'gift_back' ? '🎁 Gift Back' : (mod === 'desconto' ? '💸 Desconto' : '💰 Cash Back');
+
+  const nomeMod = mod === 'gift_back' ? '🎁 Gift Back'
+                : mod === 'desconto'  ? '💸 Desconto'
+                : '💰 Cash Back';
   const perfilNome = (_PERFIS_MODALIDADE.find(p => p.id === perfil)?.nome) || perfil;
-  const beneficio = Math.round((valor * pct / 100) * 100) / 100;
+
   box.style.display = "";
   if(lbl) lbl.textContent = nomeMod + " para " + perfilNome + " (" + pct + "%)";
-  if(val) val.textContent = "R$ " + beneficio.toFixed(2).replace(".",",");
+  if(val) val.textContent = fmt(beneficio);
   if(help) help.textContent = valor > 0
-    ? "R$ " + valor.toFixed(2).replace(".",",") + " × " + pct + "% = R$ " + beneficio.toFixed(2).replace(".",",")
+    ? fmt(valor) + " × " + pct + "% = " + fmt(beneficio)
     : "Digite o valor da venda acima para calcular";
 
-  // Produtos disponíveis (só Gift Back)
+  // Sugestão de produtos existe SÓ para Gift Back — é a modalidade em que o
+  // cliente leva produto. Desconto é abatimento em valor na própria compra e
+  // Cash Back é crédito em dinheiro: nenhum dos dois escolhe item.
   if(prodBox){
-    if(mod === "gift_back" && valor > 0){
-      const faixa = _gbFaixaParaValor(valor);
-      const listaEl = document.getElementById("fx-produtos-lista");
-      const lblProd = document.getElementById("fx-produtos-lbl");
-      if(faixa){
-        prodBox.style.display = "";
-        if(lblProd) lblProd.innerHTML = '🎁 Produtos disponíveis para R$ <strong>'+ valor.toFixed(2).replace(".",",") +'</strong> — faixa R$ '+ Number(faixa.min).toFixed(2).replace(".",",") +' a R$ '+ Number(faixa.max).toFixed(2).replace(".",",");
-        const prods = (faixa.produtos || []);
-        listaEl.innerHTML = prods.length
-          ? prods.map(p => '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)">✓ '+p+'</div>').join('')
-          : '<div style="color:var(--muted)">Nenhum produto configurado nesta faixa.</div>';
-      } else {
-        prodBox.style.display = "";
-        if(lblProd) lblProd.textContent = "🎁 Sem faixa configurada para R$ " + valor.toFixed(2).replace(".",",");
-        const listaElN = document.getElementById("fx-produtos-lista");
-        if(listaElN) listaElN.innerHTML = '<div style="color:var(--muted)">Nenhuma faixa cadastrada cobre este valor. Peça ao administrador para configurar.</div>';
-      }
+    if(mod === "gift_back" && beneficio > 0){
+      prodBox.style.display = "";
+      _fxRenderProdutos();
     } else {
       prodBox.style.display = "none";
+      window._fxSelecionados = [];
     }
   }
 };
+
+// Renderiza a lista de produtos elegíveis
+window._fxRenderProdutos = function(){
+  const listaEl = document.getElementById("fx-produtos-lista");
+  const lblProd = document.getElementById("fx-produtos-lbl");
+  if(!listaEl) return;
+
+  const {valor, beneficio} = _fxBeneficioAtual();
+  const faixa   = _gbFaixaParaValor(valor);
+  const busca   = document.getElementById("fx-prod-busca")?.value || "";
+  const linha   = document.getElementById("fx-prod-linha")?.value || "";
+
+  // Saldo NÃO filtra: a elegibilidade é definida só pelo valor do produto.
+  const res = window.sugerirProdutosPorValor(beneficio, {
+    busca, linha, limite: 60,
+    faixaProdutos: faixa ? faixa.produtos : null
+  });
+
+  if(lblProd){
+    lblProd.innerHTML = '🎁 Produtos que o cliente pode levar com <strong style="color:var(--ouro)">'
+      + fmt(beneficio) + '</strong>'
+      + (res.origem === 'faixa'
+          ? ' <span style="font-size:10px;color:var(--muted)">— faixa curada ' + fmt(Number(faixa.min)) + ' a ' + fmt(Number(faixa.max)) + '</span>'
+          : ' <span style="font-size:10px;color:var(--muted)">— catálogo de estoque, por preço do produto</span>');
+  }
+
+  // Popular o filtro de linha uma única vez
+  const selLinha = document.getElementById("fx-prod-linha");
+  if(selLinha && selLinha.options.length <= 1){
+    selLinha.innerHTML = '<option value="">Todas as linhas</option>'
+      + window._linhasCatalogo().map(l => '<option value="'+l+'">'+l+'</option>').join('');
+    selLinha.value = linha;
+  }
+
+  if(!res.itens.length){
+    listaEl.innerHTML = '<div style="color:var(--muted);padding:14px;text-align:center;font-size:12px">'
+      + 'Nenhum produto do catálogo custa até ' + fmt(beneficio) + ' com os filtros atuais.'
+      + '</div>';
+    _fxRenderSelecionados();
+    return;
+  }
+
+  const selCods = new Set(window._fxSelecionados.map(x => x.c));
+  listaEl.innerHTML = res.itens.map(p => {
+    const marcado = selCods.has(p.c);
+    // Saldo é só informação de apoio — não define elegibilidade nem bloqueia
+    // a escolha. Por isso fica em cor neutra, sem alarme de "zerado".
+    const saldoTxt = (p.saldo === null || p.saldo <= 0) ? '' : (p.saldo + ' em estoque');
+    const precoTxt = p.preco === null ? '—' : fmt(p.preco);
+    const key = (p.c || p.n).replace(/'/g, "\\'");
+    return '<label' + (marcado ? ' style="background:rgba(122,199,79,.12)"' : '') + '>'
+      + '<input type="checkbox" ' + (marcado ? 'checked' : '') + ' ' + (p._naoCatalogado ? 'disabled' : '')
+      + ' onchange="window._fxToggleProduto(\'' + key + '\', this.checked)">'
+      + '<span class="fxp-nome">'
+        + '<b>' + p.n + '</b>'
+        + '<small>' + (p.c || '—') + (p.l ? ' · ' + p.l : '')
+        + (p._naoCatalogado ? ' · <span style="color:var(--verm)">fora do catálogo</span>' : '') + '</small>'
+      + '</span>'
+      + '<span class="fxp-preco"><b>' + precoTxt + '</b><small>' + saldoTxt + '</small></span>'
+    + '</label>';
+  }).join('');
+
+  if(res.totalElegiveis > res.itens.length){
+    listaEl.innerHTML += '<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">'
+      + 'Mostrando ' + res.itens.length + ' de ' + res.totalElegiveis + ' — use a busca para refinar</div>';
+  }
+  _fxRenderSelecionados();
+};
+
+// Marcar/desmarcar um produto
+window._fxToggleProduto = function(chave, marcado){
+  const p = PRODUTOS.find(x => x.c === chave) || PRODUTOS.find(x => x.n === chave);
+  if(!p) return;
+  const preco = _precoProduto(p);
+  if(marcado){
+    if(!window._fxSelecionados.find(x => x.c === p.c)){
+      window._fxSelecionados.push({c:p.c, n:p.n, preco});
+    }
+  } else {
+    window._fxSelecionados = window._fxSelecionados.filter(x => x.c !== p.c);
+  }
+  _fxRenderProdutos();
+};
+
+window._fxLimparSelecao = function(){
+  window._fxSelecionados = [];
+  _fxRenderProdutos();
+};
+
+// Resumo do que foi escolhido + validação contra o benefício
+function _fxRenderSelecionados(){
+  const el = document.getElementById("fx-produtos-sel");
+  if(!el) return;
+  const {beneficio} = _fxBeneficioAtual();
+  const sel = window._fxSelecionados;
+
+  // Espelhar no input legado (compatibilidade com registros antigos)
+  const legado = document.getElementById("fx-produto-escolhido");
+  if(legado) legado.value = sel.map(x => x.n).join(", ");
+
+  if(!sel.length){
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhum produto escolhido ainda — marque acima o que o cliente vai levar.</div>';
+    return;
+  }
+  const total = sel.reduce((a,x) => a + (Number(x.preco)||0), 0);
+  const excede = total > beneficio + 0.001;
+  const sobra  = beneficio - total;
+
+  el.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">'
+    + sel.map(x =>
+        '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(122,199,79,.14);border:1px solid rgba(122,199,79,.45);border-radius:99px;padding:3px 9px;font-size:10.5px">'
+        + x.n + ' <strong style="color:var(--ouro)">' + fmt(x.preco) + '</strong>'
+        + '<span onclick="window._fxToggleProduto(\'' + String(x.c).replace(/'/g,"\\'") + '\', false)" style="cursor:pointer;color:var(--verm);font-weight:700">✕</span>'
+        + '</span>').join('')
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 10px;border-radius:7px;'
+      + (excede ? 'background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.45)' : 'background:rgba(122,199,79,.10);border:1px solid rgba(122,199,79,.35)') + '">'
+      + '<span style="font-size:11px">' + sel.length + ' item(ns) · total <strong>' + fmt(total) + '</strong> de ' + fmt(beneficio) + '</span>'
+      + '<span style="font-size:11px;font-weight:700;color:' + (excede ? 'var(--verm)' : 'var(--verde)') + '">'
+        + (excede ? '⚠️ Excede em ' + fmt(Math.abs(sobra)) : 'Sobra ' + fmt(sobra)) + '</span>'
+      + '<button type="button" onclick="window._fxLimparSelecao()" style="background:none;border:1px solid var(--borda);border-radius:6px;color:var(--muted);font-size:10px;padding:3px 9px;cursor:pointer">Limpar</button>'
+    + '</div>';
+}
+
 
 // salvarFluxo REESCRITO — grava data aniversário + perfil usado no cálculo
 window.salvarFluxo = function(){
@@ -24977,7 +25453,16 @@ window.salvarFluxo = function(){
 
   const modalidade = document.getElementById("fx-modalidade")?.value || "";
   const ticket = (document.getElementById("fx-ticket")?.value || "").trim();
-  const produtoEscolhido = (document.getElementById("fx-produto-escolhido")?.value || "").trim();
+  // [R43] produtos escolhidos vêm da seleção no catálogo (código + preço),
+  // não mais de texto livre. produtoEscolhido continua sendo gravado como
+  // string para não quebrar telas/relatórios que já leem esse campo.
+  const produtosSel = (modalidade === "gift_back" ? (window._fxSelecionados || []) : []).map(x => ({
+    c: x.c, n: x.n, preco: Number(x.preco) || 0
+  }));
+  const produtoEscolhido = produtosSel.length
+    ? produtosSel.map(x => x.n).join(", ")
+    : (document.getElementById("fx-produto-escolhido")?.value || "").trim();
+  const produtosValor = produtosSel.reduce((a,x) => a + x.preco, 0);
   let modalidadePct = 0;
   let beneficioValor = 0;
   if(modalidade && valor > 0){
@@ -24989,6 +25474,7 @@ window.salvarFluxo = function(){
     id:"fx"+Date.now(),
     nome:nomeF, origem, canal, tipoCliente, vendId, loja, valor, data, obs,
     modalidade, modalidadePct, beneficioValor, ticket, produtoEscolhido,
+    produtosSel, produtosValor,
     aniversarioCliente,  // formato YYYY-MM-DD (opcional)
     ts:Date.now()
   });
@@ -24996,6 +25482,7 @@ window.salvarFluxo = function(){
   const perfNome = (_PERFIS_MODALIDADE.find(p=>p.id===tipoCliente)?.nome) || tipoCliente;
   const msgMod = modalidade ? " · "+perfNome+" · benefício R$ "+beneficioValor.toFixed(2).replace(".",",") : "";
   showToast("✅ "+nome+" registrado como "+(ORIGENS[origem]?.label||origem)+msgMod);
+  window._fxSelecionados = [];
   toggleFormFluxo();
   renderFluxo();
 };
@@ -25019,6 +25506,11 @@ window.salvarConfigModalidades = function(){
   D.configModalidades._savedAt = Date.now();
   save();
   showToast("Percentuais salvos.", "ok");
+  // [R43] o form de registro fica na mesma página: recalcular na hora
+  if(document.getElementById("form-fluxo")?.style.display !== "none"
+     && typeof window._fxModalidadeMudou === "function"){
+    window._fxModalidadeMudou();
+  }
 };
 
 // CRUD de faixas
@@ -25052,6 +25544,11 @@ window.gbFaixaAtualizar = function(id){
   f.produtos = pt ? pt.split(/\n+/).map(s=>s.trim()).filter(Boolean) : [];
   cfg._savedAt = Date.now();
   save();
+  // [R43] refletir na sugestão de produtos se o form estiver aberto
+  if(typeof window._fxRenderProdutos === "function"
+     && document.getElementById("fx-produtos-box")?.style.display !== "none"){
+    window._fxRenderProdutos();
+  }
 };
 
 // Renderizar config admin — matriz + faixas
@@ -25229,7 +25726,11 @@ function _renderLembretesAniversario(){
 
 // Abrir form novo com cliente aniversariante pré-preenchido
 window._fxNovoRegistroAniv = function(nome, aniv){
-  toggleFormFluxo();
+  // [FIX R43] antes chamava toggleFormFluxo() direto: se o form já estivesse
+  // aberto, o clique em "+ Registrar" FECHAVA o formulário em vez de
+  // preenchê-lo. Agora só abre quando está fechado.
+  const f = document.getElementById("form-fluxo");
+  if(f && f.style.display === "none") toggleFormFluxo();
   setTimeout(() => {
     const nomeEl = document.getElementById('fx-nome');
     const anivEl = document.getElementById('fx-aniversario');
@@ -25253,6 +25754,221 @@ window._fxNovoRegistroAniv = function(nome, aniv){
     window.renderFluxo._wrappedR42 = true;
   }
 })();
+
+// ══════════════════════════════════════════════════════════════════════
+// [R43] ALERTA MENSAL — ANIVERSARIANTES E INATIVOS CONTATADOS
+// Cruza D.contatos (tipo aniversario/inativo) do mês com as metas
+// metaAniv / metaInativ cadastradas por vendedora em Metas → Vendedoras.
+// Essas metas existiam no cadastro mas nunca eram comparadas com o
+// realizado — este painel fecha esse ciclo.
+// ══════════════════════════════════════════════════════════════════════
+
+window._ctAlertaMes = window._ctAlertaMes || null;  // null = mês corrente
+
+// Retorna {ano, mes} (mes 1-12) do painel
+function _ctAlertaRef(){
+  if(window._ctAlertaMes) return window._ctAlertaMes;
+  const h = new Date();
+  return {ano: h.getFullYear(), mes: h.getMonth() + 1};
+}
+
+window.ctAlertaNavMes = function(delta){
+  const r = _ctAlertaRef();
+  let m = r.mes + delta, a = r.ano;
+  if(m < 1){ m = 12; a--; }
+  if(m > 12){ m = 1; a++; }
+  window._ctAlertaMes = {ano:a, mes:m};
+  _renderAlertaMesContatos();
+};
+
+window.ctAlertaIrHoje = function(){
+  window._ctAlertaMes = null;
+  _renderAlertaMesContatos();
+};
+
+// Apura contatos de aniversariantes/inativos no mês, por vendedora
+function _apurarContatosMes(){
+  const {ano, mes} = _ctAlertaRef();
+  const prefixo = ano + '-' + String(mes).padStart(2,'0');   // YYYY-MM
+  const isAd = isAdmin();
+  const lidUser = lojaId();
+  const lojaFiltro = document.getElementById('ct-filtro-loja')?.value || '';
+
+  // Vendedoras visíveis para o perfil atual
+  let vends = (D.vendedoras || []).filter(v => v.ativa !== false);
+  if(isAd){
+    if(lojaFiltro) vends = vends.filter(v => v.loja === lojaFiltro);
+  } else {
+    vends = vends.filter(v => v.loja === lidUser);
+  }
+
+  // Contatos do mês, do escopo visível
+  const contatos = (D.contatos || []).filter(c => {
+    if(!c.data || String(c.data).slice(0,7) !== prefixo) return false;
+    if(c.tipo !== 'aniversario' && c.tipo !== 'inativo') return false;
+    if(isAd){ if(lojaFiltro && c.loja !== lojaFiltro) return false; }
+    else if(c.loja !== lidUser) return false;
+    return true;
+  });
+
+  const porVend = {};
+  vends.forEach(v => {
+    porVend[v.id] = {
+      id:v.id, nome:v.nome, loja:v.loja,
+      aniv:0, inativo:0,
+      metaAniv: Number(v.metaAniv) || 0,
+      metaInativ: Number(v.metaInativ) || 0,
+      convAniv:0, convInativo:0     // contatos que viraram compra
+    };
+  });
+
+  let semVendedora = 0;
+  contatos.forEach(c => {
+    const alvo = porVend[c.vendId];
+    if(!alvo){ semVendedora++; return; }
+    const comprou = c.retorno === 'comprou';
+    if(c.tipo === 'aniversario'){ alvo.aniv++; if(comprou) alvo.convAniv++; }
+    else { alvo.inativo++; if(comprou) alvo.convInativo++; }
+  });
+
+  const linhas = Object.values(porVend)
+    // Esconde quem não tem meta nem contato — evita poluir com vendedora inativa
+    .filter(v => v.metaAniv > 0 || v.metaInativ > 0 || v.aniv > 0 || v.inativo > 0)
+    .sort((a,b) => (b.aniv + b.inativo) - (a.aniv + a.inativo));
+
+  const tot = linhas.reduce((acc,v) => ({
+    aniv: acc.aniv + v.aniv,
+    inativo: acc.inativo + v.inativo,
+    metaAniv: acc.metaAniv + v.metaAniv,
+    metaInativ: acc.metaInativ + v.metaInativ,
+    convAniv: acc.convAniv + v.convAniv,
+    convInativo: acc.convInativo + v.convInativo
+  }), {aniv:0, inativo:0, metaAniv:0, metaInativ:0, convAniv:0, convInativo:0});
+
+  return {ano, mes, linhas, tot, semVendedora, totalContatos: contatos.length};
+}
+
+const _MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                   'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// Cor conforme atingimento da meta
+function _corMeta(feito, meta){
+  if(meta <= 0) return 'var(--muted)';
+  const pct = feito / meta;
+  if(pct >= 1)  return 'var(--verde)';
+  if(pct >= .6) return 'var(--ouro)';
+  return 'var(--verm)';
+}
+function _iconMeta(feito, meta){
+  if(meta <= 0) return '';
+  const pct = feito / meta;
+  return pct >= 1 ? '✅' : (pct >= .6 ? '⚠️' : '🔴');
+}
+
+function _renderAlertaMesContatos(){
+  const corpo  = document.getElementById('ct-alerta-mes-corpo');
+  const resumo = document.getElementById('ct-alerta-mes-resumo');
+  const label  = document.getElementById('ct-alerta-mes-label');
+  if(!corpo) return;
+
+  const {ano, mes, linhas, tot, semVendedora} = _apurarContatosMes();
+  if(label) label.textContent = _MESES_PT[mes-1] + '/' + ano;
+
+  // ── Resumo: dois cartões (aniversariantes / inativos) ──
+  const card = (emoji, titulo, feito, meta, conv) => {
+    const cor = _corMeta(feito, meta);
+    const pct = meta > 0 ? Math.round(feito / meta * 100) : 0;
+    const falta = Math.max(0, meta - feito);
+    return '<div style="flex:1;min-width:190px;background:var(--cinza);border:1px solid var(--borda);border-left:3px solid '+cor+';border-radius:8px;padding:10px 12px">'
+      + '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">'+emoji+' '+titulo+'</div>'
+      + '<div style="display:flex;align-items:baseline;gap:6px;margin-top:3px">'
+        + '<span style="font-size:20px;font-weight:700;color:'+cor+'">'+feito+'</span>'
+        + '<span style="font-size:12px;color:var(--muted)">'+(meta > 0 ? '/ '+meta+' meta' : 'contatos')+'</span>'
+      + '</div>'
+      + (meta > 0
+          ? '<div style="height:5px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin-top:6px">'
+            + '<div style="height:100%;width:'+Math.min(100,pct)+'%;background:'+cor+';border-radius:99px;transition:width .4s"></div></div>'
+            + '<div style="font-size:10px;color:var(--muted);margin-top:4px">'
+              + (falta > 0 ? '<span style="color:'+cor+';font-weight:600">Faltam '+falta+'</span>' : '<span style="color:var(--verde);font-weight:600">Meta batida</span>')
+              + ' · '+pct+'%</div>'
+          : '<div style="font-size:10px;color:var(--muted);margin-top:6px">Sem meta cadastrada</div>')
+      + '<div style="font-size:10px;color:var(--verde);margin-top:3px">🛒 '+conv+' viraram compra'
+        + (feito > 0 ? ' ('+Math.round(conv/feito*100)+'%)' : '') + '</div>'
+    + '</div>';
+  };
+
+  if(resumo){
+    resumo.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+      + card('🎂','Aniversariantes', tot.aniv, tot.metaAniv, tot.convAniv)
+      + card('💤','Inativos',        tot.inativo, tot.metaInativ, tot.convInativo)
+      + '</div>';
+  }
+
+  if(!linhas.length){
+    corpo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px">'
+      + 'Nenhum contato de aniversariante ou inativo registrado em '+_MESES_PT[mes-1]+'/'+ano+'.<br>'
+      + '<span style="font-size:11px">Cadastre as metas em Metas → Vendedoras e registre os contatos aqui.</span></div>';
+    return;
+  }
+
+  const cel = (feito, meta) => {
+    const cor = _corMeta(feito, meta);
+    return '<td style="text-align:center;white-space:nowrap">'
+      + '<span style="font-weight:700;color:'+cor+'">'+feito+'</span>'
+      + (meta > 0 ? '<span style="color:var(--muted);font-size:11px"> / '+meta+'</span> '+_iconMeta(feito,meta) : '<span style="color:var(--muted);font-size:11px"> / —</span>')
+      + '</td>';
+  };
+
+  corpo.innerHTML =
+    '<div style="overflow-x:auto">'
+    + '<table class="dtable" style="min-width:560px;font-size:12px">'
+      + '<thead><tr>'
+        + '<th style="text-align:left">Vendedora</th>'
+        + '<th style="text-align:center">🎂 Aniversariantes</th>'
+        + '<th style="text-align:center">💤 Inativos</th>'
+        + '<th style="text-align:center">🛒 Viraram compra</th>'
+        + '<th style="text-align:left">Situação</th>'
+      + '</tr></thead><tbody>'
+      + linhas.map(v => {
+          const lNome = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS)
+            .find(l => l.id === v.loja)?.nome || v.loja || '—';
+          const pend = [];
+          if(v.metaAniv   > 0 && v.aniv    < v.metaAniv)   pend.push((v.metaAniv - v.aniv)+' aniversariante(s)');
+          if(v.metaInativ > 0 && v.inativo < v.metaInativ) pend.push((v.metaInativ - v.inativo)+' inativo(s)');
+          const semMeta = v.metaAniv <= 0 && v.metaInativ <= 0;
+          const situacao = semMeta
+            ? '<span style="color:var(--muted);font-size:11px">Sem meta cadastrada</span>'
+            : (pend.length
+                ? '<span style="color:var(--verm);font-size:11px">🔴 Faltam '+pend.join(' e ')+'</span>'
+                : '<span style="color:var(--verde);font-size:11px">✅ Metas do mês batidas</span>');
+          return '<tr>'
+            + '<td><strong>'+v.nome+'</strong><br><span style="font-size:10px;color:var(--muted)">'+lNome+'</span></td>'
+            + cel(v.aniv, v.metaAniv)
+            + cel(v.inativo, v.metaInativ)
+            + '<td style="text-align:center;color:var(--verde);font-weight:600">'+(v.convAniv + v.convInativo)+'</td>'
+            + '<td>'+situacao+'</td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    + (semVendedora > 0
+        ? '<div style="margin-top:8px;padding:7px 11px;background:rgba(255,107,122,.08);border-left:3px solid #ff6b7a;font-size:11px;color:var(--muted)">'
+          + '⚠️ '+semVendedora+' contato(s) do mês estão sem vendedora válida e não entram na apuração.</div>'
+        : '');
+}
+
+// Renderizar junto com a página de contatos
+(function wrapRenderContatosR43(){
+  const orig = window.renderContatos;
+  if(typeof orig === 'function' && !orig._wrappedR43){
+    window.renderContatos = function(){
+      orig.apply(this, arguments);
+      try { _renderAlertaMesContatos(); }
+      catch(e){ console.warn('_renderAlertaMesContatos:', e.message); }
+    };
+    window.renderContatos._wrappedR43 = true;
+  }
+})();
+
 
 
 
