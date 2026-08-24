@@ -1679,12 +1679,32 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ps" id="lanc-sub">MonAris Sales Control — Gestão de Vendas</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <!-- [R47] Navegador de mês no topo — o mesmo estado do navegador que já
+           existia lá embaixo no Histórico, então o painel inteiro (form, cards,
+           KPIs, calendário) passa a refletir o mês escolhido, com o mesmo layout. -->
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="lancHistNavMes(-1)" title="Mês anterior"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);cursor:pointer;font-size:14px">‹</button>
+        <select id="lanc-hist-mes-sel-topo" onchange="lancHistSelecionarMes(this.value)"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;min-width:140px"></select>
+        <button onclick="lancHistNavMes(1)" title="Próximo mês"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);cursor:pointer;font-size:14px">›</button>
+        <button onclick="lancHistIrHoje()" title="Voltar ao mês atual"
+          style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.4);border-radius:6px;padding:6px 10px;color:var(--ouro);cursor:pointer;font-size:11px;font-weight:600">Mês atual</button>
+      </div>
       <div class="tabs" style="margin:0">
         <button class="tab active" id="ptab-hoje" onclick="tabPainel('hoje',this)">Hoje</button>
         <button class="tab" id="ptab-semana" onclick="tabPainel('semana',this)">Semana</button>
         <button class="tab" id="ptab-mes" onclick="tabPainel('mes',this)">Mês</button>
       </div>
     </div>
+  </div>
+
+  <!-- [R47] Aviso de mês passado — sem isto o painel mostra dados antigos
+       sem explicar por quê, e alguém acha que o dia "sumiu". -->
+  <div id="lanc-aviso-mes" style="display:none;background:rgba(78,201,255,.08);border:1px solid rgba(78,201,255,.4);border-left:3px solid #4ec9ff;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--texto);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <span>📅 Você está vendo <strong id="lanc-aviso-mes-nome">—</strong>. Os dados abaixo são desse mês.</span>
+    <button onclick="lancHistIrHoje()" style="background:rgba(78,201,255,.15);border:1px solid rgba(78,201,255,.5);color:#4ec9ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:11px;font-weight:600">Voltar ao mês atual</button>
   </div>
 
   <!-- FORMULÁRIO DE LANÇAMENTO -->
@@ -1724,6 +1744,16 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <div class="ig"><label>Obs (Opcional)</label>
         <textarea id="l-obs" placeholder="Notas sobre a venda..." style="resize:vertical;min-height:50px"></textarea>
+      </div>
+
+      <!-- [R47] Itens vendidos — quais produtos saíram nesta venda -->
+      <div class="ig" id="l-itens-box" style="grid-column:1/-1">
+        <label>Itens vendidos <span style="font-size:9px;color:var(--muted)">(opcional — preenche a Qtd. de Produtos automaticamente)</span></label>
+        <input type="text" id="l-prod-busca" placeholder="Buscar produto por nome ou código..." autocomplete="off"
+          oninput="window._lancBuscarProduto(this.value)"
+          style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:13px">
+        <div id="l-prod-sugest" style="margin-top:4px;max-height:190px;overflow-y:auto"></div>
+        <div id="l-prod-sel" style="margin-top:8px"></div>
       </div>
     </div>
     <div class="btn-r">
@@ -2292,7 +2322,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <label id="fx-produtos-lbl">🎁 Produtos que o cliente pode levar</label>
           <!-- Filtros da sugestão -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 6px">
-            <input type="text" id="fx-prod-busca" placeholder="Buscar por nome, grupo ou código..." autocomplete="off"
+            <input type="text" id="fx-prod-busca" placeholder="Buscar item específico (inclui os mais caros que o benefício)..." autocomplete="off"
               oninput="window._fxRenderProdutos()"
               style="flex:1;min-width:180px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
             <select id="fx-prod-linha" onchange="window._fxRenderProdutos()"
@@ -3356,7 +3386,53 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedoras por loja e ranking geral da rede</div></div>
     <button class="btn-p" onclick="exportarRelatorioRanking()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
     <button class="btn-p" onclick="exportarPDFRanking()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
-    <button class="btn-p" onclick="exportarModoDivulgacaoRanking()" style="font-size:12px;padding:8px 16px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="PDF simples para publicar — só pódio, sem números detalhados">📢 Modo Divulgação</button>
+    <button class="btn-p" onclick="toggleDivulgacaoRanking()" style="font-size:12px;padding:8px 16px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="Escolher quais rankings publicar e gerar o PDF de divulgação">📢 Modo Divulgação</button>
+  </div>
+
+  <!-- [R48] Painel de divulgação: o admin escolhe período e quais rankings publicar -->
+  <div class="sc" id="rk-div-painel" style="display:none;margin-bottom:16px;border:1px solid rgba(201,168,76,.45)">
+    <div class="st">📢 Publicar Rankings</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Escolha o período e marque os rankings que vão para o PDF de divulgação. O material sai sem valores em R$ — só posição, nome e indicador.</div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <label style="font-size:11px;color:var(--muted)">Período:</label>
+      <select id="rk-div-per" onchange="window._rkDivRender()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <option value="hoje">Dia</option>
+        <option value="semana">Semana</option>
+        <option value="mes" selected>Mês</option>
+        <option value="ano">Ano</option>
+      </select>
+
+      <!-- calendário do ranking semanal / diário -->
+      <div id="rk-div-data-wrap" style="display:none;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--muted)">Data:</label>
+        <input type="date" id="rk-div-data" onchange="window._rkDivRender()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <span style="font-size:10px;color:var(--muted)">a semana da data escolhida</span>
+      </div>
+
+      <div id="rk-div-mes-wrap" style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--muted)">Mês:</label>
+        <input type="month" id="rk-div-mes" onchange="window._rkDivRender()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:6px 10px;color:var(--texto);font-size:12px">
+      </div>
+
+      <span style="font-size:11px;color:var(--ouro);font-weight:700" id="rk-div-periodo-lbl">—</span>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="window._rkDivMarcarTodos(true)" style="font-size:10px;padding:5px 10px">Marcar todos</button>
+      <button class="btn-s" onclick="window._rkDivMarcarTodos(false)" style="font-size:10px;padding:5px 10px">Desmarcar todos</button>
+      <span style="font-size:11px;color:var(--muted)" id="rk-div-contagem">—</span>
+    </div>
+
+    <div id="rk-div-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;margin-bottom:12px"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-p" onclick="gerarDivulgacaoRankings()" style="font-size:12px;padding:9px 18px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700">📢 Gerar PDF de Divulgação</button>
+      <button class="btn-s" onclick="toggleDivulgacaoRanking()" style="font-size:12px">Fechar</button>
+    </div>
   </div>
   <div class="tabs">
     <button class="tab active" onclick="tabRank('rede',this)">Rede Geral</button>
@@ -7196,9 +7272,17 @@ function nav(pg){
       // Não chama buscarAcompanhamentoGeral() automaticamente, espera usuário clicar
     },
     lanc:()=>{
-      // Sempre atualizar a data oculta ao entrar no painel (evita data desatualizada)
+      // [FIX R47] Antes forçava l-data=hoje ao entrar. Com o navegador de mês
+      // no topo, isso fazia o painel voltar para hoje enquanto _lancHistMes
+      // seguia apontando para o mês escolhido — seletor e dados discordavam.
+      // Agora respeita o mês selecionado; só cai em hoje no mês corrente.
       const lDataEl=document.getElementById('l-data');
-      if(lDataEl) lDataEl.value=hoje();
+      const _mrSel = window._lancHistMes;
+      if(lDataEl){
+        lDataEl.value = (_mrSel && _mrSel !== hoje().slice(0,7))
+          ? _ultimoDiaDoMes(_mrSel)
+          : hoje();
+      }
       renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
 }
 
@@ -8277,6 +8361,16 @@ function renderPainelDia(){
 }
 
 function carregarVendsForm(lidOverride){
+  // [R47] Os itens acumulados pertencem a UMA data. Ao trocar a data do
+  // lançamento, o acumulado precisa zerar — senão os produtos de um dia
+  // seriam gravados no dia seguinte.
+  const _dtAtual = document.getElementById('l-data')?.value || '';
+  if(window._lancDataRef !== undefined && window._lancDataRef !== _dtAtual){
+    window._lancProdutosPorVend = {};
+    if(typeof window._lancLimparItens === 'function') window._lancLimparItens();
+  }
+  window._lancDataRef = _dtAtual;
+
   // BUG12: não recriar o DOM se o usuário está digitando no formulário de lançamento
   // Verificar se algum input do formulário de lançamento está em foco
   const focusedEl = document.activeElement;
@@ -8645,6 +8739,7 @@ function limparCamposLanc(){
   const _li = document.getElementById('l-itens'); if(_li) _li.value = ''; // [FIX 22/07]
   const _lp = document.getElementById('l-pa-preview'); if(_lp) _lp.textContent = '';
   document.getElementById('l-obs').value = '';
+  if(typeof window._lancLimparItens === 'function') window._lancLimparItens();
   atualizaTotal();
 }
 
@@ -8715,6 +8810,20 @@ function adicionarVenda(){
   }
   if(_ca) _ca.value = (parseInt(_ca.value)||0) + atendimentos;
   if(_ci) _ci.value = (parseInt(_ci.value)||0) + itens;
+
+  // [R47] Acumular os itens informados por vendedora. Somam-se as quantidades
+  // quando o mesmo produto entra em lançamentos parciais do mesmo dia.
+  if(!window._lancProdutosPorVend) window._lancProdutosPorVend = {};
+  const _lista = window._lancItens || [];
+  if(_lista.length){
+    if(!window._lancProdutosPorVend[vendVal]) window._lancProdutosPorVend[vendVal] = [];
+    const alvo = window._lancProdutosPorVend[vendVal];
+    _lista.forEach(it => {
+      const ex = alvo.find(x => x.c === it.c);
+      if(ex) ex.qtd = (Number(ex.qtd)||0) + (Number(it.qtd)||0);
+      else alvo.push({c:it.c, n:it.n, preco:Number(it.preco)||0, qtd:Number(it.qtd)||0});
+    });
+  }
   if(typeof atualizarSomaDia === 'function') atualizarSomaDia();
 
   limparCamposLanc();
@@ -8839,7 +8948,7 @@ async function salvarLanc(){
     vendasParaSalvar.forEach(({v, vval, vatend, vitens})=>{
       if(!D.vendasVend[v.id]) D.vendasVend[v.id]={};
       // Pegar o registro existente do dia (se houver)
-      const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0};
+      const regExist = D.vendasVend[v.id][data] || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0, produtos:[]};
       // [FIX 22/07] SUBSTITUI em vez de somar. O formulário já vem preenchido
       // com o que está gravado, então somar fazia cada "Salvar" DOBRAR o dia
       // (1.000 -> 2.000 -> 4.000). O valor do form é a verdade do dia.
@@ -8848,11 +8957,17 @@ async function salvarLanc(){
       const novoItens = vitens||0;
       const novoTM    = novoTrans>0 ? parseFloat((novoVal/novoTrans).toFixed(2)) : 0;
       const novoPA    = novoTrans>0 ? parseFloat((novoItens/novoTrans).toFixed(2)) : 0; // PA = peças ÷ atendimentos
+      // [R47] itens vendidos: usa os informados agora; se nada foi informado
+      // nesta sessão, preserva o que já estava gravado no dia.
+      const _prodsInf = (window._lancProdutosPorVend||{})[v.id];
+      const _prodsDia = (_prodsInf && _prodsInf.length) ? _prodsInf : (regExist.produtos || []);
+
       D.vendasVend[v.id][data] = {
         val:   novoVal,
         trans: novoTrans,
         itens: novoItens,
         pa:    novoPA,
+        produtos: _prodsDia,
         cli:   novoTrans,
         aniv:  regExist.aniv||0,
         inativ:regExist.inativ||0,
@@ -8891,6 +9006,9 @@ async function salvarLanc(){
     window._pendingLocalData = JSON.parse(JSON.stringify(D));
 
     showToast("✅ Lançamento salvo! Total: "+fmt(fat));
+    // [R47] itens já gravados no dia — zerar o acumulado para o próximo
+    // lançamento não herdar os produtos deste.
+    window._lancProdutosPorVend = {};
     carregarDash();
     renderHistoricoLanc();
     renderConsolidadoLanc(lid);
@@ -9080,7 +9198,11 @@ function renderHistoricoLanc(){
   // [FIX 06/08] usa o mês do seletor; padrão é o mês atual
   const mes = window._lancHistMes || hoje().slice(0,7);
   // Popular o select de meses disponíveis (todos com dados + últimos 12)
-  const _sel = document.getElementById("lanc-hist-mes-sel");
+  // [R47] Existem DOIS seletores de mês (topo e histórico). Popular só um
+  // deixaria o outro dessincronizado, mostrando um mês e aplicando outro.
+  const _sels = ["lanc-hist-mes-sel","lanc-hist-mes-sel-topo"]
+    .map(id => document.getElementById(id)).filter(Boolean);
+  const _sel = _sels[0];
   if(_sel){
     const nomesMes = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     const _mesesSet = new Set();
@@ -9097,12 +9219,25 @@ function renderHistoricoLanc(){
       mesesDisponiveis().forEach(mr => _mesesSet.add(mr));
     }
     const meses = [..._mesesSet].sort().reverse();
-    _sel.innerHTML = meses.map(mr => {
+    const _opts = meses.map(mr => {
       const [y,mm] = mr.split("-");
       const lbl = nomesMes[parseInt(mm)] + "/" + y;
       const marcaHoje = mr === hoje().slice(0,7) ? " (atual)" : "";
       return `<option value="${mr}" ${mr===mes?"selected":""}>${lbl}${marcaHoje}</option>`;
     }).join("");
+    _sels.forEach(sl => { sl.innerHTML = _opts; sl.value = mes; });
+
+    // Aviso de mês passado no topo do painel
+    const _aviso = document.getElementById("lanc-aviso-mes");
+    if(_aviso){
+      const ehAtual = mes === hoje().slice(0,7);
+      _aviso.style.display = ehAtual ? "none" : "flex";
+      const _nm = document.getElementById("lanc-aviso-mes-nome");
+      if(_nm){
+        const [ay,am] = mes.split("-");
+        _nm.textContent = nomesMes[parseInt(am)] + "/" + ay;
+      }
+    }
   }
   // Pegar todos os dias do mês com lançamentos (via vendasVend + fallback D.vendas)
   const diasComLanc={};
@@ -9480,6 +9615,7 @@ function toggleFormFluxo(){
     const tipo=document.getElementById("fx-novo");      if(tipo) tipo.value="novo";
     const pl=document.getElementById("fx-prod-linha");  if(pl) pl.value="";
     window._fxSelecionados = [];
+    window._fxDiferencaPaga = 0;
     const bx=document.getElementById("fx-benef-box");    if(bx) bx.style.display="none";
     const pb=document.getElementById("fx-produtos-box"); if(pb) pb.style.display="none";
     preencherSelectVends();
@@ -9748,6 +9884,7 @@ function renderFluxo(){
       : (r.produtoEscolhido||"");
     const benefTxt = r.beneficioValor>0
       ? `<span style="font-weight:700;color:var(--ouro)">${fmt(r.beneficioValor)}</span>`
+        + (r.diferencaPaga>0?`<div style="font-size:9.5px;color:#4ec9ff;font-weight:600">💳 +${fmt(r.diferencaPaga)} pago</div>`:"")
         + (prodLista?`<div style="font-size:9px;color:var(--muted);max-width:220px;white-space:normal">🎁 ${prodLista}</div>`:"")
       : `<span style="color:var(--muted)">--</span>`;
     return `<tr>
@@ -9969,6 +10106,7 @@ function exportarPDFFluxo(){
       <td style="text-align:right">${r.valor>0?fmt(r.valor):"—"}</td>
       <td>${modTxt}${prods?`<br><span style="font-size:12.5px;color:#777">${prods}</span>`:""}</td>
       <td style="text-align:right">${r.beneficioValor>0?fmt(r.beneficioValor):"—"}</td>
+      <td style="text-align:right">${r.diferencaPaga>0?fmt(r.diferencaPaga):"—"}</td>
     </tr>`;
   }).join("");
 
@@ -10045,7 +10183,7 @@ ${catPDF.orfaos.length ? `<p style="font-size:13.5px;color:#a00;margin-top:8px">
 
 <h2>Registros Detalhados${regs.length>100?" (primeiros 100)":""}</h2>
 <table>
-  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade / Produtos</th><th style="text-align:right">Benefício</th></tr></thead>
+  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade / Produtos</th><th style="text-align:right">Benefício</th><th style="text-align:right">Diferença paga</th></tr></thead>
   <tbody>${rowsRegs}</tbody>
 </table>
 <div class="foot">MonAris Sales Control — ${new Date().toLocaleString("pt-BR")}</div>
@@ -21764,71 +21902,300 @@ function _htmlPodio(items){
   </div>`;
 }
 
-// ── DIVULGAÇÃO — RANKINGS GERAIS ─────────────────────────────────────
-function exportarModoDivulgacaoRanking(){
-  const per = window._rankPerAtual || 'mes';
-  const perLbl = per==='hoje'?'Hoje':per==='semana'?'Semana':per==='mes'?'Mês':per==='ano'?'Ano':'Período';
+// [R48] exportarModoDivulgacaoRanking() removida: o painel de seleção
+// (toggleDivulgacaoRanking / gerarDivulgacaoRankings) cobre o mesmo
+// material, com período escolhido e rankings selecionáveis. Manter as
+// duas versões só criaria divergência na próxima alteração.
 
-  // Ranking de lojas por % da meta (só posição + %)
-  const lojasRank = LOJAS.map(l => {
-    const metas = getMetas(l.id);
-    let real = 0, meta = 0;
-    if(per === 'hoje'){
-      real = calcDia(l.id); meta = metas.dia || 0;
-    } else if(per === 'semana'){
-      real = calcSem(l.id); meta = metas.sem || 0;
-    } else if(per === 'ano'){
-      const y = new Date().getFullYear();
-      for(let m=1; m<=12; m++){
-        const mr = y + '-' + String(m).padStart(2,'0');
-        real += realizadoDoMes(l.id, mr).valor || 0;
-        meta += metaDoMes(l.id, mr).valor || 0;
-      }
-    } else {
-      const mr = hoje().slice(0,7);
-      real = realizadoDoMes(l.id, mr).valor || 0;
-      meta = metaDoMes(l.id, mr).valor || 0;
-    }
-    const pct = meta > 0 ? (real/meta)*100 : 0;
-    return { nome: l.nome, real, meta, pct, info: pct>0 ? pct.toFixed(0)+'% da meta' : '' };
-  }).filter(l => l.real > 0)
-    .sort((a,b) => b.pct - a.pct || b.real - a.real);
 
-  // Ranking de vendedoras por realizado — mostra loja + TM
-  const vendsAtiv = (D.vendedoras||[]).filter(v => v.ativa !== false && v.cargo !== 'VRLL');
-  const vendsRank = vendsAtiv.map(v => {
-    let real = 0, atend = 0;
-    if(per === 'ano'){
-      real = calcVendAno(v.id);
-      // Somar atendimentos do ano
-      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        atend += Number(dd.trans||0);
-      });
-    } else if(per === 'mes'){
-      const mr = hoje().slice(0,7);
-      real = calcVendPer(v.id, mr);
-      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mr)) atend += Number(dd.trans||0);
-      });
-    } else if(per === 'semana' || per === 'hoje'){
-      real = calcVendPer(v.id, per);
-      // atendimentos: aproximação — deixar sem TM se não conseguir
-    }
-    const tm = atend > 0 ? real/atend : 0;
-    const lojaNome = LOJAS.find(l => l.id === v.loja)?.nome || v.loja;
-    const info = tm > 0 ? `${lojaNome} · TM ${fmt(tm)}` : lojaNome;
-    return { nome: v.nome, loja: lojaNome, real, tm, info };
-  }).filter(v => v.real > 0)
-    .sort((a,b) => b.real - a.real);
 
-  const body = `
-    <h2>Ranking de Lojas — ${perLbl}</h2>
-    ${_htmlPodio(lojasRank)}
-    <h2>Ranking de Vendedoras — ${perLbl}</h2>
-    ${_htmlPodio(vendsRank)}
-  `;
-  _abrirJanelaDivulgacao('Resultados', perLbl + ' — ' + hoje().split('-').reverse().join('/'), body);
+
+// ══════════════════════════════════════════════════════════════════════
+// [R48] DIVULGAÇÃO DE RANKINGS — categorias selecionáveis pelo admin
+// Cinco rankings: maior TM, maior crescimento, maior faturamento (loja e
+// vendedora) e mais próximo da meta. O admin marca quais publicar.
+// No período "semana" há calendário para escolher a data de referência.
+//
+// Cálculo próprio por intervalo de datas em vez de reaproveitar calcSem()
+// e calcVendPer(), que são fixos em "hoje" — só assim a semana escolhida
+// no calendário e o período anterior (para o crescimento) funcionam.
+// ══════════════════════════════════════════════════════════════════════
+
+function _rkISO(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
+function _rkAddDias(iso, n){
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(y, m-1, d); dt.setDate(dt.getDate()+n);
+  return _rkISO(dt);
+}
+// Segunda-feira da semana que contém a data
+function _rkSegundaDe(iso){
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(y, m-1, d); dt.setHours(0,0,0,0);
+  const ds = dt.getDay();
+  dt.setDate(dt.getDate() - (ds===0 ? 6 : ds-1));
+  return _rkISO(dt);
+}
+
+/**
+ * Intervalo do período + o intervalo equivalente anterior (base do crescimento).
+ * @param {string} per hoje|semana|mes|ano
+ * @param {string} ref data de referência YYYY-MM-DD (só usada em semana/hoje)
+ */
+window._rkIntervalo = function(per, ref){
+  const hj  = hoje();
+  const base = ref || hj;
+  if(per === 'hoje'){
+    return {ini:base, fim:base, iniAnt:_rkAddDias(base,-1), fimAnt:_rkAddDias(base,-1),
+            label:'Dia ' + base.split('-').reverse().join('/')};
+  }
+  if(per === 'semana'){
+    const seg = _rkSegundaDe(base);
+    const dom = _rkAddDias(seg, 6);
+    // não projetar para o futuro dentro da semana corrente
+    const fim = dom > hj ? hj : dom;
+    return {ini:seg, fim, iniAnt:_rkAddDias(seg,-7), fimAnt:_rkAddDias(seg,-1),
+            label:'Semana de ' + seg.split('-').reverse().join('/') + ' a ' + dom.split('-').reverse().join('/')};
+  }
+  if(per === 'ano'){
+    const y = Number((ref||hj).slice(0,4));
+    return {ini:y+'-01-01', fim:(y===Number(hj.slice(0,4))?hj:y+'-12-31'),
+            iniAnt:(y-1)+'-01-01', fimAnt:(y-1)+'-12-31', label:'Ano ' + y};
+  }
+  // mês (padrão)
+  const mr = (ref||hj).slice(0,7);
+  const [y,m] = mr.split('-').map(Number);
+  const ultimo = new Date(y, m, 0).getDate();
+  const fimMes = mr + '-' + String(ultimo).padStart(2,'0');
+  const antT = y*12 + (m-1) - 1;
+  const aY = Math.floor(antT/12), aM = (antT%12)+1;
+  const mrAnt = aY + '-' + String(aM).padStart(2,'0');
+  const ultAnt = new Date(aY, aM, 0).getDate();
+  const nomesMesRk = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return {ini:mr+'-01', fim:(mr===hj.slice(0,7)?hj:fimMes),
+          iniAnt:mrAnt+'-01', fimAnt:mrAnt+'-'+String(ultAnt).padStart(2,'0'),
+          label: nomesMesRk[m] + '/' + y};
+};
+
+// Soma de uma vendedora no intervalo
+function _rkSomaVend(vid, ini, fim){
+  const vd = D.vendasVend[vid] || {};
+  let fat=0, trans=0;
+  Object.entries(vd).forEach(([d,v]) => {
+    if(d >= ini && d <= fim){ fat += Number(v.val||0); trans += Number(v.trans||0); }
+  });
+  return {fat, trans, tm: trans>0 ? fat/trans : 0};
+}
+// Soma de uma loja no intervalo (vendedoras; cai para D.vendas se vazio)
+function _rkSomaLoja(lid, ini, fim){
+  let fat=0, trans=0;
+  (typeof vendsReais==='function' ? vendsReais(lid) : (D.vendedoras||[]).filter(v=>v.loja===lid))
+    .forEach(v => { const s=_rkSomaVend(v.id, ini, fim); fat+=s.fat; trans+=s.trans; });
+  if(fat === 0){
+    Object.entries(D.vendas[lid]||{}).forEach(([d,vd]) => {
+      if(d >= ini && d <= fim){ fat += Number(vd.fat||0); trans += Number(vd.trans||vd.atend||0); }
+    });
+  }
+  return {fat, trans, tm: trans>0 ? fat/trans : 0};
+}
+// Meta da loja no período
+function _rkMetaLoja(lid, per, iv){
+  if(per === 'mes')  return metaDoMes(lid, iv.ini.slice(0,7)).valor || 0;
+  if(per === 'ano'){
+    let t=0; const y=iv.ini.slice(0,4);
+    for(let m=1;m<=12;m++) t += metaDoMes(lid, y+'-'+String(m).padStart(2,'0')).valor || 0;
+    return t;
+  }
+  const mt = (typeof getMetas==='function') ? getMetas(lid) : {};
+  if(per === 'hoje')   return Number(mt.dia||0);
+  if(per === 'semana') return Number(mt.sem||0);
+  return 0;
+}
+
+/** Monta as cinco listas de ranking para o período/data escolhidos. */
+window._rkMontarRankings = function(per, ref){
+  const iv = window._rkIntervalo(per, ref);
+  const lojas = (typeof LOJAS!=='undefined' ? LOJAS : []);
+  const vends = (D.vendedoras||[]).filter(v => v.ativa !== false && v.cargo !== 'VRLL');
+  const nomeLoja = id => lojas.find(l=>l.id===id)?.nome || id;
+
+  const dadosLoja = lojas.map(l => {
+    const at = _rkSomaLoja(l.id, iv.ini, iv.fim);
+    const an = _rkSomaLoja(l.id, iv.iniAnt, iv.fimAnt);
+    const meta = _rkMetaLoja(l.id, per, iv);
+    return {
+      id:l.id, nome:l.nome, fat:at.fat, tm:at.tm, trans:at.trans,
+      fatAnt:an.fat,
+      cresc: an.fat > 0 ? (at.fat-an.fat)/an.fat*100 : null,
+      meta, pctMeta: meta > 0 ? at.fat/meta*100 : null
+    };
+  });
+
+  const dadosVend = vends.map(v => {
+    const at = _rkSomaVend(v.id, iv.ini, iv.fim);
+    const an = _rkSomaVend(v.id, iv.iniAnt, iv.fimAnt);
+    const metaV = per==='mes' ? Number(v.metaMes||0)
+                : per==='semana' ? Number(v.metaMes||0)/4.3
+                : per==='hoje' ? Number(v.metaMes||0)/26
+                : Number(v.metaMes||0)*12;
+    return {
+      id:v.id, nome:v.nome, loja:nomeLoja(v.loja),
+      fat:at.fat, tm:at.tm, trans:at.trans, fatAnt:an.fat,
+      cresc: an.fat > 0 ? (at.fat-an.fat)/an.fat*100 : null,
+      meta:metaV, pctMeta: metaV > 0 ? at.fat/metaV*100 : null
+    };
+  });
+
+  const pct = n => (n>=0?'+':'') + n.toFixed(0) + '%';
+  const semRs = true; // divulgação nunca mostra R$
+
+  return {
+    intervalo: iv,
+    fat_lojas: dadosLoja.filter(x=>x.fat>0).sort((a,b)=>b.fat-a.fat)
+      .map(x=>({nome:x.nome, info: x.trans>0 ? x.trans+' atendimentos' : ''})),
+    fat_vends: dadosVend.filter(x=>x.fat>0).sort((a,b)=>b.fat-a.fat)
+      .map(x=>({nome:x.nome, info: [x.loja, x.trans>0?x.trans+' atendimentos':''].filter(Boolean).join('<br>')})),
+    tm_lojas: dadosLoja.filter(x=>x.tm>0).sort((a,b)=>b.tm-a.tm)
+      .map(x=>({nome:x.nome, info: x.trans+' atendimentos'})),
+    tm_vends: dadosVend.filter(x=>x.tm>0).sort((a,b)=>b.tm-a.tm)
+      .map(x=>({nome:x.nome, info: [x.loja, x.trans+' atendimentos'].filter(Boolean).join('<br>')})),
+    cresc_lojas: dadosLoja.filter(x=>x.cresc!==null && x.cresc>0).sort((a,b)=>b.cresc-a.cresc)
+      .map(x=>({nome:x.nome, info: pct(x.cresc)+' vs período anterior'})),
+    cresc_vends: dadosVend.filter(x=>x.cresc!==null && x.cresc>0).sort((a,b)=>b.cresc-a.cresc)
+      .map(x=>({nome:x.nome, info: [pct(x.cresc)+' vs anterior', x.loja].filter(Boolean).join('<br>')})),
+    meta_lojas: dadosLoja.filter(x=>x.pctMeta!==null && x.fat>0).sort((a,b)=>b.pctMeta-a.pctMeta)
+      .map(x=>({nome:x.nome, info: x.pctMeta.toFixed(0)+'% da meta'})),
+    meta_vends: dadosVend.filter(x=>x.pctMeta!==null && x.fat>0).sort((a,b)=>b.pctMeta-a.pctMeta)
+      .map(x=>({nome:x.nome, info: [x.pctMeta.toFixed(0)+'% da meta', x.loja].filter(Boolean).join('<br>')})),
+    _semRs: semRs
+  };
+};
+
+// Catálogo dos rankings publicáveis (ordem = ordem no PDF)
+const _RK_CATALOGO = [
+  {id:'fat_lojas',   titulo:'🏆 Maior Faturamento — Lojas'},
+  {id:'fat_vends',   titulo:'🏆 Maior Faturamento — Vendedoras'},
+  {id:'tm_lojas',    titulo:'🎫 Maior Ticket Médio — Lojas'},
+  {id:'tm_vends',    titulo:'🎫 Maior Ticket Médio — Vendedoras'},
+  {id:'cresc_lojas', titulo:'📈 Maior Crescimento — Lojas'},
+  {id:'cresc_vends', titulo:'📈 Maior Crescimento — Vendedoras'},
+  {id:'meta_lojas',  titulo:'🎯 Mais Próximo da Meta — Lojas'},
+  {id:'meta_vends',  titulo:'🎯 Mais Próximo da Meta — Vendedoras'}
+];
+
+// Abrir/fechar o painel de seleção
+window.toggleDivulgacaoRanking = function(){
+  const box = document.getElementById('rk-div-painel');
+  if(!box) return;
+  const abrindo = box.style.display === 'none' || !box.style.display;
+  box.style.display = abrindo ? 'block' : 'none';
+  if(!abrindo) return;
+  // Defaults na primeira abertura: hoje e mês corrente
+  const dt = document.getElementById('rk-div-data');
+  if(dt && !dt.value) dt.value = hoje();
+  const mm = document.getElementById('rk-div-mes');
+  if(mm && !mm.value) mm.value = hoje().slice(0,7);
+  // Começar no período que a tela de rankings já está mostrando
+  const sel = document.getElementById('rk-div-per');
+  if(sel && typeof _rankPer !== 'undefined' && !sel.dataset.tocado){
+    sel.value = ['hoje','semana','mes','ano'].includes(_rankPer) ? _rankPer : 'mes';
+    sel.dataset.tocado = '1';
+  }
+  window._rkDivRender();
+};
+
+// Estado da seleção (persiste na sessão)
+window._rkDivSel = window._rkDivSel || {
+  fat_lojas:true, fat_vends:true, tm_lojas:true, tm_vends:true,
+  cresc_lojas:true, cresc_vends:true, meta_lojas:true, meta_vends:true
+};
+
+window._rkDivRender = function(){
+  const per = document.getElementById('rk-div-per')?.value || 'mes';
+
+  // Calendário só faz sentido em semana/dia — em mês/ano o seletor é o mês
+  const wrapData = document.getElementById('rk-div-data-wrap');
+  const wrapMes  = document.getElementById('rk-div-mes-wrap');
+  if(wrapData) wrapData.style.display = (per==='semana' || per==='hoje') ? 'flex' : 'none';
+  if(wrapMes)  wrapMes.style.display  = (per==='mes')   ? 'flex' : 'none';
+
+  const ref = window._rkDivRef();
+  const dados = window._rkMontarRankings(per, ref);
+
+  const lbl = document.getElementById('rk-div-periodo-lbl');
+  if(lbl) lbl.textContent = dados.intervalo.label;
+
+  // Lista de rankings com contagem — o admin vê o que tem conteúdo
+  const lista = document.getElementById('rk-div-lista');
+  if(lista){
+    lista.innerHTML = _RK_CATALOGO.map(c => {
+      const qtd = (dados[c.id]||[]).length;
+      const vazio = qtd === 0;
+      const marcado = window._rkDivSel[c.id] && !vazio;
+      return '<label style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--borda);border-radius:8px;'
+        + (vazio ? 'opacity:.45;cursor:not-allowed;' : 'cursor:pointer;')
+        + (marcado ? 'background:rgba(201,168,76,.10);border-color:rgba(201,168,76,.5)' : '') + '">'
+        + '<input type="checkbox" ' + (marcado?'checked':'') + ' ' + (vazio?'disabled':'')
+        + ' onchange="window._rkDivToggle(\'' + c.id + '\', this.checked)" style="accent-color:var(--ouro);width:15px;height:15px;flex:0 0 15px">'
+        + '<span style="flex:1;min-width:0;font-size:12px">' + c.titulo + '</span>'
+        + '<span style="font-size:10px;color:' + (vazio?'var(--verm)':'var(--muted)') + ';white-space:nowrap">'
+        + (vazio ? 'sem dados' : qtd + ' na lista') + '</span>'
+      + '</label>';
+    }).join('');
+  }
+  const cont = document.getElementById('rk-div-contagem');
+  if(cont){
+    const n = _RK_CATALOGO.filter(c => window._rkDivSel[c.id] && (dados[c.id]||[]).length).length;
+    cont.textContent = n + ' ranking(s) selecionado(s)';
+  }
+};
+
+window._rkDivToggle = function(id, val){
+  window._rkDivSel[id] = !!val;
+  window._rkDivRender();
+};
+window._rkDivMarcarTodos = function(val){
+  _RK_CATALOGO.forEach(c => window._rkDivSel[c.id] = !!val);
+  window._rkDivRender();
+};
+
+// Data de referência conforme o período escolhido
+window._rkDivRef = function(){
+  const per = document.getElementById('rk-div-per')?.value || 'mes';
+  if(per === 'semana' || per === 'hoje') return document.getElementById('rk-div-data')?.value || hoje();
+  if(per === 'mes'){
+    const mr = document.getElementById('rk-div-mes')?.value || hoje().slice(0,7);
+    return mr + '-01';
+  }
+  return hoje();
+};
+
+// Gerar o PDF de divulgação com os rankings marcados
+window.gerarDivulgacaoRankings = function(){
+  const per = document.getElementById('rk-div-per')?.value || 'mes';
+  const ref = window._rkDivRef();
+  const dados = window._rkMontarRankings(per, ref);
+
+  const escolhidos = _RK_CATALOGO.filter(c => window._rkDivSel[c.id] && (dados[c.id]||[]).length);
+  if(!escolhidos.length){
+    showToast('Selecione ao menos um ranking com dados para divulgar.','err');
+    return;
+  }
+
+  const body = escolhidos.map(c =>
+    '<h2>' + c.titulo + '</h2>' + _htmlPodio(dados[c.id])
+  ).join('');
+
+  const dArq = d => d.split('-').reverse().join('-');
+  _abrirJanelaDivulgacao(
+    'Resultados',
+    dados.intervalo.label,
+    body,
+    'Divulgacao — Rankings — ' + dados.intervalo.label.replace(/\//g,'-')
+      + ' — ' + dArq(dados.intervalo.ini) + ' a ' + dArq(dados.intervalo.fim)
+  );
+};
 
 
 // ── DIVULGAÇÃO — ORIGEM DO FLUXO ────────────────────────────────────
@@ -25330,6 +25697,9 @@ window.sugerirProdutosPorValor = function(beneficio, opts){
   // Quem quiser filtrar por saldo precisa pedir explicitamente (opt-in).
   const soSaldo  = opts.somenteComSaldo === true;
   const limite   = Number(opts.limite) || 60;
+  // [R47] Quando o cliente quer um item mais caro que o benefício, a
+  // vendedora precisa enxergar esse item para cobrar a diferença.
+  const incluirAcima = opts.incluirAcima === true;
 
   // Universo: faixa curada pelo admin (se houver) ou catálogo inteiro
   let universo, origem;
@@ -25357,7 +25727,7 @@ window.sugerirProdutosPorValor = function(beneficio, opts){
     // [FIX] com valor 0 a comparação era pulada e a função devolvia o
     // catálogo inteiro como "elegível" — benefício zero não dá direito a nada.
     if(preco <= 0) return;
-    if(preco > valor) return;
+    if(preco > valor && !incluirAcima) return;
     if(saldo <= 0){
       semEstoque++;
       if(soSaldo) return;
@@ -25368,17 +25738,40 @@ window.sugerirProdutosPorValor = function(beneficio, opts){
     elegiveis.push({
       ...p, preco, saldo,
       aproveita: valor > 0 ? (preco / valor) : 0,
-      cabe: true
+      cabe: preco <= valor,
+      // quanto o cliente pagaria de diferença levando SÓ este item
+      diferenca: preco > valor ? Math.round((preco - valor) * 100) / 100 : 0
     });
   });
 
-  // Melhor aproveitamento primeiro: item mais caro que ainda cabe no valor.
-  // Desempate por nome, para a ordem ficar estável entre renders.
-  elegiveis.sort((a,b) => (b.preco||0) - (a.preco||0) || String(a.n).localeCompare(String(b.n)));
+  // Primeiro os que cabem no benefício (do mais caro para o mais barato,
+  // melhor aproveitamento). Depois os acima do valor, do mais barato para o
+  // mais caro — a menor diferença a pagar aparece primeiro.
+  elegiveis.sort((a,b) => {
+    if(a.cabe !== b.cabe) return a.cabe ? -1 : 1;
+    const ord = a.cabe ? (b.preco||0) - (a.preco||0) : (a.preco||0) - (b.preco||0);
+    return ord || String(a.n).localeCompare(String(b.n));
+  });
+
+  // [FIX R47] Com "incluir acima" ligado, um corte simples em `limite` era
+  // preenchido inteiramente pelos itens que cabem — os mais caros ficavam
+  // fora da lista e o filtro parecia não fazer nada. Agora os itens acima
+  // do valor têm cota garantida, começando pela menor diferença a pagar.
+  const cabem = elegiveis.filter(x => x.cabe);
+  const acima = elegiveis.filter(x => !x.cabe);
+  let itens;
+  if(incluirAcima && acima.length){
+    const cotaAcima = Math.min(acima.length, Math.max(12, Math.floor(limite / 3)));
+    itens = cabem.slice(0, Math.max(0, limite - cotaAcima)).concat(acima.slice(0, cotaAcima));
+  } else {
+    itens = elegiveis.slice(0, limite);
+  }
 
   return {
-    itens: elegiveis.slice(0, limite),
+    itens,
     totalElegiveis: elegiveis.length,
+    totalCabem: cabem.length,
+    totalAcima: acima.length,
     semEstoque,
     origem
   };
@@ -25529,9 +25922,15 @@ window._fxRenderProdutos = function(){
   const busca   = document.getElementById("fx-prod-busca")?.value || "";
   const linha   = document.getElementById("fx-prod-linha")?.value || "";
 
+  // [R48] Navegando, a lista mostra SÓ o que cabe no benefício — é a
+  // sugestão do que o cliente tem direito. Assim que a vendedora busca um
+  // item específico, os mais caros entram no resultado para que ela possa
+  // selecioná-lo e cobrar a diferença.
+  const verAcima = busca.length >= 2;
+
   // Saldo NÃO filtra: a elegibilidade é definida só pelo valor do produto.
   const res = window.sugerirProdutosPorValor(beneficio, {
-    busca, linha, limite: 60,
+    busca, linha, limite: 60, incluirAcima: verAcima,
     faixaProdutos: faixa ? faixa.produtos : null
   });
 
@@ -25540,7 +25939,10 @@ window._fxRenderProdutos = function(){
       + fmt(beneficio) + '</strong>'
       + (res.origem === 'faixa'
           ? ' <span style="font-size:10px;color:var(--muted)">— faixa curada ' + fmt(Number(faixa.min)) + ' a ' + fmt(Number(faixa.max)) + '</span>'
-          : ' <span style="font-size:10px;color:var(--muted)">— catálogo de estoque, por preço do produto</span>');
+          : ' <span style="font-size:10px;color:var(--muted)">— catálogo de estoque, por preço do produto</span>')
+      + (verAcima
+          ? ' <span style="font-size:10px;color:#4ec9ff">— busca ativa: inclui itens acima do valor</span>'
+          : ' <span style="font-size:10px;color:var(--muted)">— busque acima para achar um item mais caro</span>');
   }
 
   // Popular o filtro de linha uma única vez
@@ -25567,7 +25969,11 @@ window._fxRenderProdutos = function(){
     const saldoTxt = (p.saldo === null || p.saldo <= 0) ? '' : (p.saldo + ' em estoque');
     const precoTxt = p.preco === null ? '—' : fmt(p.preco);
     const key = (p.c || p.n).replace(/'/g, "\\'");
-    return '<label' + (marcado ? ' style="background:rgba(122,199,79,.12)"' : '') + '>'
+    // [R47] item acima do benefício: mostra a diferença que o cliente paga
+    const acima = p.cabe === false && p.diferenca > 0;
+    const bgLinha = marcado ? 'background:rgba(122,199,79,.12)'
+                  : (acima ? 'background:rgba(78,201,255,.05)' : '');
+    return '<label' + (bgLinha ? ' style="' + bgLinha + '"' : '') + '>'
       + '<input type="checkbox" ' + (marcado ? 'checked' : '') + ' ' + (p._naoCatalogado ? 'disabled' : '')
       + ' onchange="window._fxToggleProduto(\'' + key + '\', this.checked)">'
       + '<span class="fxp-nome">'
@@ -25575,13 +25981,19 @@ window._fxRenderProdutos = function(){
         + '<small>' + (p.c || '—') + (p.l ? ' · ' + p.l : '')
         + (p._naoCatalogado ? ' · <span style="color:var(--verm)">fora do catálogo</span>' : '') + '</small>'
       + '</span>'
-      + '<span class="fxp-preco"><b>' + precoTxt + '</b><small>' + saldoTxt + '</small></span>'
+      + '<span class="fxp-preco"><b>' + precoTxt + '</b><small>'
+        + (acima ? '<span style="color:#4ec9ff">+' + fmt(p.diferenca) + ' a pagar</span>' : saldoTxt)
+      + '</small></span>'
     + '</label>';
   }).join('');
 
   if(res.totalElegiveis > res.itens.length){
+    const detalhe = verAcima && res.totalAcima
+      ? ' (' + res.totalCabem + ' dentro do benefício, ' + res.totalAcima + ' acima)'
+      : '';
     listaEl.innerHTML += '<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">'
-      + 'Mostrando ' + res.itens.length + ' de ' + res.totalElegiveis + ' — use a busca para refinar</div>';
+      + 'Mostrando ' + res.itens.length + ' de ' + res.totalElegiveis + detalhe
+      + ' — use a busca para achar um item específico</div>';
   }
   _fxRenderSelecionados();
 };
@@ -25603,6 +26015,7 @@ window._fxToggleProduto = function(chave, marcado){
 
 window._fxLimparSelecao = function(){
   window._fxSelecionados = [];
+  window._fxDiferencaPaga = 0;
   _fxRenderProdutos();
 };
 
@@ -25622,8 +26035,11 @@ function _fxRenderSelecionados(){
     return;
   }
   const total = sel.reduce((a,x) => a + (Number(x.preco)||0), 0);
-  const excede = total > beneficio + 0.001;
-  const sobra  = beneficio - total;
+  // [R47] Passar do benefício não é erro: é o cliente levando algo melhor e
+  // pagando a diferença. A tela informa o valor a cobrar em vez de alertar.
+  const diferenca = Math.max(0, Math.round((total - beneficio) * 100) / 100);
+  const sobra     = Math.max(0, Math.round((beneficio - total) * 100) / 100);
+  window._fxDiferencaPaga = diferenca;
 
   el.innerHTML =
     '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">'
@@ -25633,13 +26049,18 @@ function _fxRenderSelecionados(){
         + '<span onclick="window._fxToggleProduto(\'' + String(x.c).replace(/'/g,"\\'") + '\', false)" style="cursor:pointer;color:var(--verm);font-weight:700">✕</span>'
         + '</span>').join('')
     + '</div>'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 10px;border-radius:7px;'
-      + (excede ? 'background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.45)' : 'background:rgba(122,199,79,.10);border:1px solid rgba(122,199,79,.35)') + '">'
-      + '<span style="font-size:11px">' + sel.length + ' item(ns) · total <strong>' + fmt(total) + '</strong> de ' + fmt(beneficio) + '</span>'
-      + '<span style="font-size:11px;font-weight:700;color:' + (excede ? 'var(--verm)' : 'var(--verde)') + '">'
-        + (excede ? '⚠️ Excede em ' + fmt(Math.abs(sobra)) : 'Sobra ' + fmt(sobra)) + '</span>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 11px;border-radius:7px;'
+      + (diferenca > 0 ? 'background:rgba(78,201,255,.10);border:1px solid rgba(78,201,255,.45)'
+                       : 'background:rgba(122,199,79,.10);border:1px solid rgba(122,199,79,.35)') + '">'
+      + '<span style="font-size:11px">' + sel.length + ' item(ns) · total <strong>' + fmt(total) + '</strong> de ' + fmt(beneficio) + ' de benefício</span>'
+      + (diferenca > 0
+          ? '<span style="font-size:12px;font-weight:700;color:#4ec9ff">💳 Cliente paga ' + fmt(diferenca) + ' de diferença</span>'
+          : '<span style="font-size:11px;font-weight:700;color:var(--verde)">Sobra ' + fmt(sobra) + '</span>')
       + '<button type="button" onclick="window._fxLimparSelecao()" style="background:none;border:1px solid var(--borda);border-radius:6px;color:var(--muted);font-size:10px;padding:3px 9px;cursor:pointer">Limpar</button>'
-    + '</div>';
+    + '</div>'
+    + (diferenca > 0
+        ? '<div style="margin-top:6px;font-size:10.5px;color:var(--muted)">O valor da diferença fica registrado no atendimento e aparece no relatório.</div>'
+        : '');
 }
 
 
@@ -25678,17 +26099,24 @@ window.salvarFluxo = function(){
     beneficioValor = Math.round((valor * modalidadePct / 100) * 100) / 100;
   }
 
+  // [R47] Quando os produtos escolhidos passam do benefício, o cliente paga
+  // a diferença — valor registrado para conferência de caixa e relatório.
+  const diferencaPaga = Math.max(0, Math.round((produtosValor - beneficioValor) * 100) / 100);
+
   D.fluxo.push({
     id:"fx"+Date.now(),
     nome:nomeF, origem, canal, tipoCliente, vendId, loja, valor, data, obs,
     modalidade, modalidadePct, beneficioValor, ticket, produtoEscolhido,
-    produtosSel, produtosValor,
+    produtosSel, produtosValor, diferencaPaga,
     aniversarioCliente,  // formato YYYY-MM-DD (opcional)
     ts:Date.now()
   });
   save();
   const perfNome = (_PERFIS_MODALIDADE.find(p=>p.id===tipoCliente)?.nome) || tipoCliente;
-  const msgMod = modalidade ? " · "+perfNome+" · benefício R$ "+beneficioValor.toFixed(2).replace(".",",") : "";
+  const msgMod = modalidade
+    ? " · "+perfNome+" · benefício "+fmt(beneficioValor)
+      + (diferencaPaga > 0 ? " · diferença paga "+fmt(diferencaPaga) : "")
+    : "";
   showToast("✅ "+nome+" registrado como "+(ORIGENS[origem]?.label||origem)+msgMod);
   window._fxSelecionados = [];
   toggleFormFluxo();
@@ -25953,6 +26381,132 @@ window._fxNovoRegistroAniv = function(nome, aniv){
 
 
 
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R47] ITENS VENDIDOS NO LANÇAMENTO (Painel do Dia)
+// A vendedora registra QUAIS produtos saíram, não só quantos. A soma das
+// quantidades alimenta a Qtd. de Produtos (base do P.A.), e a lista fica
+// gravada por vendedora/dia em D.vendasVend[vendId][data].produtos.
+// ══════════════════════════════════════════════════════════════════════
+
+window._lancItens = window._lancItens || [];   // [{c,n,preco,qtd}] do form atual
+
+// Busca no catálogo
+window._lancBuscarProduto = function(q){
+  const box = document.getElementById('l-prod-sugest');
+  if(!box) return;
+  const termo = String(q||'').trim();
+  if(termo.length < 2){ box.innerHTML = ''; return; }
+  const t = _normTxt(termo);
+  const achados = PRODUTOS.filter(p =>
+    _normTxt(p.n).includes(t) || _normTxt(p.g).includes(t) || p.c.includes(termo)
+  ).slice(0, 8);
+  if(!achados.length){
+    box.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">Nenhum produto encontrado.</div>';
+    return;
+  }
+  box.innerHTML = '<div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;overflow:hidden">'
+    + achados.map(p => {
+        const jaTem = window._lancItens.some(x => x.c === p.c);
+        return '<div style="display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid rgba(255,255,255,.05)">'
+          + '<div style="flex:1;min-width:0">'
+            + '<div style="font-size:11.5px;font-weight:500">' + p.n + '</div>'
+            + '<div style="font-size:9.5px;color:var(--muted)">' + p.c + ' · ' + fmt(_precoProduto(p)) + '</div>'
+          + '</div>'
+          + (jaTem
+              ? '<span style="font-size:10px;color:var(--ouro);white-space:nowrap">já incluído</span>'
+              : '<button type="button" onclick="window._lancAddItem(\'' + p.c + '\')" '
+                + 'style="background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;border-radius:5px;font-size:10px;padding:4px 10px;cursor:pointer;white-space:nowrap">+ Incluir</button>')
+        + '</div>';
+      }).join('')
+    + '</div>';
+};
+
+window._lancAddItem = function(cod){
+  const p = PRODUTOS.find(x => x.c === cod);
+  if(!p) return;
+  if(!window._lancItens.some(x => x.c === p.c)){
+    window._lancItens.push({c:p.c, n:p.n, preco:_precoProduto(p), qtd:1});
+  }
+  const busca = document.getElementById('l-prod-busca');
+  if(busca) busca.value = '';
+  const sug = document.getElementById('l-prod-sugest');
+  if(sug) sug.innerHTML = '';
+  _lancRenderItens();
+};
+
+window._lancRemoverItem = function(cod){
+  window._lancItens = window._lancItens.filter(x => x.c !== cod);
+  _lancRenderItens();
+};
+
+window._lancQtdItem = function(cod, delta){
+  const it = window._lancItens.find(x => x.c === cod);
+  if(!it) return;
+  it.qtd = Math.max(1, (Number(it.qtd)||1) + delta);
+  _lancRenderItens();
+};
+
+// Soma das quantidades → alimenta l-itens (peças, base do P.A.)
+function _lancRenderItens(){
+  const el = document.getElementById('l-prod-sel');
+  if(!el) return;
+  const itens = window._lancItens;
+
+  if(!itens.length){
+    el.innerHTML = '';
+    return;
+  }
+  const totQtd = itens.reduce((a,x) => a + (Number(x.qtd)||0), 0);
+  const totVal = itens.reduce((a,x) => a + (Number(x.preco)||0) * (Number(x.qtd)||0), 0);
+
+  // Manter a Qtd. de Produtos coerente com os itens informados
+  const elItens = document.getElementById('l-itens');
+  if(elItens){
+    elItens.value = totQtd;
+    if(typeof calcPAForm === 'function') calcPAForm();
+  }
+
+  el.innerHTML = itens.map(x =>
+      '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--cinza);border:1px solid var(--borda);border-radius:7px;margin-bottom:5px">'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:11.5px;font-weight:500;overflow-wrap:anywhere">' + x.n + '</div>'
+        + '<div style="font-size:9.5px;color:var(--muted)">' + x.c + ' · ' + fmt(x.preco) + ' un</div>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">'
+        + '<button type="button" onclick="window._lancQtdItem(\'' + x.c + '\',-1)" style="width:24px;height:24px;background:var(--card);border:1px solid var(--borda);border-radius:5px;color:var(--texto);cursor:pointer;font-size:14px;line-height:1">−</button>'
+        + '<span style="min-width:26px;text-align:center;font-size:12px;font-weight:700">' + x.qtd + '</span>'
+        + '<button type="button" onclick="window._lancQtdItem(\'' + x.c + '\',1)" style="width:24px;height:24px;background:var(--card);border:1px solid var(--borda);border-radius:5px;color:var(--texto);cursor:pointer;font-size:14px;line-height:1">+</button>'
+      + '</div>'
+      + '<div style="width:78px;text-align:right;font-size:11.5px;font-weight:700;color:var(--ouro);flex-shrink:0">' + fmt(x.preco * x.qtd) + '</div>'
+      + '<button type="button" onclick="window._lancRemoverItem(\'' + x.c + '\')" title="Remover" style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:14px;flex-shrink:0">✕</button>'
+    + '</div>').join('')
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:7px 10px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.35);border-radius:7px;margin-top:2px">'
+      + '<span style="font-size:11px">' + itens.length + ' produto(s) · <strong>' + totQtd + '</strong> peça(s)</span>'
+      + '<span style="font-size:11px;color:var(--ouro);font-weight:700">Soma de tabela: ' + fmt(totVal) + '</span>'
+      + '<button type="button" onclick="window._lancUsarValorTabela()" title="Preenche o Faturamento com a soma de tabela"'
+        + ' style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.45);color:var(--ouro);border-radius:6px;font-size:10px;padding:4px 10px;cursor:pointer">Usar como faturamento</button>'
+    + '</div>'
+    + '<div style="font-size:10px;color:var(--muted);margin-top:4px">A soma de tabela é referência — o faturamento real pode ter desconto, então continua sendo você quem informa.</div>';
+}
+
+// Copiar a soma de tabela para o campo de faturamento (ação explícita)
+window._lancUsarValorTabela = function(){
+  const tot = window._lancItens.reduce((a,x) => a + (Number(x.preco)||0) * (Number(x.qtd)||0), 0);
+  const el = document.getElementById('l-fat');
+  if(el){ el.value = tot.toFixed(2); showToast('Faturamento preenchido com a soma de tabela.','ok'); }
+};
+
+window._lancLimparItens = function(){
+  window._lancItens = [];
+  const b = document.getElementById('l-prod-busca'); if(b) b.value = '';
+  const s = document.getElementById('l-prod-sugest'); if(s) s.innerHTML = '';
+  _lancRenderItens();
+  const el = document.getElementById('l-prod-sel'); if(el) el.innerHTML = '';
+};
+
+
 // ══════════════════════════════════════════════════════════════════════
 // [R44] RELATÓRIO CATEGORIZADO DA ORIGEM DO FLUXO — PDF e Excel
 // PDF e Excel partem EXATAMENTE do mesmo recorte e da mesma apuração:
@@ -26036,6 +26590,7 @@ function _fluxoApurar(regs){
   const n = regs.length;
   const faturamento = regs.reduce((s,r) => s + (Number(r.valor)||0), 0);
   const beneficio   = regs.reduce((s,r) => s + (Number(r.beneficioValor)||0), 0);
+  const difPaga     = regs.reduce((s,r) => s + (Number(r.diferencaPaga)||0), 0);
   const comCompra   = regs.filter(r => (Number(r.valor)||0) > 0).length;
 
   const porModalidade = _MOD_ORDEM.map(m => {
@@ -26046,6 +26601,7 @@ function _fluxoApurar(regs){
       n: rs.length,
       faturamento: rs.reduce((s,r) => s + (Number(r.valor)||0), 0),
       beneficio:   rs.reduce((s,r) => s + (Number(r.beneficioValor)||0), 0),
+      difPaga:     rs.reduce((s,r) => s + (Number(r.diferencaPaga)||0), 0),
       pctMedio: pcts.length ? pcts.reduce((a,b)=>a+b,0)/pcts.length : 0,
       produtos: m === 'gift_back' ? _fluxoProdutosDe(rs) : []
     };
@@ -26054,7 +26610,7 @@ function _fluxoApurar(regs){
   const semModalidade = regs.filter(r => !r.modalidade).length;
 
   return {
-    n, faturamento, beneficio, comCompra,
+    n, faturamento, beneficio, difPaga, comCompra,
     ticketMedio: n > 0 ? faturamento/n : 0,
     ticketMedioComprou: comCompra > 0 ? faturamento/comCompra : 0,
     taxaConversao: n > 0 ? comCompra/n*100 : 0,
@@ -26138,18 +26694,21 @@ window.exportarExcelFluxo = function(){
     ['Ticket médio geral (R$)', Number(t.ticketMedio.toFixed(2))],
     ['Ticket médio de quem comprou (R$)', Number(t.ticketMedioComprou.toFixed(2))],
     ['Benefício concedido (R$)', Number(t.beneficio.toFixed(2))],
+    ['Diferença paga pelos clientes (R$)', Number(t.difPaga.toFixed(2))],
     ['Sem modalidade aplicada', t.semModalidade],
     [],
     ['POR PERFIL DE CLIENTE'],
-    ['Perfil','Atendimentos','Compraram','Conversão %','Faturamento R$','Ticket Médio R$','Benefício R$']
+    ['Perfil','Atendimentos','Compraram','Conversão %','Faturamento R$','Ticket Médio R$','Benefício R$','Diferença paga R$']
   ];
   cat.porPerfil.forEach(p => resumo.push([
     p.nome, p.n, p.comCompra, Number(p.taxaConversao.toFixed(1)),
-    Number(p.faturamento.toFixed(2)), Number(p.ticketMedio.toFixed(2)), Number(p.beneficio.toFixed(2))
+    Number(p.faturamento.toFixed(2)), Number(p.ticketMedio.toFixed(2)),
+    Number(p.beneficio.toFixed(2)), Number(p.difPaga.toFixed(2))
   ]));
   resumo.push(['TOTAL', t.n, t.comCompra, Number(t.taxaConversao.toFixed(1)),
-    Number(t.faturamento.toFixed(2)), Number(t.ticketMedio.toFixed(2)), Number(t.beneficio.toFixed(2))]);
-  add('Resumo', resumo, [34,14,12,12,16,16,14]);
+    Number(t.faturamento.toFixed(2)), Number(t.ticketMedio.toFixed(2)),
+    Number(t.beneficio.toFixed(2)), Number(t.difPaga.toFixed(2))]);
+  add('Resumo', resumo, [34,14,12,12,16,16,14,16]);
 
   // ── Abas 2..5: uma por perfil, com modalidade e produtos ───────────
   cat.porPerfil.forEach(p => {
@@ -26162,6 +26721,7 @@ window.exportarExcelFluxo = function(){
     L.push(['Faturamento R$', Number(p.faturamento.toFixed(2))]);
     L.push(['Ticket médio R$', Number(p.ticketMedio.toFixed(2))]);
     L.push(['Benefício concedido R$', Number(p.beneficio.toFixed(2))]);
+    L.push(['Diferença paga pelos clientes R$', Number(p.difPaga.toFixed(2))]);
     L.push([]);
 
     L.push(['MODALIDADES APLICADAS']);
@@ -26184,7 +26744,7 @@ window.exportarExcelFluxo = function(){
 
     L.push(['REGISTROS DETALHADOS']);
     const cab = ['Data','Cliente','Origem','Canal','Vendedora','Loja','Valor R$',
-                 'Modalidade','% aplicado','Benefício R$','Produtos escolhidos','Ticket','Observação'];
+                 'Modalidade','% aplicado','Benefício R$','Diferença paga R$','Produtos escolhidos','Ticket','Observação'];
     if(p.id === 'aniversario') cab.splice(2, 0, 'Aniversário');
     L.push(cab);
     p.registros.forEach(r => {
@@ -26198,14 +26758,15 @@ window.exportarExcelFluxo = function(){
         Number((r.valor||0).toFixed(2)),
         _MOD_LABEL[r.modalidade] || '', Number(r.modalidadePct||0),
         Number((r.beneficioValor||0).toFixed(2)),
+        Number((r.diferencaPaga||0).toFixed(2)),
         prods, r.ticket || '', r.obs || ''
       ];
       if(p.id === 'aniversario') linha.splice(2, 0, _dBR(r.aniversarioCliente));
       L.push(linha);
     });
     add(p.nome, L,
-        p.id === 'aniversario' ? [12,26,12,20,12,18,16,12,14,11,13,38,10,26]
-                               : [12,26,20,12,18,16,12,14,11,13,38,10,26]);
+        p.id === 'aniversario' ? [12,26,12,20,12,18,16,12,14,11,13,15,38,10,26]
+                               : [12,26,20,12,18,16,12,14,11,13,15,38,10,26]);
   });
 
   // ── Aba: Modalidades (cruzamento perfil × modalidade) ──────────────
@@ -26256,7 +26817,7 @@ window.exportarExcelFluxo = function(){
   // ── Aba: Registros (tudo, sem corte) ───────────────────────────────
   const todos = [['TODOS OS REGISTROS DO PERÍODO'],[],
     ['Data','Cliente','Perfil','Aniversário','Origem','Canal','Vendedora','Loja','Valor R$',
-     'Modalidade','% aplicado','Benefício R$','Produtos escolhidos','Ticket','Observação']];
+     'Modalidade','% aplicado','Benefício R$','Diferença paga R$','Produtos escolhidos','Ticket','Observação']];
   const nomePerfil = id => (typeof _PERFIS_MODALIDADE !== 'undefined'
     ? (_PERFIS_MODALIDADE.find(x=>x.id===(id||'novo'))?.nome || id || '') : (id||''));
   regs.forEach(r => {
@@ -26268,10 +26829,11 @@ window.exportarExcelFluxo = function(){
       (ORIGENS[r.origem]?.label) || r.origem || '', r.canal||'',
       nomeVend(r.vendId), nomeLoja(r.loja), Number((r.valor||0).toFixed(2)),
       _MOD_LABEL[r.modalidade]||'', Number(r.modalidadePct||0),
-      Number((r.beneficioValor||0).toFixed(2)), prods, r.ticket||'', r.obs||''
+      Number((r.beneficioValor||0).toFixed(2)), Number((r.diferencaPaga||0).toFixed(2)),
+      prods, r.ticket||'', r.obs||''
     ]);
   });
-  add('Registros', todos, [12,26,18,12,20,12,18,16,12,14,11,13,38,10,26]);
+  add('Registros', todos, [12,26,18,12,20,12,18,16,12,14,11,13,15,38,10,26]);
 
   const slug = lojaNm.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w]+/g,'-').toLowerCase();
   XLSX.writeFile(wb, 'origem-fluxo-' + slug + '-' + ini + '-a-' + fim + '.xlsx');
