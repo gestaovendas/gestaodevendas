@@ -66,6 +66,9 @@ try{
 
   window._fbOk   = true;
   window._fbDb   = db;     // exposto para debugMeta() conseguir ler direto do Firestore
+  // [R54] guardar o módulo já carregado — backup e restauração reaproveitam
+  // em vez de baixar o SDK de novo a cada operação.
+  window._fbMod  = storeMod;
   window._auth   = auth;
   window._authFn = {signInWithEmailAndPassword, signOut};
 
@@ -1278,6 +1281,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 /* MAIN */
 .main{margin-left:232px;padding:26px;min-height:100vh}
 .page{display:none}.page.active{display:block}
+@keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.25}}
 .ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
 .pt{font-family:"Playfair Display",serif;font-size:24px;font-weight:700}
 .pt span{background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
@@ -1520,7 +1524,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div><h1 class="pt">Dashboard <span id="dash-lnome"></span></h1><div class="ps" id="dash-data"></div></div>
     <div style="display:flex;gap:8px;align-items:center">
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
-      <div id="sync-badge" style="display:none;background:var(--card);border:1px solid rgba(46,204,135,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--verde);cursor:pointer" onclick="forceSyncAdmin()" title="Clique para sincronizar agora"></div>
+      <!-- [R61] Estado da sincronização — visível para TODOS os perfis -->
+      <div id="sync-badge" style="display:none;align-items:center;gap:7px;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 12px;font-size:10.5px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap" onclick="window.syncAgora()" title="Clique para sincronizar agora"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
       <button onclick="window.abrirModalDiagnostico()" title="Ver diagnóstico completo, discrepâncias e forçar sincronização"
         style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--ouro);cursor:pointer;font-weight:600">🔍 Diagnóstico + Sync</button>
@@ -2168,13 +2173,59 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <div class="page" id="page-semana">
   <div class="ph">
     <div><h1 class="pt">Visão da <span>Semana</span></h1><div class="ps">Semana comercial atual</div></div>
-    <button onclick="exportarPDFSemana()" style="background:var(--ouro);color:#000;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer">📄 PDF por Loja</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="exportarPDFSemana()" style="background:var(--ouro);color:#000;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer" title="Relatório completo com números e padrões">📄 Relatório</button>
+      <button onclick="exportarDivulgacaoSemana()" style="background:linear-gradient(135deg,#c9a84c,#e6c672);color:#111;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer" title="PDF para publicar com a equipe — pódio, sem valores em R$">📢 Divulgação</button>
+    </div>
   </div>
   <div class="sdias" id="sdias">--</div>
   <div class="g2">
     <div class="sc"><div class="st">Evolução Diária</div><div id="evol-diaria">--</div></div>
     <div class="dicas"><div class="dh"><span>&#9672;</span><h3>Análise da Semana</h3></div><div id="dicas-sem">--</div></div>
   </div>
+  <!-- [R52] Padrões: melhor/pior dia da semana e semana do mês -->
+  <div class="sc" style="margin-top:16px;border-left:3px solid var(--ouro)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div class="st" style="margin:0">📊 Padrões de Venda</div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--muted)">Base:</label>
+        <select id="sem-padroes-meses" onchange="window.renderPadroesSemana()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 9px;color:var(--texto);font-size:11px">
+          <option value="1">Mês atual</option>
+          <option value="3" selected>Últimos 3 meses</option>
+          <option value="6">Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
+          <option value="mes">📅 Mês específico...</option>
+          <option value="range">📆 Intervalo personalizado...</option>
+        </select>
+
+        <!-- [R62] Mês específico: ex. só Fevereiro/2025 -->
+        <div id="sem-padroes-mes-wrap" style="display:none;align-items:center;gap:6px">
+          <input type="month" id="sem-padroes-mes" onchange="window.renderPadroesSemana()"
+            style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 9px;color:var(--texto);font-size:11px">
+        </div>
+
+        <!-- [R62] Intervalo livre entre dois meses -->
+        <div id="sem-padroes-range-wrap" style="display:none;align-items:center;gap:6px">
+          <input type="month" id="sem-padroes-ini" onchange="window.renderPadroesSemana()"
+            style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 9px;color:var(--texto);font-size:11px">
+          <span style="font-size:11px;color:var(--muted)">até</span>
+          <input type="month" id="sem-padroes-fim" onchange="window.renderPadroesSemana()"
+            style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 9px;color:var(--texto);font-size:11px">
+        </div>
+
+        <!-- [R63] Analisar a rede toda ou uma loja específica — só admin -->
+        <select id="sem-padroes-loja" class="admin-only" onchange="window.renderPadroesSemana()"
+          style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 9px;color:var(--texto);font-size:11px">
+          <option value="">🏪 Todas as lojas</option>
+        </select>
+
+        <span id="sem-padroes-rotulo" style="font-size:11px;color:var(--ouro);font-weight:700"></span>
+      </div>
+    </div>
+    <div id="sem-padroes">--</div>
+  </div>
+
   <div class="sc" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="st">Todas as Lojas — Esta Semana</div>
@@ -2972,7 +3023,12 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <div class="ps" id="excel-subtitulo">Análise da base de clientes por vendedora, produto e recência</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-s admin-only" onclick="document.getElementById('excel-file-input').click()" id="excel-btn-subir" style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
+      <!-- [R55] O arquivo é importado POR LOJA: o admin escolhe qual. -->
+      <select id="excel-loja-import" class="admin-only" style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:12px"
+        title="Loja a que este arquivo pertence — aplicada a todas as linhas">
+        <option value="">Deduzir da planilha</option>
+      </select>
+      <button class="btn-s admin-only" onclick="window.excelAbrirUpload()" id="excel-btn-subir" style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
       <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.excelProcessarUpload(event)">
       <button class="btn-s admin-only" onclick="window.excelLimparDados()" title="Apaga dados do Excel — não afeta vendas/contatos"
         style="background:rgba(220,53,69,.10);border-color:rgba(220,53,69,.35);color:#ff6b7a;font-size:11px;padding:8px 12px;display:none" id="excel-btn-limpar">🗑️ Limpar dados</button>
@@ -3008,8 +3064,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
   <!-- [NEW R40] Gerenciamento de importações — só admin -->
   <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="excel-gestao-imports">
-    <div class="st">📥 Gestão de Importações</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Cada upload é registrado como uma importação. Você pode excluir uma sem apagar as outras.</div>
+    <div class="st">📥 Conjuntos importados (loja / ano)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Cada arquivo é agregado por loja e ano. Você pode apagar um conjunto sem afetar os demais.</div>
     <div id="excel-imports-lista"></div>
   </div>
 
@@ -3040,10 +3096,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
       </select>
 
-      <select id="excel-filtro-dia" onchange="window.excelRender()"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
-        <option value="">🗓️ Todos os dias</option>
-      </select>
+      <!-- [R57] Filtro de dia removido: os cubos do CRM são mensais.
+           Para o recorte diário existe o Painel do Dia. -->
 
       <select id="excel-filtro-loja" onchange="window.excelRender()" class="admin-only-inline"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
@@ -4271,6 +4325,27 @@ create policy "acesso_total" on metas_loja for all using (true) with check (true
 
     <!-- ABA: FIREBASE -->
   <div id="cfg-tab-firebase" style="display:none">
+
+    <!-- [R54] Backup e restauração — antes não havia NENHUMA forma de
+         exportar ou recuperar os dados do Firebase. -->
+    <div class="sc" style="margin-bottom:14px;border-left:3px solid var(--verde)">
+      <div class="st">💾 Backup &amp; Restauração</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+        Baixa <strong>todos</strong> os documentos do Firebase (principal + uma por loja) num único arquivo JSON,
+        junto com o estado local. Faça um antes de qualquer mudança grande — importação de planilha grande, ajuste de metas, migração.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn-p" onclick="window.backupFirebase()"
+          style="font-size:12px;padding:9px 16px;background:rgba(46,204,135,.15);border-color:rgba(46,204,135,.5);color:var(--verde)">⬇️ Baixar backup agora</button>
+        <button class="btn-s" onclick="document.getElementById('bk-file').click()" style="font-size:12px;padding:9px 16px">📂 Carregar arquivo de backup</button>
+        <input type="file" id="bk-file" accept=".json" style="display:none" onchange="window.backupInspecionar(event)">
+      </div>
+      <div id="bk-preview" style="display:none;margin-top:14px"></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+        Carregar um arquivo só <strong>mostra</strong> o conteúdo — nada é escrito até você confirmar a restauração.
+      </div>
+    </div>
+
     <div class="sc">
       <div class="st">🔥 Firebase Firestore — Configuração</div>
       <div style="background:rgba(255,160,0,.06);border:1px solid rgba(255,160,0,.25);border-radius:10px;padding:14px;font-size:12px;color:var(--muted);margin-bottom:14px">
@@ -4731,7 +4806,7 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
   }
   D._lojasArquivadasTs = Date.now();
   // gravação imediata no localStorage
-  try{ localStorage.setItem('avatim_v5', JSON.stringify(D)); }catch(e){}
+  _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   showToast(arquivar ? '📦 '+nome+' arquivada' : '✅ '+nome+' reativada');
@@ -5423,7 +5498,7 @@ if(!D.vendedoras) D.vendedoras=[];
     idsParaTombstonar.forEach(id=>{
       if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
     });
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _persistirLocal();
     console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedoras fantasmas (padrão antigo). Tombstones criados.");
   }
 })();
@@ -5463,7 +5538,7 @@ if(!D.vendedoras) D.vendedoras=[];
     }
   });
   if(corrigidas > 0){
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _persistirLocal();
     console.warn("[Avatim MIGRAÇÃO META] Total corrigido: "+corrigidas+" vendedoras");
   }
 })();
@@ -5487,6 +5562,7 @@ if(typeof window.aplicarOverridesProdutos === 'function') window.aplicarOverride
 if(!D.fluxo)      D.fluxo=[];
 if(!D.contatos)   D.contatos=[];
 if(!D.excelDados) D.excelDados=[];
+if(!D.crm) D.crm={};   // [R53] cubos agregados do CRM, por loja/ano
 if(!D._excelImportacoes) D._excelImportacoes=[];
 if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
 if(!D.prospeccoes) D.prospeccoes=[]; // [NEW] Prospecção B2B — captação de empresas
@@ -5701,7 +5777,7 @@ function limparTombstonesAntigos(){
     // });
   });
   if(corrompidas > 0){
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _persistirLocal();
     console.warn("[Avatim] "+corrompidas+" meta(s) em formato antigo migrada(s).");
   }
 })();
@@ -5842,8 +5918,1296 @@ function _atendLancamento(r){
 // ── FIRESTORE SYNC ──────────────────────────────────────────
 let _savePending = false;
 
+
+
+// Agregador CRM por loja, grão mensal. Tabelas de string + arrays posicionais
+// para caber no documento Firestore da loja (1 MiB).
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R54] BACKUP E RESTAURAÇÃO DO FIREBASE
+// O sistema não tinha nenhuma forma de exportar ou restaurar os dados.
+// Uma escrita errada no doc `principal` ou num `loja_*` era irreversível.
+// Isto baixa TODOS os documentos da coleção `avatim` num único arquivo
+// JSON e sabe escrevê-los de volta.
+//
+// Estrutura no Firestore: coleção "avatim" com
+//   principal  → configuração, metas, vendedoras, contatos, fluxo, CRM
+//   loja_<id>  → lançamentos de cada loja (um por loja)
+// ══════════════════════════════════════════════════════════════════════
+
+// [FIX R59] Antes esta lista era ADIVINHADA: 'principal' + 'loja_<id>'.
+// Os documentos do CRM (crm_<loja>_<ano> e suas partes) ficavam de fora —
+// um backup não continha a análise, e a restauração não a recuperava.
+// Agora o backup ENUMERA a coleção inteira: cobre o que existe hoje e o
+// que vier a existir, sem depender de a lista ser mantida atualizada.
+async function _bkListarDocs(mod, db){
+  const {getDocs, collection} = mod;
+  if(typeof getDocs === 'function' && typeof collection === 'function'){
+    const snap = await getDocs(collection(db, 'avatim'));
+    const nomes = [];
+    snap.forEach(d => nomes.push(d.id));
+    if(nomes.length) return nomes.sort();
+  }
+  // Fallback: se a enumeração não estiver disponível, usa os nomes conhecidos
+  return ['principal'].concat((typeof LOJAS !== 'undefined' ? LOJAS : []).map(l => 'loja_' + l.id));
+}
+
+async function _bkFirestore(){
+  // Usa o módulo carregado no boot; só baixa de novo se não houver.
+  const mod = window._fbMod
+    || await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
+  const db = window._fbDb || (mod.getFirestore && mod.getFirestore());
+  if(!db) throw new Error('Firestore indisponível — verifique a conexão.');
+  return {mod, db};
+}
+
+/** Baixa todos os documentos num arquivo JSON. */
+window.backupFirebase = async function(){
+  if(!isAdmin()){ showToast('Só o administrador pode gerar backup.','err'); return; }
+  showToast('⏳ Lendo documentos do Firebase...','ok');
+  try{
+    const {mod, db} = await _bkFirestore();
+    const {getDoc, doc} = mod;
+
+    const pacote = {
+      _formato: 'avatim-backup-v1',
+      geradoEm: new Date().toISOString(),
+      geradoPor: window._currentUser?.email || '?',
+      docs: {}
+    };
+    let lidos = 0, bytes = 0;
+    const nomesDocs = await _bkListarDocs(mod, db);
+    pacote.enumerado = true;
+    for(const nome of nomesDocs){
+      try{
+        const snap = await getDoc(doc(db, 'avatim', nome));
+        if(snap.exists()){
+          const d = snap.data();
+          pacote.docs[nome] = d;
+          lidos++;
+          bytes += (d.dados || '').length;
+        } else {
+          pacote.docs[nome] = null;   // registra a ausência, não omite
+        }
+      }catch(e){
+        console.warn('[Avatim] backup: falha lendo', nome, e.code||e.message);
+        pacote.docs[nome] = {_erroLeitura: e.code || e.message};
+      }
+    }
+
+    // Snapshot local junto — se o Firebase estiver defasado, ainda há isto
+    try{ pacote.localStorage = JSON.parse(localStorage.getItem('avatim_v5') || '{}'); }catch(e){}
+
+    const txt = JSON.stringify(pacote);
+    const nomeArq = 'avatim-backup-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
+    const blob = new Blob([txt], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nomeArq; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
+
+    showToast('✅ Backup gerado: ' + lidos + ' documento(s), '
+      + (txt.length/1048576).toFixed(2) + ' MB — ' + nomeArq, 'ok');
+    console.log('[Avatim] backup:', nomeArq, lidos, 'docs,', (bytes/1048576).toFixed(2), 'MB de dados');
+  }catch(e){
+    console.error('[Avatim] backup falhou:', e);
+    showToast('❌ Não foi possível gerar o backup: ' + (e.message||e), 'err');
+  }
+};
+
+/** Lê o arquivo de backup e mostra o que ele contém, sem escrever nada. */
+window.backupInspecionar = function(event){
+  const file = event.target?.files?.[0];
+  if(!file) return;
+  const rd = new FileReader();
+  rd.onload = function(e){
+    let pacote;
+    try{ pacote = JSON.parse(e.target.result); }
+    catch(err){ showToast('Arquivo inválido — não é um JSON.','err'); return; }
+    if(pacote._formato !== 'avatim-backup-v1'){
+      showToast('Este arquivo não é um backup do Avatim.','err'); return;
+    }
+    window._bkPacote = pacote;
+
+    const linhas = Object.entries(pacote.docs || {}).map(([nome, d]) => {
+      if(!d) return {nome, estado:'ausente no backup', kb:0, resumo:'—'};
+      if(d._erroLeitura) return {nome, estado:'erro na leitura', kb:0, resumo:d._erroLeitura};
+      let resumo = '—', dias = null;
+      try{
+        const obj = JSON.parse(d.dados || '{}');
+        const partes = [];
+        if(obj.vendedoras) partes.push(obj.vendedoras.length + ' vendedoras');
+        if(obj.contatos)   partes.push(obj.contatos.length + ' contatos');
+        if(obj.fluxo)      partes.push(obj.fluxo.length + ' fluxo');
+        // [R60] Vendas vivem SÓ nos docs loja_* — contar os dias lançados
+        // é o que revela se aquela loja está sincronizando de verdade.
+        if(obj.vendas){
+          const nDias = Object.values(obj.vendas).reduce((s,o)=>s+Object.keys(o||{}).length,0);
+          partes.push(nDias + ' dia(s) de venda');
+        }
+        if(obj.vendasVend) partes.push(Object.keys(obj.vendasVend).length + ' vendedora(s) c/ lançamento');
+        if(obj.excelDados && obj.excelDados.length) partes.push(obj.excelDados.length + ' linhas Excel');
+        if(obj.crm)        partes.push('CRM: ' + Object.keys(obj.crm).join(','));
+        if(obj.linhas)     partes.push((obj.linhas||0).toLocaleString('pt-BR') + ' linhas agregadas');
+        if(Array.isArray(obj) && obj.length) partes.push(obj.length + ' clientes (parte)');
+        resumo = partes.join(' · ') || 'sem conteúdo reconhecido';
+      }catch(err){ resumo = 'conteúdo ilegível'; }
+      if(d.ts) dias = Math.round((Date.now() - Number(d.ts)) / 86400000);
+      return {nome, estado:'ok', kb:(d.dados||'').length/1024, resumo, dias,
+              quando: d.ts ? new Date(d.ts).toLocaleString('pt-BR') : '—', por: d.por || '—'};
+    });
+
+    const el = document.getElementById('bk-preview');
+    if(el){
+      el.style.display = '';
+      el.innerHTML =
+        '<div style="font-size:12px;margin-bottom:8px">Backup de <strong>'
+          + new Date(pacote.geradoEm).toLocaleString('pt-BR') + '</strong> por ' + (pacote.geradoPor||'?') + '</div>'
+        + '<div style="overflow-x:auto"><table class="dtable" style="min-width:560px;font-size:11.5px">'
+        + '<thead><tr><th>Documento</th><th>Estado</th><th style="text-align:right">Tamanho</th><th>Conteúdo</th><th>Gravado em</th></tr></thead><tbody>'
+        + linhas.map(l => '<tr>'
+            + '<td><strong>'+l.nome+'</strong></td>'
+            + '<td style="color:'+(l.estado==='ok'?'var(--verde)':'var(--verm)')+'">'+l.estado+'</td>'
+            + '<td style="text-align:right">'+(l.kb?l.kb.toFixed(0)+' KB':'—')+'</td>'
+            + '<td style="font-size:10.5px;color:var(--muted)">'+l.resumo+'</td>'
+            + '<td style="font-size:10.5px;color:'+(l.dias===null?'var(--muted)':l.dias>14?'var(--verm)':l.dias>3?'var(--ouro)':'var(--muted)')+'">'
+            +(l.quando||'—')+(l.dias!==null?'<br>há '+l.dias+' dia(s)':'')+'</td>'
+          + '</tr>').join('')
+        + '</tbody></table></div>'
+        + _bkCobertura(linhas)
+        + '<div style="margin-top:10px;padding:9px 12px;background:rgba(220,53,69,.08);border-left:3px solid var(--verm);font-size:11.5px">'
+          + '⚠️ Restaurar <strong>sobrescreve</strong> os documentos acima no Firebase — o conteúdo atual de cada um é substituído inteiro. '
+          + 'Documentos que não estão neste backup ficam intactos.<br>'
+          + 'Um backup do estado atual é baixado automaticamente antes, para que a própria restauração seja reversível.<br>'
+          + '<strong>Ao final este navegador será limpo e recarregado</strong>, para não empurrar os dados antigos de volta.'
+        + '</div>'
+        + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
+          + '<button class="btn-p" onclick="window.backupRestaurar()" style="background:rgba(220,53,69,.85);border:none;color:#fff;font-size:12px;padding:9px 16px">↩️ Restaurar este backup</button>'
+          + '<button class="btn-s" onclick="document.getElementById(\'bk-preview\').style.display=\'none\'" style="font-size:12px">Cancelar</button>'
+        + '</div>';
+    }
+  };
+  rd.readAsText(file);
+  event.target.value = '';
+};
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R61] INDICADOR DE SINCRONIZAÇÃO
+// Antes o badge só aparecia para o admin — justamente quem menos precisa.
+// As lojas, cujas vendas moram no documento delas, não tinham como saber
+// que pararam de sincronizar. Uma loja podia ficar dias fora sem ninguém
+// perceber, e o problema só aparecia quando alguém fosse conferir.
+//
+// Agora o estado é visível para todos, sobrevive a recarga (o horário do
+// último sucesso fica no localStorage) e distingue três coisas que antes
+// se misturavam: enviando, enviado e falhou.
+// ══════════════════════════════════════════════════════════════════════
+
+const SYNC_CHAVE = 'avatim_ultimo_sync';
+
+window._syncEstado = {estado:'inicial', ts:0, msg:''};
+
+function _syncCarregarUltimo(){
+  try{
+    const v = Number(localStorage.getItem(SYNC_CHAVE) || 0);
+    if(v > 0){ window._syncEstado = {estado:'ok', ts:v, msg:''}; }
+  }catch(e){}
+}
+
+/** Marca o estado atual e redesenha. */
+window._syncMarcar = function(estado, msg){
+  window._syncEstado = {estado, ts: estado==='ok' ? Date.now() : (window._syncEstado.ts||0), msg: msg||''};
+  if(estado === 'ok'){
+    try{ localStorage.setItem(SYNC_CHAVE, String(Date.now())); }catch(e){}
+  }
+  window._syncRender();
+};
+
+function _syncHaQuanto(ts){
+  if(!ts) return null;
+  const s = Math.max(0, Math.round((Date.now() - ts)/1000));
+  if(s < 60)    return 'agora';
+  if(s < 3600)  return 'há ' + Math.floor(s/60) + ' min';
+  if(s < 86400) return 'há ' + Math.floor(s/3600) + 'h';
+  return 'há ' + Math.floor(s/86400) + ' dia(s)';
+}
+
+window._syncRender = function(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  el.style.display = 'flex';
+
+  const {estado, ts, msg} = window._syncEstado;
+  const quando = _syncHaQuanto(ts);
+  // Mais de 1 dia sem sucesso é problema mesmo que o último envio tenha dado certo
+  const diasSem = ts ? (Date.now()-ts)/86400000 : 999;
+  const velho = diasSem > 1;
+
+  let cor, ponto, texto, titulo;
+  if(estado === 'enviando'){
+    cor='var(--ouro)'; ponto='var(--ouro)'; texto='Enviando...';
+    titulo='Gravando no Firebase';
+  } else if(estado === 'erro'){
+    cor='var(--verm)'; ponto='var(--verm)';
+    texto = quando ? 'Falhou · último envio ' + quando : 'Falha ao sincronizar';
+    titulo='Não foi possível gravar: ' + (msg||'erro desconhecido') + '. Clique para tentar de novo.';
+  } else if(estado === 'inicial' && !ts){
+    cor='var(--muted)'; ponto='var(--muted)'; texto='Sem sincronizar ainda';
+    titulo='Nenhuma sincronização registrada neste navegador';
+  } else if(velho){
+    cor='var(--verm)'; ponto='var(--verm)'; texto='Sem enviar ' + quando;
+    titulo='Este navegador não grava no Firebase há mais de um dia. Clique para tentar agora.';
+  } else {
+    cor='var(--verde)'; ponto='var(--verde)'; texto='Sincronizado ' + quando;
+    titulo='Dados enviados ao Firebase. Clique para forçar novo envio.';
+  }
+
+  el.style.color = cor;
+  el.style.borderColor = cor.replace('var(--','rgba(').length ? cor : cor;
+  el.title = titulo;
+  el.innerHTML =
+    '<span style="width:8px;height:8px;border-radius:50%;background:'+ponto+';flex:0 0 8px;'
+      + (estado==='enviando' ? 'animation:syncPulse 1s infinite' : '') + '"></span>'
+    + '<span>' + texto + '</span>';
+};
+
+/** Clique no badge: tenta enviar agora. */
+window.syncAgora = async function(){
+  window._syncMarcar('enviando');
+  try{
+    const ok = await waitForFirebase(5000);
+    if(!ok || !window.fsGravar){
+      window._syncMarcar('erro','Firebase indisponível');
+      showToast('Firebase não disponível. Verifique a conexão.','err');
+      return;
+    }
+    await window.fsGravar(JSON.stringify(D));
+    window._syncMarcar('ok');
+    showToast('✅ Dados enviados ao Firebase.','ok');
+  }catch(e){
+    window._syncMarcar('erro', e.code || e.message);
+    showToast('❌ Não foi possível enviar: ' + (e.code||e.message),'err');
+  }
+};
+
+// Manter o "há X min" fresco e denunciar silêncio prolongado
+(function _syncRelogio(){
+  _syncCarregarUltimo();
+  setInterval(() => { try{ window._syncRender(); }catch(e){} }, 30000);
+  document.addEventListener('DOMContentLoaded', () => { try{ window._syncRender(); }catch(e){} });
+})();
+
+
+/**
+ * [R60] Diagnóstico de cobertura do backup.
+ * O backup captura tudo que está NO FIREBASE. O risco real não é o backup
+ * e sim uma loja cujo navegador não sincronizou — as vendas dela moram só
+ * no doc loja_*, então um doc velho significa vendas faltando.
+ */
+function _bkCobertura(linhas){
+  const lojas = (typeof LOJAS !== 'undefined' ? LOJAS : []);
+  const achados = new Map(linhas.map(l => [l.nome, l]));
+  const faltando = [], velhas = [], ok = [];
+
+  lojas.forEach(l => {
+    const d = achados.get('loja_' + l.id);
+    if(!d) faltando.push(l.nome);
+    else if(d.dias !== null && d.dias > 14) velhas.push(l.nome + ' (há ' + d.dias + 'd)');
+    else ok.push(l.nome);
+  });
+  const temPrincipal = achados.has('principal');
+  const nCrm = linhas.filter(l => /^crm_/.test(l.nome) && !/_c\d+$/.test(l.nome)).length;
+
+  const bloco = (cor, icone, titulo, texto) =>
+    '<div style="padding:8px 11px;border-left:3px solid '+cor+';background:rgba(255,255,255,.03);border-radius:5px;margin-top:6px;font-size:11.5px">'
+    + icone + ' <strong>' + titulo + '</strong><br><span style="color:var(--muted)">' + texto + '</span></div>';
+
+  let html = '<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Cobertura deste backup</div>';
+
+  html += bloco(temPrincipal?'var(--verde)':'var(--verm)',
+    temPrincipal?'✅':'❌', 'Configuração geral',
+    temPrincipal ? 'Metas, vendedoras, campanhas, contatos e origem do fluxo presentes.'
+                 : 'Documento principal AUSENTE — este backup está incompleto.');
+
+  html += bloco(ok.length===lojas.length?'var(--verde)':velhas.length||faltando.length?'var(--ouro)':'var(--verde)',
+    ok.length===lojas.length?'✅':'⚠️', 'Vendas por loja (' + ok.length + ' de ' + lojas.length + ' em dia)',
+    'As vendas de cada loja moram no documento dela. '
+    + (faltando.length ? '<br><span style="color:var(--verm)">Sem documento: ' + faltando.join(', ') + ' — nunca sincronizaram.</span>' : '')
+    + (velhas.length ? '<br><span style="color:var(--ouro)">Desatualizadas: ' + velhas.join(', ') + ' — podem ter lançamentos só no navegador da loja.</span>' : '')
+    + (!faltando.length && !velhas.length ? 'Todas gravaram nos últimos 14 dias.' : ''));
+
+  html += bloco(nCrm?'var(--verde)':'var(--muted)', nCrm?'✅':'ℹ️', 'CRM (planilhas agregadas)',
+    nCrm ? nCrm + ' conjunto(s) loja/ano incluídos.' : 'Nenhum conjunto de CRM neste backup.');
+
+  if(faltando.length || velhas.length){
+    html += bloco('var(--azul)','💡','Antes de confiar neste backup',
+      'Peça para as lojas marcadas abrirem o sistema e salvarem um lançamento — isso força a sincronização. Depois gere o backup de novo.');
+  }
+  return html + '</div>';
+}
+
+/** Escreve o backup carregado de volta no Firestore. */
+window.backupRestaurar = async function(){
+  const pacote = window._bkPacote;
+  if(!pacote){ showToast('Carregue um arquivo de backup primeiro.','err'); return; }
+  if(!isAdmin()){ showToast('Só o administrador pode restaurar.','err'); return; }
+
+  const nomes = Object.keys(pacote.docs || {}).filter(n => pacote.docs[n] && !pacote.docs[n]._erroLeitura);
+  if(!nomes.length){ showToast('O backup não tem nenhum documento válido.','err'); return; }
+
+  if(!confirm('RESTAURAR ' + nomes.length + ' documento(s) do backup de '
+      + new Date(pacote.geradoEm).toLocaleString('pt-BR') + '?\n\n'
+      + 'Isto SOBRESCREVE os dados atuais no Firebase.\n'
+      + 'Um backup do estado atual será baixado antes.\n\nContinuar?')) return;
+
+  // Rede de segurança: o estado atual vira arquivo antes de qualquer escrita
+  showToast('⏳ Salvando o estado atual antes de restaurar...','ok');
+  try{ await window.backupFirebase(); }
+  catch(e){
+    if(!confirm('Não consegui gerar o backup de segurança do estado atual.\n\nRestaurar mesmo assim?')) return;
+  }
+
+  try{
+    const {mod, db} = await _bkFirestore();
+    const {setDoc, doc} = mod;
+    let ok = 0, erros = [];
+    for(const nome of nomes){
+      try{
+        const d = pacote.docs[nome];
+        await setDoc(doc(db, 'avatim', nome), {
+          dados: d.dados || '{}',
+          ts: Date.now(),
+          por: (window._currentUser?.email || 'restauracao') + ' (restaurado)'
+        });
+        ok++;
+      }catch(e){ erros.push(nome + ': ' + (e.code||e.message)); }
+    }
+    if(erros.length){
+      console.error('[Avatim] restauração com falhas:', erros);
+      showToast('⚠️ Restaurados ' + ok + ' de ' + nomes.length + '. Falhas: ' + erros.join(' | '), 'err');
+      return;
+    }
+
+    // [FIX R59] O passo que faltava. Sem isto a restauração se desfazia
+    // sozinha: o navegador continua com o estado ANTIGO em memória e no
+    // localStorage, e o primeiro save() empurra tudo de volta por cima do
+    // que acabou de ser restaurado. Limpar o local e recarregar é o que
+    // faz o navegador reler o estado restaurado do Firebase.
+    showToast('✅ ' + ok + ' documento(s) restaurados no Firebase.', 'ok');
+    const limpar = confirm(
+      'Restauração concluída: ' + ok + ' documento(s) gravados.\n\n' +
+      'AGORA É PRECISO LIMPAR OS DADOS LOCAIS DESTE NAVEGADOR.\n\n' +
+      'Se não limpar, o que está em memória aqui vai sobrescrever de volta ' +
+      'o que acabou de ser restaurado no primeiro salvamento.\n\n' +
+      'OK = limpar e recarregar agora (recomendado)\n' +
+      'Cancelar = NÃO mexer em nada agora (feche a aba sem usar o sistema)'
+    );
+    if(limpar){
+      try{
+        localStorage.removeItem('avatim_v5');
+        localStorage.removeItem('avatim_pending');
+      }catch(e){ console.warn('[Avatim] limpeza local:', e.message); }
+      window._pendingLocalData = null;
+      location.reload();
+    } else {
+      showToast('⚠️ Dados locais NÃO limpos. Não use o sistema nesta aba — feche-a e reabra, ou os dados antigos voltarão a subir.','err');
+    }
+  }catch(e){
+    console.error('[Avatim] restauração falhou:', e);
+    showToast('❌ Restauração falhou: ' + (e.message||e), 'err');
+  }
+};
+
+
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R57] CRM — CAMADA DE LEITURA DOS PAINÉIS
+// Os painéis consumiam linhas cruas. Agora consomem os cubos agregados.
+// Grão MENSAL: filtros de ano/mês/loja/vendedora continuam; o de dia sai
+// (para o dia existe o Painel do Dia).
+//
+// Importações antigas em D.excelDados continuam funcionando: quando não
+// há cubo, a camada monta um a partir das linhas cruas. Assim nada quebra
+// para quem já tinha base pequena carregada.
+// ══════════════════════════════════════════════════════════════════════
+
+window.crmTemCubos = function(){
+  return Object.keys(D.crm || {}).some(l => Object.keys(D.crm[l] || {}).length);
+};
+
+/** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedora. */
+window.crmVisao = function(){
+  const fAno  = document.getElementById('excel-filtro-ano')?.value  || '';
+  const fMes  = document.getElementById('excel-filtro-mes')?.value  || '';
+  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
+  const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+
+  let lojas = window.crmLojasVisiveis();
+  if(fLoja) lojas = lojas.filter(l => l === fLoja);
+
+  // Sem cubo: montar um na hora a partir das linhas antigas
+  let base;
+  if(!window.crmTemCubos() && (D.excelDados||[]).length){
+    const linhas = D.excelDados.filter(r => {
+      if(!isAdmin() && r.loja !== lojaId()) return false;
+      if(fLoja && r.loja !== fLoja) return false;
+      return true;
+    });
+    base = window.crmCombinarDeLinhas(linhas);
+  } else {
+    base = window.crmCombinar(lojas, fAno ? [fAno] : null);
+  }
+
+  return window.crmFiltrar(base, {ano:fAno, mes:fMes, vend:fVend});
+};
+
+/** Adapta linhas cruas legadas para o mesmo formato de cubo. */
+window.crmCombinarDeLinhas = function(linhas){
+  const c = window.crmAgregar(linhas || []);
+  // crmCombinar normaliza o cubo de clientes para objetos; fazer o mesmo aqui
+  c.clientes = (c.clientes||[]).map(([n,v,priMi,ult,compras,total,itens]) => ({
+    n, v, pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:''
+  }));
+  return c;
+};
+
+/** Aplica filtros de mês e vendedora sobre um cubo já combinado. */
+window.crmFiltrar = function(cubo, f){
+  f = f || {};
+  const mesOk = mi => {
+    const m = cubo.meses[mi] || '';
+    if(f.ano && m.slice(0,4) !== f.ano) return false;
+    if(f.mes && m.slice(5,7) !== f.mes) return false;
+    return true;
+  };
+  const vendOk = vi => !f.vend || (cubo.vends[vi] === f.vend);
+
+  const mesVend = (cubo.mesVend||[]).filter(a => mesOk(a[0]) && vendOk(a[1]));
+  const mesesUsados = new Set(mesVend.map(a => a[0]));
+  const mesProd = (cubo.mesProd||[]).filter(a => mesOk(a[0]));
+
+  const faturamento = mesVend.reduce((s,a) => s + a[2], 0);
+  const cupons      = mesVend.reduce((s,a) => s + a[3], 0);
+  const itens       = mesVend.reduce((s,a) => s + a[4], 0);
+
+  // Sem filtro de mês/vendedora os cubos totais valem direto (mais preciso:
+  // não sofrem do corte de "top N produtos por mês").
+  const semRecorte = !f.mes && !f.vend && !f.ano;
+
+  let produtos;
+  if(semRecorte){
+    produtos = (cubo.prodTotal||[]).map(([pi,q,v,ncli]) => ({nome:cubo.prods[pi]||'?', qtd:q, valor:v, clientes:ncli}));
+  } else {
+    const acc = new Map();
+    mesProd.forEach(([mi,pi,q,v]) => {
+      const a = acc.get(pi) || {qtd:0, valor:0};
+      a.qtd += q; a.valor += v; acc.set(pi,a);
+    });
+    produtos = [...acc.entries()].map(([pi,a]) => ({nome:cubo.prods[pi]||'?', qtd:a.qtd, valor:a.valor, clientes:0}))
+      .sort((a,b) => b.valor - a.valor);
+  }
+
+  // Clientes: filtro por vendedora e por período da última compra
+  let clientes = (cubo.clientes||[]).map(c => ({
+    nome: c.n, vendedora: cubo.vends[c.v] || '', primeira: c.pri, ultima: c.ult,
+    compras: c.compras, total: c.total, itens: c.itens, loja: c.loja
+  }));
+  if(f.vend) clientes = clientes.filter(c => c.vendedora === f.vend);
+  if(f.ano || f.mes){
+    clientes = clientes.filter(c => {
+      const u = String(c.ultima||'');
+      if(f.ano && u.slice(0,4) !== f.ano) return false;
+      if(f.mes && u.slice(5,7) !== f.mes) return false;
+      return true;
+    });
+  }
+
+  const porVend = new Map();
+  mesVend.forEach(([mi,vi,fa,cu,it,cl]) => {
+    const nome = cubo.vends[vi] || '(sem vendedora)';
+    const a = porVend.get(nome) || {nome, fat:0, cupons:0, itens:0, clientes:0};
+    a.fat += fa; a.cupons += cu; a.itens += it; a.clientes += cl;
+    porVend.set(nome, a);
+  });
+
+  const porMes = new Map();
+  mesVend.forEach(([mi,vi,fa,cu,it,cl]) => {
+    const m = cubo.meses[mi];
+    const a = porMes.get(m) || {mes:m, fat:0, cupons:0, itens:0};
+    a.fat += fa; a.cupons += cu; a.itens += it;
+    porMes.set(m, a);
+  });
+
+  return {
+    faturamento, cupons, itens,
+    clientesUnicos: clientes.length,
+    ticketMedio: cupons > 0 ? faturamento/cupons : 0,
+    pa: cupons > 0 ? itens/cupons : 0,
+    meses: [...porMes.values()].sort((a,b)=>a.mes.localeCompare(b.mes)),
+    mesesCount: mesesUsados.size,
+    produtos,
+    clientes: clientes.sort((a,b)=>b.total-a.total),
+    vendedoras: [...porVend.values()].sort((a,b)=>b.fat-a.fat),
+    cross: (cubo.cross||[]).map(([a,b,n]) => ({a:cubo.prods[a]||'?', b:cubo.prods[b]||'?', n})),
+    prodsTabela: cubo.prods || [],
+    vendsTabela: cubo.vends || [],
+    linhas: cubo.linhas || 0,
+    periodo: cubo.periodo || {}
+  };
+};
+
+/** Dias desde a última compra — base do painel de inativos. */
+window.crmDiasDesde = function(dataISO){
+  if(!dataISO) return null;
+  const [y,m,d] = String(dataISO).split('-').map(Number);
+  if(!y||!m||!d) return null;
+  const a = new Date(y, m-1, d); a.setHours(0,0,0,0);
+  const hj = new Date(); hj.setHours(0,0,0,0);
+  return Math.round((hj - a) / 86400000);
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R56] CRM — SINCRONIZAÇÃO EM DOCUMENTOS PRÓPRIOS
+// Os cubos NÃO entram no doc `principal`: ele já carrega metas, vendedoras,
+// contatos, fluxo e tombstones dentro de 1 MiB. Cada loja/ano tem os seus:
+//   crm_<loja>_<ano>        → cubos leves + índice das partes de clientes
+//   crm_<loja>_<ano>_c<N>   → partes do cubo de clientes
+// Assim cada loja lê só o que é dela, e o orçamento de 1 MiB é por unidade.
+// ══════════════════════════════════════════════════════════════════════
+
+function _crmDocNome(lid, ano, parte){
+  return 'crm_' + lid + '_' + ano + (parte === undefined ? '' : '_c' + parte);
+}
+
+/** Grava no Firestore os cubos de uma loja/ano. Só admin. */
+window.crmSincronizarUm = async function(lid, ano){
+  const cubo = ((D.crm||{})[lid]||{})[ano];
+  if(!cubo) throw new Error('Sem cubo para ' + lid + '/' + ano);
+  const {mod, db} = await _bkFirestore();
+  const {setDoc, doc} = mod;
+
+  const pedacos = window.crmFatiarClientes(cubo.clientes || []);
+  const leves = Object.assign({}, cubo);
+  delete leves.clientes;
+  leves._partes = pedacos.length;
+
+  await setDoc(doc(db, 'avatim', _crmDocNome(lid, ano)), {
+    dados: JSON.stringify(leves), ts: Date.now(),
+    por: window._currentUser?.email || '?', loja: lid, ano: String(ano)
+  });
+  for(let i = 0; i < pedacos.length; i++){
+    await setDoc(doc(db, 'avatim', _crmDocNome(lid, ano, i)), {
+      dados: JSON.stringify(pedacos[i]), ts: Date.now(),
+      por: window._currentUser?.email || '?', loja: lid, ano: String(ano), parte: i
+    });
+  }
+  return {partes: pedacos.length, clientes: (cubo.clientes||[]).length};
+};
+
+/** Sobe todos os cubos que estiverem em memória. */
+window.crmSincronizar = async function(){
+  if(!isAdmin()){ showToast('Só o administrador sincroniza o CRM.','err'); return; }
+  const pares = [];
+  Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
+  if(!pares.length){ showToast('Nenhum dado de CRM para sincronizar.','warn'); return; }
+
+  showToast('⏳ Enviando ' + pares.length + ' conjunto(s) de CRM...','ok');
+  let ok = 0, docs = 0; const erros = [];
+  for(const [lid, ano] of pares){
+    try{ const r = await window.crmSincronizarUm(lid, ano); ok++; docs += 1 + r.partes; }
+    catch(e){ erros.push(lid+'/'+ano+': '+(e.code||e.message)); }
+  }
+  if(erros.length){
+    console.error('[crm] sync com falhas:', erros);
+    showToast('⚠️ ' + ok + ' de ' + pares.length + ' enviados. Falhas: ' + erros.join(' | '),'err');
+  } else {
+    showToast('✅ CRM sincronizado: ' + ok + ' conjunto(s) em ' + docs + ' documento(s).','ok');
+  }
+};
+
+/**
+ * Lê do Firestore os cubos das lojas visíveis para quem está logado.
+ * Admin lê de todas; loja lê só a própria.
+ */
+window.crmCarregar = async function(){
+  let db, mod;
+  try{ ({mod, db} = await _bkFirestore()); }
+  catch(e){ console.warn('[crm] carregar: Firestore indisponível'); return 0; }
+  const {getDoc, doc} = mod;
+
+  const lojas = isAdmin()
+    ? (typeof LOJAS !== 'undefined' ? LOJAS.map(l=>l.id) : [])
+    : [lojaId()].filter(Boolean);
+
+  // Anos a tentar: os que já conhecemos + uma janela recente
+  const anoAtual = Number(hoje().slice(0,4));
+  const anos = new Set();
+  for(let a = anoAtual; a >= anoAtual - 4; a--) anos.add(String(a));
+  Object.values(D.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
+
+  if(!D.crm) D.crm = {};
+  let carregados = 0;
+  for(const lid of lojas){
+    for(const ano of anos){
+      try{
+        const snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano)));
+        if(!snap.exists()) continue;
+        const raw = snap.data();
+        // conjunto apagado deixa um documento vazio como lápide
+        if(raw._apagado || !raw.dados) continue;
+        const leves = JSON.parse(raw.dados || '{}');
+        if(!leves.linhas) continue;
+        const partes = Number(leves._partes) || 0;
+        const clientes = [];
+        for(let i = 0; i < partes; i++){
+          const sp = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano, i)));
+          if(sp.exists()) clientes.push(...JSON.parse(sp.data().dados || '[]'));
+        }
+        delete leves._partes;
+        leves.clientes = clientes;
+        if(!D.crm[lid]) D.crm[lid] = {};
+        D.crm[lid][ano] = leves;
+        carregados++;
+      }catch(e){
+        console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
+      }
+    }
+  }
+  if(carregados) console.log('[crm] carregados', carregados, 'conjunto(s) loja/ano');
+  return carregados;
+};
+
+/** Apaga um conjunto loja/ano — local e remoto. */
+window.crmApagar = async function(lid, ano){
+  if(!isAdmin()){ showToast('Só o administrador pode apagar.','err'); return; }
+  const cubo = ((D.crm||{})[lid]||{})[ano];
+  if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
+  const nomeLoja = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
+  if(!confirm('Apagar o CRM de ' + nomeLoja + ' / ' + ano + '?\n\n'
+    + (cubo.linhas||0).toLocaleString('pt-BR') + ' linhas · '
+    + (cubo.clientesUnicos||0).toLocaleString('pt-BR') + ' clientes.\n\n'
+    + 'Isto não afeta vendas, contatos nem fluxo.')) return;
+
+  const partes = window.crmFatiarClientes(cubo.clientes||[]).length;
+  delete D.crm[lid][ano];
+  if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
+  save();
+
+  try{
+    const {mod, db} = await _bkFirestore();
+    const {setDoc, doc} = mod;
+    // documento vazio marca a exclusão — some no próximo carregamento
+    await setDoc(doc(db,'avatim',_crmDocNome(lid,ano)), {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
+    for(let i=0;i<partes;i++){
+      await setDoc(doc(db,'avatim',_crmDocNome(lid,ano,i)), {dados:'[]', ts:Date.now(), _apagado:true});
+    }
+  }catch(e){ console.warn('[crm] apagar remoto falhou:', e.message); }
+
+  showToast('CRM de ' + nomeLoja + '/' + ano + ' apagado.','ok');
+  if(typeof window.excelRender === 'function') window.excelRender();
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R53] CRM — AGREGAÇÃO NA IMPORTAÇÃO
+// 200 mil linhas cruas dão ~42 MB de JSON: 9x o localStorage e 42x o
+// limite de 1 MiB por documento do Firestore. As telas do CRM consomem
+// AGREGADOS, não linhas — então a importação passa a guardar só os cubos.
+// Medido: 100 mil linhas -> ~0,6 MB em ~350ms (redução de ~24x).
+//
+// Grão MENSAL (decidido com o usuário): filtros de ano/mês/loja/vendedora
+// sobrevivem; filtro por dia exato sai — para o dia existe o Painel do Dia.
+// Tabelas de string + arrays posicionais em vez de objetos: é o que faz
+// o cubo caber no documento.
+// ══════════════════════════════════════════════════════════════════════
+window.crmAgregar = function(linhas, opts){
+  opts = opts || {};
+  const TOP_PROD_MES = opts.topProdMes || 120;
+  const TOP_CROSS    = opts.topCross   || 150;
+
+  const tVend=[], iVend=new Map();
+  const tProd=[], iProd=new Map();
+  const tMes =[], iMes =new Map();
+  const idx=(t,m,v)=>{ if(v===undefined||v===null) v=''; let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
+
+  const mesVend=new Map();      // mes|vend -> {f,i,cupons:Set,cli:Set}
+  const mesProd=new Map();      // mes|prod -> {q,f}
+  const prodTot=new Map();      // prod -> {q,f,cli:Set}
+  const cliente=new Map();      // nomeNorm -> {n,v,pri,ult,cupons:Set,t,i}
+  const cliProd=new Map();      // nomeNorm -> Set(prodIdx)
+  let fatTotal=0, dtMin=null, dtMax=null;
+
+  const norm=s=>String(s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+
+  for(let k=0;k<linhas.length;k++){
+    const r=linhas[k];
+    if(!r.data) continue;
+    const val=Number(r.valor)||0, qt=Number(r.qtde)||1;
+    const mes=r.data.slice(0,7);
+    const mi=idx(tMes,iMes,mes), vi=idx(tVend,iVend,r.vendedora||''), pi=idx(tProd,iProd,r.produto||'');
+    const cup=r.cupom||('#'+k);
+    fatTotal+=val;
+    if(!dtMin||r.data<dtMin) dtMin=r.data;
+    if(!dtMax||r.data>dtMax) dtMax=r.data;
+
+    const cn=norm(r.cliente)||'(sem cliente)';
+
+    let a=mesVend.get(mi+'|'+vi);
+    if(!a){ a={f:0,i:0,cupons:new Set(),cli:new Set()}; mesVend.set(mi+'|'+vi,a); }
+    a.f+=val; a.i+=qt; a.cupons.add(cup); a.cli.add(cn);
+
+    let b=mesProd.get(mi+'|'+pi);
+    if(!b){ b={q:0,f:0}; mesProd.set(mi+'|'+pi,b); }
+    b.q+=qt; b.f+=val;
+
+    let c=prodTot.get(pi);
+    if(!c){ c={q:0,f:0,cli:new Set()}; prodTot.set(pi,c); }
+    c.q+=qt; c.f+=val; c.cli.add(cn);
+
+    let d=cliente.get(cn);
+    if(!d){ d={n:String(r.cliente||'(sem cliente)').trim(),v:vi,pri:r.data,ult:r.data,cupons:new Set(),t:0,i:0}; cliente.set(cn,d); }
+    if(r.data<d.pri) d.pri=r.data;   // guardado como indice de mes na saida
+    if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedora da compra mais recente
+    d.cupons.add(cup); d.t+=val; d.i+=qt;
+
+    let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
+  }
+
+  const r2=n=>Math.round(n*100)/100;
+
+  const cuboMesVend=[...mesVend.entries()].map(([k,v])=>{
+    const [mi,vi]=k.split('|').map(Number);
+    return [mi,vi,r2(v.f),v.cupons.size,v.i,v.cli.size];
+  });
+
+  // top N produtos por mês (o resto do mês some; o total geral fica no prodTotal)
+  const porMes=new Map();
+  [...mesProd.entries()].forEach(([k,v])=>{
+    const [mi,pi]=k.split('|').map(Number);
+    if(!porMes.has(mi)) porMes.set(mi,[]);
+    porMes.get(mi).push([pi,v.q,r2(v.f)]);
+  });
+  const cuboMesProd=[];
+  porMes.forEach((arr,mi)=>{
+    arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_PROD_MES).forEach(a=>cuboMesProd.push([mi,a[0],a[1],a[2]]));
+  });
+
+  const cuboProdTot=[...prodTot.entries()]
+    .map(([pi,v])=>[pi,v.q,r2(v.f),v.cli.size]).sort((a,b)=>b[2]-a[2]);
+
+  const cuboClientes=[...cliente.values()]
+    .map(c=>[c.n,c.v,iMes.get(c.pri.slice(0,7)), c.ult, c.cupons.size, r2(c.t), c.i])
+    .sort((a,b)=>b[5]-a[5]);
+
+  // cruzamento: pares de produtos comprados pelo mesmo cliente
+  const par=new Map();
+  cliProd.forEach(set=>{
+    const a=[...set]; if(a.length<2||a.length>40) return;
+    for(let i=0;i<a.length;i++) for(let j=i+1;j<a.length;j++){
+      const k=a[i]<a[j]?a[i]+'|'+a[j]:a[j]+'|'+a[i];
+      par.set(k,(par.get(k)||0)+1);
+    }
+  });
+  const cuboCross=[...par.entries()].map(([k,n])=>{const[a,b]=k.split('|').map(Number);return [a,b,n];})
+    .sort((x,y)=>y[2]-x[2]).slice(0,TOP_CROSS);
+
+  return {
+    ts:Date.now(), linhas:linhas.length, faturamento:r2(fatTotal),
+    periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
+    meses:tMes, vends:tVend, prods:tProd,
+    mesVend:cuboMesVend, mesProd:cuboMesProd, prodTotal:cuboProdTot,
+    clientes:cuboClientes, cross:cuboCross
+  };
+};
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R53] CRM — ARMAZENAMENTO POR LOJA/ANO COM FATIAMENTO AUTOMÁTICO
+// D.crm[lid][ano] = cubo agregado. Cada loja/ano é uma unidade
+// independente: a loja lê só o que é dela, e o admin lê tudo.
+//
+// O cubo de clientes é ~95% do peso. Quando passa do orçamento de um
+// documento, é fatiado em pedaços — normalmente 1, às vezes 2 ou 3.
+// Medido: 100 mil linhas/ano cabem em 1 documento até ~12 mil clientes
+// únicos; acima disso o fatiamento entra sozinho.
+// ══════════════════════════════════════════════════════════════════════
+
+const CRM_ORC_DOC = 700 * 1024;   // orçamento por documento (folga sobre 1 MiB)
+
+function _crmBytes(o){
+  try{ return new Blob([JSON.stringify(o)]).size; }catch(e){ return JSON.stringify(o).length; }
+}
+
+/** Divide o cubo de clientes em pedaços que cabem no orçamento. */
+window.crmFatiarClientes = function(clientes){
+  const total = _crmBytes(clientes);
+  if(total <= CRM_ORC_DOC) return [clientes];
+  const n = Math.ceil(total / CRM_ORC_DOC);
+  const porPedaco = Math.ceil(clientes.length / n);
+  const out = [];
+  for(let i = 0; i < clientes.length; i += porPedaco) out.push(clientes.slice(i, i + porPedaco));
+  return out;
+};
+
+/** Guarda o cubo de uma loja/ano em D.crm e devolve um diagnóstico. */
+window.crmGuardar = function(lid, ano, cubo){
+  if(!D.crm) D.crm = {};
+  if(!D.crm[lid]) D.crm[lid] = {};
+  D.crm[lid][ano] = cubo;
+
+  const leves = Object.assign({}, cubo); delete leves.clientes;
+  const pedacos = window.crmFatiarClientes(cubo.clientes || []);
+  return {
+    bytesLeves: _crmBytes(leves),
+    bytesClientes: _crmBytes(cubo.clientes || []),
+    pedacos: pedacos.length,
+    clientes: (cubo.clientes || []).length
+  };
+};
+
+/** Anos disponíveis de uma loja (ou de todas, para o admin). */
+window.crmAnos = function(lid){
+  if(!D.crm) return [];
+  const alvo = lid ? [lid] : Object.keys(D.crm);
+  const set = new Set();
+  alvo.forEach(l => Object.keys(D.crm[l] || {}).forEach(a => set.add(a)));
+  return [...set].sort().reverse();
+};
+
+/** Lojas com CRM carregado, respeitando o perfil de quem está olhando. */
+window.crmLojasVisiveis = function(){
+  if(!D.crm) return [];
+  const todas = Object.keys(D.crm);
+  return isAdmin() ? todas : todas.filter(l => l === lojaId());
+};
+
+/**
+ * Junta os cubos de várias lojas/anos num só, para os painéis.
+ * As tabelas de string são reindexadas — sem isso os índices de um cubo
+ * apontariam para os nomes de outro.
+ */
+window.crmCombinar = function(lojas, anos){
+  const tVend=[], iVend=new Map(), tProd=[], iProd=new Map(), tMes=[], iMes=new Map();
+  const idx=(t,m,v)=>{ let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
+
+  const mesVend=new Map(), mesProd=new Map(), prodTot=new Map(), cross=new Map();
+  const clientes=new Map();
+  let linhas=0, faturamento=0, ini=null, fim=null;
+
+  (lojas||[]).forEach(lid => {
+    const porAno = (D.crm||{})[lid] || {};
+    (anos && anos.length ? anos : Object.keys(porAno)).forEach(ano => {
+      const c = porAno[ano];
+      if(!c) return;
+      linhas += c.linhas||0; faturamento += c.faturamento||0;
+      if(c.periodo){
+        if(!ini || (c.periodo.ini && c.periodo.ini < ini)) ini = c.periodo.ini;
+        if(!fim || (c.periodo.fim && c.periodo.fim > fim)) fim = c.periodo.fim;
+      }
+      const mM = (c.meses||[]).map(v => idx(tMes,iMes,v));
+      const mV = (c.vends||[]).map(v => idx(tVend,iVend,v));
+      const mP = (c.prods||[]).map(v => idx(tProd,iProd,v));
+
+      (c.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
+        const k = mM[mi]+'|'+mV[vi];
+        const a = mesVend.get(k) || {f:0,c:0,i:0,cl:0};
+        a.f+=f; a.c+=cup; a.i+=it; a.cl+=cli; mesVend.set(k,a);
+      });
+      (c.mesProd||[]).forEach(([mi,pi,q,f])=>{
+        const k = mM[mi]+'|'+mP[pi];
+        const a = mesProd.get(k) || {q:0,f:0};
+        a.q+=q; a.f+=f; mesProd.set(k,a);
+      });
+      (c.prodTotal||[]).forEach(([pi,q,f,ncli])=>{
+        const k = mP[pi];
+        const a = prodTot.get(k) || {q:0,f:0,cli:0};
+        a.q+=q; a.f+=f; a.cli+=ncli; prodTot.set(k,a);
+      });
+      (c.cross||[]).forEach(([a,b,n])=>{
+        const k = mP[a]+'|'+mP[b];
+        cross.set(k, (cross.get(k)||0) + n);
+      });
+      (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens])=>{
+        const k = String(nome).trim().toLowerCase();
+        const e = clientes.get(k);
+        if(!e){
+          clientes.set(k, {n:nome, v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
+        } else {
+          // mesmo cliente em anos diferentes: consolidar
+          if(ult > e.ult){ e.ult = ult; e.v = mV[vi]; }
+          if(((c.meses||[])[priMi]||'') < e.pri) e.pri = (c.meses||[])[priMi]||e.pri;
+          e.compras += compras; e.total += total; e.itens += itens;
+        }
+      });
+    });
+  });
+
+  const par = k => k.split('|').map(Number);
+  return {
+    linhas, faturamento: Math.round(faturamento*100)/100,
+    periodo:{ini, fim},
+    meses:tMes, vends:tVend, prods:tProd,
+    mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
+    mesProd: [...mesProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
+    prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]),
+    cross: [...cross.entries()].map(([k,n])=>{const[a,b]=par(k);return [a,b,n];}).sort((x,y)=>y[2]-x[2]),
+    clientes: [...clientes.values()].sort((a,b)=>b.total-a.total),
+    clientesUnicos: clientes.size
+  };
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R52] PADRÕES DA SEMANA — melhor/pior dia da semana e semana do mês
+// Dia da semana é comparado por MÉDIA (um mês tem 5 sextas e 4 segundas;
+// somar puniria o dia que caiu menos vezes). Semana do mês é comparada
+// por TOTAL, que é como a operação enxerga o fechamento.
+// Dias em que a loja não abre são excluídos — senão domingo apareceria
+// sempre como "pior" nas lojas de rua, o que não é informação.
+// ══════════════════════════════════════════════════════════════════════
+
+const _DIAS_SEM = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+
+function _padLojasVisiveis(){
+  // [R63] O admin pode analisar a rede toda ou uma loja só. A loja logada
+  // continua vendo apenas a própria — o seletor nem aparece para ela.
+  const base = isAdmin() ? LOJAS : LOJAS.filter(l => l.id === lojaId());
+  if(!isAdmin()) return base;
+  const escolhida = document.getElementById('sem-padroes-loja')?.value || '';
+  return escolhida ? base.filter(l => l.id === escolhida) : base;
+}
+
+/**
+ * [R63] Misturar loja de shopping (abre domingo) com loja de rua distorce
+ * a média por dia da semana: no domingo só as de shopping entram, então o
+ * dia aparece artificialmente fraco. Detectar para poder avisar na tela.
+ */
+function _padMisturaAbertura(lojas){
+  const abre7 = lojas.filter(l => LOJAS_7DIAS.includes(l.id));
+  const abre6 = lojas.filter(l => !LOJAS_7DIAS.includes(l.id));
+  return (abre7.length && abre6.length)
+    ? {mistura:true, sete:abre7.map(l=>l.nome), seis:abre6.map(l=>l.nome)}
+    : {mistura:false};
+}
+function _padAbre(lid, dt){
+  const abre7 = (typeof LOJAS_7DIAS !== 'undefined') && LOJAS_7DIAS.includes(lid);
+  return abre7 || dt.getDay() !== 0;
+}
+function _padISO(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+// Semana do mês pelo dia (1-7 = 1ª, 8-14 = 2ª, ...)
+function _padSemanaDoMes(dia){ return Math.min(5, Math.floor((dia-1)/7) + 1); }
+
+/**
+ * [R62] Meses a considerar, a partir da especificação escolhida na tela.
+ * Aceita três formas — e um número solto, pela compatibilidade com as
+ * chamadas antigas que passavam só a quantidade de meses.
+ *   {tipo:'ultimos', n}        últimos N meses, contando o atual
+ *   {tipo:'mes',  mr}          um mês específico ('2025-02')
+ *   {tipo:'range', ini, fim}   intervalo livre entre dois meses
+ */
+window._padResolverMeses = function(spec){
+  const hj = hoje();
+  const [hY, hM] = hj.split('-').map(Number);
+  if(typeof spec === 'number' || !spec) spec = {tipo:'ultimos', n: Number(spec) || 1};
+
+  const passo = (y, m) => y + '-' + String(m).padStart(2,'0');
+
+  if(spec.tipo === 'mes' && spec.mr){
+    return {meses:[spec.mr], rotulo: _padRotuloMes(spec.mr)};
+  }
+  if(spec.tipo === 'range' && (spec.ini || spec.fim)){
+    let a = (spec.ini || spec.fim).slice(0,7);
+    let b = (spec.fim || spec.ini).slice(0,7);
+    if(a > b){ const t = a; a = b; b = t; }
+    const [aY,aM] = a.split('-').map(Number);
+    const [bY,bM] = b.split('-').map(Number);
+    const out = [];
+    for(let t = aY*12+(aM-1); t <= bY*12+(bM-1); t++){
+      out.push(passo(Math.floor(t/12), (t%12)+1));
+      if(out.length > 120) break;             // trava de sanidade
+    }
+    return {meses: out, rotulo: out.length === 1 ? _padRotuloMes(out[0])
+      : _padRotuloMes(a) + ' a ' + _padRotuloMes(b)};
+  }
+  // últimos N meses
+  const n = Math.max(1, Number(spec.n) || 1);
+  const out = [];
+  for(let k = 0; k < n; k++){
+    const t = hY*12 + (hM-1) - k;
+    out.push(passo(Math.floor(t/12), (t%12)+1));
+  }
+  return {meses: out, rotulo: n === 1 ? 'Mês atual' : 'Últimos ' + n + ' meses'};
+};
+
+function _padRotuloMes(mr){
+  const nomes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const [y,m] = String(mr).split('-').map(Number);
+  return (nomes[m] || '?') + '/' + y;
+}
+
+/**
+ * Apura padrões nos meses da especificação.
+ * @param {object|number} spec ver _padResolverMeses
+ */
+window._calcularPadroesSemana = function(spec){
+  const resolvido = window._padResolverMeses(spec);
+  const lojas = _padLojasVisiveis();
+  const hj = hoje();
+
+  const porDiaSem = _DIAS_SEM.map((n,i) => ({i, nome:n, total:0, dias:0, lojasDia:0}));
+  const porSemMes = [1,2,3,4,5].map(n => ({n, total:0, dias:0}));
+  let totalGeral = 0, diasComVenda = 0;
+  const mesesUsados = [];
+
+  for(const mr of resolvido.meses){
+    const [y, m] = mr.split('-').map(Number);
+    mesesUsados.push(mr);
+    const ultimo = new Date(y, m, 0).getDate();
+
+    for(let d = 1; d <= ultimo; d++){
+      const ds = mr + '-' + String(d).padStart(2,'0');
+      if(ds > hj) break;                       // não contar futuro
+      const dt = new Date(y, m-1, d);
+      const dow = dt.getDay();
+
+      // soma só das lojas que abrem nesse dia
+      let vDia = 0, abriu = false;
+      lojas.forEach(l => {
+        if(!_padAbre(l.id, dt)) return;
+        abriu = true;
+        vDia += calcDia(l.id, ds);
+      });
+      if(!abriu) continue;
+
+      porDiaSem[dow].total += vDia;
+      porDiaSem[dow].dias++;
+      porSemMes[_padSemanaDoMes(d)-1].total += vDia;
+      porSemMes[_padSemanaDoMes(d)-1].dias++;
+      totalGeral += vDia;
+      if(vDia > 0) diasComVenda++;
+    }
+  }
+
+  const diasVal = porDiaSem.filter(x => x.dias > 0)
+    .map(x => ({...x, media: x.total / x.dias}));
+  const semVal = porSemMes.filter(x => x.dias > 0);
+
+  const ordDia = [...diasVal].sort((a,b) => b.media - a.media);
+  const ordSem = [...semVal].sort((a,b) => b.total - a.total);
+
+  return {
+    meses: mesesUsados, rotulo: resolvido.rotulo, totalGeral, diasComVenda,
+    lojas: lojas.map(l => l.nome), abertura: _padMisturaAbertura(lojas),
+    porDiaSem: diasVal, porSemMes: semVal,
+    melhorDia: ordDia[0] || null, piorDia: ordDia[ordDia.length-1] || null,
+    melhorSem: ordSem[0] || null, piorSem: ordSem[ordSem.length-1] || null,
+    mediaGeralDia: diasVal.length ? diasVal.reduce((s,x)=>s+x.total,0) / diasVal.reduce((s,x)=>s+x.dias,0) : 0
+  };
+};
+
+/** [R62] Traduz os controles da tela na especificação de período. */
+window._padSpecDaTela = function(){
+  const v = document.getElementById('sem-padroes-meses')?.value || '3';
+  const hj = hoje();
+
+  const wMes   = document.getElementById('sem-padroes-mes-wrap');
+  const wRange = document.getElementById('sem-padroes-range-wrap');
+  if(wMes)   wMes.style.display   = (v === 'mes')   ? 'flex' : 'none';
+  if(wRange) wRange.style.display = (v === 'range') ? 'flex' : 'none';
+
+  if(v === 'mes'){
+    const el = document.getElementById('sem-padroes-mes');
+    if(el && !el.value) el.value = hj.slice(0,7);
+    return {tipo:'mes', mr: (el?.value || hj.slice(0,7))};
+  }
+  if(v === 'range'){
+    const a = document.getElementById('sem-padroes-ini');
+    const b = document.getElementById('sem-padroes-fim');
+    if(a && !a.value){
+      // padrão: os 3 meses anteriores até o atual
+      const [y,m] = hj.slice(0,7).split('-').map(Number);
+      const t = y*12 + (m-1) - 2;
+      a.value = Math.floor(t/12) + '-' + String((t%12)+1).padStart(2,'0');
+    }
+    if(b && !b.value) b.value = hj.slice(0,7);
+    return {tipo:'range', ini:a?.value || '', fim:b?.value || ''};
+  }
+  return {tipo:'ultimos', n: Number(v) || 1};
+};
+
+window.renderPadroesSemana = function(){
+  const el = document.getElementById('sem-padroes');
+  if(!el) return;
+
+  // Popular o seletor de loja uma única vez (admin)
+  const selLoja = document.getElementById('sem-padroes-loja');
+  if(selLoja && isAdmin() && selLoja.options.length <= 1){
+    const at = selLoja.value;
+    selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>'
+      + LOJAS.map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
+    if(at) selLoja.value = at;
+  }
+
+  const p = window._calcularPadroesSemana(window._padSpecDaTela());
+
+  const rot = document.getElementById('sem-padroes-rotulo');
+  if(rot){
+    const nLojas = (p.lojas||[]).length;
+    const alvo = nLojas === 1 ? p.lojas[0] : (nLojas + ' lojas');
+    rot.textContent = (p.rotulo || '') + (nLojas ? ' · ' + alvo : '');
+  }
+
+  if(!p.diasComVenda){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'Sem lançamentos em <strong>' + (p.rotulo||'') + '</strong> para identificar padrões.'
+      + '<br><span style="font-size:11px">Escolha outro período na caixa acima.</span></div>';
+    return;
+  }
+
+  const maxMedia = Math.max(...p.porDiaSem.map(x => x.media)) || 1;
+  const maxSem   = Math.max(...p.porSemMes.map(x => x.total)) || 1;
+
+  const barra = (pct, cor) =>
+    '<div style="height:7px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden">'
+    + '<div style="height:100%;width:' + Math.max(2, pct) + '%;background:' + cor + ';border-radius:99px"></div></div>';
+
+  const linhaDia = d => {
+    const eMelhor = p.melhorDia && d.i === p.melhorDia.i;
+    const ePior   = p.piorDia   && d.i === p.piorDia.i;
+    const cor = eMelhor ? 'var(--verde)' : ePior ? 'var(--verm)' : 'var(--ouro)';
+    const vsMedia = p.mediaGeralDia > 0 ? (d.media / p.mediaGeralDia - 1) * 100 : 0;
+    return '<div style="display:grid;grid-template-columns:78px 1fr 96px 62px;gap:9px;align-items:center;padding:5px 0">'
+      + '<span style="font-size:11.5px;font-weight:' + (eMelhor||ePior?'700':'500') + ';color:' + (eMelhor||ePior?cor:'var(--texto)') + '">'
+        + (eMelhor?'🏆 ':'') + (ePior?'⚠️ ':'') + d.nome + '</span>'
+      + barra(d.media/maxMedia*100, cor)
+      + '<span style="font-size:11px;text-align:right;font-weight:600">' + fmt(d.media) + '</span>'
+      + '<span style="font-size:10px;text-align:right;color:' + (vsMedia>=0?'var(--verde)':'var(--verm)') + '">'
+        + (vsMedia>=0?'+':'') + vsMedia.toFixed(0) + '%</span>'
+    + '</div>';
+  };
+
+  const linhaSem = s => {
+    const eMelhor = p.melhorSem && s.n === p.melhorSem.n;
+    const ePior   = p.piorSem   && s.n === p.piorSem.n;
+    const cor = eMelhor ? 'var(--verde)' : ePior ? 'var(--verm)' : 'var(--azul)';
+    const pctTot = p.totalGeral > 0 ? s.total/p.totalGeral*100 : 0;
+    return '<div style="display:grid;grid-template-columns:78px 1fr 96px 62px;gap:9px;align-items:center;padding:5px 0">'
+      + '<span style="font-size:11.5px;font-weight:' + (eMelhor||ePior?'700':'500') + ';color:' + (eMelhor||ePior?cor:'var(--texto)') + '">'
+        + (eMelhor?'🏆 ':'') + (ePior?'⚠️ ':'') + s.n + 'ª sem</span>'
+      + barra(s.total/maxSem*100, cor)
+      + '<span style="font-size:11px;text-align:right;font-weight:600">' + fmt(s.total) + '</span>'
+      + '<span style="font-size:10px;text-align:right;color:var(--muted)">' + pctTot.toFixed(0) + '%</span>'
+    + '</div>';
+  };
+
+  const resumo = [];
+  if(p.melhorDia && p.piorDia && p.melhorDia.i !== p.piorDia.i){
+    const razao = p.piorDia.media > 0 ? (p.melhorDia.media / p.piorDia.media) : 0;
+    resumo.push('<strong style="color:var(--verde)">' + p.melhorDia.nome + '</strong> é o melhor dia ('
+      + fmt(p.melhorDia.media) + ' em média) e <strong style="color:var(--verm)">' + p.piorDia.nome
+      + '</strong> o mais fraco (' + fmt(p.piorDia.media) + ')'
+      + (razao > 1 ? ' — <strong>' + razao.toFixed(1) + '×</strong> de diferença' : '') + '.');
+  }
+  if(p.melhorSem && p.piorSem && p.melhorSem.n !== p.piorSem.n){
+    resumo.push('A <strong style="color:var(--verde)">' + p.melhorSem.n + 'ª semana</strong> concentra o maior volume e a <strong style="color:var(--verm)">'
+      + p.piorSem.n + 'ª</strong> o menor — vale antecipar ação para a semana fraca.');
+  }
+
+  el.innerHTML =
+    '<div class="g2" style="gap:16px">'
+      + '<div>'
+        + '<div style="font-size:11px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📅 Por dia da semana <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">— média por dia</span></div>'
+        + p.porDiaSem.map(linhaDia).join('')
+      + '</div>'
+      + '<div>'
+        + '<div style="font-size:11px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🗓️ Por semana do mês <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">— total acumulado</span></div>'
+        + p.porSemMes.map(linhaSem).join('')
+      + '</div>'
+    + '</div>'
+    + (resumo.length
+        ? '<div style="margin-top:12px;padding:10px 13px;background:rgba(201,168,76,.07);border-left:3px solid var(--ouro);border-radius:6px;font-size:12px;line-height:1.55">'
+          + resumo.join('<br>') + '</div>'
+        : '')
+    + (p.abertura && p.abertura.mistura
+        ? '<div style="margin-top:10px;padding:9px 12px;background:rgba(78,201,255,.07);border-left:3px solid #4ec9ff;border-radius:6px;font-size:11px;color:var(--muted)">'
+          + 'ℹ️ A seleção mistura lojas que abrem domingo (' + p.abertura.sete.join(', ') + ') '
+          + 'com lojas que fecham (' + p.abertura.seis.join(', ') + '). '
+          + 'No domingo só as primeiras entram na conta, então o dia aparece mais fraco do que é. '
+          + '<strong>Para comparar dia da semana, selecione uma loja de cada vez.</strong></div>'
+        : '')
+    + '<div style="margin-top:8px;font-size:10px;color:var(--muted)">'
+      + 'Base: ' + (p.rotulo || (p.meses.length + ' mês(es)')) + ' · '
+      + p.meses.length + ' mês(es) · ' + p.diasComVenda + ' dias com lançamento. '
+      + 'Dias em que a loja não abre não entram na média.</div>';
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R50] Persistência local à prova de quota.
+// Antes: save() começava com localStorage.setItem() sem proteção. Quando o
+// quota estourava (planilha grande em D.excelDados), a exceção abortava o
+// save() INTEIRO — inclusive o sync com o Firebase. Uma importação grande
+// derrubava a persistência de lançamentos, contatos e fluxo junto.
+// Agora a falha é contida: sacrifica o dado analítico (recuperável, é só
+// reimportar) para preservar o operacional (não é recuperável).
+// ══════════════════════════════════════════════════════════════════════
+function _tamanhoMB(obj){
+  try{ return new Blob([JSON.stringify(obj)]).size / 1048576; }catch(e){ return 0; }
+}
+function _persistirLocal(){
+  try{
+    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    if(window._avisoQuota){ window._avisoQuota = false; }
+    return true;
+  }catch(e){
+    const ehQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || /quota/i.test(e.message||''));
+    if(!ehQuota){ console.error('[Avatim] localStorage falhou:', e.message); return false; }
+
+    // Plano B: gravar sem os dados analíticos do Excel — de longe o maior
+    // volume e o único que pode ser reconstruído reimportando a planilha.
+    const mbExcel = _tamanhoMB(D.excelDados || []);
+    try{
+      const enxuto = Object.assign({}, D, {excelDados: [], _excelOmitidoLocal: true});
+      localStorage.setItem("avatim_v5", JSON.stringify(enxuto));
+      if(!window._avisoQuota){
+        window._avisoQuota = true;
+        console.warn('[Avatim] quota estourado — excelDados ('+mbExcel.toFixed(1)+' MB) fora do localStorage');
+        if(typeof showToast === 'function'){
+          showToast('⚠️ Base do CRM grande demais para o armazenamento local ('
+            + mbExcel.toFixed(1) + ' MB). Lançamentos e contatos continuam sendo salvos; '
+            + 'os dados da planilha valem só nesta sessão. Use "Limpar dados" no CRM e importe um período menor.', 'err');
+        }
+      }
+      return true;
+    }catch(e2){
+      // Nem sem o Excel coube: aí é dado operacional demais ou storage cheio
+      console.error('[Avatim] localStorage cheio mesmo sem excelDados:', e2.message);
+      if(typeof showToast === 'function'){
+        showToast('❌ Armazenamento local cheio ('+_tamanhoMB(D).toFixed(1)+' MB). '
+          + 'Os dados desta sessão podem não sobreviver a um refresh — sincronize antes de fechar.', 'err');
+      }
+      return false;
+    }
+  }
+}
+
 function save(){
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  // A falha aqui NÃO pode impedir o sync remoto abaixo — é ele que leva o
+  // dado para as outras lojas.
+  _persistirLocal();
   if(_savePending) return;
   _savePending = true;
   // [FIX Race Condition] Guardar snapshot dos dados no momento do save
@@ -5881,19 +7245,16 @@ function save(){
     const ok = await waitForFirebase(5000);
     if(ok && window.fsGravar){
       try{
+        if(typeof window._syncMarcar === 'function') window._syncMarcar('enviando');
         await window.fsGravar(JSON.stringify(D));
         // [FIX Race Condition] Dados gravados — limpar snapshot pendente
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
-        // [FIX] Feedback de sync para TODOS os perfis (nao so admin)
-        const syncEl = document.getElementById('sync-badge');
-        if(syncEl){
-          syncEl.textContent = '✅ Salvo: ' + new Date().toLocaleTimeString('pt-BR');
-          syncEl.style.color = 'var(--verde)';
-        }
+        if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
         console.log("[Avatim] save() sincronizado com Firebase OK");
       }catch(e){
         console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
+        if(typeof window._syncMarcar === 'function') window._syncMarcar('erro', e.code||e.message);
         // [FIX A] SEMPRE zerar _pendingLocalData ao falhar — nunca deixar syncAdmin bloqueado
         window._pendingLocalData = null;
         showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
@@ -5902,6 +7263,7 @@ function save(){
           if(window.fsGravar){
             try{
               await window.fsGravar(JSON.stringify(D));
+              if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
               showToast('✅ Sincronizado com sucesso!', 'ok');
             }
             catch(e2){
@@ -5913,6 +7275,7 @@ function save(){
       }
     } else {
       console.warn("[Avatim] Firebase indisponivel - dado salvo so no localStorage");
+      if(typeof window._syncMarcar === 'function') window._syncMarcar('erro','Firebase indisponível');
       // [FIX A] Zerar _pendingLocalData para não bloquear syncAdmin
       window._pendingLocalData = null;
       showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
@@ -5920,6 +7283,7 @@ function save(){
       if(retryOk && window.fsGravar){
         try{
           await window.fsGravar(JSON.stringify(D));
+          if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
           showToast('✅ Reconectado e sincronizado com sucesso!', 'ok');
         }
         catch(e){
@@ -6001,6 +7365,10 @@ async function loadFromFirestore(){
       return false;
     }
     console.log("[Avatim] loadFromFirestore: dados recebidos, processando...");
+    // [R56] Cubos do CRM vivem em documentos próprios (crm_<loja>_<ano>),
+    // fora do payload principal. Carregados aqui, sem travar o resto se falhar.
+    try{ if(typeof window.crmCarregar === 'function') await window.crmCarregar(); }
+    catch(eCrm){ console.warn('[crm] carregamento ignorado:', eCrm.message); }
     const remoto = JSON.parse(dadosJSON);
     if(remoto){
       // [FIX] Merge seguro: campos de configuracao sobrescrevem (vem do admin)
@@ -6242,7 +7610,7 @@ async function loadFromFirestore(){
           if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
         });
       }
-      localStorage.setItem("avatim_v5", JSON.stringify(D));
+      _persistirLocal();
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
       // [FIX 13/08] auto-recuperar dados presos que nunca subiram
       if(typeof window.autoSyncDadosPresos === 'function'){
@@ -6500,7 +7868,7 @@ function arquivarVendedora(vid, arquivar){
   const nome = D.vendedoras[idx].nome;
   // [FIX CRÍTICO] Gravar imediatamente no localStorage e Firebase
   // bypass do save() que pode ter guards bloqueando admin
-  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   showToast(arquivar ? "📦 "+nome+" arquivada" : "✅ "+nome+" reativada");
@@ -7020,9 +8388,11 @@ function showApp(){
 
   restaurarConfigCosmos();
   CosmosDB.init();
+  // [R61] O badge de sync vale para TODOS: a loja precisa saber se as
+  // vendas dela subiram. Só o de Cosmos continua restrito ao admin.
+  if(typeof window._syncRender === 'function') window._syncRender();
   if(adminMode){
-    const sb=document.getElementById("sync-badge"),cb=document.getElementById("cosmos-badge");
-    if(sb) sb.style.display="block";
+    const cb=document.getElementById("cosmos-badge");
     if(cb&&COSMOS_OK) cb.style.display="block";
   }
   renderProdutos("","");
@@ -7168,7 +8538,7 @@ function nav(pg){
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
   document.getElementById("page-"+pg)?.classList.add("active");
   document.getElementById("nav-"+pg)?.classList.add("active");
-  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:renderSemana,metas:renderMetas,
+  ({historico:()=>iniciarPaginaHistorico(),rankings:()=>initRankings(),lojas:()=>renderLojas(_tabLojas),semana:()=>{renderSemana(); if(typeof window.renderPadroesSemana==="function") window.renderPadroesSemana();},metas:renderMetas,
     performance:renderPerformance,
     controle:renderControle,
     vendedoras:()=>{renderVendRanking(_tabVend);renderTabelaVend();},
@@ -7190,7 +8560,7 @@ function nav(pg){
                   const i=D.campRealizados.findIndex(x=>x.id===r.id);
                   if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
                 });
-                localStorage.setItem('avatim_v5',JSON.stringify(D));
+                _persistirLocal();
               }
             }
           }catch(e){ console.warn('[Avatim] sync campanhas:', e.message); }
@@ -7213,7 +8583,7 @@ function nav(pg){
                   const i=D.campRealizados.findIndex(x=>x.id===r.id);
                   if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
                 });
-                localStorage.setItem('avatim_v5',JSON.stringify(D));
+                _persistirLocal();
               }
             }
           }catch(e){ console.warn('[Avatim] sync campanhas loja:', e.message); }
@@ -8566,7 +9936,10 @@ function carregarVendsForm(lidOverride){
           ${barra('Hoje',         valAtual, metaDia,  corDia, superDia)}
           ${barra(semNome+' sem', acumSem,  metaSem,  corSem, superSem)}
           ${barra('Mês',          acumMes,  metaMes,  corMes, superMes)}
-        </div>`
+        </div>
+
+        <!-- [R51] Ritmo da meta da vendedora: ideal até a data vs realizado -->
+        ${typeof window._htmlRitmoVend === 'function' ? window._htmlRitmoVend(v.id) : ''}`
         : '<div style="font-size:11px;color:var(--muted);text-align:center;padding:8px;background:rgba(255,255,255,.03);border-radius:8px">⚠️ Meta não cadastrada</div>'}
 
         <!-- Lançamento -->
@@ -9005,7 +10378,7 @@ async function salvarLanc(){
 
     // [FIX Race Condition] Gravar no Firebase ANTES de recarregar a tela
     // para evitar que loadFromFirestore apague o dado recém-lançado
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
+    _persistirLocal();
     // Salvar snapshot TAMBÉM no localStorage para sobreviver a recargas
     localStorage.setItem("avatim_pending", JSON.stringify(D));
     window._pendingLocalData = JSON.parse(JSON.stringify(D));
@@ -9133,7 +10506,7 @@ async function deletarLanc(lid, data){
   });
   // [FIX Race Condition] Exclusão tem prioridade — cancela qualquer save() pendente
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   // Snapshot da exclusão para proteger tombstones
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast("🗑️ Lançamento de "+data+" excluído.");
@@ -10297,7 +11670,7 @@ async function lancarVendaVend(){
   const tmV = trans>0 ? parseFloat((val/trans).toFixed(2)) : 0;
   D.vendasVend[id][data]={val, trans, cli:trans, aniv:0, inativ:0, tm:tmV, ts:Date.now()};
   // [FIX Race Condition] Snapshot antes de gravar
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast("\u2705 Venda lan\u00e7ada!");
   renderVendRanking(_tabVend);
@@ -10390,7 +11763,7 @@ async function excluirLancVend(vendId, data, btn){
   if(D.vendasVend[vendId]) delete D.vendasVend[vendId][data];
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast('🗑️ Lançamento de '+dFmt+' excluído.', 'ok');
   btn?.closest('tr')?.remove();
@@ -10430,7 +11803,7 @@ async function excluirLancDia(lid, data, btn){
   });
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
   window._pendingLocalData = null;
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   showToast('🗑️ Lançamentos de '+dFmt+' excluídos.', 'ok');
   btn?.closest('tr')?.remove();
@@ -11076,28 +12449,46 @@ function exportarPDFSemana(){
 
   const thDias = datas.map(({d,nome})=>`<th style="text-align:right">${nome}<br>${d.getDate()}</th>`).join('');
 
+  // [R64] Padrões de venda, no mesmo recorte escolhido na tela
+  let _padHTML = '', _padRotulo = '';
+  try{
+    const _p = window._calcularPadroesSemana(
+      typeof window._padSpecDaTela === 'function' ? window._padSpecDaTela() : 3);
+    _padHTML = _semPadroesHTML(_p);
+    _padRotulo = (_p.rotulo||'') + ((_p.lojas||[]).length===1 ? ' · '+_p.lojas[0] : '');
+  }catch(e){ console.warn('[semana] padrões no PDF:', e.message); }
+
+  const _semAlvo = _adm ? ((lojas.length===1) ? lojas[0].nome : 'Rede Completa') : (lojas[0]?.nome || '');
+  const _dSem = d => d.split('-').reverse().join('-');
+  const _tituloSemana = 'Semana — ' + _semAlvo + ' — ' + _dSem(datas[0]?.ds || hj) + ' a ' + _dSem(datas[datas.length-1]?.ds || hj);
+
   const win = window.open('','_blank','width=1100,height=700');
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
-<meta charset="UTF-8"><title>Semana — Relatório por Loja</title>
+<meta charset="UTF-8"><title>${_tituloSemana}</title>
 <style>
+/* [R64] Mesma escala de leitura do relatório de Origem do Fluxo. */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;font-size:11px}
-.logo{font-size:18px;font-weight:900;color:#0a0a0a;letter-spacing:1px}
+body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:24px;font-size:15px;line-height:1.45}
+.logo{font-size:30px;font-weight:900;color:#0a0a0a;letter-spacing:1px}
 .logo span{color:#C9A84C}
-.sub{font-size:10px;color:#666;margin-bottom:12px;border-bottom:2px solid #C9A84C;padding-bottom:6px}
-table{width:100%;border-collapse:collapse;margin-top:10px}
-th{background:#1a1a2e;color:#C9A84C;padding:7px 8px;text-align:left;font-size:10px;font-weight:700}
-td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}
+.sub{font-size:14px;color:#444;margin-bottom:16px;border-bottom:2px solid #C9A84C;padding-bottom:8px;font-weight:600}
+h2{font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:24px 0 8px;color:#444;border-bottom:1px solid #ddd;padding-bottom:5px}
+h3{font-size:14.5px;margin:16px 0 6px;color:#555}
+table{width:100%;border-collapse:collapse;margin-top:10px;margin-bottom:16px}
+th{background:#1a1a2e;color:#C9A84C;padding:8px 10px;text-align:left;font-size:14px;font-weight:700}
+td{padding:7px 10px;border-bottom:1px solid #eee;font-size:14px}
 tr:nth-child(even){background:#fafaf5}
-.foot{margin-top:14px;font-size:9px;color:#999;text-align:center}
-@media print{body{padding:10px}}
+.foot{margin-top:18px;font-size:12px;color:#888;text-align:center}
+@media print{body{padding:12px}}
 </style></head><body>
-<div class="logo">Mon<span>Aris</span> <span style="font-size:12px;font-weight:400">SALES CONTROL</span></div>
-<div class="sub">Relatório Semanal por Loja — Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+<div class="logo">Mon<span>Aris</span> <span style="font-size:19px;font-weight:400">SALES CONTROL</span></div>
+<div class="sub">Relatório da Semana — ${_semAlvo} &nbsp;|&nbsp; Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+<h2>Resultado por Loja na Semana</h2>
 <table>
   <thead><tr><th>Loja</th>${thDias}<th style="text-align:right">Total</th><th style="text-align:right">Meta Sem.</th><th style="text-align:right">%</th><th style="text-align:right">Falta</th></tr></thead>
   <tbody>${rowsLojas}${rowTotal}</tbody>
 </table>
+${_padHTML}
 <div class="foot">MonAris Sales Control — Exportado em ${new Date().toLocaleString('pt-BR')}</div>
 </body></html>`);
   win.document.close();
@@ -11533,7 +12924,7 @@ function toggleRelCamp(){
               const i=D.campRealizados.findIndex(x=>x.id===r.id);
               if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
             });
-            localStorage.setItem('avatim_v5',JSON.stringify(D));
+            _persistirLocal();
           }
         }
       }catch(e){ console.warn('[Avatim] sync rel campanhas:', e.message); }
@@ -12790,7 +14181,7 @@ async function salvarCampReal(){
   }
 
     // [FIX Race Condition] Snapshot antes de gravar campanha
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
   // Gravar Firebase diretamente
   const _okCamp = await waitForFirebase(4000);
@@ -13440,7 +14831,7 @@ function salvarMetasVendedoras(lid){
     // Senão: meta da loja já está definida, preservar
   }
   // [FIX 5 CRÍTICO] Gravar direto no Firebase sem passar por save() com guards
-  localStorage.setItem('avatim_v5', JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   showToast(n + " vendedoras salvas! Sincronizando...");
@@ -13645,7 +15036,7 @@ function salvarMetaLoja(lid){
   }
   // [FIX CRÍTICO] Gravar localmente IMEDIATAMENTE e enviar ao Firestore direto
   // Bypass do save() que pode ter guards bloqueando admin
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
   // [FIX Race Condition] Snapshot antes de gravar — evita que D seja alterado durante o await
@@ -13705,7 +15096,7 @@ function resetEmergencia(){
   if(!confirm("Isso vai APAGAR todas as metas salvas e manter apenas os lançamentos de vendas.\n\nUse somente se os valores estiverem aparecendo errados (ex: R$ 6,00 em vez de R$ 6.000,00).\n\nContinuar?")) return;
   // Manter vendas e vendedoras, limpar só metas corrompidas
   LOJAS.forEach(l=>{ D.metasLoja[l.id]={}; });
-  localStorage.setItem("avatim_v5", JSON.stringify(D));
+  _persistirLocal();
   alert("Metas limpas! Faça login e redefina as metas em Metas por Loja.");
   location.reload();
 }
@@ -14075,7 +15466,7 @@ async function tabRankPer(per, el, ctx) {
               });
             });
           }
-          localStorage.setItem('avatim_v5', JSON.stringify(D));
+          _persistirLocal();
         }
       }catch(e){ console.warn('[Avatim] tabRankPer ano Firebase:', e.message); }
     }
@@ -14436,7 +15827,7 @@ function tabRankPerLoja(per, el){
                 if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
               });
               });
-              localStorage.setItem('avatim_v5', JSON.stringify(D));
+              _persistirLocal();
             }
           }catch(e){}
           renderRankingLoja();
@@ -15051,7 +16442,7 @@ async function sbUpsert(table,data){return await sbRequest(table,'POST',Array.is
 
 // Salvar com sync — Supabase e/ou Firebase
 async function saveWithSync(opts={}){
-  localStorage.setItem('avatim_v5',JSON.stringify(D));
+  _persistirLocal();
   const hoje_ts = new Date().toISOString();
   if(opts.lancamento){
     const {lid,data,dados}=opts.lancamento;
@@ -15169,7 +16560,7 @@ function iniciarAutoRefresh(){
             if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _persistirLocal();
         const pg=document.querySelector('.page.active')?.id?.replace('page-','');
         if(pg==='dash') carregarDash();
         else if(pg==='metas') renderMetas();
@@ -15281,14 +16672,15 @@ function iniciarAutoRefresh(){
               });
             }
           }
-          localStorage.setItem('avatim_v5', JSON.stringify(D));
+          _persistirLocal();
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
         }
       }
     }catch(e){ console.warn('[Avatim] syncAdmin erro:', e.message); }
-    const ts=new Date();
-    const el=document.getElementById('sync-badge');
-    if(el) el.textContent='🔄 Sync: '+ts.toLocaleTimeString('pt-BR');
+    // [FIX R61] Antes esta linha sobrescrevia o badge com o horário da
+    // LEITURA do admin. "Sync 14:32" parecia confirmar envio, mas era só
+    // releitura — mascarava uma gravação que havia falhado.
+    if(typeof window._syncRender === 'function') window._syncRender();
     const pg=document.querySelector('.page.active')?.id?.replace('page-','');
     if(pg==='dash')       carregarDash();
     else if(pg==='lojas') renderLojas(_tabLojas);
@@ -15439,7 +16831,7 @@ async function forceSyncAdmin(){
       if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
     }
     if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
-    localStorage.setItem('avatim_v5', JSON.stringify(D));
+    _persistirLocal();
     const ts = new Date().toLocaleTimeString('pt-BR');
     if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
     showToast('✅ Dados sincronizados!');
@@ -17626,7 +19018,7 @@ async function buscarHistoricoLoja(){
               });
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _persistirLocal();
         console.log('[Avatim] buscarHistoricoLoja: dados do Firebase carregados');
       }
     }catch(e){ console.warn('[Avatim] buscarHistoricoLoja Firebase:', e.message); }
@@ -17857,7 +19249,7 @@ async function buscarHistoricoVend(){
               });
           });
         }
-        localStorage.setItem('avatim_v5', JSON.stringify(D));
+        _persistirLocal();
       }
     }catch(e){ console.warn('[Avatim] buscarHistoricoVend Firebase:', e.message); }
   }
@@ -22204,6 +23596,128 @@ window.gerarDivulgacaoRankings = function(){
 };
 
 
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R64] SEMANA — RELATÓRIO E DIVULGAÇÃO
+// Mesma dupla das outras telas: o Relatório leva os números completos,
+// a Divulgação leva o material de publicar (pódio, sem valores em R$).
+// Ambos incluem os Padrões de Venda, respeitando o período e a loja
+// escolhidos na tela — o PDF não pode discordar do que está no monitor.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Blocos HTML dos padrões, para o relatório detalhado. */
+function _semPadroesHTML(p){
+  if(!p || !p.diasComVenda) return '<p style="color:#999;font-size:13px">Sem lançamentos no período para identificar padrões.</p>';
+
+  const linhasDia = p.porDiaSem.map(d => {
+    const vs = p.mediaGeralDia > 0 ? (d.media/p.mediaGeralDia - 1)*100 : 0;
+    const marca = (p.melhorDia && d.i === p.melhorDia.i) ? '🏆 '
+                : (p.piorDia && d.i === p.piorDia.i) ? '⚠️ ' : '';
+    return `<tr>
+      <td>${marca}${d.nome}</td>
+      <td style="text-align:center">${d.dias}</td>
+      <td style="text-align:right">${fmt(d.total)}</td>
+      <td style="text-align:right"><strong>${fmt(d.media)}</strong></td>
+      <td style="text-align:right;color:${vs>=0?'#2ecc87':'#e74c3c'}">${vs>=0?'+':''}${vs.toFixed(0)}%</td>
+    </tr>`;
+  }).join('');
+
+  const linhasSem = p.porSemMes.map(s => {
+    const marca = (p.melhorSem && s.n === p.melhorSem.n) ? '🏆 '
+                : (p.piorSem && s.n === p.piorSem.n) ? '⚠️ ' : '';
+    const pct = p.totalGeral > 0 ? s.total/p.totalGeral*100 : 0;
+    return `<tr>
+      <td>${marca}${s.n}ª semana</td>
+      <td style="text-align:center">${s.dias}</td>
+      <td style="text-align:right"><strong>${fmt(s.total)}</strong></td>
+      <td style="text-align:right">${pct.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+
+  const leitura = [];
+  if(p.melhorDia && p.piorDia && p.melhorDia.i !== p.piorDia.i){
+    const razao = p.piorDia.media > 0 ? p.melhorDia.media/p.piorDia.media : 0;
+    leitura.push('<strong>' + p.melhorDia.nome + '</strong> é o melhor dia (' + fmt(p.melhorDia.media)
+      + ' em média) e <strong>' + p.piorDia.nome + '</strong> o mais fraco (' + fmt(p.piorDia.media) + ')'
+      + (razao > 1 ? ' — ' + razao.toFixed(1) + '× de diferença' : '') + '.');
+  }
+  if(p.melhorSem && p.piorSem && p.melhorSem.n !== p.piorSem.n){
+    leitura.push('A <strong>' + p.melhorSem.n + 'ª semana</strong> concentra o maior volume e a <strong>'
+      + p.piorSem.n + 'ª</strong> o menor.');
+  }
+
+  return `
+<h2>Padrões de Venda — ${p.rotulo || ''}${(p.lojas||[]).length===1 ? ' · '+p.lojas[0] : ''}</h2>
+${p.abertura && p.abertura.mistura ? `<p style="font-size:12px;color:#555;background:#eef6fb;border-left:3px solid #4ec9ff;padding:8px 10px;margin-bottom:8px">
+  A seleção mistura lojas que abrem domingo (${p.abertura.sete.join(', ')}) com lojas que fecham (${p.abertura.seis.join(', ')}).
+  No domingo só as primeiras entram na conta. Para comparar dia da semana, gere o relatório de uma loja por vez.</p>` : ''}
+<h3>Por dia da semana — comparado pela média</h3>
+<table>
+  <thead><tr><th>Dia</th><th style="text-align:center">Ocorrências</th><th style="text-align:right">Total</th><th style="text-align:right">Média</th><th style="text-align:right">vs. média geral</th></tr></thead>
+  <tbody>${linhasDia}</tbody>
+</table>
+<h3>Por semana do mês — total acumulado</h3>
+<table>
+  <thead><tr><th>Semana</th><th style="text-align:center">Dias</th><th style="text-align:right">Total</th><th style="text-align:right">% do período</th></tr></thead>
+  <tbody>${linhasSem}</tbody>
+</table>
+${leitura.length ? '<p style="font-size:13px;background:#faf6e8;border-left:3px solid #C9A84C;padding:9px 12px;margin-top:10px">'+leitura.join('<br>')+'</p>' : ''}
+<p style="font-size:11px;color:#777;margin-top:6px">
+  Base: ${p.meses.length} mês(es) · ${p.diasComVenda} dias com lançamento.
+  Dias em que a loja não abre não entram na média.</p>`;
+}
+
+/** Divulgação da Semana — pódio, sem valores em R$. */
+window.exportarDivulgacaoSemana = function(){
+  const p = window._calcularPadroesSemana(window._padSpecDaTela());
+  if(!p || !p.diasComVenda){ showToast('Sem lançamentos no período para divulgar.','err'); return; }
+
+  const lojas = (p.lojas||[]);
+  const alvo = lojas.length === 1 ? lojas[0] : 'Rede Completa';
+
+  // Pódio de dias da semana pela média (sem mostrar o valor)
+  const dias = [...p.porDiaSem].sort((a,b) => b.media - a.media).map(d => {
+    const vs = p.mediaGeralDia > 0 ? (d.media/p.mediaGeralDia - 1)*100 : 0;
+    return {nome: d.nome, info: (vs>=0?'+':'') + vs.toFixed(0) + '% vs média<br>' + d.dias + ' ocorrências'};
+  });
+
+  const semanas = [...p.porSemMes].sort((a,b) => b.total - a.total).map(s => {
+    const pct = p.totalGeral > 0 ? s.total/p.totalGeral*100 : 0;
+    return {nome: s.n + 'ª semana', info: pct.toFixed(0) + '% do período<br>' + s.dias + ' dias'};
+  });
+
+  const destaque = (valor, rotulo) =>
+    '<div style="flex:1 1 165px;min-width:165px;max-width:230px;background:#fff;border:2px solid #c9a84c;border-radius:14px;padding:18px 12px;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.06);display:flex;flex-direction:column;justify-content:center">'
+    + '<div style="font-family:\'Playfair Display\',Georgia,serif;font-size:40px;font-weight:800;color:#c9a84c;line-height:1.05">' + valor + '</div>'
+    + '<div style="font-size:13.5px;color:#8a7f5f;letter-spacing:.6px;text-transform:uppercase;font-weight:700;margin-top:8px;line-height:1.3">' + rotulo + '</div>'
+    + '</div>';
+
+  let body = '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;justify-content:center;margin:8px auto 30px;max-width:100%">'
+    + destaque(p.melhorDia ? p.melhorDia.nome : '—', 'Melhor dia da semana')
+    + destaque(p.melhorSem ? p.melhorSem.n + 'ª' : '—', 'Melhor semana do mês')
+    + destaque(p.diasComVenda, 'Dias com venda')
+    + destaque(p.meses.length, 'Meses analisados')
+    + '</div>';
+
+  body += '<h2>Dias que mais vendem</h2>' + _htmlPodio(dias);
+  body += '<h2>Semanas que mais vendem</h2>' + _htmlPodio(semanas);
+
+  if(p.abertura && p.abertura.mistura){
+    body += '<p style="text-align:center;font-size:13px;color:#8a7f5f;margin-top:18px">'
+      + 'Comparação entre lojas com dias de abertura diferentes — o domingo considera apenas as lojas de shopping.</p>';
+  }
+
+  const dArq = t => String(t).replace(/[\/\s]/g,'-');
+  _abrirJanelaDivulgacao(
+    'Padrões da Semana',
+    alvo + ' — ' + (p.rotulo || ''),
+    body,
+    'Divulgacao — Padroes da Semana — ' + alvo + ' — ' + dArq(p.rotulo || '')
+  );
+};
+
+
 // ── DIVULGAÇÃO — ORIGEM DO FLUXO ────────────────────────────────────
 // Segue a mesma regra dos outros modos de divulgação: material para
 // publicar para a equipe, então NUNCA mostra valor em R$ — só posição,
@@ -24400,52 +25914,88 @@ window.excelProcessarUpload = function(event){
         }
       }
 
-      // Perguntar se substitui ou acrescenta
-      const acao = D.excelDados.length > 0
-        ? (confirm(`Já existem ${D.excelDados.length} linhas no sistema (${(D._excelImportacoes||[]).length} importação(ões)).\n\nOK = ADICIONAR esta nova ao existente (recomendado para atualização mês a mês)\nCancelar = SUBSTITUIR tudo pelo novo arquivo (apaga todas as importações anteriores)`) ? 'adicionar' : 'substituir')
-        : 'substituir';
-
-      // [NEW R40] Criar registro da importação e marcar linhas
-      const _impId = _importIdGerar();
-      const _refMes = _importDeduzirRefMes(dadosProcessados);
-      const _cLojas = _importContarLojas(dadosProcessados);
-      dadosProcessados.forEach(r => { r._importId = _impId; });
-
-      if(acao === 'substituir'){
-        D.excelDados = dadosProcessados;
-        D._excelImportacoes = [];
-      } else {
-        D.excelDados = [...(D.excelDados||[]), ...dadosProcessados];
+      // ══════════════════════════════════════════════════════════════
+      // [R55] AGREGAÇÃO NA IMPORTAÇÃO
+      // As linhas cruas NÃO são mais guardadas: 200 mil linhas dão ~42 MB,
+      // 9x o localStorage e 42x o limite de um documento do Firestore.
+      // Guardamos os cubos agregados por loja/ano — o que as telas usam.
+      // ══════════════════════════════════════════════════════════════
+      const _lojaEscolhida = document.getElementById('excel-loja-import')?.value || '';
+      if(_lojaEscolhida){
+        // Admin escolheu a loja do arquivo: ela manda sobre o que veio na planilha
+        dadosProcessados.forEach(r => { r.loja = _lojaEscolhida; });
       }
 
+      const _semLojaAgora = dadosProcessados.filter(r => !r.loja).length;
+      if(_semLojaAgora === dadosProcessados.length){
+        showToast('Nenhuma linha tem loja definida. Escolha a loja no seletor ao lado do botão e tente de novo.','err');
+        event.target.value = '';
+        return;
+      }
+
+      // Agrupar por loja + ano — cada par vira uma unidade independente
+      const _grupos = new Map();
+      dadosProcessados.forEach(r => {
+        if(!r.loja) return;
+        const k = r.loja + '|' + r.data.slice(0,4);
+        if(!_grupos.has(k)) _grupos.set(k, []);
+        _grupos.get(k).push(r);
+      });
+
+      const _diagnostico = [];
+      let _totalPedacos = 0;
+      _grupos.forEach((linhas, k) => {
+        const [lid, ano] = k.split('|');
+        const cubo = window.crmAgregar(linhas);
+        cubo.arquivo = file.name;
+        const dg = window.crmGuardar(lid, ano, cubo);
+        _totalPedacos += dg.pedacos;
+        _diagnostico.push({
+          loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid, ano,
+          linhas: linhas.length, clientes: dg.clientes,
+          kb: Math.round((dg.bytesLeves + dg.bytesClientes)/1024),
+          pedacos: dg.pedacos
+        });
+      });
+
+      // Registro da importação (para a Gestão de Importações)
       if(!D._excelImportacoes) D._excelImportacoes = [];
       D._excelImportacoes.push({
-        id: _impId,
+        id: _importIdGerar(),
         arquivo: file.name,
         importadoEm: Date.now(),
         linhas: dadosProcessados.length,
-        refMes: _refMes,
-        lojaCounts: _cLojas.lojaCounts,
-        orfas: _cLojas.orfas,
+        agregado: true,
+        grupos: _diagnostico.map(d => d.loja + '/' + d.ano),
         colunasDetectadas: Object.keys(colMap)
       });
-
       D._excelImportInfo = {
         arquivo: file.name,
         linhas: dadosProcessados.length,
-        totalBase: D.excelDados.length,
         importadoEm: Date.now(),
+        agregado: true,
         colunasDetectadas: Object.keys(colMap)
       };
 
       save();
-      const partes = [];
-      if(ignoradosDadosVazios > 0) partes.push(ignoradosDadosVazios+' sem data/valor');
-      if(ignoradosNaoVenda > 0) partes.push(ignoradosNaoVenda+' não-venda (troca/devolução)');
-      const msg = partes.length
-        ? `✅ ${dadosProcessados.length} linhas importadas (${partes.join(', ')} ignoradas).`
-        : `✅ ${dadosProcessados.length} linhas importadas.`;
-      showToast(msg,'ok');
+
+      const _resumo = _diagnostico
+        .map(d => d.loja + '/' + d.ano + ': ' + d.linhas.toLocaleString('pt-BR') + ' linhas → '
+             + d.clientes.toLocaleString('pt-BR') + ' clientes (' + d.kb + ' KB'
+             + (d.pedacos > 1 ? ', ' + d.pedacos + ' partes' : '') + ')')
+        .join(' · ');
+      const _ignorados = [];
+      if(ignoradosDadosVazios > 0) _ignorados.push(ignoradosDadosVazios+' sem data/valor');
+      if(ignoradosNaoVenda > 0)    _ignorados.push(ignoradosNaoVenda+' não-venda');
+      showToast('✅ ' + dadosProcessados.length.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
+        + (_ignorados.length ? ' · ignoradas: ' + _ignorados.join(', ') : ''), 'ok');
+      console.log('[crm] importação agregada:', _diagnostico);
+
+      // Subir os cubos para que as lojas enxerguem a análise
+      if(typeof window.crmSincronizar === 'function'){
+        window.crmSincronizar().catch(e => console.warn('[crm] sync pós-importação:', e.message));
+      }
+
       // Reset input para permitir re-upload do mesmo arquivo
       event.target.value = '';
       window.excelRender();
@@ -24458,12 +26008,33 @@ window.excelProcessarUpload = function(event){
   reader.readAsArrayBuffer(file);
 };
 
+// [R55] Abre o seletor de arquivo depois de garantir que a loja está clara.
+window.excelAbrirUpload = function(){
+  const sel = document.getElementById('excel-loja-import');
+  if(sel && sel.options.length <= 1){
+    sel.innerHTML = '<option value="">Deduzir da planilha</option>'
+      + (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS)
+          .map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
+  }
+  if(sel && !sel.value){
+    if(!confirm('Nenhuma loja selecionada.\n\nO sistema vai tentar deduzir a loja de cada linha pela coluna Loja ou pela vendedora.\n\n'
+      + 'Se o arquivo é de UMA loja específica, cancele e selecione-a no seletor ao lado — é mais confiável.\n\nContinuar deduzindo?')) return;
+  }
+  document.getElementById('excel-file-input').click();
+};
+
 // ── LIMPAR DADOS ──────────────────────────────────────────────────
 window.excelLimparDados = function(){
-  if(!D.excelDados?.length){ showToast('Sem dados para limpar.','warn'); return; }
-  if(!confirm(`Apagar ${D.excelDados.length} linhas de Excel? Não afeta vendas/contatos.`)) return;
+  const nCubos = Object.values(D.crm||{}).reduce((s,o)=>s+Object.keys(o).length,0);
+  if(!D.excelDados?.length && !nCubos){ showToast('Sem dados para limpar.','warn'); return; }
+  if(!confirm('Apagar os dados do CRM?\n\n'
+    + (D.excelDados?.length ? D.excelDados.length + ' linhas antigas\n' : '')
+    + (nCubos ? nCubos + ' conjunto(s) loja/ano agregados\n' : '')
+    + '\nNão afeta vendas, contatos nem fluxo.')) return;
   D.excelDados = [];
+  D.crm = {};
   D._excelImportInfo = null;
+  D._excelImportacoes = [];
   save();
   showToast('Dados de Excel apagados.','ok');
   window.excelRender();
@@ -24471,7 +26042,7 @@ window.excelLimparDados = function(){
 
 // ── LIMPAR FILTROS ────────────────────────────────────────────────
 window.excelLimparFiltros = function(){
-  ['excel-filtro-ano','excel-filtro-mes','excel-filtro-dia','excel-filtro-loja','excel-filtro-vend','excel-cross-base'].forEach(id=>{
+  ['excel-filtro-ano','excel-filtro-mes','excel-filtro-loja','excel-filtro-vend','excel-cross-base'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.value = '';
   });
@@ -26473,6 +28044,77 @@ window._calcularRitmoMeta = function(lid, mesRef, dataRef){
   };
 };
 
+/**
+ * [R51] Mesmo conceito do ritmo da loja, aplicado à vendedora.
+ * A base de dias abertos é a da LOJA dela — uma vendedora não pode ser
+ * cobrada por dias em que a loja está fechada.
+ */
+window._calcularRitmoVend = function(vendId, mesRef, dataRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return null;
+  const hj = hoje();
+  mesRef = mesRef || (window._lancHistMes || hj.slice(0,7));
+  const [y,m] = mesRef.split('-').map(Number);
+  const ultimoDia = new Date(y, m, 0).getDate();
+  const fimMes = mesRef + '-' + String(ultimoDia).padStart(2,'0');
+
+  const ehMesFechado = mesRef < hj.slice(0,7);
+  const ehMesFuturo  = mesRef > hj.slice(0,7);
+  const dataLim = dataRef || (ehMesFechado ? fimMes : (ehMesFuturo ? mesRef+'-01' : hj));
+  const diaLim  = Number(dataLim.slice(8,10));
+
+  const meta = Number(v.metaMes) || 0;
+  const diasTotais    = _idDiasAbertos(v.loja, mesRef);
+  const diasPassados  = _idDiasAbertos(v.loja, mesRef, diaLim);
+  const diasRestantes = Math.max(0, diasTotais - diasPassados);
+
+  let realizado = 0;
+  Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
+    if(d.startsWith(mesRef) && d <= dataLim) realizado += Number(vd.val||0);
+  });
+
+  const ideal = diasTotais > 0 ? meta * (diasPassados / diasTotais) : 0;
+  const falta = Math.max(0, meta - realizado);
+  return {
+    meta, ideal, realizado, dif: realizado - ideal,
+    pctIdeal: ideal > 0 ? (realizado/ideal*100) : null,
+    diasTotais, diasPassados, diasRestantes, falta,
+    porDia: diasRestantes > 0 ? falta/diasRestantes : 0,
+    dataRef: dataLim, mesRef, ehMesFechado
+  };
+};
+
+// Linha compacta de ritmo para o card da vendedora
+window._htmlRitmoVend = function(vendId){
+  const r = window._calcularRitmoVend(vendId);
+  if(!r || !r.meta) return '';
+  const noRitmo = r.dif >= 0;
+  const cor = noRitmo ? 'var(--verde)' : 'var(--verm)';
+  const pctReal  = Math.max(0, Math.min(100, r.meta>0 ? r.realizado/r.meta*100 : 0));
+  const pctIdeal = Math.max(0, Math.min(100, r.meta>0 ? r.ideal/r.meta*100 : 0));
+  return ''
+    + '<div style="background:rgba(255,255,255,.03);border:1px solid var(--borda);border-radius:8px;padding:9px 10px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+        + '<span style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">📈 Ritmo do mês</span>'
+        + '<span style="font-size:9.5px;color:var(--muted)">dia ' + r.diasPassados + '/' + r.diasTotais + '</span>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:10.5px;margin-bottom:6px">'
+        + '<span style="color:var(--muted)">Ideal até hoje <strong style="color:var(--ouro)">' + fmt(r.ideal) + '</strong></span>'
+        + '<span style="color:var(--muted)">Feito <strong style="color:var(--texto)">' + fmt(r.realizado) + '</strong></span>'
+      + '</div>'
+      + '<div style="position:relative;height:7px;background:rgba(255,255,255,.08);border-radius:99px;margin-bottom:6px">'
+        + '<div style="height:100%;width:' + pctReal + '%;background:' + cor + ';border-radius:99px"></div>'
+        + '<div title="ponto ideal para hoje" style="position:absolute;top:-3px;left:' + pctIdeal + '%;width:2px;height:13px;background:var(--ouro)"></div>'
+      + '</div>'
+      + '<div style="font-size:10.5px;font-weight:700;color:' + cor + '">'
+        + (noRitmo ? '✅ ' + fmt(Math.abs(r.dif)) + ' acima do ritmo' : '⚠️ ' + fmt(Math.abs(r.dif)) + ' abaixo do ritmo')
+        + (r.diasRestantes > 0
+            ? '<span style="font-weight:400;color:var(--muted)"> · faltam ' + fmt(r.falta) + ' em ' + r.diasRestantes + 'd = <strong style="color:var(--texto)">' + fmt(r.porDia) + '/dia</strong></span>'
+            : '')
+      + '</div>'
+    + '</div>';
+};
+
 // Renderiza o bloco no Painel do Dia
 window.renderRitmoMeta = function(lidArg){
   const el = document.getElementById('lanc-ritmo-box');
@@ -27013,6 +28655,218 @@ window.exportarExcelFluxo = function(){
   XLSX.writeFile(wb, 'origem-fluxo-' + slug + '-' + ini + '-a-' + fim + '.xlsx');
   showToast('📊 Excel gerado com ' + wb.SheetNames.length + ' abas.','ok');
 };
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R58] CRM — PAINÉIS SOBRE OS CUBOS
+// Substitui excelRender() e os painéis que liam linhas cruas. A leitura
+// vem de crmVisao(); o que muda na tela é o filtro de DIA, que sai — os
+// cubos são mensais. O resto dos painéis continua igual em conteúdo.
+// ══════════════════════════════════════════════════════════════════════
+
+const _CRM_MESES_PT = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                       'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function _crmTabela(cols, linhas, vazio){
+  if(!linhas.length) return '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'+(vazio||'Sem dados.')+'</div>';
+  return '<div style="overflow-x:auto"><table class="dtable" style="min-width:'+(cols.length*110)+'px;font-size:12px"><thead><tr>'
+    + cols.map(c => '<th'+(c.dir?' style="text-align:'+c.dir+'"':'')+'>'+c.t+'</th>').join('')
+    + '</tr></thead><tbody>' + linhas.join('') + '</tbody></table></div>';
+}
+
+window.excelRender = function(){
+  if(!D.excelDados) D.excelDados = [];
+  if(!D.crm) D.crm = {};
+
+  const temCubo = window.crmTemCubos();
+  const temLegado = (D.excelDados||[]).length > 0;
+
+  // Selects de filtro
+  _crmPopularFiltros();
+
+  const box = document.getElementById('excel-kpis');
+  if(!temCubo && !temLegado){
+    if(box) box.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--muted);font-size:12px">'
+      + 'Sem dados. Escolha a loja e suba uma planilha para começar.</div>';
+    ['excel-melhores-clientes','excel-inativos','excel-produtos','excel-rank-vends','excel-cross-produtos','excel-carteira-vend-res']
+      .forEach(id => { const e = document.getElementById(id); if(e) e.innerHTML = ''; });
+    _crmRenderConjuntos();
+    return;
+  }
+
+  const v = window.crmVisao();
+  window._crmV = v;   // painéis auxiliares reaproveitam
+
+  // ── KPIs ──
+  if(box){
+    box.innerHTML = ''
+      + '<div class="kcard verde"><div class="kl">💰 FATURAMENTO</div><div class="kv" style="font-size:18px">'+fmt(v.faturamento)+'</div></div>'
+      + '<div class="kcard"><div class="kl">🧾 CUPONS</div><div class="kv" style="font-size:20px">'+v.cupons.toLocaleString('pt-BR')+'</div></div>'
+      + '<div class="kcard azul"><div class="kl">👥 CLIENTES</div><div class="kv" style="font-size:20px">'+v.clientesUnicos.toLocaleString('pt-BR')+'</div></div>'
+      + '<div class="kcard laranja"><div class="kl">🎫 TICKET MÉDIO</div><div class="kv" style="font-size:18px">'+fmt(v.ticketMedio)+'</div></div>'
+      + '<div class="kcard"><div class="kl">📦 P.A.</div><div class="kv" style="font-size:20px">'+v.pa.toFixed(2).replace('.',',')+'</div></div>'
+      + '<div class="kcard roxo"><div class="kl">📅 MESES</div><div class="kv" style="font-size:20px">'+v.mesesCount+'</div></div>';
+  }
+
+  _crmRenderMelhores(v);
+  _crmRenderInativos(v);
+  _crmRenderProdutos(v);
+  _crmRenderVendedoras(v);
+  _crmRenderCross(v);
+  _crmRenderConjuntos();
+
+  const sub = document.getElementById('excel-subtitulo');
+  if(sub){
+    sub.textContent = v.linhas
+      ? v.linhas.toLocaleString('pt-BR') + ' linhas analisadas · '
+        + (v.periodo.ini ? v.periodo.ini.split('-').reverse().join('/') : '?') + ' a '
+        + (v.periodo.fim ? v.periodo.fim.split('-').reverse().join('/') : '?')
+      : 'Análise da base de clientes por vendedora, produto e recência';
+  }
+};
+
+function _crmPopularFiltros(){
+  // Ano
+  const anos = new Set();
+  Object.values(D.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
+  (D.excelDados||[]).forEach(r => { if(r.data) anos.add(r.data.slice(0,4)); });
+  const selA = document.getElementById('excel-filtro-ano');
+  if(selA && selA.options.length <= 1 && anos.size){
+    const at = selA.value;
+    selA.innerHTML = '<option value="">📅 Todos os anos</option>'
+      + [...anos].sort().reverse().map(a => '<option value="'+a+'">'+a+'</option>').join('');
+    if(at) selA.value = at;
+  }
+  // Loja — só admin escolhe
+  const selL = document.getElementById('excel-filtro-loja');
+  if(selL && selL.options.length <= 1){
+    const lojas = window.crmLojasVisiveis();
+    selL.innerHTML = '<option value="">🏪 Todas as lojas</option>'
+      + lojas.map(l => '<option value="'+l+'">'+((LOJAS.find(x=>x.id===l)?.nome)||l)+'</option>').join('');
+  }
+  // Vendedora — a partir do cubo
+  const selV = document.getElementById('excel-filtro-vend');
+  if(selV){
+    const at = selV.value;
+    const nomes = new Set();
+    Object.values(D.crm||{}).forEach(o => Object.values(o).forEach(c => (c.vends||[]).forEach(n => n && nomes.add(n))));
+    (D.excelDados||[]).forEach(r => { if(r.vendedora) nomes.add(r.vendedora); });
+    if(nomes.size && selV.options.length <= 1){
+      selV.innerHTML = '<option value="">👩 Todas as vendedoras</option>'
+        + [...nomes].sort().map(n => '<option value="'+n+'">'+n+'</option>').join('');
+      if(at) selV.value = at;
+    }
+  }
+}
+
+function _crmRenderMelhores(v){
+  const el = document.getElementById('excel-melhores-clientes');
+  if(!el) return;
+  const linhas = v.clientes.slice(0,50).map((c,i) =>
+    '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
+    + '<td><strong>'+c.nome+'</strong>'+(c.vendedora?'<div style="font-size:9.5px;color:var(--muted)">'+c.vendedora+'</div>':'')+'</td>'
+    + '<td style="text-align:center">'+c.compras+'</td>'
+    + '<td style="text-align:right;font-weight:700;color:var(--verde)">'+fmt(c.total)+'</td>'
+    + '<td style="text-align:right">'+fmt(c.compras>0?c.total/c.compras:0)+'</td>'
+    + '<td style="font-size:10.5px;color:var(--muted)">'+(c.ultima||'').split('-').reverse().join('/')+'</td></tr>');
+  el.innerHTML = _crmTabela(
+    [{t:'#'},{t:'Cliente'},{t:'Compras',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Última'}],
+    linhas, 'Nenhum cliente no filtro atual.')
+    + (v.clientes.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+v.clientes.length.toLocaleString('pt-BR')+'</div>':'');
+}
+
+function _crmRenderInativos(v){
+  const el = document.getElementById('excel-inativos');
+  if(!el) return;
+  const dias = parseInt(document.getElementById('excel-inativo-dias')?.value || '60', 10);
+  const inativos = v.clientes
+    .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
+    .filter(c => c.dias !== null && c.dias > dias)
+    .sort((a,b) => b.total - a.total);
+
+  const linhas = inativos.slice(0,50).map(c =>
+    '<tr><td><strong>'+c.nome+'</strong>'+(c.vendedora?'<div style="font-size:9.5px;color:var(--muted)">'+c.vendedora+'</div>':'')+'</td>'
+    + '<td style="text-align:center;color:'+(c.dias>180?'var(--verm)':c.dias>90?'var(--ouro)':'var(--muted)')+';font-weight:700">'+c.dias+'d</td>'
+    + '<td style="text-align:right">'+fmt(c.total)+'</td>'
+    + '<td style="text-align:center">'+c.compras+'</td></tr>');
+  el.innerHTML =
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
+      + inativos.length.toLocaleString('pt-BR') + ' cliente(s) sem comprar há mais de ' + dias + ' dias · '
+      + fmt(inativos.reduce((s,c)=>s+c.total,0)) + ' em histórico</div>'
+    + _crmTabela([{t:'Cliente'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Compras',dir:'center'}],
+        linhas, 'Nenhum cliente inativo nesse prazo.')
+    + (inativos.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+inativos.length.toLocaleString('pt-BR')+'</div>':'');
+}
+
+function _crmRenderProdutos(v){
+  const el = document.getElementById('excel-produtos');
+  if(!el) return;
+  const tot = v.produtos.reduce((s,p)=>s+p.valor,0);
+  const linhas = v.produtos.slice(0,50).map((p,i) =>
+    '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
+    + '<td>'+p.nome+'</td>'
+    + '<td style="text-align:center">'+p.qtd.toLocaleString('pt-BR')+'</td>'
+    + '<td style="text-align:right;font-weight:600;color:var(--ouro)">'+fmt(p.valor)+'</td>'
+    + '<td style="text-align:right;color:var(--muted)">'+(tot>0?(p.valor/tot*100).toFixed(1):'0')+'%</td></tr>');
+  el.innerHTML = _crmTabela([{t:'#'},{t:'Produto'},{t:'Qtd',dir:'center'},{t:'Faturamento',dir:'right'},{t:'% do total',dir:'right'}],
+    linhas, 'Nenhum produto no filtro atual.');
+}
+
+function _crmRenderVendedoras(v){
+  const el = document.getElementById('excel-rank-vends');
+  if(!el) return;
+  const linhas = v.vendedoras.map((x,i) =>
+    '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
+    + '<td><strong>'+x.nome+'</strong></td>'
+    + '<td style="text-align:center">'+x.cupons.toLocaleString('pt-BR')+'</td>'
+    + '<td style="text-align:right;font-weight:700;color:var(--verde)">'+fmt(x.fat)+'</td>'
+    + '<td style="text-align:right">'+fmt(x.cupons>0?x.fat/x.cupons:0)+'</td>'
+    + '<td style="text-align:center">'+(x.cupons>0?(x.itens/x.cupons).toFixed(2).replace('.',','):'—')+'</td></tr>');
+  el.innerHTML = _crmTabela([{t:'#'},{t:'Vendedora'},{t:'Cupons',dir:'center'},{t:'Faturamento',dir:'right'},{t:'TM',dir:'right'},{t:'P.A.',dir:'center'}],
+    linhas, 'Nenhuma vendedora no filtro atual.');
+}
+
+function _crmRenderCross(v){
+  const el = document.getElementById('excel-cross-produtos');
+  if(!el) return;
+  const linhas = v.cross.slice(0,30).map((c,i) =>
+    '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
+    + '<td>'+c.a+'</td><td>'+c.b+'</td>'
+    + '<td style="text-align:center;font-weight:700;color:var(--ouro)">'+c.n+'</td></tr>');
+  el.innerHTML =
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Pares de produtos comprados pelo mesmo cliente.</div>'
+    + _crmTabela([{t:'#'},{t:'Produto A'},{t:'Produto B'},{t:'Clientes',dir:'center'}],
+        linhas, 'Sem combinações suficientes para cruzar.');
+}
+
+/** Conjuntos loja/ano carregados — substitui a Gestão de Importações. */
+function _crmRenderConjuntos(){
+  const el = document.getElementById('excel-imports-lista');
+  if(!el) return;
+  const linhas = [];
+  Object.keys(D.crm||{}).sort().forEach(lid => {
+    Object.keys(D.crm[lid]).sort().reverse().forEach(ano => {
+      const c = D.crm[lid][ano];
+      const nome = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
+      linhas.push('<tr>'
+        + '<td><strong>'+nome+'</strong></td>'
+        + '<td style="text-align:center">'+ano+'</td>'
+        + '<td style="text-align:right">'+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
+        + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
+        + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
+        + '<td style="font-size:10.5px;color:var(--muted)">'+(c.arquivo||'—')+'</td>'
+        + '<td style="text-align:center">'
+          + (isAdmin() ? '<button onclick="window.crmApagar(\''+lid+'\',\''+ano+'\')" title="Apagar este conjunto" style="background:none;border:1px solid rgba(220,53,69,.35);color:var(--verm);border-radius:5px;font-size:10px;padding:3px 8px;cursor:pointer">🗑️</button>' : '—')
+        + '</td></tr>');
+    });
+  });
+  el.innerHTML = linhas.length
+    ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
+      + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
+    : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
+}
 
 
 // Chamar render dos lembretes sempre que renderFluxo rodar
