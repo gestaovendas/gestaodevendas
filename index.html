@@ -6685,13 +6685,28 @@ window.crmDedup = function(linhas){
     if(rs.length < 2) return;
     const v0 = Number(rs[0].valor) || 0;
     if(v0 <= 0) return;
-    // todas as linhas com o MESMO valor => é o total da nota repetido
-    if(!rs.every(r => Math.abs((Number(r.valor)||0) - v0) < 0.005)) return;
+
+    // [R68] Dois caminhos para saber que o valor é o TOTAL DA NOTA:
+    //  (a) a planilha declarou a coluna como "Valor NF" — certeza;
+    //  (b) todas as linhas trazem o mesmo valor — forte indício.
+    const declaradoNF = rs.every(r => r._valorNF === true);
+    const todasIguais = rs.every(r => Math.abs((Number(r.valor)||0) - v0) < 0.005);
+    if(!declaradoNF && !todasIguais) return;
+
+    // Com "Valor NF" declarado, o total da nota é o maior valor visto —
+    // não a soma, e nem necessariamente repetido em todas as linhas.
+    const totalNota = declaradoNF
+      ? rs.reduce((mx,r) => Math.max(mx, Number(r.valor)||0), 0)
+      : v0;
+    const somaAtual = rs.reduce((a,r) => a + (Number(r.valor)||0), 0);
+
     nfsCorrigidas++;
-    valorRemovido += v0 * (rs.length - 1);
+    valorRemovido += Math.max(0, somaAtual - totalNota);
     const qTot = rs.reduce((s,r) => s + (Number(r.qtde)||1), 0) || rs.length;
-    rs.forEach(r => { r.valor = v0 * ((Number(r.qtde)||1) / qTot); });
+    rs.forEach(r => { r.valor = totalNota * ((Number(r.qtde)||1) / qTot); });
   });
+
+  // Nota com uma linha só e valor declarado como total da NF: já está certo.
 
   return {linhas: unicas, dupExatas, nfsCorrigidas, valorRemovido,
           notas: porNF.size, original: (linhas||[]).length};
@@ -25812,13 +25827,29 @@ function _excelDetectarColunas(headers){
   //   2º "VALOR TOTAL", "TOTAL VENDA" → sem NF no nome
   //   3º "VALOR" isolado
   //   NUNCA "VALOR NF" ou "VALOR UNITARIO" (dão totais errados quando somados por linha)
+  // [FIX R68] Antes, "VALOR NF" e "VALOR UNITARIO" eram DESCARTADOS: somados
+  // linha a linha davam total errado. A consequência é que uma planilha cujo
+  // único campo de valor fosse um desses era rejeitada com "faltou coluna
+  // Valor" — o erro de cabeçalho relatado. Agora eles são aceitos e tratados
+  // pelo que são, registrando o TIPO do valor para a apuração usar direito.
   const valorItem = normH.find(h => /valor.*(item)/.test(h.norm) || /^valor_item$/.test(h.norm));
   const valorTotalVenda = !valorItem && normH.find(h => /valor.*(total|venda)/.test(h.norm) && !/nf$|unit/.test(h.norm));
   const totalGenerico = !valorItem && !valorTotalVenda && normH.find(h => /^total$/.test(h.norm));
   const valorSozinho = !valorItem && !valorTotalVenda && !totalGenerico &&
                        normH.find(h => /^(valor|vlr|preco|price)$/.test(h.norm));
-  const escolhido = valorItem || valorTotalVenda || totalGenerico || valorSozinho;
-  if(escolhido) map.valor = escolhido.idx;
+  // total da NOTA: vale uma vez por nota, não por linha
+  const valorNF = !valorItem && !valorTotalVenda && !totalGenerico && !valorSozinho &&
+                  normH.find(h => /^(valor|vlr|vl)_?(total_?)?nf$|nota_?fiscal$|^valor_nota$/.test(h.norm)
+                                  || (/valor|vlr|^vl_/.test(h.norm) && /nf$|nota$/.test(h.norm)));
+  // valor UNITÁRIO: precisa multiplicar pela quantidade
+  const valorUnit = !valorItem && !valorTotalVenda && !totalGenerico && !valorSozinho && !valorNF &&
+                    normH.find(h => /unit/.test(h.norm) && /valor|vlr|^vl_|preco/.test(h.norm));
+
+  const escolhido = valorItem || valorTotalVenda || totalGenerico || valorSozinho || valorNF || valorUnit;
+  if(escolhido){
+    map.valor = escolhido.idx;
+    map.valorTipo = valorNF ? 'nf' : valorUnit ? 'unitario' : 'linha';
+  }
 
   // ── CUPOM/NF (aceita "N° NFE", "NFE", "NF", "CUPOM")
   const cupomC = normH.find(h => /^(cupom|nota|nf|cf|nfe|doc|documento)$/.test(h.norm))
@@ -25950,10 +25981,17 @@ window.excelProcessarUpload = function(event){
         const faltando = [];
         if(colMap.data === undefined) faltando.push('Data');
         if(colMap.valor === undefined) faltando.push('Valor');
-        const detectadas = Object.keys(colMap).map(k => k+'→col'+(colMap[k]+1)).join(', ') || '(nenhuma)';
-        showToast('❌ Faltou coluna: '+faltando.join(', ')+'. Cabeçalhos: '+headers.slice(0,5).join(', ')+'...','err');
-        console.log('[excel] Cabeçalhos:', headers);
-        console.log('[excel] Detectadas:', detectadas);
+        const detectadas = Object.keys(colMap).filter(k=>k!=='valorTipo')
+          .map(k => k+' → "'+headers[colMap[k]]+'"').join(' · ') || '(nenhuma)';
+        console.error('[excel] Cabeçalhos do arquivo:', headers);
+        console.error('[excel] Reconhecidas:', detectadas);
+        alert('Não consegui identificar a coluna de ' + faltando.join(' e ') + '.\n\n'
+          + 'Cabeçalhos encontrados no arquivo:\n' + headers.filter(Boolean).join(' | ') + '\n\n'
+          + 'Colunas que reconheci:\n' + detectadas + '\n\n'
+          + 'Para VALOR eu aceito: "Valor", "Valor Item", "Valor Total", "Valor NF", "Valor Unitário", "Total".\n'
+          + 'Para DATA: "Data", "Emissão", "Dia".\n\n'
+          + 'Se a coluna existe com outro nome, renomeie no arquivo ou me diga o nome para eu incluir.');
+        showToast('❌ Faltou identificar: '+faltando.join(', ')+' — veja o detalhamento na janela.','err');
         return;
       }
 
@@ -25969,7 +26007,12 @@ window.excelProcessarUpload = function(event){
           if(op && op !== 'VENDA' && op !== 'V'){ ignoradosNaoVenda++; continue; }
         }
         const dt = _excelParseData(row[colMap.data]);
-        const val = _excelParseNumero(row[colMap.valor]);
+        let val = _excelParseNumero(row[colMap.valor]);
+        // [R68] valor unitário vira valor de linha multiplicando pela qtde
+        if(colMap.valorTipo === 'unitario'){
+          const _q = colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1;
+          val = val * _q;
+        }
         if(!dt || val === 0){ ignoradosDadosVazios++; continue; }
         dadosProcessados.push({
           data: dt,
@@ -25981,6 +26024,7 @@ window.excelProcessarUpload = function(event){
           vendedora: String(row[colMap.vendedora] || '').trim(),
           produto: String(row[colMap.produto] || '').trim() || '(sem produto)',
           categoria: String(row[colMap.categoria] || '').trim(),
+          _valorNF: colMap.valorTipo === 'nf',   // [R68] total da nota, não da linha
           qtde: colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1,
           valor: val,
           cupom: String(row[colMap.cupom] || '').trim(),
@@ -26215,12 +26259,32 @@ window.excelLimparDados = async function(){
     }
   }
 
+  // [FIX R68] Antes, se o Firebase falhasse o botão simplesmente NÃO fazia
+  // nada e parecia quebrado. Falhar no remoto não pode impedir a limpeza
+  // local — mas o usuário precisa saber que os dados voltam ao recarregar,
+  // e decidir. Perguntar é melhor que travar em silêncio.
   if(erros.length){
     console.error('[crm] limpar: falhas', erros);
-    showToast('⚠️ ' + apagados + ' de ' + pares.length + ' apagados no Firebase. '
-      + 'Os que falharam voltarão ao recarregar: ' + erros.join(' | '), 'err');
-    // não limpar a memória do que não foi apagado — evita mentir de novo
-    if(apagados === 0) return;
+    const soLocal = confirm(
+      'Não consegui apagar ' + (pares.length - apagados) + ' de ' + pares.length + ' conjunto(s) no Firebase.\n\n'
+      + 'Motivo: ' + erros[0] + '\n\n'
+      + 'OK = limpar mesmo assim SÓ neste navegador (os dados voltam ao recarregar, '
+      + 'porque continuam no Firebase)\n'
+      + 'Cancelar = não mexer em nada e tentar de novo depois'
+    );
+    if(!soLocal){
+      showToast('Nada foi apagado. Verifique a conexão e tente de novo.','err');
+      return;
+    }
+    D.excelDados = [];
+    D.crm = {};
+    D._excelImportInfo = null;
+    D._excelImportacoes = [];
+    save();
+    showToast('⚠️ Limpo apenas neste navegador — ' + (pares.length - apagados)
+      + ' conjunto(s) seguem no Firebase e voltarão ao recarregar.','err');
+    window.excelRender();
+    return;
   }
 
   D.excelDados = [];
