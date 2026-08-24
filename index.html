@@ -1801,6 +1801,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
+  <!-- [R49] Ritmo da meta: o que deveria ter sido vendido até a data vigente -->
+  <div class="sc" id="lanc-ritmo-box" style="margin-bottom:16px;border-left:3px solid var(--ouro)"></div>
+
   <!-- CARDS VENDEDORAS DO DIA -->
   <div class="sc">
     <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Realizado</div>
@@ -8297,6 +8300,7 @@ function renderPainelDia(){
   if(metaDia) metaDia.textContent = fmt(_progPainel.dia>0 ? _progPainel.dia : (m.dia||0));
   if(metaSem) metaSem.textContent = fmt(m.sem||0);
   if(metaMes) metaMes.textContent = fmt(m.mes||0);
+  if(typeof window.renderRitmoMeta === 'function') window.renderRitmoMeta(lid);
 
   // Renderizar cards das vendedoras no período
   const grid = document.getElementById('vend-lanc-grid');
@@ -8463,6 +8467,7 @@ function carregarVendsForm(lidOverride){
   renderConsolidadoLanc(lid);
   renderHistoricoLanc();
   if(typeof renderCalendarioLanc === 'function') renderCalendarioLanc();
+  if(typeof window.renderRitmoMeta === 'function') window.renderRitmoMeta(lid);
 
   if(!vends.length){
     grid.innerHTML="<div style='color:var(--muted);font-size:12px;padding:12px 0'>Sem vendedoras cadastradas para esta loja.</div>";
@@ -9163,6 +9168,7 @@ function _lancHistAplicarMes(mr){
   if(typeof carregarVendsForm === "function") carregarVendsForm();
   renderHistoricoLanc();
   if(typeof renderCalendarioLanc === "function") renderCalendarioLanc();
+  if(typeof window.renderRitmoMeta === "function") window.renderRitmoMeta();
 }
 function _ultimoDiaDoMes(mr){
   // Se for o mês atual ou futuro, usa hoje; se mês passado, o último dia do mês.
@@ -26381,6 +26387,174 @@ window._fxNovoRegistroAniv = function(nome, aniv){
 
 
 
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R49] RITMO DA META NO PAINEL DO DIA
+// Quanto a loja DEVERIA ter vendido até a data vigente para fechar o mês
+// na meta, e quanto de fato vendeu. O proporcional é por DIAS ABERTOS, não
+// por dias corridos — loja que fecha domingo não pode ser cobrada por eles.
+//
+// diasAbertosNoMes()/diasAbertosPassados() existentes são fixos no mês
+// corrente; aqui as versões aceitam o mês de referência, porque o Painel
+// do Dia navega meses anteriores.
+// ══════════════════════════════════════════════════════════════════════
+
+// Dias abertos de uma loja no mês, opcionalmente até um dia limite
+function _idDiasAbertos(lid, mesRef, ateDia){
+  const [y,m] = mesRef.split('-').map(Number);
+  const totalDias = new Date(y, m, 0).getDate();
+  const limite = Math.min(Number(ateDia) || totalDias, totalDias);
+  const abre7 = (typeof LOJAS_7DIAS !== 'undefined') && LOJAS_7DIAS.includes(lid);
+  let n = 0;
+  for(let d = 1; d <= limite; d++){
+    const dow = new Date(y, m-1, d).getDay();
+    if(abre7 || dow !== 0) n++;   // fecha domingo quando não é shopping
+  }
+  return n;
+}
+
+// Faturamento da loja no mês até a data (inclusive)
+function _idRealizadoAte(lid, mesRef, dataLim){
+  const vends = (typeof vendsReais === 'function')
+    ? vendsReais(lid)
+    : (D.vendedoras||[]).filter(v => v.loja === lid);
+  let t = 0;
+  vends.forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
+      if(d.startsWith(mesRef) && d <= dataLim) t += Number(vd.val||0);
+    });
+  });
+  if(t === 0){
+    Object.entries(D.vendas[lid] || {}).forEach(([d, vd]) => {
+      if(d.startsWith(mesRef) && d <= dataLim) t += Number(vd.fat||0);
+    });
+  }
+  return t;
+}
+
+/**
+ * Apura o ritmo da meta de uma loja.
+ * @returns {{meta,ideal,realizado,dif,pctIdeal,diasTotais,diasPassados,diasRestantes,porDia,dataRef,mesRef,ehMesFechado}}
+ */
+window._calcularRitmoMeta = function(lid, mesRef, dataRef){
+  const hj = hoje();
+  mesRef  = mesRef || (window._lancHistMes || hj.slice(0,7));
+  const [y,m] = mesRef.split('-').map(Number);
+  const ultimoDia = new Date(y, m, 0).getDate();
+  const fimMes = mesRef + '-' + String(ultimoDia).padStart(2,'0');
+
+  // Mês passado: a "data vigente" é o fim do mês. Mês corrente: hoje.
+  const ehMesFechado = mesRef < hj.slice(0,7);
+  const ehMesFuturo  = mesRef > hj.slice(0,7);
+  const dataLim = dataRef || (ehMesFechado ? fimMes : (ehMesFuturo ? mesRef+'-01' : hj));
+  const diaLim  = Number(dataLim.slice(8,10));
+
+  const meta = (typeof metaDoMes === 'function' ? (metaDoMes(lid, mesRef).valor || 0) : 0);
+  const diasTotais   = _idDiasAbertos(lid, mesRef);
+  const diasPassados = _idDiasAbertos(lid, mesRef, diaLim);
+  const diasRestantes = Math.max(0, diasTotais - diasPassados);
+
+  const ideal     = diasTotais > 0 ? meta * (diasPassados / diasTotais) : 0;
+  const realizado = _idRealizadoAte(lid, mesRef, dataLim);
+  const dif       = realizado - ideal;
+  const falta     = Math.max(0, meta - realizado);
+
+  return {
+    meta, ideal, realizado, dif,
+    pctIdeal: ideal > 0 ? (realizado / ideal * 100) : null,
+    pctMeta:  meta  > 0 ? (realizado / meta  * 100) : null,
+    diasTotais, diasPassados, diasRestantes,
+    falta,
+    porDia: diasRestantes > 0 ? falta / diasRestantes : 0,
+    dataRef: dataLim, mesRef, ehMesFechado
+  };
+};
+
+// Renderiza o bloco no Painel do Dia
+window.renderRitmoMeta = function(lidArg){
+  const el = document.getElementById('lanc-ritmo-box');
+  if(!el) return;
+
+  const selLoja = document.getElementById('lanc-loja-sel');
+  const lid = lidArg || (isAdmin()
+    ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
+    : lojaId());
+  if(!lid){ el.style.display = 'none'; return; }
+
+  const r = window._calcularRitmoMeta(lid);
+  const nomeLoja = LOJAS.find(l => l.id === lid)?.nome || lid;
+
+  if(!r.meta){
+    el.style.display = '';
+    el.innerHTML = '<div class="st" style="margin-bottom:8px">🎯 Ritmo da Meta</div>'
+      + '<div style="font-size:12px;color:var(--muted);padding:10px 0">'
+      + 'Sem meta cadastrada para <strong>' + nomeLoja + '</strong> em ' + r.mesRef.split('-').reverse().join('/') + '.'
+      + ' Cadastre em <strong>Metas por Loja</strong> para acompanhar o ritmo.</div>';
+    return;
+  }
+
+  const noRitmo = r.dif >= 0;
+  const cor = noRitmo ? 'var(--verde)' : 'var(--verm)';
+  const dFmt = r.dataRef.split('-').reverse().join('/');
+
+  // Barra: realizado sobre a meta, com marcador no ponto ideal
+  const pctReal  = Math.max(0, Math.min(100, r.meta > 0 ? r.realizado/r.meta*100 : 0));
+  const pctMarca = Math.max(0, Math.min(100, r.meta > 0 ? r.ideal/r.meta*100 : 0));
+
+  const card = (rot, val, cr, sub) =>
+    '<div style="flex:1;min-width:150px;background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">'
+    + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">' + rot + '</div>'
+    + '<div style="font-size:20px;font-weight:700;color:' + cr + '">' + val + '</div>'
+    + (sub ? '<div style="font-size:9.5px;color:var(--muted);margin-top:3px">' + sub + '</div>' : '')
+    + '</div>';
+
+  el.style.display = '';
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+      + '<div class="st" style="margin:0">🎯 Ritmo da Meta — ' + nomeLoja + '</div>'
+      + '<div style="font-size:10px;color:var(--muted)">'
+        + (r.ehMesFechado ? 'Mês fechado · ' : 'Até ') + dFmt
+        + ' · dia ' + r.diasPassados + ' de ' + r.diasTotais + ' abertos</div>'
+    + '</div>'
+
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      + card('Ideal até a data', fmt(r.ideal), 'var(--ouro)', r.diasPassados + ' de ' + r.diasTotais + ' dias abertos')
+      + card('Realizado', fmt(r.realizado), 'var(--texto)', r.pctMeta !== null ? r.pctMeta.toFixed(0) + '% da meta do mês' : '')
+      + card(noRitmo ? 'Acima do ritmo' : 'Abaixo do ritmo',
+             (noRitmo ? '+' : '−') + fmt(Math.abs(r.dif)).replace('R$ ','R$ '), cor,
+             r.pctIdeal !== null ? r.pctIdeal.toFixed(0) + '% do ideal' : '')
+      + card('Meta do mês', fmt(r.meta), 'var(--azul)',
+             r.diasRestantes > 0 ? r.diasRestantes + ' dia(s) aberto(s) restante(s)' : 'mês encerrado')
+    + '</div>'
+
+    + '<div style="position:relative;height:12px;background:rgba(255,255,255,.07);border-radius:99px;overflow:visible;margin-bottom:6px">'
+      + '<div style="height:100%;width:' + pctReal + '%;background:' + cor + ';border-radius:99px;transition:width .4s"></div>'
+      + '<div title="Ponto ideal para hoje" style="position:absolute;top:-4px;left:' + pctMarca + '%;width:2px;height:20px;background:var(--ouro)"></div>'
+      + '<div style="position:absolute;top:-18px;left:' + pctMarca + '%;transform:translateX(-50%);font-size:9px;color:var(--ouro);white-space:nowrap">ideal</div>'
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">'
+      + '<span>R$ 0</span><span>' + fmt(r.meta) + '</span>'
+    + '</div>'
+
+    + '<div style="margin-top:10px;padding:9px 12px;border-radius:8px;font-size:12px;'
+      + (noRitmo ? 'background:rgba(46,204,135,.08);border-left:3px solid var(--verde)'
+                 : 'background:rgba(220,53,69,.08);border-left:3px solid var(--verm)') + '">'
+      + (r.diasRestantes > 0
+          ? (noRitmo
+              ? '✅ No ritmo: <strong>' + fmt(Math.abs(r.dif)) + '</strong> acima do esperado para hoje. '
+                + 'Faltam <strong>' + fmt(r.falta) + '</strong> em ' + r.diasRestantes + ' dia(s) aberto(s) — '
+                + '<strong>' + fmt(r.porDia) + '/dia</strong>.'
+              : '⚠️ Abaixo do ritmo: <strong>' + fmt(Math.abs(r.dif)) + '</strong> atrás do esperado para hoje. '
+                + 'Faltam <strong>' + fmt(r.falta) + '</strong> em ' + r.diasRestantes + ' dia(s) aberto(s) — '
+                + 'é preciso <strong>' + fmt(r.porDia) + '/dia</strong>.')
+          : (r.realizado >= r.meta
+              ? '🏆 Mês encerrado com a meta batida — ' + fmt(r.realizado - r.meta) + ' acima.'
+              : '📕 Mês encerrado ' + fmt(r.falta) + ' abaixo da meta.'))
+    + '</div>';
+};
 
 
 // ══════════════════════════════════════════════════════════════════════
