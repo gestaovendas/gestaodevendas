@@ -3227,6 +3227,25 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="ct-alerta-mes-corpo"></div>
   </div>
 
+  <!-- [R66] Inativos há mais de 180 dias — vindos da base do CRM -->
+  <div class="sc" id="ct-inativos180-box" style="margin-bottom:14px;border-left:3px solid var(--verm)">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div class="st" style="margin:0">💤 Inativos há mais de <span id="ct-inat-dias-lbl">180</span> dias
+        <span id="ct-inat-count" style="background:rgba(220,53,69,.2);color:var(--verm);padding:2px 8px;border-radius:10px;font-size:12px;margin-left:6px">0</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--muted)">Sem comprar há mais de:</label>
+        <select id="ct-inat-dias" onchange="window.renderInativos180()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px">
+          <option value="180" selected>180 dias</option>
+          <option value="270">270 dias</option>
+          <option value="365">1 ano</option>
+          <option value="540">18 meses</option>
+        </select>
+      </div>
+    </div>
+    <div id="ct-inativos180"></div>
+  </div>
+
   <!-- [NEW 12/08] Lembretes: contatos a retomar + clientes sem follow-up -->
   <div class="sc" style="margin-bottom:14px;border-left:3px solid #e6a817">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
@@ -6373,8 +6392,8 @@ window.crmVisao = function(){
 window.crmCombinarDeLinhas = function(linhas){
   const c = window.crmAgregar(linhas || []);
   // crmCombinar normaliza o cubo de clientes para objetos; fazer o mesmo aqui
-  c.clientes = (c.clientes||[]).map(([n,v,priMi,ult,compras,total,itens]) => ({
-    n, v, pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:''
+  c.clientes = (c.clientes||[]).map(([n,v,priMi,ult,compras,total,itens,doc,tel]) => ({
+    n, doc:doc||'', tel:tel||'', v, pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:''
   }));
   return c;
 };
@@ -6417,7 +6436,8 @@ window.crmFiltrar = function(cubo, f){
 
   // Clientes: filtro por vendedora e por período da última compra
   let clientes = (cubo.clientes||[]).map(c => ({
-    nome: c.n, vendedora: cubo.vends[c.v] || '', primeira: c.pri, ultima: c.ult,
+    nome: c.n, documento: c.doc || '', telefone: c.tel || '',
+    vendedora: cubo.vends[c.v] || '', primeira: c.pri, ultima: c.ult,
     compras: c.compras, total: c.total, itens: c.itens, loja: c.loja
   }));
   if(f.vend) clientes = clientes.filter(c => c.vendedora === f.vend);
@@ -6629,8 +6649,62 @@ window.crmApagar = async function(lid, ano){
 // Tabelas de string + arrays posicionais em vez de objetos: é o que faz
 // o cubo caber no documento.
 // ══════════════════════════════════════════════════════════════════════
+/**
+ * [R65] Deduplicação antes de agregar.
+ * Dois problemas reais apareceram nas importações:
+ *  (a) linhas idênticas repetidas — reimportação ou repetição na planilha;
+ *  (b) o valor da NF repetido em TODAS as linhas dela. Quando isso ocorre,
+ *      somar linha a linha multiplica o faturamento pelo número de itens
+ *      da nota. Detectamos pelo padrão: mesma NF, 2+ linhas, valor idêntico
+ *      em todas. Nesse caso a nota vale UMA vez, e o valor é distribuído
+ *      entre os itens proporcionalmente à quantidade — assim o total fecha
+ *      e a análise por produto continua fazendo sentido.
+ */
+window.crmDedup = function(linhas){
+  const vistos = new Set();
+  const unicas = [];
+  let dupExatas = 0;
+
+  (linhas||[]).forEach(r => {
+    const k = [r.cupom||'', r.data||'', r.produto||'', r.cliente||'', r.valor, r.qtde].join('|');
+    if(vistos.has(k)){ dupExatas++; return; }
+    vistos.add(k);
+    unicas.push(Object.assign({}, r));   // cópia: não mexer no array do chamador
+  });
+
+  const porNF = new Map();
+  unicas.forEach(r => {
+    const nf = String(r.cupom||'').trim();
+    if(!nf) return;
+    if(!porNF.has(nf)) porNF.set(nf, []);
+    porNF.get(nf).push(r);
+  });
+
+  let nfsCorrigidas = 0, valorRemovido = 0;
+  porNF.forEach(rs => {
+    if(rs.length < 2) return;
+    const v0 = Number(rs[0].valor) || 0;
+    if(v0 <= 0) return;
+    // todas as linhas com o MESMO valor => é o total da nota repetido
+    if(!rs.every(r => Math.abs((Number(r.valor)||0) - v0) < 0.005)) return;
+    nfsCorrigidas++;
+    valorRemovido += v0 * (rs.length - 1);
+    const qTot = rs.reduce((s,r) => s + (Number(r.qtde)||1), 0) || rs.length;
+    rs.forEach(r => { r.valor = v0 * ((Number(r.qtde)||1) / qTot); });
+  });
+
+  return {linhas: unicas, dupExatas, nfsCorrigidas, valorRemovido,
+          notas: porNF.size, original: (linhas||[]).length};
+};
+
 window.crmAgregar = function(linhas, opts){
   opts = opts || {};
+  // [R65] a menos que o chamador já tenha deduplicado
+  if(opts.jaDeduplicado !== true){
+    const dd = window.crmDedup(linhas);
+    linhas = dd.linhas;
+    opts._dedup = dd;
+  }
   const TOP_PROD_MES = opts.topProdMes || 120;
   const TOP_CROSS    = opts.topCross   || 150;
 
@@ -6642,7 +6716,12 @@ window.crmAgregar = function(linhas, opts){
   const mesVend=new Map();      // mes|vend -> {f,i,cupons:Set,cli:Set}
   const mesProd=new Map();      // mes|prod -> {q,f}
   const prodTot=new Map();      // prod -> {q,f,cli:Set}
-  const cliente=new Map();      // nomeNorm -> {n,v,pri,ult,cupons:Set,t,i}
+  // [R67] Chave do cliente = CPF/CNPJ quando existe; nome normalizado só
+  // como último recurso. E o consumo é consolidado por NOTA, não por linha:
+  // cada NF entra uma única vez no total do cliente.
+  const cliente=new Map();      // chave -> {n,doc,tel,v,pri,ult,cupons:Set,t,i}
+  const nfCliente=new Map();    // NF -> chave do cliente (uma nota, um dono)
+  const nfValor=new Map();      // NF -> valor consolidado da nota
   const cliProd=new Map();      // nomeNorm -> Set(prodIdx)
   let fatTotal=0, dtMin=null, dtMax=null;
 
@@ -6659,7 +6738,8 @@ window.crmAgregar = function(linhas, opts){
     if(!dtMin||r.data<dtMin) dtMin=r.data;
     if(!dtMax||r.data>dtMax) dtMax=r.data;
 
-    const cn=norm(r.cliente)||'(sem cliente)';
+    const docCli = String(r.documento||'').replace(/\D/g,'');
+    const cn = docCli || norm(r.cliente) || '(sem cliente)';
 
     let a=mesVend.get(mi+'|'+vi);
     if(!a){ a={f:0,i:0,cupons:new Set(),cli:new Set()}; mesVend.set(mi+'|'+vi,a); }
@@ -6674,13 +6754,31 @@ window.crmAgregar = function(linhas, opts){
     c.q+=qt; c.f+=val; c.cli.add(cn);
 
     let d=cliente.get(cn);
-    if(!d){ d={n:String(r.cliente||'(sem cliente)').trim(),v:vi,pri:r.data,ult:r.data,cupons:new Set(),t:0,i:0}; cliente.set(cn,d); }
+    if(!d){
+      d={n:String(r.cliente||'(sem cliente)').trim(), doc:docCli, tel:String(r.telefone||'').trim(),
+         v:vi, pri:r.data, ult:r.data, cupons:new Set(), t:0, i:0};
+      cliente.set(cn,d);
+    }
+    if(!d.tel && r.telefone) d.tel = String(r.telefone).trim();
+    if(!d.doc && docCli) d.doc = docCli;
     if(r.data<d.pri) d.pri=r.data;   // guardado como indice de mes na saida
     if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedora da compra mais recente
-    d.cupons.add(cup); d.t+=val; d.i+=qt;
+    d.cupons.add(cup);
+    d.i+=qt;
+    // Uma nota pertence a UM cliente — evita a mesma NF entrar duas vezes
+    // quando a planilha traz o nome grafado de formas diferentes.
+    if(!nfCliente.has(cup)) nfCliente.set(cup, cn);
+    nfValor.set(cup, (nfValor.get(cup)||0) + val);
 
     let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
   }
+
+  // [R67] Total de cada cliente = soma das NOTAS dele, cada uma uma vez.
+  nfValor.forEach((v, nf) => {
+    const dono = nfCliente.get(nf);
+    const d = dono && cliente.get(dono);
+    if(d) d.t += v;
+  });
 
   const r2=n=>Math.round(n*100)/100;
 
@@ -6705,7 +6803,7 @@ window.crmAgregar = function(linhas, opts){
     .map(([pi,v])=>[pi,v.q,r2(v.f),v.cli.size]).sort((a,b)=>b[2]-a[2]);
 
   const cuboClientes=[...cliente.values()]
-    .map(c=>[c.n,c.v,iMes.get(c.pri.slice(0,7)), c.ult, c.cupons.size, r2(c.t), c.i])
+    .map(c=>[c.n,c.v,iMes.get(c.pri.slice(0,7)), c.ult, c.cupons.size, r2(c.t), c.i, c.doc||'', c.tel||''])
     .sort((a,b)=>b[5]-a[5]);
 
   // cruzamento: pares de produtos comprados pelo mesmo cliente
@@ -6722,6 +6820,8 @@ window.crmAgregar = function(linhas, opts){
 
   return {
     ts:Date.now(), linhas:linhas.length, faturamento:r2(fatTotal),
+    dedup: opts._dedup ? {duplicadas:opts._dedup.dupExatas, nfsCorrigidas:opts._dedup.nfsCorrigidas,
+                          valorRemovido:r2(opts._dedup.valorRemovido), notas:opts._dedup.notas} : null,
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
     meses:tMes, vends:tVend, prods:tProd,
     mesVend:cuboMesVend, mesProd:cuboMesProd, prodTotal:cuboProdTot,
@@ -6838,12 +6938,15 @@ window.crmCombinar = function(lojas, anos){
         const k = mP[a]+'|'+mP[b];
         cross.set(k, (cross.get(k)||0) + n);
       });
-      (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens])=>{
-        const k = String(nome).trim().toLowerCase();
+      (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
+        // [R67] agrupar por documento quando houver — nome é fallback
+        const k = String(doc||'').replace(/\D/g,'') || String(nome).trim().toLowerCase();
         const e = clientes.get(k);
         if(!e){
-          clientes.set(k, {n:nome, v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
+          clientes.set(k, {n:nome, doc:doc||'', tel:tel||'', v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
         } else {
+          if(!e.tel && tel) e.tel = tel;
+          if(!e.doc && doc) e.doc = doc;
           // mesmo cliente em anos diferentes: consolidar
           if(ult > e.ult){ e.ult = ult; e.v = mV[vi]; }
           if(((c.meses||[])[priMi]||'') < e.pri) e.pri = (c.meses||[])[priMi]||e.pri;
@@ -25723,6 +25826,19 @@ function _excelDetectarColunas(headers){
               || normH.find(h => /^cupom|^nota|numero_nf/.test(h.norm));
   if(cupomC) map.cupom = cupomC.idx;
 
+  // ── [R67] DOCUMENTO (CPF/CNPJ) — chave confiável do cliente.
+  // Sem isto o cliente era identificado só pelo NOME, e "MARIA SILVA" x
+  // "MARIA DA SILVA" viravam duas pessoas, partindo o consumo em dois.
+  const docC = normH.find(h => /^(cpf|cnpj|cpf_cnpj|cnpj_cpf|documento|doc_cliente|cpfcnpj)$/.test(h.norm))
+            || normH.find(h => /^cpf|^cnpj|cpf_cnpj|cnpj_cpf/.test(h.norm))
+            || normH.find(h => /documento.*client|client.*documento/.test(h.norm));
+  if(docC) map.documento = docC.idx;
+
+  // ── [R67] TELEFONE — para acionar o cliente inativo
+  const telC = normH.find(h => /^(telefone|tel|celular|fone|whatsapp|whats|contato)$/.test(h.norm))
+            || normH.find(h => /^telefone|^celular|^fone|whatsapp/.test(h.norm));
+  if(telC) map.telefone = telC.idx;
+
   // ── OPERACAO (para filtrar só VENDAs, ignorar troca/devolução)
   const opC = normH.find(h => /^(operacao|op|tipo|tipo_op)$/.test(h.norm))
            || normH.find(h => /operacao|^tipo_op/.test(h.norm));
@@ -25858,6 +25974,9 @@ window.excelProcessarUpload = function(event){
         dadosProcessados.push({
           data: dt,
           cliente: String(row[colMap.cliente] || '').trim() || '(sem cliente)',
+          // [R67] documento e telefone quando a planilha traz
+          documento: colMap.documento !== undefined ? String(row[colMap.documento] || '').replace(/\D/g,'') : '',
+          telefone:  colMap.telefone  !== undefined ? String(row[colMap.telefone]  || '').trim() : '',
           loja: colMap.loja !== undefined ? _excelResolverLoja(row[colMap.loja]) : '',
           vendedora: String(row[colMap.vendedora] || '').trim(),
           produto: String(row[colMap.produto] || '').trim() || '(sem produto)',
@@ -25952,6 +26071,7 @@ window.excelProcessarUpload = function(event){
         _totalPedacos += dg.pedacos;
         _diagnostico.push({
           loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid, ano,
+          dedup: cubo.dedup,
           linhas: linhas.length, clientes: dg.clientes,
           kb: Math.round((dg.bytesLeves + dg.bytesClientes)/1024),
           pedacos: dg.pedacos
@@ -25984,6 +26104,22 @@ window.excelProcessarUpload = function(event){
              + d.clientes.toLocaleString('pt-BR') + ' clientes (' + d.kb + ' KB'
              + (d.pedacos > 1 ? ', ' + d.pedacos + ' partes' : '') + ')')
         .join(' · ');
+
+      // [R65] o que a deduplicação encontrou — precisa ficar visível,
+      // porque muda o faturamento apurado.
+      const _dd = _diagnostico.reduce((a,d) => ({
+        dup: a.dup + (d.dedup?.duplicadas||0),
+        nfs: a.nfs + (d.dedup?.nfsCorrigidas||0),
+        val: a.val + (d.dedup?.valorRemovido||0)
+      }), {dup:0, nfs:0, val:0});
+      if(_dd.dup || _dd.nfs){
+        const partes = [];
+        if(_dd.dup) partes.push(_dd.dup.toLocaleString('pt-BR') + ' linha(s) duplicada(s) descartada(s)');
+        if(_dd.nfs) partes.push(_dd.nfs.toLocaleString('pt-BR') + ' nota(s) com o valor repetido em todas as linhas — '
+          + 'contadas uma vez (' + fmt(_dd.val) + ' que seriam somados a mais)');
+        console.warn('[crm] deduplicação:', partes.join(' | '));
+        setTimeout(() => showToast('🔎 Deduplicação: ' + partes.join(' · '), 'warn'), 1200);
+      }
       const _ignorados = [];
       if(ignoradosDadosVazios > 0) _ignorados.push(ignoradosDadosVazios+' sem data/valor');
       if(ignoradosNaoVenda > 0)    _ignorados.push(ignoradosNaoVenda+' não-venda');
@@ -26009,13 +26145,23 @@ window.excelProcessarUpload = function(event){
 };
 
 // [R55] Abre o seletor de arquivo depois de garantir que a loja está clara.
-window.excelAbrirUpload = function(){
+// [FIX R67] O seletor de loja só era preenchido DENTRO de excelAbrirUpload,
+// isto é, ao clicar em "Subir planilha". Antes disso aparecia vazio, e as
+// opções só surgiam depois de abrir e cancelar o diálogo de arquivo.
+// Agora é preenchido no render da tela, antes de qualquer interação.
+window.excelPopularLojaImport = function(){
   const sel = document.getElementById('excel-loja-import');
-  if(sel && sel.options.length <= 1){
-    sel.innerHTML = '<option value="">Deduzir da planilha</option>'
-      + (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS)
-          .map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
-  }
+  if(!sel || sel.options.length > 1) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Deduzir da planilha</option>'
+    + (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS)
+        .map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
+  if(atual) sel.value = atual;
+};
+
+window.excelAbrirUpload = function(){
+  window.excelPopularLojaImport();
+  const sel = document.getElementById('excel-loja-import');
   if(sel && !sel.value){
     if(!confirm('Nenhuma loja selecionada.\n\nO sistema vai tentar deduzir a loja de cada linha pela coluna Loja ou pela vendedora.\n\n'
       + 'Se o arquivo é de UMA loja específica, cancele e selecione-a no seletor ao lado — é mais confiável.\n\nContinuar deduzindo?')) return;
@@ -26024,19 +26170,65 @@ window.excelAbrirUpload = function(){
 };
 
 // ── LIMPAR DADOS ──────────────────────────────────────────────────
-window.excelLimparDados = function(){
-  const nCubos = Object.values(D.crm||{}).reduce((s,o)=>s+Object.keys(o).length,0);
-  if(!D.excelDados?.length && !nCubos){ showToast('Sem dados para limpar.','warn'); return; }
+// [FIX R65] "Limpar dados" dizia que apagou, mas só limpava a MEMÓRIA.
+// Os cubos vivem em documentos próprios no Firestore (crm_<loja>_<ano> e
+// suas partes) e nunca eram tocados — na carga seguinte crmCarregar() os
+// trazia de volta, e parecia que o botão não funcionava. Agora apaga
+// remoto de verdade, e só reporta sucesso do que realmente apagou.
+window.excelLimparDados = async function(){
+  const pares = [];
+  Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
+  const nLinhas = (D.excelDados||[]).length;
+  if(!nLinhas && !pares.length){ showToast('Sem dados para limpar.','warn'); return; }
+
+  if(!isAdmin() && pares.length){
+    showToast('Só o administrador pode apagar os dados do CRM.','err'); return;
+  }
   if(!confirm('Apagar os dados do CRM?\n\n'
-    + (D.excelDados?.length ? D.excelDados.length + ' linhas antigas\n' : '')
-    + (nCubos ? nCubos + ' conjunto(s) loja/ano agregados\n' : '')
+    + (nLinhas ? nLinhas.toLocaleString('pt-BR') + ' linhas antigas\n' : '')
+    + (pares.length ? pares.length + ' conjunto(s) loja/ano — TAMBÉM no Firebase\n' : '')
     + '\nNão afeta vendas, contatos nem fluxo.')) return;
+
+  // Apagar remoto ANTES de limpar a memória: se falhar, o usuário fica
+  // sabendo e o dado local continua íntegro para tentar de novo.
+  const erros = [];
+  let apagados = 0;
+  if(pares.length){
+    showToast('⏳ Apagando ' + pares.length + ' conjunto(s) no Firebase...','ok');
+    try{
+      const {mod, db} = await _bkFirestore();
+      const {setDoc, doc} = mod;
+      for(const [lid, ano] of pares){
+        try{
+          const partes = window.crmFatiarClientes((D.crm[lid][ano].clientes)||[]).length;
+          await setDoc(doc(db,'avatim','crm_'+lid+'_'+ano),
+            {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
+          for(let i=0;i<partes;i++){
+            await setDoc(doc(db,'avatim','crm_'+lid+'_'+ano+'_c'+i),
+              {dados:'[]', ts:Date.now(), _apagado:true});
+          }
+          apagados++;
+        }catch(e){ erros.push(lid+'/'+ano+': '+(e.code||e.message)); }
+      }
+    }catch(e){
+      erros.push('Firestore indisponível: ' + (e.message||e));
+    }
+  }
+
+  if(erros.length){
+    console.error('[crm] limpar: falhas', erros);
+    showToast('⚠️ ' + apagados + ' de ' + pares.length + ' apagados no Firebase. '
+      + 'Os que falharam voltarão ao recarregar: ' + erros.join(' | '), 'err');
+    // não limpar a memória do que não foi apagado — evita mentir de novo
+    if(apagados === 0) return;
+  }
+
   D.excelDados = [];
   D.crm = {};
   D._excelImportInfo = null;
   D._excelImportacoes = [];
   save();
-  showToast('Dados de Excel apagados.','ok');
+  showToast('✅ CRM apagado' + (apagados ? ' — ' + apagados + ' conjunto(s) removidos do Firebase.' : '.'), 'ok');
   window.excelRender();
 };
 
@@ -28669,6 +28861,14 @@ window.exportarExcelFluxo = function(){
 const _CRM_MESES_PT = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
                        'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
+/** [R67] CPF/CNPJ legível. */
+function _crmDocFmt(d){
+  const s = String(d||'').replace(/\D/g,'');
+  if(s.length === 11) return s.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4');
+  if(s.length === 14) return s.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5');
+  return s;
+}
+
 function _crmTabela(cols, linhas, vazio){
   if(!linhas.length) return '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'+(vazio||'Sem dados.')+'</div>';
   return '<div style="overflow-x:auto"><table class="dtable" style="min-width:'+(cols.length*110)+'px;font-size:12px"><thead><tr>'
@@ -28685,6 +28885,7 @@ window.excelRender = function(){
 
   // Selects de filtro
   _crmPopularFiltros();
+  if(typeof window.excelPopularLojaImport === 'function') window.excelPopularLojaImport();
 
   const box = document.getElementById('excel-kpis');
   if(!temCubo && !temLegado){
@@ -28766,13 +28967,16 @@ function _crmRenderMelhores(v){
   if(!el) return;
   const linhas = v.clientes.slice(0,50).map((c,i) =>
     '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
-    + '<td><strong>'+c.nome+'</strong>'+(c.vendedora?'<div style="font-size:9.5px;color:var(--muted)">'+c.vendedora+'</div>':'')+'</td>'
+    + '<td><strong>'+c.nome+'</strong>'
+      + (c.documento?'<div style="font-size:9.5px;color:var(--muted)">'+_crmDocFmt(c.documento)+'</div>':'')+'</td>'
+    + '<td style="font-size:11px;color:var(--muted)">'+(c.vendedora||'—')+'</td>'
     + '<td style="text-align:center">'+c.compras+'</td>'
     + '<td style="text-align:right;font-weight:700;color:var(--verde)">'+fmt(c.total)+'</td>'
     + '<td style="text-align:right">'+fmt(c.compras>0?c.total/c.compras:0)+'</td>'
+    + '<td style="font-size:10.5px;color:var(--muted)">'+(c.telefone||'—')+'</td>'
     + '<td style="font-size:10.5px;color:var(--muted)">'+(c.ultima||'').split('-').reverse().join('/')+'</td></tr>');
   el.innerHTML = _crmTabela(
-    [{t:'#'},{t:'Cliente'},{t:'Compras',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Última'}],
+    [{t:'#'},{t:'Cliente'},{t:'Vendedora'},{t:'Notas',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Telefone'},{t:'Última'}],
     linhas, 'Nenhum cliente no filtro atual.')
     + (v.clientes.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+v.clientes.length.toLocaleString('pt-BR')+'</div>':'');
 }
@@ -28787,15 +28991,18 @@ function _crmRenderInativos(v){
     .sort((a,b) => b.total - a.total);
 
   const linhas = inativos.slice(0,50).map(c =>
-    '<tr><td><strong>'+c.nome+'</strong>'+(c.vendedora?'<div style="font-size:9.5px;color:var(--muted)">'+c.vendedora+'</div>':'')+'</td>'
+    '<tr><td><strong>'+c.nome+'</strong>'
+      + (c.documento?'<div style="font-size:9.5px;color:var(--muted)">'+_crmDocFmt(c.documento)+'</div>':'')+'</td>'
+    + '<td style="font-size:11px;color:var(--muted)">'+(c.vendedora||'—')+'</td>'
     + '<td style="text-align:center;color:'+(c.dias>180?'var(--verm)':c.dias>90?'var(--ouro)':'var(--muted)')+';font-weight:700">'+c.dias+'d</td>'
     + '<td style="text-align:right">'+fmt(c.total)+'</td>'
-    + '<td style="text-align:center">'+c.compras+'</td></tr>');
+    + '<td style="text-align:center">'+c.compras+'</td>'
+    + '<td style="font-size:10.5px;color:var(--muted)">'+(c.telefone||'—')+'</td></tr>');
   el.innerHTML =
     '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
       + inativos.length.toLocaleString('pt-BR') + ' cliente(s) sem comprar há mais de ' + dias + ' dias · '
       + fmt(inativos.reduce((s,c)=>s+c.total,0)) + ' em histórico</div>'
-    + _crmTabela([{t:'Cliente'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Compras',dir:'center'}],
+    + _crmTabela([{t:'Cliente'},{t:'Vendedora'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Notas',dir:'center'},{t:'Telefone'}],
         linhas, 'Nenhum cliente inativo nesse prazo.')
     + (inativos.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+inativos.length.toLocaleString('pt-BR')+'</div>':'');
 }
@@ -28867,6 +29074,132 @@ function _crmRenderConjuntos(){
       + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
 }
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R66] INATIVOS DE LONGA DATA NA TELA DE CLIENTES CONTATADOS
+// A base do CRM sabe quem não compra há muito tempo, mas isso vivia só na
+// tela de análise. Quem trabalha a régua de contato está aqui — então a
+// lista de quem passou de 180 dias precisa aparecer aqui, já cruzada com
+// os contatos feitos, para não ligar duas vezes para a mesma pessoa.
+// ══════════════════════════════════════════════════════════════════════
+
+window.renderInativos180 = function(){
+  const el = document.getElementById('ct-inativos180');
+  if(!el) return;
+  const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
+  const lbl = document.getElementById('ct-inat-dias-lbl');
+  if(lbl) lbl.textContent = dias;
+
+  if(typeof window.crmVisao !== 'function' || (!window.crmTemCubos?.() && !(D.excelDados||[]).length)){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">'
+      + 'Sem base de clientes carregada. Suba a planilha em <strong>CRM Clientes</strong> para ver quem está inativo.</div>';
+    const c0 = document.getElementById('ct-inat-count'); if(c0) c0.textContent = '0';
+    return;
+  }
+
+  let v;
+  try{ v = window.crmVisao(); }
+  catch(e){ el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px">Não foi possível ler a base do CRM.</div>'; return; }
+
+  const inativos = (v.clientes||[])
+    .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
+    .filter(c => c.dias !== null && c.dias > dias)
+    .sort((a,b) => b.total - a.total);
+
+  // Cruzar com quem já foi contatado — a régua não pode repetir abordagem
+  const _norm = s => String(s||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  const contatados = new Map();
+  (D.contatos||[]).forEach(ct => {
+    const k = _norm(ct.cliente);
+    if(!k) return;
+    const ex = contatados.get(k);
+    if(!ex || (ct.data||'') > (ex.data||'')) contatados.set(k, ct);
+  });
+
+  const cnt = document.getElementById('ct-inat-count');
+  if(cnt) cnt.textContent = inativos.length.toLocaleString('pt-BR');
+
+  if(!inativos.length){
+    el.innerHTML = '<div style="color:var(--verde);font-size:12px;padding:14px;text-align:center">'
+      + '✅ Nenhum cliente sem comprar há mais de ' + dias + ' dias na base atual.</div>';
+    return;
+  }
+
+  const semContato = inativos.filter(c => !contatados.has(_norm(c.nome)));
+  const potencial  = inativos.reduce((s,c) => s + (c.total||0), 0);
+
+  el.innerHTML =
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<div style="flex:1;min-width:150px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;text-align:center">'
+        + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Inativos</div>'
+        + '<div style="font-size:19px;font-weight:700;color:var(--verm)">' + inativos.length.toLocaleString('pt-BR') + '</div></div>'
+      + '<div style="flex:1;min-width:150px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;text-align:center">'
+        + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Nunca contatados</div>'
+        + '<div style="font-size:19px;font-weight:700;color:var(--ouro)">' + semContato.length.toLocaleString('pt-BR') + '</div></div>'
+      + '<div style="flex:1;min-width:150px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;text-align:center">'
+        + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Já compraram</div>'
+        + '<div style="font-size:19px;font-weight:700;color:var(--verde)">' + fmt(potencial) + '</div></div>'
+    + '</div>'
+    + '<div style="overflow-x:auto"><table class="dtable" style="min-width:660px;font-size:12px">'
+      + '<thead><tr><th>Cliente</th><th style="text-align:center">Sem comprar</th>'
+      + '<th style="text-align:right">Já gastou</th><th style="text-align:center">Notas</th>'
+      + '<th>Telefone</th><th>Vendedora</th><th>Último contato</th><th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
+      + inativos.slice(0,50).map(c => {
+          const ct = contatados.get(_norm(c.nome));
+          const corD = c.dias > 365 ? 'var(--verm)' : c.dias > 270 ? 'var(--ouro)' : 'var(--muted)';
+          const nomeEsc = String(c.nome||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+          return '<tr>'
+            + '<td><strong>' + c.nome + '</strong>'
+              + (c.documento ? '<div style="font-size:9.5px;color:var(--muted)">' + (typeof _crmDocFmt==='function'?_crmDocFmt(c.documento):c.documento) + '</div>' : '') + '</td>'
+            + '<td style="text-align:center;color:' + corD + ';font-weight:700">' + c.dias + 'd</td>'
+            + '<td style="text-align:right">' + fmt(c.total||0) + '</td>'
+            + '<td style="text-align:center">' + (c.compras||0) + '</td>'
+            + '<td style="font-size:11px;color:' + (c.telefone?'var(--texto)':'var(--muted)') + '">' + (c.telefone||'—') + '</td>'
+            + '<td style="font-size:11px;color:var(--muted)">' + (c.vendedora||'—') + '</td>'
+            + '<td style="font-size:11px;color:' + (ct?'var(--verde)':'var(--muted)') + '">'
+              + (ct ? (ct.data||'').split('-').reverse().join('/') : 'nunca') + '</td>'
+            + '<td style="text-align:center">'
+              + '<button onclick="window._ctContatarInativo(&quot;' + nomeEsc + '&quot;,&quot;' + String(c.telefone||'').replace(/"/g,'') + '&quot;)" '
+              + 'style="background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">📞 Contatar</button>'
+            + '</td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    + (inativos.length > 50
+        ? '<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando os 50 de maior valor, de ' + inativos.length.toLocaleString('pt-BR') + '</div>'
+        : '');
+};
+
+/** Abre o formulário de contato já preenchido como reativação. */
+window._ctContatarInativo = function(nome, tel){
+  if(typeof abrirFormContato !== 'function') return;
+  abrirFormContato();
+  setTimeout(() => {
+    const cl = document.getElementById('ct-form-cliente');
+    if(cl) cl.value = nome || '';
+    const tp = document.getElementById('ct-form-tipo');
+    if(tp) tp.value = 'inativo';
+    // telefone na observação — o formulário não tem campo próprio para ele
+    const ob = document.getElementById('ct-form-obs');
+    if(ob && tel && !ob.value) ob.value = 'Telefone: ' + tel;
+  }, 100);
+};
+
+// Renderizar junto com a página de contatos
+(function _wrapContatosR66(){
+  const orig = window.renderContatos;
+  if(typeof orig === 'function' && !orig._wrappedR66){
+    window.renderContatos = function(){
+      orig.apply(this, arguments);
+      try { window.renderInativos180(); }
+      catch(e){ console.warn('renderInativos180:', e.message); }
+    };
+    window.renderContatos._wrappedR66 = true;
+  }
+})();
 
 
 // Chamar render dos lembretes sempre que renderFluxo rodar
