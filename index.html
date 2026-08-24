@@ -271,6 +271,11 @@ try{
           _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0,
           // [FIX 13/08] contatos NÃO estava subindo — nenhum admin ou loja via os contatos criados em outros dispositivos
           contatos:            D2.contatos             || [],
+          // [FIX R71] prospeccoes nunca entrou em payload nenhum: a loja
+          // registrava, via "Prospecção registrada!" e o dado morria no
+          // localStorage — o admin jamais enxergava. Mesmo tratamento de
+          // contatos: merge por ID, cada loja envia as suas.
+          prospeccoes:         D2.prospeccoes          || [],
           excelDados:          D2.excelDados           || [],
           _excelImportInfo:    D2._excelImportInfo     || null,
           _excelImportacoes:   D2._excelImportacoes    || [],
@@ -493,6 +498,7 @@ try{
             // [FIX 13/08] contatos NÃO estava subindo — vendedoras registravam e admin nunca via
             // Loja envia SÓ os contatos da própria loja
             contatos:       (D2.contatos||[]).filter(c => c.loja === lid),
+            prospeccoes:    (D2.prospeccoes||[]).filter(p => p.loja === lid),
             _contatosExcluidos: D2._contatosExcluidos || {},
             // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
             _vendsExcluidas:      D2._vendsExcluidas      || [],
@@ -3232,7 +3238,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
       <div class="st" style="margin:0">💤 Inativos há mais de <span id="ct-inat-dias-lbl">180</span> dias
         <span id="ct-inat-count" style="background:rgba(220,53,69,.2);color:var(--verm);padding:2px 8px;border-radius:10px;font-size:12px;margin-left:6px">0</span></div>
-      <div style="display:flex;align-items:center;gap:6px">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <label style="font-size:11px;color:var(--muted)">Sem comprar há mais de:</label>
         <select id="ct-inat-dias" onchange="window.renderInativos180()"
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px">
@@ -3240,6 +3246,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <option value="270">270 dias</option>
           <option value="365">1 ano</option>
           <option value="540">18 meses</option>
+        </select>
+        <!-- [R69] filtrar a carteira de uma vendedora -->
+        <select id="ct-inat-vend" onchange="window.renderInativos180()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
+          <option value="">👩 Todas as vendedoras</option>
         </select>
       </div>
     </div>
@@ -6115,6 +6126,105 @@ window.backupInspecionar = function(event){
 
 
 
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R72] RE-RENDERIZAÇÃO CENTRAL DA PÁGINA ATIVA
+// O auto-refresh só redesenhava uma LISTA FIXA de páginas — 4 para loja,
+// 8 para admin. Clientes Contatados, CRM, Semana, Prospecção e outras
+// ficavam de fora: o dado chegava do Firebase mas a tela seguia velha,
+// e só um F5 resolvia.
+//
+// Aqui há um mapa único de "como redesenhar cada página", usado tanto
+// pelo sync quanto após uma alteração local. Deliberadamente NÃO chama
+// o que reinicializa estado de navegação (mês selecionado, aba, filtro):
+// redesenhar não pode jogar o usuário de volta ao começo.
+// ══════════════════════════════════════════════════════════════════════
+
+const _RENDER_PAGINA = {
+  dash:        () => carregarDash(),
+  lanc:        () => { renderPainelDia(); renderHistoricoLanc?.(); },
+  performance: () => renderPerformance(),
+  metas:       () => renderMetas(),
+  vendedoras:  () => { renderVendRanking(_tabVend); renderTabelaVend(); },
+  comissao:    () => renderComissao(),
+  semana:      () => { renderSemana(); window.renderPadroesSemana?.(); },
+  fluxo:       () => renderFluxo(),
+  contatos:    () => renderContatos(),
+  excel:       () => window.excelRender?.(),
+  prospec:     () => window.renderProspec?.(),
+  mesant:      () => window.renderMesAnterior?.(),
+  relatorios:  () => window.renderRelatorios?.(),
+  controle:    () => renderControle(),
+  lojas:       () => renderLojas(_tabLojas),
+  rankings:    () => renderRankings('rede'),
+  gestao:      () => renderGestao(),
+  estoque:     () => { renderCampLista?.(); if(typeof renderRelCamp === 'function') renderRelCamp(); },
+  metaslojas:  () => renderMetasLojas(),
+  historicoanu:() => window.renderHistoricoAnual?.()
+  // 'acompgeral' fica de fora de propósito: aquela tela só busca quando o
+  // usuário clica, e redesenhar sozinho contrariaria esse desenho.
+};
+
+/** Página aberta agora. */
+window.paginaAtiva = function(){
+  return document.querySelector('.page.active')?.id?.replace('page-','') || '';
+};
+
+/**
+ * Redesenha a página aberta. Seguro para chamar a qualquer momento.
+ * @param {string} motivo só para o log — ajuda a entender no console
+ */
+window.rerenderPaginaAtiva = function(motivo){
+  const pg = window.paginaAtiva();
+  if(!pg) return false;
+  const fn = _RENDER_PAGINA[pg];
+  if(!fn) return false;
+
+  // Não redesenhar por baixo de quem está digitando: perderia o texto e
+  // moveria o cursor. A próxima passada pega.
+  const foco = document.activeElement;
+  if(foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName) && foco.type !== 'button'){
+    window._rerenderAdiado = true;
+    return false;
+  }
+  window._rerenderAdiado = false;
+
+  try{ fn(); return true; }
+  catch(e){ console.warn('[Avatim] rerender "'+pg+'" ('+(motivo||'?')+'):', e.message); return false; }
+};
+
+/**
+ * Agenda um redesenho logo após uma alteração local, agrupando rajadas
+ * (vários save() seguidos redesenham uma vez só).
+ */
+let _rerenderTimer = null;
+window.agendarRerender = function(motivo){
+  if(_rerenderTimer) clearTimeout(_rerenderTimer);
+  _rerenderTimer = setTimeout(() => {
+    _rerenderTimer = null;
+    window.rerenderPaginaAtiva(motivo || 'alteração local');
+  }, 250);
+};
+
+// Batimento próprio: garante tela atualizada mesmo sem nenhuma alteração,
+// e recupera o redesenho que foi adiado porque o usuário estava digitando.
+(function _batimentoRerender(){
+  setInterval(() => {
+    const foco = document.activeElement;
+    const digitando = foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName) && foco.type !== 'button';
+    if(digitando) return;
+    if(document.hidden) return;          // aba em segundo plano: não gasta
+    window.rerenderPaginaAtiva('batimento');
+  }, 45000);
+
+  // Ao voltar para a aba, mostrar o estado atual em vez do congelado
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) window.agendarRerender('aba reativada');
+  });
+})();
+
+
 // ══════════════════════════════════════════════════════════════════════
 // [R61] INDICADOR DE SINCRONIZAÇÃO
 // Antes o badge só aparecia para o admin — justamente quem menos precisa.
@@ -6617,22 +6727,57 @@ window.crmApagar = async function(lid, ano){
     + (cubo.clientesUnicos||0).toLocaleString('pt-BR') + ' clientes.\n\n'
     + 'Isto não afeta vendas, contatos nem fluxo.')) return;
 
+  // [FIX R70] Antes: apagava a memória, TENTAVA o remoto engolindo o erro
+  // com um console.warn, e avisava "apagado" de qualquer jeito. Se a
+  // gravação falhasse, o conjunto voltava no próximo carregamento — o
+  // botão dizia que agiu e não tinha agido. Agora o remoto vem primeiro
+  // e o que se informa é o que de fato aconteceu.
   const partes = window.crmFatiarClientes(cubo.clientes||[]).length;
-  delete D.crm[lid][ano];
-  if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
-  save();
+  const docs = [_crmDocNome(lid,ano)].concat(
+    Array.from({length: partes}, (_,i) => _crmDocNome(lid,ano,i)));
 
+  let erro = null;
   try{
     const {mod, db} = await _bkFirestore();
     const {setDoc, doc} = mod;
     // documento vazio marca a exclusão — some no próximo carregamento
-    await setDoc(doc(db,'avatim',_crmDocNome(lid,ano)), {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
+    await setDoc(doc(db,'avatim',docs[0]),
+      {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
     for(let i=0;i<partes;i++){
-      await setDoc(doc(db,'avatim',_crmDocNome(lid,ano,i)), {dados:'[]', ts:Date.now(), _apagado:true});
+      await setDoc(doc(db,'avatim',_crmDocNome(lid,ano,i)),
+        {dados:'[]', ts:Date.now(), _apagado:true});
     }
-  }catch(e){ console.warn('[crm] apagar remoto falhou:', e.message); }
+  }catch(e){
+    erro = e.code || e.message || String(e);
+    console.error('[crm] apagar remoto falhou:', erro);
+  }
 
-  showToast('CRM de ' + nomeLoja + '/' + ano + ' apagado.','ok');
+  if(erro){
+    const soLocal = confirm(
+      'Não consegui apagar ' + nomeLoja + '/' + ano + ' no Firebase.\n\n'
+      + 'Motivo: ' + erro + '\n\n'
+      + 'OK = remover SÓ deste navegador (o conjunto volta ao recarregar, '
+      + 'porque continua no Firebase)\n'
+      + 'Cancelar = não mexer e tentar de novo depois'
+    );
+    if(!soLocal){
+      showToast('Nada foi apagado. Verifique a conexão e tente de novo.','err');
+      return;
+    }
+    delete D.crm[lid][ano];
+    if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
+    save();
+    showToast('⚠️ ' + nomeLoja + '/' + ano + ' removido apenas deste navegador — '
+      + 'segue no Firebase e voltará ao recarregar.','err');
+    if(typeof window.excelRender === 'function') window.excelRender();
+    return;
+  }
+
+  delete D.crm[lid][ano];
+  if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
+  save();
+  showToast('✅ CRM de ' + nomeLoja + '/' + ano + ' apagado — '
+    + docs.length + ' documento(s) removidos do Firebase.','ok');
   if(typeof window.excelRender === 'function') window.excelRender();
 };
 
@@ -7326,6 +7471,9 @@ function save(){
   // A falha aqui NÃO pode impedir o sync remoto abaixo — é ele que leva o
   // dado para as outras lojas.
   _persistirLocal();
+  // [R72] Alteração local aparece na tela sem esperar o próximo sync.
+  // Agrupado, para uma rajada de save() redesenhar uma vez só.
+  if(typeof window.agendarRerender === 'function') window.agendarRerender('save');
   if(_savePending) return;
   _savePending = true;
   // [FIX Race Condition] Guardar snapshot dos dados no momento do save
@@ -7626,6 +7774,13 @@ async function loadFromFirestore(){
         if(!D.contatos) D.contatos=[];
         remoto.contatos.forEach(c=>{
           if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c);
+        });
+      }
+      // [FIX R71] prospecções: mesmo padrão — nunca eram carregadas de volta
+      if(remoto.prospeccoes && remoto.prospeccoes.length){
+        if(!D.prospeccoes) D.prospeccoes=[];
+        remoto.prospeccoes.forEach(pr=>{
+          if(!D.prospeccoes.find(x=>x.id===pr.id)) D.prospeccoes.push(pr);
         });
       }
       // [NEW 13/08] excelDados: substitui inteiro (admin é autoridade)
@@ -16679,11 +16834,9 @@ function iniciarAutoRefresh(){
           });
         }
         _persistirLocal();
-        const pg=document.querySelector('.page.active')?.id?.replace('page-','');
-        if(pg==='dash') carregarDash();
-        else if(pg==='metas') renderMetas();
-        else if(pg==='lanc') renderHistoricoLanc?.();
-        else if(pg==='fluxo') renderFluxo?.();
+        // [FIX R72] Antes só 4 páginas eram redesenhadas; nas demais o dado
+        // chegava e a tela ficava velha até um F5.
+        window.rerenderPaginaAtiva?.('syncLoja');
         console.log('[Avatim] 🔄 syncLoja: dados atualizados');
       }catch(e){ console.warn('[Avatim] syncLoja erro:', e.message); }
     }
@@ -16799,15 +16952,8 @@ function iniciarAutoRefresh(){
     // LEITURA do admin. "Sync 14:32" parecia confirmar envio, mas era só
     // releitura — mascarava uma gravação que havia falhado.
     if(typeof window._syncRender === 'function') window._syncRender();
-    const pg=document.querySelector('.page.active')?.id?.replace('page-','');
-    if(pg==='dash')       carregarDash();
-    else if(pg==='lojas') renderLojas(_tabLojas);
-    else if(pg==='rankings'){ renderRankings('rede'); }
-    else if(pg==='gestao'){ renderGestao(); }
-    else if(pg==='campanhas'){ renderCampLista(); if(typeof renderRelCamp==='function') renderRelCamp(); }
-    else if(pg==='metas') renderMetas();
-    else if(pg==='fluxo') { if(typeof renderFluxo==='function') renderFluxo(); }
-    else if(pg==='lanc')  { renderPainelDia(); }
+    // [FIX R72] mesma lista fixa de antes, agora pelo despachante central
+    window.rerenderPaginaAtiva?.('syncAdmin');
   }
   syncAdmin();
   _autoRefreshTimer=setInterval(syncAdmin,30000);
@@ -16942,6 +17088,10 @@ async function forceSyncAdmin(){
     if(remoto.contatos?.length){
       if(!D.contatos) D.contatos=[];
       remoto.contatos.forEach(c=>{ if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c); });
+    }
+    if(remoto.prospeccoes && remoto.prospeccoes.length){
+      if(!D.prospeccoes) D.prospeccoes=[];
+      remoto.prospeccoes.forEach(pr=>{ if(!D.prospeccoes.find(x=>x.id===pr.id)) D.prospeccoes.push(pr); });
     }
     // [NEW 13/08] excelDados: replace do remoto (admin authoritative)
     if(Array.isArray(remoto.excelDados)){
@@ -29150,10 +29300,35 @@ function _crmRenderConjuntos(){
 // os contatos feitos, para não ligar duas vezes para a mesma pessoa.
 // ══════════════════════════════════════════════════════════════════════
 
+// [R69] Ordenação das colunas do painel de inativos.
+window._ctInatOrd = window._ctInatOrd || {campo:'total', dir:-1};
+
+window.ctInatOrdenar = function(campo){
+  const o = window._ctInatOrd;
+  // Mesmo campo inverte a direção; campo novo começa no sentido mais útil:
+  // texto de A→Z, número e data do maior/mais antigo para baixo.
+  if(o.campo === campo) o.dir = -o.dir;
+  else { o.campo = campo; o.dir = (campo === 'nome' || campo === 'vendedora') ? 1 : -1; }
+  window.renderInativos180();
+};
+
+function _ctSeta(campo){
+  const o = window._ctInatOrd;
+  if(o.campo !== campo) return '<span style="opacity:.25">⇅</span>';
+  return '<span style="color:var(--ouro)">' + (o.dir === 1 ? '▲' : '▼') + '</span>';
+}
+
+function _ctTh(rot, campo, align){
+  return '<th style="cursor:pointer;user-select:none;white-space:nowrap'
+    + (align ? ';text-align:'+align : '') + '" onclick="window.ctInatOrdenar(\''+campo+'\')" '
+    + 'title="Clique para ordenar">' + rot + ' ' + _ctSeta(campo) + '</th>';
+}
+
 window.renderInativos180 = function(){
   const el = document.getElementById('ct-inativos180');
   if(!el) return;
   const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
+  const fVend = document.getElementById('ct-inat-vend')?.value || '';
   const lbl = document.getElementById('ct-inat-dias-lbl');
   if(lbl) lbl.textContent = dias;
 
@@ -29168,10 +29343,26 @@ window.renderInativos180 = function(){
   try{ v = window.crmVisao(); }
   catch(e){ el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px">Não foi possível ler a base do CRM.</div>'; return; }
 
-  const inativos = (v.clientes||[])
+  let inativos = (v.clientes||[])
     .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
-    .filter(c => c.dias !== null && c.dias > dias)
-    .sort((a,b) => b.total - a.total);
+    .filter(c => c.dias !== null && c.dias > dias);
+
+  // Popular o seletor de vendedoras com quem realmente tem inativo na lista
+  const selV = document.getElementById('ct-inat-vend');
+  if(selV){
+    const nomes = [...new Set(inativos.map(c => c.vendedora).filter(Boolean))].sort();
+    const marcado = selV.value;
+    const assinatura = nomes.join('|');
+    if(selV.dataset.assinatura !== assinatura){
+      selV.innerHTML = '<option value="">👩 Todas as vendedoras</option>'
+        + nomes.map(n => '<option value="'+n+'">'+n+'</option>').join('')
+        + '<option value="__sem__">— sem vendedora —</option>';
+      selV.dataset.assinatura = assinatura;
+      if(marcado) selV.value = marcado;
+    }
+  }
+  if(fVend === '__sem__')      inativos = inativos.filter(c => !c.vendedora);
+  else if(fVend)               inativos = inativos.filter(c => c.vendedora === fVend);
 
   // Cruzar com quem já foi contatado — a régua não pode repetir abordagem
   const _norm = s => String(s||'').trim().toLowerCase()
@@ -29182,6 +29373,27 @@ window.renderInativos180 = function(){
     if(!k) return;
     const ex = contatados.get(k);
     if(!ex || (ct.data||'') > (ex.data||'')) contatados.set(k, ct);
+  });
+
+  // Ordenar conforme a coluna escolhida
+  const _ord = window._ctInatOrd;
+  const _txt = x => String(x||'').toLowerCase();
+  const _ultCt = c => {
+    const ct = contatados.get(_norm(c.nome));
+    return ct ? (ct.data || '') : '';   // sem contato ordena primeiro no crescente
+  };
+  inativos.sort((a,b) => {
+    let r = 0;
+    switch(_ord.campo){
+      case 'nome':      r = _txt(a.nome).localeCompare(_txt(b.nome)); break;
+      case 'dias':      r = (a.dias||0) - (b.dias||0); break;
+      case 'vendedora': r = _txt(a.vendedora).localeCompare(_txt(b.vendedora)); break;
+      case 'contato':   r = String(_ultCt(a)).localeCompare(String(_ultCt(b))); break;
+      case 'notas':     r = (a.compras||0) - (b.compras||0); break;
+      default:          r = (a.total||0) - (b.total||0);
+    }
+    // desempate estável por valor, para a lista não "dançar" entre renders
+    return (r || (a.total||0) - (b.total||0)) * _ord.dir;
   });
 
   const cnt = document.getElementById('ct-inat-count');
@@ -29209,9 +29421,15 @@ window.renderInativos180 = function(){
         + '<div style="font-size:19px;font-weight:700;color:var(--verde)">' + fmt(potencial) + '</div></div>'
     + '</div>'
     + '<div style="overflow-x:auto"><table class="dtable" style="min-width:660px;font-size:12px">'
-      + '<thead><tr><th>Cliente</th><th style="text-align:center">Sem comprar</th>'
-      + '<th style="text-align:right">Já gastou</th><th style="text-align:center">Notas</th>'
-      + '<th>Telefone</th><th>Vendedora</th><th>Último contato</th><th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
+      + '<thead><tr>'
+        + _ctTh('Cliente','nome')
+        + _ctTh('Sem comprar','dias','center')
+        + _ctTh('Já gastou','total','right')
+        + _ctTh('Notas','notas','center')
+        + '<th>Telefone</th>'
+        + _ctTh('Vendedora','vendedora')
+        + _ctTh('Último contato','contato')
+        + '<th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
       + inativos.slice(0,50).map(c => {
           const ct = contatados.get(_norm(c.nome));
           const corD = c.dias > 365 ? 'var(--verm)' : c.dias > 270 ? 'var(--ouro)' : 'var(--muted)';
