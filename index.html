@@ -772,7 +772,10 @@ try{
                   const _bMeta = base.metasLoja[lid2]?.[mr];
                   const _rTsM  = m?._savedAt      || 0;
                   const _lTsM  = _bMeta?._savedAt || 0;
-                  if(!_bMeta || !_bMeta.mes || _rTsM > _lTsM)
+                  // [R85] mesma regra do mergeMetasLoja, inclusive o caso em
+                  // que nenhum dos dois tem carimbo (primeira sincronização).
+                  if(!_bMeta || !_bMeta.mes || _rTsM > _lTsM
+                     || (_rTsM === 0 && _lTsM === 0 && m?.mes))
                     base.metasLoja[lid2][mr] = m;
                 }); 
               });
@@ -1506,13 +1509,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="ni" onclick="nav('contatos')" id="nav-contatos"><span class="ic">&#128222;</span>Clientes Contatados</button>
     <button class="ni" onclick="nav('excel')" id="nav-excel"><span class="ic">&#128202;</span>CRM Clientes</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
-    <button class="ni" onclick="nav('mesant')" id="nav-mesant"><span class="ic">📈</span>Histórico</button>
     <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
-    <button class="ni admin-only" onclick="nav('historicoanu')" id="nav-historicoanu" style="display:none"><span class="ic">📊</span>Histórico Anual</button>
-    <button class="ni admin-only" onclick="nav('lanchistorico')" id="nav-lanchistorico" style="display:none"><span class="ic">📝</span>Lançar Histórico</button>
-    <!-- [23/07] "Lançamento por Loja" removido do menu a pedido — o lançamento
-         histórico é feito em "Lançar Histórico". A página segue existindo para
-         não quebrar links antigos, mas sai da navegação. -->
+    <!-- [R83] O histórico agora é único (item "Histórico", abaixo de Rankings) e
+         alimentado automaticamente por CRM + base histórica + metas. Não há mais
+         lançamento manual de histórico no menu. -->
     <button class="ni" onclick="nav('controle')" id="nav-controle"><span class="ic">🎯</span>Controle Ano a Ano</button>
     <button class="ni admin-only" onclick="nav('acompgeral')" id="nav-acompgeral" style="display:none"><span class="ic">📊</span>Acompanh. Meta Geral</span></button>
     <button class="ni admin-item" onclick="nav('lojas')" id="nav-lojas" style="display:none"><span class="ic">&#8862;</span>Todas as Lojas</button>
@@ -1681,7 +1681,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
               style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px"></select>
             <button onclick="mesAntNavegar(1)" class="btn-s" title="Mês seguinte"
               style="padding:4px 9px;font-size:12px;line-height:1">›</button>
-            <button onclick="nav('mesant')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver análise</button>
+            <button onclick="nav('historico')" class="btn-s" style="padding:4px 10px;font-size:10px">Ver análise</button>
           </div>
         </div>
         <div id="mesant-dash-widget" style="display:grid;gap:8px;grid-template-columns:repeat(2,1fr)">--</div>
@@ -2601,59 +2601,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </div>
 
 
-<!-- HISTÓRICO — performance dos meses passados -->
-<div class="page" id="page-mesant">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Histó<span>rico</span></h1>
-      <div class="ps" id="mesant-titulo">Performance geral das 7 lojas</div>
-    </div>
-  </div>
 
-  <!-- [NEW 28/07] Seletor de mês — permite ver performance de qualquer mês passado -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Mês:</label>
-    <select id="hist-mes-sel" onchange="window._histMesRef=this.value;renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="">Mês anterior (padrão)</option>
-    </select>
-  </div>
-
-  <!-- Filtro de loja -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Loja:</label>
-    <select id="mesant-loja" onchange="renderMesAnterior()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="">📊 Todas as Lojas</option>
-      <option value="mooca">🏪 Mooca Plaza</option>
-      <option value="leopoldina">🏪 Vila Leopoldina</option>
-      <option value="perdizes">🏪 Perdizes</option>
-      <option value="santana">🏪 Santana</option>
-      <option value="jarpaul">🏪 Jardim Paulista</option>
-      <option value="pinheiros">🏪 Alto de Pinheiros</option>
-      <option value="ibirapuera">🏪 Shopping Ibirapuera</option>
-    </select>
-  </div>
-
-  <!-- Filtro de período customizado -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Período:</label>
-    <input type="date" id="mesant-periodo-ini" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
-    <span style="color:var(--muted)">até</span>
-    <input type="date" id="mesant-periodo-fim" style="padding:8px 12px;font-size:12px;border:1px solid var(--borda);border-radius:8px;background:var(--cinza)" />
-    <button class="btn-s" onclick="buscarMesAnteriorPeriodo()" style="font-size:11px;padding:6px 12px">Buscar</button>
-  </div>
-  <div class="kgrid" id="mesant-kpis" style="margin-bottom:16px"></div>
-
-  <!-- Tabela por loja -->
-  <div class="sc">
-    <div class="st">📊 Performance por Loja</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
-        <tbody id="tbody-mesant"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
 
 
@@ -2713,140 +2661,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 </style>
 
 
-<!-- HISTÓRICO ANUAL — 2021 até agora, mês a mês -->
-<div class="page" id="page-historicoanu">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Histórico <span>Anual</span></h1>
-      <div class="ps">Performance mês a mês desde 2021 — consolidado das 7 lojas</div>
-    </div>
-  </div>
-
-  <!-- Filtro de ano -->
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-    <label style="font-size:12px;font-weight:600">Ano:</label>
-    <select id="hanu-ano" onchange="renderHistoricoAnual()" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:12px;outline:none">
-      <option value="2021">2021</option>
-      <option value="2022">2022</option>
-      <option value="2023">2023</option>
-      <option value="2024">2024</option>
-      <option value="2025">2025</option>
-      <option value="2026" selected>2026</option>
-    </select>
-  </div>
-
-  <!-- Tabela histórico -->
-  <div class="sc">
-    <div class="st">📋 Mês a Mês</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Mês</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th></tr></thead>
-        <tbody id="tbody-historicoanu"></tbody>
-      </table>
-    </div>
-    <div id="historicoanu-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
-      Sem dados para este período.
-    </div>
-  </div>
-
-  <!-- Gráfico de evolução -->
-  <div class="sc" style="margin-top:16px">
-    <div class="st">📈 Evolução Meta vs Realizado</div>
-    <div id="historicoanu-chart" style="height:250px;display:flex;align-items:flex-end;gap:4px;padding:16px;background:rgba(91,141,239,.05);border-radius:8px">--</div>
-  </div>
-</div>
 
 
-<!-- LANÇAMENTO HISTÓRICO — entrada de dados de meses/anos anteriores -->
-<div class="page" id="page-lanchistorico">
-  <div class="ph">
-    <div>
-      <h1 class="pt">Lançar <span>Histórico</span></h1>
-      <div class="ps">Registre meta, realizado e TM de meses anteriores para análise de crescimento</div>
-    </div>
-  </div>
 
-  <!-- Formulário -->
-  <div class="sc">
-    <div class="st">Lançar Dados do Mês</div>
-    <div class="gr">
-      <div class="ig"><label>Mês <span style="color:var(--verm)">*</span></label>
-        <select id="lh-mes">
-          <option value="01">Janeiro</option>
-          <option value="02">Fevereiro</option>
-          <option value="03">Março</option>
-          <option value="04">Abril</option>
-          <option value="05">Maio</option>
-          <option value="06">Junho</option>
-          <option value="07">Julho</option>
-          <option value="08">Agosto</option>
-          <option value="09">Setembro</option>
-          <option value="10">Outubro</option>
-          <option value="11">Novembro</option>
-          <option value="12">Dezembro</option>
-        </select>
-      </div>
-      <!-- [FIX 21/07] sem este campo o histórico era gravado global e uma
-           loja sobrescrevia a outra -->
-      <div class="ig"><label>Loja <span style="color:var(--verm)">*</span></label>
-        <select id="lh-loja"></select>
-      </div>
-      <div class="ig"><label>Ano <span style="color:var(--verm)">*</span></label>
-        <select id="lh-ano">
-          <option value="2021">2021</option>
-          <option value="2022">2022</option>
-          <option value="2023">2023</option>
-          <option value="2024">2024</option>
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-      </div>
-      <div class="ig"><label>Meta (R$) <span style="color:var(--verm)">*</span></label>
-        <input type="number" id="lh-meta" placeholder="176600" min="0" step="100">
-      </div>
-      <div class="ig"><label>Realizado (R$) <span style="color:var(--verm)">*</span></label>
-        <input type="number" id="lh-real" placeholder="125691" min="0" step="100">
-      </div>
-      <div class="ig"><label>TM — Ticket Médio (R$)</label>
-        <input type="number" id="lh-tm" placeholder="511" min="0" step="1">
-      </div>
-      <div class="ig"><label>Nº de Vendas</label>
-        <input type="number" id="lh-nvendas" placeholder="246" min="0" step="1" oninput="atualizaPAPreview()">
-      </div>
-      <div class="ig"><label>Quantidade de Itens</label>
-        <input type="number" id="lh-qtditens" placeholder="510" min="0" step="1" oninput="atualizaPAPreview()">
-      </div>
-    </div>
-    <div style="background:rgba(91,141,239,.08);border-left:3px solid var(--azul);padding:12px;border-radius:4px;margin-bottom:16px">
-      <div style="font-size:11px;color:var(--texto)"><strong>PA (Produto por Atendimento):</strong> <span id="lh-pa-preview">—</span></div>
-      <div style="font-size:9px;color:var(--muted);margin-top:4px">= Quantidade de Itens ÷ Nº de Vendas</div>
-    </div>
-    <div class="btn-r">
-      <button class="btn-p" onclick="salvarHistoricoMes()">Salvar</button>
-      <button class="btn-s" onclick="limparFormHistorico()">Limpar</button>
-    </div>
-  </div>
 
-  <!-- Tabela com YoY -->
-  <div class="sc" style="margin-top:16px">
-    <div class="st">📊 Histórico Lançado — com Análise YoY</div>
-    <div style="overflow-x:auto">
-      <table class="dtable">
-        <thead><tr><th>Mês/Ano</th><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Nº Vendas</th><th>PA</th><th>Qtd Itens</th><th>YoY %</th><th></th></tr></thead>
-        <tbody id="tbody-lanchistorico"></tbody>
-      </table>
-    </div>
-    <div id="lanchistorico-empty" style="display:none;text-align:center;padding:32px;color:var(--muted);font-size:12px">
-      Nenhum dado lançado ainda.
-    </div>
-  </div>
-
-  <!-- Gráfico YoY -->
-  <div class="sc" style="margin-top:16px">
-    <div class="st">📈 Crescimento YoY (Mesmo mês, anos consecutivos)</div>
-    <div id="lanchistorico-yoy" style="height:300px;display:flex;align-items:flex-end;gap:8px;padding:16px;background:rgba(46,204,135,.05);border-radius:8px;font-size:9px">--</div>
-  </div>
-</div>
 
 
 <!-- LANÇAMENTO POR LOJA — entrada de dados por período de cada loja -->
@@ -3183,7 +3001,16 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
 
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">📦 Produtos Mais Vendidos</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px">
+      <div class="st" style="margin:0">📦 Produtos Mais Vendidos</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <select id="excel-prod-vend" onchange="excelRender()"
+                style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 12px;color:var(--texto);font-size:12px;min-width:190px">
+          <option value="">👥 Todos(as) vendedor(es)</option>
+        </select>
+        <button class="btn-s" onclick="exportarProdutosExcel()" style="font-size:11px;padding:7px 14px;white-space:nowrap">📊 Exportar Excel</button>
+      </div>
+    </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranking de produtos por quantidade e faturamento.</div>
     <div id="excel-produtos"></div>
   </div>
@@ -4744,6 +4571,12 @@ service cloud.firestore {
         <div id="hist-loja-crescimento"></div>
       </div>
 
+      <!-- [R83] Evolução mês a mês — histórico único, alimentado automaticamente -->
+      <div class="sc" style="margin-bottom:12px;padding:16px 14px">
+        <div style="font-size:12px;font-weight:700;color:var(--verde);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">📊 Evolução dos Indicadores — mês a mês</div>
+        <div id="hist-loja-evolucao"></div>
+      </div>
+
       <!-- Tabela dia a dia -->
       <div class="sc" style="margin-bottom:12px;padding:16px 14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -5933,6 +5766,39 @@ window.debugMeta = async function(lid){
   console.log("════════════════════════════════════════════════════════════");
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R85] MERGE DE METAS — por loja+mês, o carimbo mais recente vence.
+//
+// BUG CORRIGIDO: quando a meta vinha do servidor SEM _savedAt (registro
+// antigo), o código a estampava com Date.now(). Uma meta velha passava a
+// parecer a mais nova da rede, derrubava a edição real do admin e, como a
+// máquina reenviava, o carimbo falso se espalhava para todo mundo. Era por
+// isso que limpar o cache do navegador não resolvia: o estrago já estava
+// gravado no Firestore.
+//
+// Regra: quem não tem carimbo é ANTIGO, nunca "agora". Só uma gravação de
+// verdade carimba.
+// ══════════════════════════════════════════════════════════════════════
+window.mergeMetasLoja = function(metasRemotas){
+  if(!metasRemotas) return 0;
+  if(!D.metasLoja) D.metasLoja = {};
+  let aceitas = 0;
+  Object.entries(metasRemotas).forEach(([lid, meses]) => {
+    if(!D.metasLoja[lid]) D.metasLoja[lid] = {};
+    Object.entries(meses || {}).forEach(([mr, metaObj]) => {
+      const local = D.metasLoja[lid]?.[mr];
+      const lTs   = local?._savedAt   || 0;
+      const rTs   = metaObj?._savedAt || 0;
+      // Aceita quando: não há meta local · a local é vazia · o remoto é mais
+      // recente · ou nenhum dos dois tem carimbo (primeira sincronização).
+      const aceita = !local || !local.mes || rTs > lTs
+                   || (rTs === 0 && lTs === 0 && metaObj?.mes);
+      if(aceita){ D.metasLoja[lid][mr] = metaObj; aceitas++; }
+    });
+  });
+  return aceitas;
+};
+
 // Função auxiliar: forçar gravação só da meta da loja no principal
 window.forcarMetaPrincipal = async function(lid, valorMes){
   const mr = mesAtual();
@@ -6274,15 +6140,13 @@ const _RENDER_PAGINA = {
   contatos:    () => renderContatos(),
   excel:       () => window.excelRender?.(),
   prospec:     () => window.renderProspec?.(),
-  mesant:      () => window.renderMesAnterior?.(),
   relatorios:  () => window.renderRelatorios?.(),
   controle:    () => renderControle(),
   lojas:       () => renderLojas(_tabLojas),
   rankings:    () => renderRankings('rede'),
   gestao:      () => renderGestao(),
   estoque:     () => { renderCampLista?.(); if(typeof renderRelCamp === 'function') renderRelCamp(); },
-  metaslojas:  () => renderMetasLojas(),
-  historicoanu:() => window.renderHistoricoAnual?.()
+  metaslojas:  () => renderMetasLojas()
   // 'acompgeral' fica de fora de propósito: aquela tela só busca quando o
   // usuário clica, e redesenhar sozinho contrariaria esse desenho.
 };
@@ -6620,11 +6484,15 @@ window.crmTemCubos = function(){
 };
 
 /** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedor(a). */
-window.crmVisao = function(){
+window.crmVisao = function(over){
+  over = over || {};
   const fAno  = document.getElementById('excel-filtro-ano')?.value  || '';
   const fMes  = document.getElementById('excel-filtro-mes')?.value  || '';
   const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
-  const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+  // [R86] O card de produtos tem seu próprio filtro de vendedor(a), que se
+  // soma aos filtros gerais de ano/mês/loja.
+  const fVend = over.vend !== undefined ? over.vend
+              : (document.getElementById('excel-filtro-vend')?.value || '');
 
   let lojas = window.crmLojasVisiveis();
   if(fLoja) lojas = lojas.filter(l => l === fLoja);
@@ -6679,7 +6547,28 @@ window.crmFiltrar = function(cubo, f){
   const semRecorte = !f.mes && !f.vend && !f.ano;
 
   let produtos;
-  if(semRecorte){
+  // [R86] Com vendedor(a) escolhida, o ranking sai da dimensão vendedor×produto.
+  // Cubos importados antes dela existir não a têm — nesse caso avisamos em vez
+  // de devolver o ranking da loja inteira fingindo que é da pessoa.
+  let produtosSemDimensaoVend = false;
+  if(f.vend){
+    const temDim = Array.isArray(cubo.vendProd) && cubo.vendProd.length > 0;
+    if(temDim){
+      const vi = (cubo.vends||[]).indexOf(f.vend);
+      const acc = new Map();
+      (cubo.vendProd||[]).forEach(([v2,pi,q,val]) => {
+        if(v2 !== vi) return;
+        const a = acc.get(pi) || {qtd:0, valor:0};
+        a.qtd += q; a.valor += val; acc.set(pi,a);
+      });
+      produtos = [...acc.entries()]
+        .map(([pi,a]) => ({nome:cubo.prods[pi]||'?', qtd:a.qtd, valor:a.valor, clientes:0}))
+        .sort((a,b) => b.valor - a.valor);
+    } else {
+      produtos = [];
+      produtosSemDimensaoVend = true;
+    }
+  } else if(semRecorte){
     produtos = (cubo.prodTotal||[]).map(([pi,q,v,ncli]) => ({nome:cubo.prods[pi]||'?', qtd:q, valor:v, clientes:ncli}));
   } else {
     const acc = new Map();
@@ -6709,7 +6598,7 @@ window.crmFiltrar = function(cubo, f){
 
   const porVend = new Map();
   mesVend.forEach(([mi,vi,fa,cu,it,cl]) => {
-    const nome = cubo.vends[vi] || '(sem vendedora)';
+    const nome = cubo.vends[vi] || '(sem vendedor(a))';
     const a = porVend.get(nome) || {nome, fat:0, cupons:0, itens:0, clientes:0};
     a.fat += fa; a.cupons += cu; a.itens += it; a.clientes += cl;
     porVend.set(nome, a);
@@ -6731,6 +6620,7 @@ window.crmFiltrar = function(cubo, f){
     meses: [...porMes.values()].sort((a,b)=>a.mes.localeCompare(b.mes)),
     mesesCount: mesesUsados.size,
     produtos,
+    produtosSemDimensaoVend,
     clientes: clientes.sort((a,b)=>b.total-a.total),
     vendedoras: [...porVend.values()].sort((a,b)=>b.fat-a.fat),
     cross: (cubo.cross||[]).map(([a,b,n]) => ({a:cubo.prods[a]||'?', b:cubo.prods[b]||'?', n})),
@@ -6865,6 +6755,9 @@ window.crmCarregar = async function(){
 
 /** Apaga um conjunto loja/ano — local e remoto. */
 window.crmApagar = async function(lid, ano){
+  // Apagar volume libera espaço: tentar gravar completo já na próxima
+  // gravação, em vez de esperar o ciclo de retentativa.
+  window._nivelPersist = 0;
   if(!isAdmin()){ showToast('Só o administrador pode apagar.','err'); return; }
   const cubo = ((D.crm||{})[lid]||{})[ano];
   if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
@@ -7015,6 +6908,10 @@ window.crmAgregar = function(linhas, opts){
 
   const mesVend=new Map();      // mes|vend -> {f,i,cupons:Set,cli:Set}
   const mesProd=new Map();      // mes|prod -> {q,f}
+  // [R86] vendedor|produto: sem esta dimensão o filtro de vendedor(a) não
+  // alcançava os produtos — a tela trocava o filtro e a lista continuava a
+  // mesma, mostrando o ranking da loja inteira.
+  const vendProd=new Map();     // vend|prod -> {q,f}
   const prodTot=new Map();      // prod -> {q,f,cli:Set}
   // [R67] Chave do cliente = CPF/CNPJ quando existe; nome normalizado só
   // como último recurso. E o consumo é consolidado por NOTA, não por linha:
@@ -7055,6 +6952,10 @@ window.crmAgregar = function(linhas, opts){
     let b=mesProd.get(mi+'|'+pi);
     if(!b){ b={q:0,f:0}; mesProd.set(mi+'|'+pi,b); }
     b.q+=qt; b.f+=val;
+
+    let bv=vendProd.get(vi+'|'+pi);
+    if(!bv){ bv={q:0,f:0}; vendProd.set(vi+'|'+pi,bv); }
+    bv.q+=qt; bv.f+=val;
 
     let c=prodTot.get(pi);
     if(!c){ c={q:0,f:0,cli:new Set()}; prodTot.set(pi,c); }
@@ -7106,6 +7007,19 @@ window.crmAgregar = function(linhas, opts){
     arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_PROD_MES).forEach(a=>cuboMesProd.push([mi,a[0],a[1],a[2]]));
   });
 
+  // Top N por vendedor(a) — mesmo critério do corte por mês, para o cubo
+  // não crescer com vendedores × produtos.
+  const porVend=new Map();
+  [...vendProd.entries()].forEach(([k,v])=>{
+    const [vi,pi]=k.split('|').map(Number);
+    if(!porVend.has(vi)) porVend.set(vi,[]);
+    porVend.get(vi).push([pi,v.q,r2(v.f)]);
+  });
+  const cuboVendProd=[];
+  porVend.forEach((arr,vi)=>{
+    arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_PROD_MES).forEach(a=>cuboVendProd.push([vi,a[0],a[1],a[2]]));
+  });
+
   const cuboProdTot=[...prodTot.entries()]
     .map(([pi,v])=>[pi,v.q,r2(v.f),v.cli.size]).sort((a,b)=>b[2]-a[2]);
 
@@ -7132,7 +7046,7 @@ window.crmAgregar = function(linhas, opts){
                           semNF:opts._dedup.semNF||0} : null,
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
     meses:tMes, vends:tVend, prods:tProd,
-    mesVend:cuboMesVend, mesProd:cuboMesProd, prodTotal:cuboProdTot,
+    mesVend:cuboMesVend, mesProd:cuboMesProd, vendProd:cuboVendProd, prodTotal:cuboProdTot,
     clientes:cuboClientes, cross:cuboCross
   };
 };
@@ -7209,7 +7123,7 @@ window.crmCombinar = function(lojas, anos){
   const tVend=[], iVend=new Map(), tProd=[], iProd=new Map(), tMes=[], iMes=new Map();
   const idx=(t,m,v)=>{ let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
 
-  const mesVend=new Map(), mesProd=new Map(), prodTot=new Map(), cross=new Map();
+  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), prodTot=new Map(), cross=new Map();
   const clientes=new Map();
   let linhas=0, faturamento=0, ini=null, fim=null;
 
@@ -7236,6 +7150,11 @@ window.crmCombinar = function(lojas, anos){
         const k = mM[mi]+'|'+mP[pi];
         const a = mesProd.get(k) || {q:0,f:0};
         a.q+=q; a.f+=f; mesProd.set(k,a);
+      });
+      (c.vendProd||[]).forEach(([vi,pi,q,f])=>{
+        const k = mV[vi]+'|'+mP[pi];
+        const a = vendProd.get(k) || {q:0,f:0};
+        a.q+=q; a.f+=f; vendProd.set(k,a);
       });
       (c.prodTotal||[]).forEach(([pi,q,f,ncli])=>{
         const k = mP[pi];
@@ -7271,6 +7190,7 @@ window.crmCombinar = function(lojas, anos){
     meses:tMes, vends:tVend, prods:tProd,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
     mesProd: [...mesProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
+    vendProd: [...vendProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
     prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]),
     cross: [...cross.entries()].map(([k,n])=>{const[a,b]=par(k);return [a,b,n];}).sort((x,y)=>y[2]-x[2]),
     clientes: [...clientes.values()].sort((a,b)=>b.total-a.total),
@@ -7387,6 +7307,226 @@ window._histRenderConciliacao = function(elId, lancPorMes, crmPorMes, de, ate){
     O <strong>lançado</strong> é o que a loja registrou no sistema; o <strong>faturado</strong> vem da
     planilha importada em CRM Clientes. O lançamento continua sendo a fonte oficial — o CRM é conferência.
     ${nParciais ? 'Meses marcados como <strong>PARCIAL</strong> não são comparáveis (o CRM tem grão mensal e o período não cobre o mês inteiro), então ficam fora do total.' : ''}
+  </div>`;
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R83] HISTÓRICO ÚNICO — consolidação automática por mês
+//
+// Substitui o lançamento manual de histórico. Cada mês é montado cruzando,
+// nesta ordem de confiança:
+//   1. CRM  — planilha oficial da rede (faturamento, notas, itens)
+//   2. Lançamento diário — o que a loja registrou no sistema
+//   3. Base histórica — meses antigos, anteriores ao CRM
+// e a meta vem de metaDoMes(), que já cruza cadastro + histórico + período.
+//
+// Faturamento e atendimento saem SEMPRE da mesma fonte no mesmo mês: se o
+// TM viesse do CRM e o atendimento do lançamento, o ticket médio seria a
+// divisão de duas bases diferentes. Por isso a escolha é por mês inteiro,
+// e a linha diz de onde veio.
+//
+// Aniversariantes e inativos recuperados não existem no CRM — são marcação
+// de atendimento, então vêm sempre do fluxo/lançamento.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Aniversariantes e inativos recuperados de um mês (fluxo + lançamento). */
+window._anivInativoDoMes = function(lid, mesRef){
+  let aniv = 0, inativ = 0;
+  (D.fluxo || []).forEach(f => {
+    if(!f || !String(f.data||'').startsWith(mesRef)) return;
+    const fl = f.loja || f.lojaId || '';
+    if(lid && fl !== lid) return;
+    if(f.origem === 'aniversario' || f.tipoCliente === 'aniversario') aniv++;
+    if(f.origem === 'inativo'     || f.tipoCliente === 'inativo')     inativ++;
+  });
+  if(aniv === 0 && inativ === 0){
+    // Fallback: contadores gravados no card da vendedor(a).
+    (lid ? vendsReais(lid) : LOJAS.flatMap(l => vendsReais(l.id))).forEach(v => {
+      Object.entries(D.vendasVend?.[v.id] || {}).forEach(([dt, vd]) => {
+        if(!dt.startsWith(mesRef)) return;
+        aniv   += Number(vd?.aniv   || 0);
+        inativ += Number(vd?.inativ || 0);
+      });
+    });
+  }
+  return {aniv, inativ};
+};
+
+/**
+ * Uma linha de histórico por mês, já cruzada.
+ * @param {string|null} lid loja; null = rede inteira
+ * @param {string} deMes  'AAAA-MM'
+ * @param {string} ateMes 'AAAA-MM'
+ */
+window.historicoConsolidado = function(lid, deMes, ateMes){
+  const lojas = lid ? [lid] : LOJAS.map(l => l.id);
+
+  // CRM de uma vez só para todo o intervalo — evita reler o cubo por mês.
+  let crmMes = new Map();
+  try{
+    const p = window.crmRealizadoPeriodo(lid, deMes + '-01', ateMes + '-31');
+    crmMes = p.porMes;
+  }catch(e){ console.warn('[R83] CRM indisponível:', e.message); }
+
+  const meses = [];
+  for(let m = deMes; m <= ateMes; ){
+    meses.push(m);
+    const [y, mm] = m.split('-').map(Number);
+    const d = new Date(y, mm, 1);
+    m = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    if(meses.length > 240) break;   // trava de segurança
+  }
+
+  const linhas = meses.map(mes => {
+    const crm = crmMes.get(mes) || null;
+
+    // Faturamento e atendimentos, da mesma fonte
+    let fat = 0, atend = 0, itens = 0, fonte = null;
+    if(crm && crm.fat > 0){
+      fat = crm.fat; atend = crm.notas || 0; itens = crm.itens || 0; fonte = 'crm';
+    } else {
+      let fatL = 0, atendL = 0, itensL = 0;
+      lojas.forEach(l => {
+        const r = realizadoDoMes(l, mes);
+        fatL += r.valor || 0;
+        const ia = _itensAtendDoMes(l, mes);
+        atendL += ia.atend || 0; itensL += ia.itens || 0;
+        if(r.origem && !fonte) fonte = (r.origem === 'diario') ? 'lancamento' : 'historico';
+      });
+      fat = fatL; atend = atendL; itens = itensL;
+    }
+
+    // Meta: soma das lojas do recorte
+    const meta = lojas.reduce((s, l) => s + (metaDoMes(l, mes).valor || 0), 0);
+
+    // Aniversariantes / inativos: sempre do fluxo
+    let aniv = 0, inativ = 0;
+    lojas.forEach(l => { const a = window._anivInativoDoMes(l, mes); aniv += a.aniv; inativ += a.inativ; });
+
+    return {
+      mes, fat, meta, atend, itens, aniv, inativ,
+      fonte: fat > 0 ? (fonte || 'lancamento') : null,
+      pctMeta: meta > 0 ? fat / meta * 100 : 0,
+      tm: atend > 0 ? fat / atend : 0,
+      pa: atend > 0 ? itens / atend : 0
+    };
+  });
+
+  // Evolução contra o mês anterior COM dado — pular um mês vazio e comparar
+  // com o anterior a ele evita "+∞%" toda vez que um mês não foi lançado.
+  let ant = null;
+  linhas.forEach(l => {
+    const varia = (atual, anterior) =>
+      (anterior > 0) ? (atual - anterior) / anterior * 100 : null;
+    // Mês sem movimento é AUSÊNCIA de dado, não queda: comparar daria -100%
+    // e a linha leria como se as vendas tivessem desabado naquele mês.
+    const temDado = l.fat > 0;
+    l.varFat   = (ant && temDado) ? varia(l.fat,   ant.fat)   : null;
+    l.varTm    = (ant && temDado) ? varia(l.tm,    ant.tm)    : null;
+    l.varAtend = (ant && temDado) ? varia(l.atend, ant.atend) : null;
+    l.comparadoCom = (ant && temDado) ? ant.mes : null;
+    if(l.fat > 0) ant = l;
+  });
+
+  return linhas;
+};
+
+
+/** Seta de evolução: null vira '—' (sem base de comparação, não 0%). */
+window._setaVar = function(v, inverter){
+  if(v === null || v === undefined || !isFinite(v))
+    return '<span style="color:var(--muted)">—</span>';
+  const bom = inverter ? v < 0 : v > 0;
+  const cor = Math.abs(v) < 0.05 ? 'var(--muted)' : bom ? 'var(--verde)' : 'var(--verm)';
+  const ico = Math.abs(v) < 0.05 ? '→' : v > 0 ? '▲' : '▼';
+  return '<span style="color:' + cor + ';font-weight:700;white-space:nowrap">'
+       + ico + ' ' + (v > 0 ? '+' : '') + v.toFixed(1) + '%</span>';
+};
+
+/** Tabela de evolução mês a mês do histórico único. */
+window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
+  const el = document.getElementById(elId); if(!el) return;
+  let linhas;
+  try{ linhas = window.historicoConsolidado(lid, deMes, ateMes); }
+  catch(e){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">'
+      + 'Não foi possível montar o histórico: ' + e.message + '</div>';
+    return;
+  }
+
+  const comDado = linhas.filter(l => l.fat > 0 || l.meta > 0);
+  if(!comDado.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'Sem dados no período. O histórico é alimentado automaticamente pelo CRM, pelos lançamentos '
+      + 'e pelas metas cadastradas — importe a planilha em <strong>CRM Clientes</strong> ou cadastre '
+      + 'as metas do mês.</div>';
+    return;
+  }
+
+  const rotuloFonte = {crm:'CRM', lancamento:'Lançamento', historico:'Base histórica'};
+  const corFonte    = {crm:'var(--azul)', lancamento:'var(--verde)', historico:'var(--muted)'};
+
+  const corpo = comDado.map(l => {
+    const mesFmt = l.mes.split('-').reverse().join('/');
+    const cp = l.pctMeta >= 100 ? 'var(--verde)' : l.pctMeta >= 70 ? 'var(--ouro)'
+             : l.pctMeta > 0 ? 'var(--verm)' : 'var(--muted)';
+    return `<tr>
+      <td style="font-weight:600;white-space:nowrap">${mesFmt}</td>
+      <td style="color:var(--ouro);font-weight:600;white-space:nowrap">${fmt(l.fat)}</td>
+      <td style="white-space:nowrap">${l.meta > 0 ? fmt(l.meta) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td style="color:${cp};font-weight:700">${l.meta > 0 ? l.pctMeta.toFixed(0) + '%' : '—'}</td>
+      <td>${window._setaVar(l.varFat)}</td>
+      <td style="color:var(--azul);white-space:nowrap">${fmt(l.tm)}</td>
+      <td>${window._setaVar(l.varTm)}</td>
+      <td style="text-align:center">${l.atend || '—'}</td>
+      <td>${window._setaVar(l.varAtend)}</td>
+      <td style="text-align:center;color:var(--roxo)">${l.aniv || '—'}</td>
+      <td style="text-align:center;color:var(--laranja)">${l.inativ || '—'}</td>
+      <td><span style="font-size:9px;color:${corFonte[l.fonte] || 'var(--muted)'};text-transform:uppercase;letter-spacing:.5px">${rotuloFonte[l.fonte] || '—'}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Totais: TM do período é faturamento/atendimentos do período, não a
+  // média dos TMs mensais — média de médias distorce quando o volume varia.
+  const tFat   = comDado.reduce((s, l) => s + l.fat, 0);
+  const tMeta  = comDado.reduce((s, l) => s + l.meta, 0);
+  const tAtend = comDado.reduce((s, l) => s + l.atend, 0);
+  const tAniv  = comDado.reduce((s, l) => s + l.aniv, 0);
+  const tInat  = comDado.reduce((s, l) => s + l.inativ, 0);
+  const tPct   = tMeta > 0 ? tFat / tMeta * 100 : 0;
+  const cpT    = tPct >= 100 ? 'var(--verde)' : tPct >= 70 ? 'var(--ouro)' : tPct > 0 ? 'var(--verm)' : 'var(--muted)';
+
+  const fontes = [...new Set(comDado.map(l => l.fonte).filter(Boolean))];
+
+  el.innerHTML = `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+    <thead><tr>
+      <th>Mês</th><th>Faturamento</th><th>Meta</th><th>% Meta</th><th>Cresc.</th>
+      <th>Ticket Médio</th><th>Evol. TM</th><th style="text-align:center">Atend.</th><th>Evol. Atend.</th>
+      <th style="text-align:center">Aniv.</th><th style="text-align:center">Inativos</th><th>Fonte</th>
+    </tr></thead>
+    <tbody>${corpo}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--borda);font-weight:700">
+      <td>Total (${comDado.length} ${comDado.length === 1 ? 'mês' : 'meses'})</td>
+      <td style="color:var(--ouro)">${fmt(tFat)}</td>
+      <td>${tMeta > 0 ? fmt(tMeta) : '—'}</td>
+      <td style="color:${cpT}">${tMeta > 0 ? tPct.toFixed(0) + '%' : '—'}</td>
+      <td></td>
+      <td style="color:var(--azul)">${fmt(tAtend > 0 ? tFat / tAtend : 0)}</td>
+      <td></td>
+      <td style="text-align:center">${tAtend || '—'}</td>
+      <td></td>
+      <td style="text-align:center;color:var(--roxo)">${tAniv || '—'}</td>
+      <td style="text-align:center;color:var(--laranja)">${tInat || '—'}</td>
+      <td></td>
+    </tr></tfoot>
+  </table></div>
+  <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">
+    Alimentado automaticamente — não há lançamento manual de histórico. Cada mês usa a fonte mais
+    confiável disponível, nesta ordem: <strong>CRM</strong> (planilha oficial) → <strong>Lançamento</strong>
+    (registro da loja) → <strong>Base histórica</strong> (meses anteriores ao CRM). Faturamento e
+    atendimentos vêm sempre da mesma fonte no mesmo mês, senão o ticket médio dividiria bases diferentes.
+    A evolução compara com o último mês que teve movimento${fontes.length > 1 ? '. Fontes no período: ' + fontes.map(f => rotuloFonte[f]).join(', ') : ''}.
   </div>`;
 };
 
@@ -7690,41 +7830,223 @@ window.renderPadroesSemana = function(){
 function _tamanhoMB(obj){
   try{ return new Blob([JSON.stringify(obj)]).size / 1048576; }catch(e){ return 0; }
 }
-function _persistirLocal(){
-  try{
-    localStorage.setItem("avatim_v5", JSON.stringify(D));
-    if(window._avisoQuota){ window._avisoQuota = false; }
-    return true;
-  }catch(e){
-    const ehQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || /quota/i.test(e.message||''));
-    if(!ehQuota){ console.error('[Avatim] localStorage falhou:', e.message); return false; }
+// ══════════════════════════════════════════════════════════════════════
+// [R84] CUBOS DO CRM EM IndexedDB
+//
+// O localStorage tem teto de ~5 MB; os cubos do CRM sozinhos passam de 7 MB
+// numa rede de 7 lojas. Enquanto eles disputavam esse espaço, a gravação
+// caía no degrau de sacrifício a cada sync e o usuário via um aviso a cada
+// abertura — sem nada que pudesse fazer a respeito.
+//
+// IndexedDB não tem esse teto (é da ordem de centenas de MB) e é justamente
+// o lugar de dado volumoso e reconstruível. O operacional continua no
+// localStorage, que é síncrono e sobrevive a qualquer coisa.
+// ══════════════════════════════════════════════════════════════════════
+const _IDB = {nome:'avatim', versao:1, store:'crm'};
 
-    // Plano B: gravar sem os dados analíticos do Excel — de longe o maior
-    // volume e o único que pode ser reconstruído reimportando a planilha.
-    const mbExcel = _tamanhoMB(D.excelDados || []);
+// Aberto com prazo: em página servida como file:// o open() não devolve
+// NEM sucesso nem erro — fica pendente para sempre. Sem esse prazo, o await
+// da hidratação travaria a carga inteira do sistema.
+const _IDB_PRAZO = 3000;
+
+// O sistema é aberto de duas formas: file:// enquanto se testa localmente e
+// https:// depois de publicado. Em file:// o IndexedDB não funciona, então
+// nem tentamos: esperar o prazo a cada gravação custaria 3s de travada, e
+// avisar o usuário seria alarme falso — os dados estão no Firestore e o
+// modo local é transitório. Uma vez descoberto, o motivo fica guardado
+// para as chamadas seguintes falharem na hora.
+window._idbIndisponivel = null;
+
+function _idbMotivo(){
+  // null = ainda não sabemos · false = sabidamente disponível · texto = motivo
+  if(window._idbIndisponivel === false) return null;
+  if(window._idbIndisponivel) return window._idbIndisponivel;
+  try{
+    if(location.protocol === 'file:') return (window._idbIndisponivel = 'file://');
+  }catch(e){ /* sem location: segue */ }
+  if(!window.indexedDB) return (window._idbIndisponivel = 'sem suporte no navegador');
+  return null;
+}
+
+/** true quando o IndexedDB é utilizável neste contexto. */
+window.idbUtilizavel = function(){ return _idbMotivo() === null; };
+
+function _idbAbrir(){
+  return new Promise((res, rej) => {
+    const motivo = _idbMotivo();
+    if(motivo) return rej(new Error('IndexedDB indisponível (' + motivo + ')'));
+    if(!window.indexedDB) return rej(new Error('IndexedDB indisponível'));
+    let resolvido = false;
+    const prazo = setTimeout(() => {
+      if(resolvido) return;
+      resolvido = true;
+      // Não responder uma vez significa não responder sempre: guardar o
+      // veredito evita repetir a espera a cada save.
+      window._idbIndisponivel = 'sem resposta';
+      rej(new Error('IndexedDB não respondeu em ' + _IDB_PRAZO + 'ms'));
+    }, _IDB_PRAZO);
+    const fim = (fn, arg) => { if(resolvido) return; resolvido = true; clearTimeout(prazo); fn(arg); };
+
+    let r;
+    try{ r = indexedDB.open(_IDB.nome, _IDB.versao); }
+    catch(e){ fim(rej, e); return; }
+    r.onupgradeneeded = () => {
+      try{ if(!r.result.objectStoreNames.contains(_IDB.store)) r.result.createObjectStore(_IDB.store); }
+      catch(e){ /* o onerror cuida */ }
+    };
+    r.onsuccess = () => fim(res, r.result);
+    r.onerror   = () => fim(rej, r.error || new Error('falha ao abrir IndexedDB'));
+    r.onblocked = () => fim(rej, new Error('IndexedDB bloqueado por outra aba'));
+  });
+}
+
+/** Grava os cubos do CRM. Devolve true se conseguiu. */
+window.crmGravarIdb = async function(){
+  const db = await _idbAbrir();
+  try{
+    await new Promise((res, rej) => {
+      const tx = db.transaction(_IDB.store, 'readwrite');
+      tx.objectStore(_IDB.store).put(JSON.stringify(D.crm || {}), 'cubos');
+      tx.oncomplete = () => res();
+      tx.onerror    = () => rej(tx.error || new Error('transação falhou'));
+      tx.onabort    = () => rej(tx.error || new Error('transação abortada'));
+    });
+    window._crmIdbOk = true;
+    return true;
+  } finally { db.close(); }
+};
+
+/** Lê os cubos guardados. Devolve null quando não há nada. */
+window.crmLerIdb = async function(){
+  const db = await _idbAbrir();
+  try{
+    const bruto = await new Promise((res, rej) => {
+      const tx = db.transaction(_IDB.store, 'readonly');
+      const rq = tx.objectStore(_IDB.store).get('cubos');
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror   = () => rej(rq.error);
+    });
+    return bruto ? JSON.parse(bruto) : null;
+  } finally { db.close(); }
+};
+
+// Gravação agrupada: uma rajada de save() não deve serializar 7 MB várias vezes.
+let _idbTimer = null;
+window.crmAgendarGravacaoIdb = function(){
+  if(_idbTimer) clearTimeout(_idbTimer);
+  _idbTimer = setTimeout(() => {
+    _idbTimer = null;
+    window.crmGravarIdb().catch(e => {
+      window._crmIdbOk = false;
+      console.warn('[idb] não foi possível guardar os cubos do CRM:', e.message);
+    });
+  }, 1500);
+};
+
+/** Hidrata D.crm a partir do IndexedDB, sem sobrescrever o que já veio. */
+window.crmHidratarIdb = async function(){
+  try{
+    const cubos = await window.crmLerIdb();
+    if(!cubos || !Object.keys(cubos).length) return 0;
+    if(!D.crm) D.crm = {};
+    let n = 0;
+    Object.entries(cubos).forEach(([lid, anos]) => {
+      if(!D.crm[lid]) D.crm[lid] = {};
+      Object.entries(anos || {}).forEach(([ano, cubo]) => {
+        if(!D.crm[lid][ano]){ D.crm[lid][ano] = cubo; n++; }
+      });
+    });
+    window._crmIdbOk = true;
+    if(n) console.log('[idb] CRM hidratado do cache local:', n, 'conjunto(s)');
+    return n;
+  }catch(e){
+    window._crmIdbOk = false;
+    console.warn('[idb] leitura do CRM falhou:', e.message);
+    return 0;
+  }
+};
+
+// Degrau que funcionou da última vez. Reclimbar a escada inteira a cada
+// gravação custava três JSON.stringify de vários MB (~8 MB de D.crm) a
+// cada sync — travadinha visível na interface. Começar pelo degrau
+// conhecido resolve; de tempos em tempos tentamos subir de novo, caso o
+// volume tenha diminuído.
+window._nivelPersist = 0;
+let _ciclosNoNivel = 0;
+const _CICLOS_ATE_RETENTAR = 20;
+
+function _cortePersist(nivel){
+  if(nivel === 1) return {excelDados: [], _excelOmitidoLocal: true};
+  if(nivel === 2) return {excelDados: [], _excelOmitidoLocal: true, crm: {}, _crmOmitidoLocal: true};
+  return null;
+}
+
+function _persistirLocal(){
+  // Nível do último aviso mostrado: 0 = coube inteiro, 1/2 = degraus,
+  // 3 = não coube nada. Avisar só quando o nível MUDA. Um booleano não
+  // servia: uma vez ligado, uma piora real (degrau 2 -> falha total)
+  // ficava silenciosa; e a falha total nem trava tinha, então repetia o
+  // balão vermelho a cada gravação.
+  function avisar(nivel, msg, tipo){
+    if(window._avisoQuotaNivel === nivel) return;
+    window._avisoQuotaNivel = nivel;
+    if(typeof showToast === 'function') showToast(msg, tipo);
+  }
+  const ehQuota = e => !!e && (e.name === 'QuotaExceededError' || e.code === 22 || /quota/i.test(e.message||''));
+
+  // De vez em quando, tentar de novo a partir do topo — se o usuário
+  // limpou o CRM, o dado volta a caber e o cache local volta a ser completo.
+  if(window._nivelPersist > 0 && ++_ciclosNoNivel >= _CICLOS_ATE_RETENTAR){
+    _ciclosNoNivel = 0; window._nivelPersist = 0;
+  }
+
+  // Os cubos vão para o IndexedDB independentemente do que couber aqui.
+  if(D.crm && Object.keys(D.crm).length && window.idbUtilizavel()) window.crmAgendarGravacaoIdb();
+
+  for(let n = window._nivelPersist; n <= 2; n++){
     try{
-      const enxuto = Object.assign({}, D, {excelDados: [], _excelOmitidoLocal: true});
-      localStorage.setItem("avatim_v5", JSON.stringify(enxuto));
-      if(!window._avisoQuota){
-        window._avisoQuota = true;
-        console.warn('[Avatim] quota estourado — excelDados ('+mbExcel.toFixed(1)+' MB) fora do localStorage');
-        if(typeof showToast === 'function'){
-          showToast('⚠️ Base do CRM grande demais para o armazenamento local ('
-            + mbExcel.toFixed(1) + ' MB). Lançamentos e contatos continuam sendo salvos; '
-            + 'os dados da planilha valem só nesta sessão. Use "Limpar dados" no CRM e importe um período menor.', 'err');
+      const corte = _cortePersist(n);
+      localStorage.setItem("avatim_v5", JSON.stringify(corte ? Object.assign({}, D, corte) : D));
+      if(window._nivelPersist !== n){ window._nivelPersist = n; _ciclosNoNivel = 0; }
+      window._avisoQuota = (n > 0);   // compatibilidade
+
+      // Voltar a caber não merece balão — só rearma o aviso.
+      if(n === 0){ window._avisoQuotaNivel = 0; return true; }
+
+      const mbExcel = _tamanhoMB(D.excelDados || []);
+      const mbCrm   = _tamanhoMB(D.crm || {});
+      // Com os cubos no IndexedDB, sair do localStorage é o funcionamento
+      // NORMAL, não uma degradação — não há nada que o usuário possa fazer,
+      // então isso é log, não balão. Só vira aviso se o IndexedDB falhou.
+      const _semIdbPorContexto = !window.idbUtilizavel();
+      if(n === 2 && (window._crmIdbOk !== false || _semIdbPorContexto)){
+        if(_semIdbPorContexto && !window._avisouIdbContexto){
+          window._avisouIdbContexto = true;
+          console.info('[idb] cache local do CRM desligado (' + window._idbIndisponivel
+            + '); os cubos continuam vindo do Firestore a cada abertura.');
         }
+        window._avisoQuotaNivel = 2;
+        return true;
       }
+      avisar(n, n === 1
+        ? '⚠️ A planilha bruta do CRM (' + mbExcel.toFixed(1) + ' MB) não cabe no armazenamento local. '
+          + 'Lançamentos e contatos continuam sendo salvos; a planilha vale só nesta sessão.'
+        : '⚠️ A base do CRM (' + (mbExcel + mbCrm).toFixed(1) + ' MB) não cabe no armazenamento local '
+          + 'e o cache alternativo do navegador não respondeu. Lançamentos, contatos e fluxo seguem '
+          + 'salvos; os dados do CRM são recarregados do servidor a cada abertura.', 'warn');
       return true;
-    }catch(e2){
-      // Nem sem o Excel coube: aí é dado operacional demais ou storage cheio
-      console.error('[Avatim] localStorage cheio mesmo sem excelDados:', e2.message);
-      if(typeof showToast === 'function'){
-        showToast('❌ Armazenamento local cheio ('+_tamanhoMB(D).toFixed(1)+' MB). '
-          + 'Os dados desta sessão podem não sobreviver a um refresh — sincronize antes de fechar.', 'err');
-      }
-      return false;
+    }catch(e){
+      if(!ehQuota(e)){ console.error('[Avatim] localStorage falhou:', e.message); return false; }
     }
   }
+
+  // Nem sem Excel e sem CRM coube: aí é dado operacional demais.
+  window._nivelPersist = 2;   // não voltar ao topo na próxima gravação
+  const mbOper = _tamanhoMB(Object.assign({}, D, {excelDados: [], crm: {}}));
+  console.error('[Avatim] localStorage cheio mesmo sem excelDados e sem crm:', mbOper.toFixed(1), 'MB');
+  avisar(3, '❌ Armazenamento local cheio (' + mbOper.toFixed(1) + ' MB só de dados operacionais). '
+    + 'Os dados desta sessão podem não sobreviver a um refresh — sincronize antes de fechar.', 'err');
+  return false;
 }
 
 function save(){
@@ -7893,6 +8215,10 @@ async function loadFromFirestore(){
     console.log("[Avatim] loadFromFirestore: dados recebidos, processando...");
     // [R56] Cubos do CRM vivem em documentos próprios (crm_<loja>_<ano>),
     // fora do payload principal. Carregados aqui, sem travar o resto se falhar.
+    // [R84] Cache local primeiro: as telas do CRM já abrem preenchidas e
+    // funcionam offline; o Firestore em seguida traz o que mudou.
+    try{ if(typeof window.crmHidratarIdb === 'function') await window.crmHidratarIdb(); }
+    catch(eIdb){ console.warn('[idb] hidratação ignorada:', eIdb.message); }
     try{ if(typeof window.crmCarregar === 'function') await window.crmCarregar(); }
     catch(eCrm){ console.warn('[crm] carregamento ignorado:', eCrm.message); }
     const remoto = JSON.parse(dadosJSON);
@@ -7902,28 +8228,7 @@ async function loadFromFirestore(){
       // [FIX CRÍTICO] metasLoja: MERGE por loja+mês — nunca sobrescrever
       // Bug anterior: D.metasLoja = remoto.metasLoja apagava metas salvas localmente
       // antes do fsGravar terminar (race condition)
-      if(remoto.metasLoja){
-        if(!D.metasLoja) D.metasLoja = {};
-        Object.entries(remoto.metasLoja).forEach(([lid, meses])=>{
-          if(!D.metasLoja[lid]) D.metasLoja[lid] = {};
-          Object.entries(meses||{}).forEach(([mr, metaObj])=>{
-            // [FIX 4 CRÍTICO] NUNCA sobrescrever meta local com valor > 0
-            // (vale para admin E loja — admin acabou de editar, não pode ser sobrescrita)
-            // Evita race condition: salvar meta → sync 30s traz meta antiga → sobrescreve
-            const localMeta  = D.metasLoja[lid]?.[mr];
-            const _lTs1      = localMeta?._savedAt || 0;
-            const _rTs1      = metaObj?._savedAt   || 0;
-            // [FIX BUG 1] Aceitar remoto se mais recente OU local inexistente
-            // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
-            // Isso garante que metas apareçam no time mesmo na primeira sincronização
-            if(!localMeta || !localMeta.mes || _rTs1 > _lTs1 || (_rTs1 === 0 && _lTs1 === 0 && metaObj?.mes)){
-              // [FIX] garantir _savedAt mesmo que Firebase não tenha (retrocompat)
-              if(metaObj && !metaObj._savedAt) metaObj._savedAt = _rTs1 || Date.now();
-              D.metasLoja[lid][mr] = metaObj;
-            }
-          });
-        });
-      }
+      if(remoto.metasLoja) window.mergeMetasLoja(remoto.metasLoja);
       if(remoto.campanhas)     D.campanhas     = remoto.campanhas;
       if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
       // [FIX 21/07] histórico NUNCA era mesclado do remoto — em outro
@@ -9073,7 +9378,7 @@ function nav(pg){
 
   // Bloquear páginas admin para lojas
   // [FIX 23/07] 'mesant' saiu da lista — Mês Anterior agora é visível a todos
-  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
+  const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','lancperloja','acompgeral','historico'];
   if(pgsAdmin.includes(pg) && !isAdmin()) return;
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.querySelectorAll(".ni").forEach(n=>n.classList.remove("active"));
@@ -9150,25 +9455,9 @@ function nav(pg){
       preencherSelectProspec();
       renderProspec();
     },
-    mesant:()=>{
-      // [NEW] Mês Anterior
-      renderMesAnterior();
-    },
     relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
     contatos:()=>{ if(typeof renderContatos==="function") renderContatos(); },
     excel:()=>{ if(typeof window.excelRender==="function") window.excelRender(); },
-    historicoanu:()=>{
-      // [NEW] Histórico Anual
-      const selAno = document.getElementById('hanu-ano');
-      if(selAno && !selAno.value) selAno.value = '2026';
-      renderHistoricoAnual();
-    },
-    lanchistorico:()=>{
-      // [FIX 23/07] havia DUAS chaves 'lanchistorico' neste objeto — a última
-      // vencia e o <select> de Loja nunca era preenchido (ficava vazio).
-      popularSelectLojaHistorico();
-      renderHistoricoMes();
-    },
     lancperloja:()=>{
       // [NEW] Lançamento por Loja
       const dIniEl = document.getElementById('lpl-data-ini');
@@ -15373,6 +15662,9 @@ function salvarMetasVendedoras(lid){
     if(!D.metasLoja[lid][_mr] || !D.metasLoja[lid][_mr].mes){
       const ticket=parseBR(document.getElementById("ml-ticket-"+lid)?.value)||350;
       const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
+      // [R85] Sem carimbo, esta meta nunca venceria em outra máquina e a
+      // loja ficaria sem meta lá. É uma gravação real, então carimba.
+      autoMetas._savedAt = Date.now();
       D.metasLoja[lid][_mr]=autoMetas;
     }
     // Senão: meta da loja já está definida, preservar
@@ -19707,6 +19999,15 @@ async function buscarHistoricoLoja(){
       : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum lançamento por vendedor(a) neste período.</div>`;
   }
 
+  // [R83] Evolução mês a mês — o histórico único da tela.
+  try{
+    window.renderHistoricoEvolucao('hist-loja-evolucao', lid, de.slice(0,7), ate.slice(0,7));
+  }catch(e){
+    console.warn('[R83] evolução:', e.message);
+    const _ev = document.getElementById('hist-loja-evolucao');
+    if(_ev) _ev.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">Não foi possível montar a evolução: '+e.message+'</div>';
+  }
+
   // [R81] Conciliação com o CRM: o lançado precisa virar mensal para
   // encostar no cubo do CRM, que é de grão mensal.
   try{
@@ -19941,6 +20242,7 @@ function exportarHistoricoPDF(){
   const tab   = document.getElementById(lojaAtivo ? 'hist-loja-tabela' : 'hist-pg-tabela')?.innerHTML || '';
   const pvend = lojaAtivo ? (document.getElementById('hist-loja-por-vend')?.innerHTML || '') : '';
   const conc  = document.getElementById(lojaAtivo ? 'hist-loja-conciliacao' : 'hist-pg-conciliacao')?.innerHTML || '';
+  const evol  = lojaAtivo ? (document.getElementById('hist-loja-evolucao')?.innerHTML || '') : '';
 
   const win = window.open('', '_blank', 'width=960,height=700');
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
@@ -19969,6 +20271,7 @@ tr:nth-child(even) td{background:#fafaf7}
 <div class="sub">${sub}</div>
 <div class="periodo">${lbl || 'Período não especificado'}</div>
 <div class="kpis">${_kpisParaPDF(kpis)}</div>
+${evol && evol.indexOf('<table')>=0 ? '<h2>Evolução dos indicadores — mês a mês</h2><div>' + _tabelaParaPDF(evol) + '</div>' : ''}
 ${tab ? '<h2>Lançamentos dia a dia</h2><div>' + _tabelaParaPDF(tab) + '</div>' : ''}
 ${pvend ? '<h2>Desempenho por vendedor(a)</h2><div>' + _tabelaParaPDF(pvend) + '</div>' : ''}
 ${conc && conc.indexOf('<table')>=0 ? '<h2>Conciliação — Lançado × CRM Clientes</h2><div>' + _tabelaParaPDF(conc) + '</div>' : ''}
@@ -20237,245 +20540,10 @@ if(typeof brData !== 'function'){
 // ════════════════════════════════════════════════════════════════════
 // MÊS ANTERIOR — performance do mês passado (consolid. 7 lojas)
 // ════════════════════════════════════════════════════════════════════
-function renderMesAnterior(){
-  // [FIX 28/07] Popula o seletor de mês com todos os meses que têm dados,
-  // preservando a seleção atual em window._histMesRef.
-  const _histSel = document.getElementById('hist-mes-sel');
-  if(_histSel){
-    const meses = mesesDisponiveis();
-    const _selecionado = window._histMesRef || '';
-    const mesesNomes = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-    _histSel.innerHTML = '<option value="">Mês anterior (padrão)</option>' +
-      meses.map(mr => {
-        const [y, m] = mr.split('-');
-        const _rot = mesesNomes[parseInt(m)] + '/' + y;
-        return `<option value="${mr}" ${_selecionado===mr?'selected':''}>${_rot}</option>`;
-      }).join('');
-  }
-  // [FIX 23/07] Página liberada para todos os perfis. A loja fica travada
-  // na própria loja; só o admin escolhe entre todas.
-  const _selML = document.getElementById('mesant-loja');
-  if(_selML && !isAdmin()){
-    const _meu = lojaId();
-    if(_meu){
-      const _nome = LOJAS.find(l=>l.id===_meu)?.nome || lojaNome();
-      _selML.innerHTML = `<option value="${_meu}">🏪 ${_nome}</option>`;
-      _selML.value = _meu;
-      _selML.disabled = true;
-    }
-  } else if(_selML && isAdmin()){
-    _selML.disabled = false;
-  }
-  const hj = hoje();
-  const [yyyy, mm, dd] = hj.split('-');
-  let mesAnterior, anoAnterior;
-  const mesNum = parseInt(mm);
-  if(mesNum === 1){
-    anoAnterior = parseInt(yyyy) - 1;
-    mesAnterior = '12';
-  } else {
-    anoAnterior = parseInt(yyyy);
-    mesAnterior = String(mesNum - 1).padStart(2, '0');
-  }
-  // [FIX 28/07] Usa o mês escolhido no seletor, se houver; senão o mês anterior
-  const _mesEscolhido = window._histMesRef && /^\d{4}-\d{2}$/.test(window._histMesRef) ? window._histMesRef : null;
-  const mesRef = _mesEscolhido || (anoAnterior + '-' + mesAnterior);
-  const _mm = mesRef.split('-')[1];
-  const mesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][parseInt(_mm)];
-  
-  // Filtro de loja
-  const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
-  const titulo = document.getElementById('mesant-titulo');
-  
-  if(lojaFiltro){
-    // Modo: uma loja específica
-    const loja = LOJAS.find(l=>l.id === lojaFiltro);
-    if(!loja){
-      if(titulo) titulo.textContent = 'Loja não encontrada';
-      return;
-    }
-    const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
-    const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
-    const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
-    const tm = nVendas > 0 ? fat / nVendas : 0;
-    const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-    const historicoKey = mesRef;
-    const paHistorico = paDoMes(loja.id, historicoKey) || null; // [FIX 22/07] cruza diário + histórico
-    
-    if(titulo) titulo.textContent = `${loja.nome} — ${mesNome}/${anoAnterior}`;
-    
-    // KPIs da loja individual
-    const kpis = document.getElementById('mesant-kpis');
-    if(kpis){
-      kpis.innerHTML = `
-        <div class="kbox"><div class="kn">${fmt(meta)}</div><div class="kl">Meta</div></div>
-        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">${fmt(fat)}</div>
-          <div class="kl">Realizado</div>
-        </div>
-        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">${fmt(tm)}</div><div class="kl">TM</div></div>
-        <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
-        <div class="kbox"><div class="kn">${paHistorico !== null ? fmtPA(paHistorico) : '—'}</div><div class="kl">PA</div></div>
-      `;
-    }
-    
-    // Tabela com 1 linha
-    const tb = document.getElementById('tbody-mesant');
-    if(tb){
-      tb.innerHTML = `
-        <tr>
-          <td><strong>${loja.nome}</strong></td>
-          <td>${fmt(meta)}</td>
-          <td style="color:var(--verde);font-weight:600">${fmt(fat)}</td>
-          <td>${pctMeta.toFixed(1)}%</td>
-          <td>${fmt(tm)}</td>
-          <td>${nVendas}</td>
-          <td>${paHistorico !== null ? fmtPA(paHistorico) : '<span style="color:var(--muted)">—</span>'}</td>
-        </tr>
-      `;
-    }
-  } else {
-    // Modo: consolidado todas as lojas
-    const dados = LOJAS.map(loja=>{
-      const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
-      const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
-      const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
-      const tm = nVendas > 0 ? fat / nVendas : 0;
-      const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-      const historicoKey = mesRef;
-      const paHistorico = paDoMes(loja.id, historicoKey) || null; // [FIX 22/07] cruza diário + histórico
-      return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa: paHistorico };
-    });
-    
-    if(titulo) titulo.textContent = `Performance geral — ${mesNome}/${anoAnterior}`;
-    
-    // KPIs consolidados
-    const kpis = document.getElementById('mesant-kpis');
-    if(kpis){
-      const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
-      const totFat = dados.reduce((s, d)=>s+d.fat, 0);
-      const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
-      const totTm = totVendas > 0 ? totFat / totVendas : 0;
-      const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-      // PA consolidado — [FIX 21/07] 'loja' não existe neste escopo (o .map já
-      // fechou). Antes lia D.historicoMeses[mes] global; agora agrega a rede.
-      const historicoKey = mesRef;
-      const paHistorico = histMesPARede(historicoKey);
-      kpis.innerHTML = `
-        <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
-        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">${fmt(totFat)}</div>
-          <div class="kl">Realizado</div>
-        </div>
-        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM</div></div>
-        <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
-        <div class="kbox"><div class="kn">${paHistorico !== null ? fmtPA(paHistorico) : '—'}</div><div class="kl">PA</div></div>
-      `;
-    }
-    
-    // Tabela
-    const tb = document.getElementById('tbody-mesant');
-    if(tb){
-      tb.innerHTML = dados.map(d=>`
-        <tr>
-          <td><strong>${d.loja}</strong></td>
-          <td>${fmt(d.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">${fmt(d.fat)}</td>
-          <td>${d.pctMeta.toFixed(1)}%</td>
-          <td>${fmt(d.tm)}</td>
-          <td>${d.nVendas}</td>
-          <td>${d.pa !== null ? fmtPA(d.pa) : '<span style="color:var(--muted)">—</span>'}</td>
-        </tr>
-      `).join('');
-    }
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // HISTÓRICO ANUAL — 2021 até agora, mês a mês
 // ════════════════════════════════════════════════════════════════════
-function renderHistoricoAnual(){
-  const anoSel = document.getElementById('hanu-ano')?.value || '2026';
-  const ano = parseInt(anoSel);
-  
-  // Meses de 2026: só até o atual
-  const hj = hoje();
-  const mesAtual = parseInt(hj.split('-')[1]);
-  const mesMax = ano === parseInt(hj.split('-')[0]) ? mesAtual : 12;
-  
-  // Gerar dados para cada mês
-  const dados = [];
-  for(let m = 1; m <= mesMax; m++){
-    const mesRef = ano + '-' + String(m).padStart(2, '0');
-    const mesNome = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m];
-    
-    // Consolidado de todas as 7 lojas
-    let totMeta = 0, totFat = 0, totVendas = 0, totQtdItens = 0;
-    LOJAS.forEach(loja=>{
-      const meta = metaDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza cadastro + histórico
-      const fat = realizadoDoMes(loja.id, mesRef).valor; // [FIX 21/07] cruza diário + histórico
-      const nVendas = vendasDoMes(loja.id, mesRef); // [FIX 21/07] cruza diário + histórico
-      totMeta += meta;
-      totFat += fat;
-      totVendas += nVendas;
-    });
-    
-    // Buscar Qtd Itens de D.historicoMeses se disponível
-    const historicoKey = mesRef; // "YYYY-MM"
-    const qtdItensHistorico = histMesGet(loja.id, historicoKey)?.qtditens || 0; // [FIX 21/07] por loja
-    totQtdItens = qtdItensHistorico > 0 ? qtdItensHistorico : 0;
-    
-    const tm = totVendas > 0 ? totFat / totVendas : 0;
-    const pa = totVendas > 0 ? Math.round((totQtdItens / totVendas) * 100) / 100 : 0;
-    const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-    dados.push({ mesRef, mesNome, totMeta, totFat, tm, totVendas, pctMeta, pa });
-  }
-  
-  // Tabela
-  const tb = document.getElementById('tbody-historicoanu');
-  const empty = document.getElementById('historicoanu-empty');
-  if(!dados.length){
-    if(tb) tb.innerHTML = '';
-    if(empty) empty.style.display = 'block';
-    return;
-  }
-  if(empty) empty.style.display = 'none';
-  
-  if(tb){
-    tb.innerHTML = dados.map(d=>`
-      <tr>
-        <td><strong>${d.mesNome}/${ano}</strong></td>
-        <td>${fmt(d.totMeta)}</td>
-        <td style="color:var(--verde);font-weight:600">${fmt(d.totFat)}</td>
-        <td>${d.pctMeta.toFixed(1)}%</td>
-        <td>${fmt(d.tm)}</td>
-        <td>${d.totVendas}</td>
-        <td>${d.pa > 0 ? fmtPA(d.pa) : '<span style="color:var(--muted)">—</span>'}</td>
-      </tr>
-    `).join('');
-  }
-  
-  // Gráfico simples (barras de altura proporcional)
-  const chart = document.getElementById('historicoanu-chart');
-  if(chart){
-    const maxFat = Math.max(...dados.map(d=>d.totFat), 1);
-    chart.innerHTML = dados.map(d=>{
-      const altMeta = (d.totMeta / maxFat * 100) + '%';
-      const altFat = (d.totFat / maxFat * 100) + '%';
-      return `
-        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
-          <div style="display:flex;gap:2px;height:100%;align-items:flex-end">
-            <div style="width:40%;background:rgba(201,168,76,.4);height:${altMeta};border-radius:2px" title="Meta: ${fmt(d.totMeta)}"></div>
-            <div style="width:40%;background:rgba(46,204,135,.6);height:${altFat};border-radius:2px" title="Real: ${fmt(d.totFat)}"></div>
-          </div>
-          <div style="font-size:9px;font-weight:600;margin-top:4px">${d.mesNome}</div>
-        </div>
-      `;
-    }).join('');
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // Helpers para cálculos históricos
@@ -20528,91 +20596,6 @@ function countVendasRef(lid, mesRef){
   return n;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// LANÇAMENTO HISTÓRICO — entrada manual de dados de meses anteriores
-// ════════════════════════════════════════════════════════════════════
-function salvarHistoricoMes(){
-  const mes = document.getElementById('lh-mes')?.value;
-  const ano = document.getElementById('lh-ano')?.value;
-  const meta = parseFloat(document.getElementById('lh-meta')?.value || 0);
-  const real = parseFloat(document.getElementById('lh-real')?.value || 0);
-  const tm = parseFloat(document.getElementById('lh-tm')?.value || 0);
-  const nvendas = parseInt(document.getElementById('lh-nvendas')?.value || 0);
-  const qtditens = parseInt(document.getElementById('lh-qtditens')?.value || 0);
-
-  if(!mes || !ano){ showToast('Informe mês e ano!','err'); return; }
-  if(meta <= 0){ showToast('Meta deve ser maior que 0!','err'); return; }
-  if(real < 0){ showToast('Realizado não pode ser negativo!','err'); return; }
-
-  // [FIX 21/07] histórico agora é gravado POR LOJA
-  const lidHist = document.getElementById('lh-loja')?.value
-                  || (isAdmin() ? null : lojaId());
-  if(!lidHist){ showToast('Selecione a loja!','err'); return; }
-
-  const key = ano + '-' + mes; // ex: "2026-06"
-  if(!D.historicoMeses) D.historicoMeses = {};
-
-  // Calcular PA = Qtd Itens / Nº Vendas
-  const pa = nvendas > 0 ? Math.round((qtditens / nvendas) * 100) / 100 : 0;
-
-  histMesSet(lidHist, key, {
-    meta: Math.round(meta),
-    realizado: Math.round(real),
-    tm: tm > 0 ? Math.round(tm * 100) / 100 : 0,
-    nvendas: nvendas,
-    qtditens: qtditens,
-    pa: pa,
-    loja: lidHist,
-    ts: Date.now()
-  });
-
-  save();
-  showToast('Histórico de '+(LOJAS.find(l=>l.id===lidHist)?.nome||lidHist)+' salvo!');
-  limparFormHistorico();
-  renderHistoricoMes();
-}
-
-// [FIX 21/07] popular o seletor de loja do histórico
-function popularSelectLojaHistorico(){
-  const sel = document.getElementById('lh-loja');
-  if(!sel) return;
-  const atual = sel.value;
-  if(isAdmin()){
-    sel.disabled = false;
-    sel.innerHTML = LOJAS.map(l=>`<option value="${l.id}">${l.nome}</option>`).join('');
-    if(atual && LOJAS.some(l=>l.id===atual)) sel.value = atual;
-  } else {
-    const lid = lojaId();
-    const nome = LOJAS.find(l=>l.id===lid)?.nome || lojaNome();
-    sel.innerHTML = `<option value="${lid}">${nome}</option>`;
-    sel.disabled = true; // loja lança só o próprio histórico
-  }
-  if(!sel.dataset.bound){
-    sel.dataset.bound = '1';
-    sel.addEventListener('change', ()=>renderHistoricoMes());
-  }
-}
-
-function limparFormHistorico(){
-  ['lh-meta','lh-real','lh-tm','lh-nvendas','lh-qtditens'].forEach(id=>{
-    const el = document.getElementById(id);
-    if(el) el.value = '';
-  });
-  atualizaPAPreview();
-}
-
-function atualizaPAPreview(){
-  const qtditens = parseInt(document.getElementById('lh-qtditens')?.value || 0);
-  const nvendas = parseInt(document.getElementById('lh-nvendas')?.value || 0);
-  const preview = document.getElementById('lh-pa-preview');
-  if(!preview) return;
-  if(nvendas <= 0){
-    preview.textContent = '—';
-    return;
-  }
-  const pa = Math.round((qtditens / nvendas) * 100) / 100;
-  preview.textContent = fmtPA(pa) + ' itens/atendimento';
-}
 
 // [NEW 22/07] Meses que existem na base (histórico manual + lançamento diário)
 function mesesDisponiveis(){
@@ -20699,7 +20682,7 @@ function renderMesAnteriorDashboard(){
     if(totFat === 0){
       _origEl.textContent = 'Sem lançamentos para este mês.';
     } else if(_itensTot === 0){
-      _origEl.innerHTML = '⚠️ P.A. indisponível: nenhuma <strong>peça</strong> lançada neste mês. Informe a Qtd. de Itens em Lançar Histórico (ou o campo Peças no Painel do Dia).';
+      _origEl.innerHTML = '⚠️ P.A. indisponível: nenhuma <strong>peça</strong> lançada neste mês. Informe o campo Peças no Painel do Dia.';
     } else {
       _origEl.textContent = _itensTot.toLocaleString('pt-BR')+' peças ÷ '+totVendas.toLocaleString('pt-BR')+' atendimentos';
     }
@@ -20736,165 +20719,8 @@ function renderMesAnteriorDashboard(){
   `;
 }
 
-function renderHistoricoMes(){
-  // Listar todos os históricos lançados e calcular YoY
-  // [FIX 21/07] percorre a estrutura por loja; loja só vê a sua
-  const _lidFiltro = isAdmin() ? (document.getElementById('lh-loja')?.value || null) : lojaId();
-  const historicoArray = [];
-  Object.entries(D.historicoMeses||{}).forEach(([lidH, meses])=>{
-    if(_lidFiltro && lidH !== _lidFiltro && lidH !== '_legado') return;
-    Object.entries(meses||{}).forEach(([key, data])=>{
-      if(!/^\d{4}-\d{2}$/.test(key)) return;
-      const [ano, mes] = key.split('-');
-      historicoArray.push({
-        key, lojaId: lidH,
-        lojaNome: LOJAS.find(l=>l.id===lidH)?.nome || (lidH==='_legado'?'(antigo)':lidH),
-        ano: parseInt(ano), mes: parseInt(mes), ...data
-      });
-    });
-  });
-  historicoArray.sort((a,b)=>{
-    if(a.ano !== b.ano) return a.ano - b.ano;
-    if(a.mes !== b.mes) return a.mes - b.mes;
-    return String(a.lojaNome).localeCompare(String(b.lojaNome));
-  });
 
-  const tb = document.getElementById('tbody-lanchistorico');
-  const empty = document.getElementById('lanchistorico-empty');
-  
-  if(!historicoArray.length){
-    if(tb) tb.innerHTML = '';
-    if(empty) empty.style.display = 'block';
-    return;
-  }
-  if(empty) empty.style.display = 'none';
 
-  // Calcular YoY para cada mês: (realizado_ano - realizado_anoAnterior) / realizado_anoAnterior
-  // [FIX 21/07] YoY precisa comparar a MESMA loja — antes cruzava lojas diferentes
-  const calcYoY = (ano, mes, lojaRef) => {
-    const atual = historicoArray.find(h=>h.ano===ano   && h.mes===mes && h.lojaId===lojaRef);
-    const ant   = historicoArray.find(h=>h.ano===ano-1 && h.mes===mes && h.lojaId===lojaRef);
-    if(!atual || !ant || !ant.realizado) return null;
-    return ((atual.realizado - ant.realizado) / ant.realizado) * 100;
-  };
-
-  if(tb){
-    tb.innerHTML = historicoArray.map(h=>{
-      const pctMeta = h.meta > 0 ? (h.realizado / h.meta * 100) : 0;
-      const yoy = calcYoY(h.ano, h.mes, h.lojaId);
-      const yoyBadge = yoy === null 
-        ? '<span style="color:var(--muted)">—</span>'
-        : `<span style="color:${yoy>=0?'var(--verde)':'var(--verm)'};font-weight:600">${yoy>=0?'+':''}${yoy.toFixed(1)}%</span>`;
-      
-      return `
-        <tr>
-          <td><strong>${String(h.mes).padStart(2,'0')}/${h.ano}</strong></td>
-          <td style="font-size:11px;color:var(--muted)">${h.lojaNome}</td>
-          <td>${fmt(h.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">${fmt(h.realizado)}</td>
-          <td>${pctMeta.toFixed(1)}%</td>
-          <td>${fmt(h.tm||0)}</td>
-          <td>${h.nvendas||'—'}</td>
-          <td><strong>${(h.pa||0).toFixed(2)}</strong></td>
-          <td>${h.qtditens||'—'}</td>
-          <td>${yoyBadge}</td>
-          <td><button onclick="excluirHistoricoMes('${h.lojaId}','${h.key}')" style="background:transparent;border:1px solid rgba(220,53,69,.3);color:var(--verm);padding:4px 8px;border-radius:6px;cursor:pointer;font-size:10px">×</button></td>
-        </tr>
-      `;
-    }).join('');
-  }
-
-  // Gráfico YoY
-  renderYoYChart();
-}
-
-function excluirHistoricoMes(lid, key){
-  // [FIX 21/07] assinatura mudou: exclui o mês da LOJA certa
-  if(arguments.length===1){ key = lid; lid = isAdmin() ? null : lojaId(); } // retrocompat
-  if(!confirm('Excluir este mês?')) return;
-  if(lid && D.historicoMeses?.[lid]) delete D.historicoMeses[lid][key];
-  else Object.keys(D.historicoMeses||{}).forEach(l=>{ if(D.historicoMeses[l]?.[key]) delete D.historicoMeses[l][key]; });
-  save();
-  renderHistoricoMes();
-  showToast('Mês excluído');
-}
-
-function renderYoYChart(){
-  // [FIX 21/07] percorre estrutura por loja e soma a rede por mês
-  const _agg = {};
-  Object.entries(D.historicoMeses||{}).forEach(([lidH, meses])=>{
-    Object.entries(meses||{}).forEach(([k, data])=>{
-      if(!/^\d{4}-\d{2}$/.test(k)) return;
-      if(!_agg[k]) _agg[k] = {meta:0, realizado:0, nvendas:0, qtditens:0};
-      _agg[k].meta      += Number(data.meta||0);
-      _agg[k].realizado += Number(data.realizado||0);
-      _agg[k].nvendas   += Number(data.nvendas||0);
-      _agg[k].qtditens  += Number(data.qtditens||0);
-    });
-  });
-  const historicoArray = Object.entries(_agg).map(([key, data])=>{
-    const [ano, mes] = key.split('-');
-    return {key, ano: parseInt(ano), mes: parseInt(mes), ...data};
-  });
-
-  // Agrupar por mês (1-12)
-  const porMes = {};
-  historicoArray.forEach(h=>{
-    if(!porMes[h.mes]) porMes[h.mes] = [];
-    porMes[h.mes].push(h);
-  });
-
-  const chart = document.getElementById('lanchistorico-yoy');
-  if(!chart) return;
-
-  // Se não há dados ou só 1 ano, não desenha
-  const anos = new Set(historicoArray.map(h=>h.ano));
-  if(anos.size < 2){
-    chart.innerHTML = '<div style="width:100%;text-align:center;color:var(--muted)">Precisa de pelo menos 2 anos de dados para comparação YoY</div>';
-    return;
-  }
-
-  // Para cada mês, mostrar barras de crescimento
-  let html = '';
-  const meses = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-  for(let m = 1; m <= 12; m++){
-    if(!porMes[m]) continue;
-    const dados = porMes[m].sort((a,b)=>a.ano - b.ano);
-    if(dados.length < 2) continue;
-
-    let yoyGrupo = [];
-    for(let i = 1; i < dados.length; i++){
-      const atual = dados[i].realizado;
-      const anterior = dados[i-1].realizado;
-      if(anterior > 0){
-        const yoy = ((atual - anterior) / anterior) * 100;
-        yoyGrupo.push(yoy);
-      }
-    }
-
-    if(!yoyGrupo.length) continue;
-
-    // Desenhar barra para este mês
-    const yoyMed = yoyGrupo.reduce((a,b)=>a+b) / yoyGrupo.length;
-    const cor = yoyMed >= 0 ? 'rgba(46,204,135,.6)' : 'rgba(220,53,69,.6)';
-    const altura = Math.min(Math.abs(yoyMed) / 100 * 200, 200); // max 200px
-    html += `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
-        <div style="display:flex;height:${altura}px;align-items:flex-end;width:100%">
-          <div style="width:100%;background:${cor};border-radius:2px" title="YoY ${meses[m]}: ${yoyMed.toFixed(1)}%"></div>
-        </div>
-        <div style="font-weight:600;font-size:10px;color:${yoyMed>=0?'var(--verde)':'var(--verm)'}">${yoyMed.toFixed(0)}%</div>
-        <div style="font-size:9px;font-weight:600">${meses[m]}</div>
-      </div>
-    `;
-  }
-
-  if(!html){
-    chart.innerHTML = '<div style="width:100%;text-align:center;color:var(--muted)">Sem comparação YoY disponível para os meses</div>';
-  } else {
-    chart.innerHTML = html;
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // LANÇAMENTO POR LOJA — entrada de dados por período (loja individual)
@@ -21204,150 +21030,7 @@ function buscarRankingPeriodo(){
   showToast('Ranking atualizado: ' + brData(dataIni) + ' → ' + brData(dataFim));
 }
 
-function buscarMesAnteriorPeriodo(){
-  // Buscar período customizado em Mês Anterior
-  const dataIni = document.getElementById('mesant-periodo-ini')?.value;
-  const dataFim = document.getElementById('mesant-periodo-fim')?.value;
 
-  if(!dataIni || !dataFim){
-    showToast('Informe período (data início e fim)!','err');
-    return;
-  }
-
-  if(new Date(dataIni) > new Date(dataFim)){
-    showToast('Data início não pode ser maior que data fim!','err');
-    return;
-  }
-
-  renderMesAnteriorPeriodo(dataIni, dataFim);
-}
-
-function renderMesAnteriorPeriodo(dataIni, dataFim){
-  // Similar a renderMesAnterior() mas com período customizado
-  const lojaFiltro = document.getElementById('mesant-loja')?.value || '';
-  const titulo = document.getElementById('mesant-titulo');
-  const periodo = brData(dataIni) + ' a ' + brData(dataFim);
-
-  if(lojaFiltro){
-    const loja = LOJAS.find(l=>l.id === lojaFiltro);
-    if(!loja){
-      if(titulo) titulo.textContent = 'Loja não encontrada';
-      return;
-    }
-
-    const periodosLoja = D.historicoLojas?.[lojaFiltro] || [];
-    const periodoMatch = periodosLoja.find(p=>{
-      return (p.dataIni <= dataIni && p.dataFim >= dataFim) ||
-             (p.dataIni >= dataIni && p.dataIni <= dataFim) ||
-             (p.dataFim >= dataIni && p.dataFim <= dataFim);
-    });
-
-    let meta = 0, fat = 0, tm = 0, nVendas = 0, pa = 0;
-    if(periodoMatch){
-      meta = periodoMatch.meta || 0;
-      fat = periodoMatch.realizado || 0;
-      tm = periodoMatch.tm || 0;
-      nVendas = periodoMatch.nvendas || 0;
-      pa = periodoMatch.pa || 0;
-    }
-
-    const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-
-    if(titulo) titulo.textContent = `${loja.nome} — ${periodo}`;
-
-    const kpis = document.getElementById('mesant-kpis');
-    if(kpis){
-      kpis.innerHTML = `
-        <div class="kbox"><div class="kn">${fmt(meta)}</div><div class="kl">Meta</div></div>
-        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">${fmt(fat)}</div>
-          <div class="kl">Realizado</div>
-        </div>
-        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">${fmt(tm)}</div><div class="kl">TM</div></div>
-        <div class="kbox"><div class="kn">${nVendas}</div><div class="kl">Nº Vendas</div></div>
-        <div class="kbox"><div class="kn">${fmtPA(pa)}</div><div class="kl">PA</div></div>
-      `;
-    }
-
-    const tb = document.getElementById('tbody-mesant');
-    if(tb){
-      tb.innerHTML = `
-        <tr>
-          <td><strong>${loja.nome}</strong></td>
-          <td>${fmt(meta)}</td>
-          <td style="color:var(--verde);font-weight:600">${fmt(fat)}</td>
-          <td>${pctMeta.toFixed(1)}%</td>
-          <td>${fmt(tm)}</td>
-          <td>${nVendas}</td>
-          <td>${fmtPA(pa)}</td>
-        </tr>
-      `;
-    }
-  } else {
-    const dados = LOJAS.map(loja=>{
-      const periodosLoja = D.historicoLojas?.[loja.id] || [];
-      const periodoMatch = periodosLoja.find(p=>{
-        return (p.dataIni <= dataIni && p.dataFim >= dataFim) ||
-               (p.dataIni >= dataIni && p.dataIni <= dataFim) ||
-               (p.dataFim >= dataIni && p.dataFim <= dataFim);
-      });
-
-      let meta = 0, fat = 0, tm = 0, nVendas = 0, pa = 0;
-      if(periodoMatch){
-        meta = periodoMatch.meta || 0;
-        fat = periodoMatch.realizado || 0;
-        tm = periodoMatch.tm || 0;
-        nVendas = periodoMatch.nvendas || 0;
-        pa = periodoMatch.pa || 0;
-      }
-
-      const pctMeta = meta > 0 ? (fat / meta * 100) : 0;
-      return { loja: loja.nome, meta, fat, tm, nVendas, pctMeta, pa };
-    });
-
-    if(titulo) titulo.textContent = `Todas as Lojas — ${periodo}`;
-
-    const kpis = document.getElementById('mesant-kpis');
-    if(kpis){
-      const totMeta = dados.reduce((s, d)=>s+d.meta, 0);
-      const totFat = dados.reduce((s, d)=>s+d.fat, 0);
-      const totVendas = dados.reduce((s, d)=>s+d.nVendas, 0);
-      const totTm = totVendas > 0 ? totFat / totVendas : 0;
-      const pctMeta = totMeta > 0 ? (totFat / totMeta * 100) : 0;
-      // [FIX 22/07] P.A. ponderado: soma peças ÷ soma atendimentos
-      const _totItens2 = dados.reduce((s,d)=>s+(Number(d.qtditens)||0), 0);
-      const mediaPa = totVendas > 0 ? _totItens2 / totVendas : 0;
-
-      kpis.innerHTML = `
-        <div class="kbox"><div class="kn">${fmt(totMeta)}</div><div class="kl">Meta Total</div></div>
-        <div class="kbox" style="border-color:rgba(46,204,135,.3)">
-          <div class="kn" style="color:var(--verde)">${fmt(totFat)}</div>
-          <div class="kl">Realizado</div>
-        </div>
-        <div class="kbox"><div class="kn">${pctMeta.toFixed(1)}%</div><div class="kl">% Meta</div></div>
-        <div class="kbox"><div class="kn">${fmt(totTm)}</div><div class="kl">TM</div></div>
-        <div class="kbox"><div class="kn">${totVendas}</div><div class="kl">Nº Vendas</div></div>
-        <div class="kbox"><div class="kn">${mediaPa.toFixed(2)}</div><div class="kl">PA Médio</div></div>
-      `;
-    }
-
-    const tb = document.getElementById('tbody-mesant');
-    if(tb){
-      tb.innerHTML = dados.map(d=>`
-        <tr>
-          <td><strong>${d.loja}</strong></td>
-          <td>${fmt(d.meta)}</td>
-          <td style="color:var(--verde);font-weight:600">${fmt(d.fat)}</td>
-          <td>${d.pctMeta.toFixed(1)}%</td>
-          <td>${fmt(d.tm)}</td>
-          <td>${d.nVendas}</td>
-          <td>${fmtPA(d.pa)}</td>
-        </tr>
-      `).join('');
-    }
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // FASE 2: ACOMPANHAMENTO META GERAL — consolidado da rede por período
@@ -26725,6 +26408,9 @@ window.excelAbrirUpload = function(){
 // trazia de volta, e parecia que o botão não funcionava. Agora apaga
 // remoto de verdade, e só reporta sucesso do que realmente apagou.
 window.excelLimparDados = async function(){
+  // Apagar volume libera espaço: tentar gravar completo já na próxima
+  // gravação, em vez de esperar o ciclo de retentativa.
+  window._nivelPersist = 0;
   const pares = [];
   Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
   const nLinhas = (D.excelDados||[]).length;
@@ -27739,7 +27425,7 @@ function _excelListarOrfas(){
   const mapa = new Map(); // norm → {nome, linhas, valorTotal, primeiraData, ultimaData}
   (D.excelDados || []).forEach(r => {
     if(r.loja) return;
-    const nome = (r.vendedora || '').trim() || '(sem vendedora)';
+    const nome = (r.vendedora || '').trim() || '(sem vendedor(a))';
     const norm = _crmNorm(nome);
     if(!mapa.has(norm)) mapa.set(norm, {nome, linhas:0, valor:0, primeira:'', ultima:''});
     const o = mapa.get(norm);
@@ -29606,6 +29292,36 @@ function _crmRenderInativos(v){
 function _crmRenderProdutos(v){
   const el = document.getElementById('excel-produtos');
   if(!el) return;
+
+  // [R86] Seletor próprio deste card: só vendedor(es) que aparecem na base
+  // visível (a mesma regra do filtro geral, que já é restrito à loja).
+  const selP = document.getElementById('excel-prod-vend');
+  if(selP){
+    const nomes = (v.vendsTabela || []).filter(Boolean).sort();
+    const assinatura = nomes.join('|');
+    if(selP.dataset.assinatura !== assinatura){
+      const atual = selP.value;
+      selP.innerHTML = '<option value="">👥 Todos(as) vendedor(es)</option>'
+        + nomes.map(n => '<option value="'+String(n).replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+      selP.dataset.assinatura = assinatura;
+      selP.value = (atual && nomes.indexOf(atual) >= 0) ? atual : '';
+    }
+  }
+  const vendEscolhida = selP?.value || '';
+  if(vendEscolhida){
+    try{ v = window.crmVisao({vend: vendEscolhida}); }
+    catch(e){ console.warn('[R86] filtro de produtos por vendedor(a):', e.message); }
+  }
+  window._crmProdutosVisiveis = {linhas: v.produtos || [], vend: vendEscolhida};
+
+  if(v.produtosSemDimensaoVend){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'Esta base foi importada antes do detalhamento por vendedor(a) existir, então não dá para '
+      + 'separar os produtos de <strong>' + vendEscolhida + '</strong> sem inventar número. '
+      + 'Reimporte a planilha desta loja para habilitar o filtro.</div>';
+    return;
+  }
+
   const tot = v.produtos.reduce((s,p)=>s+p.valor,0);
   const linhas = v.produtos.slice(0,50).map((p,i) =>
     '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
@@ -29960,6 +29676,78 @@ window.exportarInativosExcel = function(){
              + new Date().toISOString().slice(0,10) + '.xlsx';
   XLSX.writeFile(wb, nome);
   showToast('📊 ' + lista.length.toLocaleString('pt-BR') + ' cliente(s) exportados — ' + nome, 'ok');
+};
+
+/**
+ * [R86] Exporta "Produtos Mais Vendidos" com os MESMOS filtros da tela.
+ * Reaproveita a lista que o render acabou de montar em vez de recalcular:
+ * recalcular abriria espaço para o arquivo divergir do que está na tela.
+ */
+window.exportarProdutosExcel = function(){
+  if(typeof XLSX === 'undefined'){
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload  = () => window.exportarProdutosExcel();
+    sc.onerror = () => showToast('❌ Não foi possível carregar o gerador de Excel (sem internet?).','err');
+    document.head.appendChild(sc);
+    showToast('⏳ Carregando gerador de Excel...','ok');
+    return;
+  }
+
+  // Garantir que a lista reflete os controles atuais
+  if(typeof window.excelRender === 'function') window.excelRender();
+  const info  = window._crmProdutosVisiveis || {};
+  const lista = info.linhas || [];
+  if(!lista.length){ showToast('Nenhum produto na seleção atual.','warn'); return; }
+
+  const fAno  = document.getElementById('excel-filtro-ano')?.value  || '';
+  const fMes  = document.getElementById('excel-filtro-mes')?.value  || '';
+  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
+  const nomeLoja = fLoja ? (LOJAS.find(l => l.id === fLoja)?.nome || fLoja) : 'Todas as lojas';
+  const alvoVend = info.vend || 'Todos(as) vendedor(es)';
+  const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho',
+                 'Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const periodo = (fMes ? (MESES[parseInt(fMes,10)] || fMes) + '/' : '') + (fAno || 'todos os anos');
+
+  const tot   = lista.reduce((s,p) => s + (p.valor||0), 0);
+  const totQ  = lista.reduce((s,p) => s + (p.qtd||0), 0);
+
+  const wb = XLSX.utils.book_new();
+  const L = [];
+  L.push(['PRODUTOS MAIS VENDIDOS']);
+  L.push([]);
+  L.push(['Loja', nomeLoja]);
+  L.push(['Vendedor(a)', alvoVend]);
+  L.push(['Período', periodo]);
+  L.push(['Gerado em', new Date().toLocaleString('pt-BR')]);
+  L.push(['Produtos distintos', lista.length]);
+  L.push(['Itens vendidos', totQ]);
+  L.push(['Faturamento', Number(tot.toFixed(2))]);
+  L.push([]);
+  L.push(['#','Produto','Qtd','Faturamento R$','% do total','Ticket por item R$']);
+
+  lista.forEach((p,i) => {
+    L.push([
+      i + 1,
+      p.nome || '',
+      Number(p.qtd) || 0,
+      Number((p.valor||0).toFixed(2)),
+      Number((tot > 0 ? (p.valor/tot*100) : 0).toFixed(2)),
+      Number((((p.qtd||0) > 0 ? p.valor/p.qtd : 0)).toFixed(2))
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(L);
+  ws['!cols'] = [{wch:6},{wch:44},{wch:10},{wch:16},{wch:12},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Produtos');
+
+  const slug = t => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                     .replace(/[^\w]+/g,'-').toLowerCase().replace(/^-|-$/g,'');
+  const nome = 'produtos-' + slug(nomeLoja) + '-' + slug(alvoVend) + '-'
+             + (fAno || 'todos') + (fMes ? '-' + fMes : '') + '-'
+             + new Date().toISOString().slice(0,10) + '.xlsx';
+  XLSX.writeFile(wb, nome);
+  showToast('📊 ' + lista.length.toLocaleString('pt-BR') + ' produto(s) exportados — ' + nome, 'ok');
 };
 
 /** Abre o formulário de contato já preenchido como reativação. */
