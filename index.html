@@ -3056,18 +3056,44 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
       <div style="flex:1;min-width:300px">
         <div style="font-size:12px;color:var(--muted);line-height:1.6">
-          <strong style="color:var(--ouro)">📋 Formato esperado da planilha</strong> — colunas (nomes flexíveis):
-          <ul style="margin:6px 0 0 20px;padding:0">
-            <li><strong>Data</strong> (obrigatória) — DD/MM/AAAA ou AAAA-MM-DD</li>
-            <li><strong>Cliente</strong> (nome) — usado para agrupar</li>
-            <li><strong>Loja</strong> — nome ou id da loja</li>
-            <li><strong>Vendedora</strong> — nome</li>
-            <li><strong>Produto</strong> — descrição do item</li>
-            <li><strong>Quantidade</strong> — número</li>
-            <li><strong>Valor</strong> (obrigatória) — total da linha em R$</li>
-            <li><em>Opcional:</em> Categoria, Cupom/Nota</li>
-          </ul>
-          <div style="margin-top:8px;font-size:11px">Aceita .xlsx / .xls / .csv. O sistema detecta os cabeçalhos automaticamente.</div>
+          <strong style="color:var(--ouro)">📋 Formato esperado da planilha</strong>
+          <div style="margin:4px 0 8px;font-size:11px">
+            A <strong>ordem das colunas não importa</strong> — o sistema identifica pelo nome do cabeçalho.
+            Cada campo aceita vários nomes; use qualquer um da lista.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:6px">
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--verm);font-weight:700">Data *</td>
+                <td style="padding:3px 0;color:var(--muted)">Data · Emissão · Dia · Dt — em DD/MM/AAAA ou AAAA-MM-DD</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--verm);font-weight:700">Valor *</td>
+                <td style="padding:3px 0;color:var(--muted)">Valor · Valor Item · Valor Total · <strong>Valor NF</strong> · <strong>Valor Unitário</strong> · Total</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--ouro);font-weight:700">NF / Cupom ⚠</td>
+                <td style="padding:3px 0;color:var(--muted)">NF · NFE · N° NFE · Nota · Cupom — <strong>é o identificador da venda</strong></td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--ouro);font-weight:700">CPF/CNPJ ⚠</td>
+                <td style="padding:3px 0;color:var(--muted)">CPF · CNPJ · CPF/CNPJ — <strong>identifica o cliente</strong></td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Cliente</td>
+                <td style="padding:3px 0;color:var(--muted)">Cliente · Nome · Comprador</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Telefone</td>
+                <td style="padding:3px 0;color:var(--muted)">Telefone · Celular · Fone · WhatsApp — usado para acionar inativos</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Vendedora</td>
+                <td style="padding:3px 0;color:var(--muted)">Vendedora · Vendedor · Operador · Atendente</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Produto</td>
+                <td style="padding:3px 0;color:var(--muted)">Produto · Item · Descrição · SKU</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Quantidade</td>
+                <td style="padding:3px 0;color:var(--muted)">Quantidade · Qtd · Qtde</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Loja</td>
+                <td style="padding:3px 0;color:var(--muted)">Loja · Filial · Unidade — ou escolha no seletor ao lado do botão</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Categoria</td>
+                <td style="padding:3px 0;color:var(--muted)">Categoria · Linha · Família</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Operação</td>
+                <td style="padding:3px 0;color:var(--muted)">Operação · Tipo — só linhas "VENDA" entram</td></tr>
+          </table>
+          <div style="font-size:10.5px;color:var(--muted);line-height:1.6">
+            <span style="color:var(--verm)">*</span> obrigatórias — sem elas a importação é recusada.<br>
+            <span style="color:var(--ouro)">⚠</span> sem <strong>NF</strong> a venda é identificada por cliente + dia e o ticket médio fica aproximado;
+            sem <strong>CPF/CNPJ</strong> os clientes são agrupados pelo nome, e variações de grafia viram pessoas diferentes.<br>
+            Uma coluna chamada só "Documento" é lida como NF; se houver também NF/Cupom, ela passa a valer como CPF/CNPJ.<br>
+            Aceita .xlsx / .xls / .csv. Importe <strong>uma loja e um ano por arquivo</strong>.
+          </div>
         </div>
       </div>
       <div id="excel-status" style="min-width:240px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:12px;font-size:11px">
@@ -6924,12 +6950,20 @@ window.crmDedup = function(linhas){
     unicas.push(Object.assign({}, r));   // cópia: não mexer no array do chamador
   });
 
+  // [FIX R76] A chave da venda era SÓ o número da NF. Mas a numeração
+  // reinicia (cupom fiscal reinicia por dia/série), então o mesmo número
+  // em datas diferentes são vendas diferentes — e estavam sendo fundidas
+  // numa só, com perda de faturamento. A chave passa a ser DATA + NF.
+  // Linhas sem NF não entram nesta consolidação: sem identificador não há
+  // como afirmar que pertencem à mesma venda.
   const porNF = new Map();
+  let semNF = 0;
   unicas.forEach(r => {
     const nf = String(r.cupom||'').trim();
-    if(!nf) return;
-    if(!porNF.has(nf)) porNF.set(nf, []);
-    porNF.get(nf).push(r);
+    if(!nf){ semNF++; return; }
+    const chave = String(r.data||'') + '|' + nf;
+    if(!porNF.has(chave)) porNF.set(chave, []);
+    porNF.get(chave).push(r);
   });
 
   let nfsCorrigidas = 0, valorRemovido = 0;
@@ -6961,7 +6995,7 @@ window.crmDedup = function(linhas){
   // Nota com uma linha só e valor declarado como total da NF: já está certo.
 
   return {linhas: unicas, dupExatas, nfsCorrigidas, valorRemovido,
-          notas: porNF.size, original: (linhas||[]).length};
+          notas: porNF.size, semNF, original: (linhas||[]).length};
 };
 
 window.crmAgregar = function(linhas, opts){
@@ -7000,7 +7034,14 @@ window.crmAgregar = function(linhas, opts){
     const val=Number(r.valor)||0, qt=Number(r.qtde)||1;
     const mes=r.data.slice(0,7);
     const mi=idx(tMes,iMes,mes), vi=idx(tVend,iVend,r.vendedora||''), pi=idx(tProd,iProd,r.produto||'');
-    const cup=r.cupom||('#'+k);
+    // [FIX R76] Antes: r.cupom || ('#'+k) — sem NF, CADA LINHA virava uma
+    // venda, inflando a contagem de cupons e derrubando o ticket médio.
+    // Sem NF, o melhor identificador disponível é cliente + dia: as compras
+    // de uma pessoa num mesmo dia contam como uma venda.
+    const _nfLinha = String(r.cupom||'').trim();
+    const cup = _nfLinha
+      ? (r.data + '|' + _nfLinha)
+      : ('s/nf|' + r.data + '|' + (norm(r.cliente)||'?'));
     fatTotal+=val;
     if(!dtMin||r.data<dtMin) dtMin=r.data;
     if(!dtMax||r.data>dtMax) dtMax=r.data;
@@ -7088,7 +7129,8 @@ window.crmAgregar = function(linhas, opts){
   return {
     ts:Date.now(), linhas:linhas.length, faturamento:r2(fatTotal),
     dedup: opts._dedup ? {duplicadas:opts._dedup.dupExatas, nfsCorrigidas:opts._dedup.nfsCorrigidas,
-                          valorRemovido:r2(opts._dedup.valorRemovido), notas:opts._dedup.notas} : null,
+                          valorRemovido:r2(opts._dedup.valorRemovido), notas:opts._dedup.notas,
+                          semNF:opts._dedup.semNF||0} : null,
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
     meses:tMes, vends:tVend, prods:tProd,
     mesVend:cuboMesVend, mesProd:cuboMesProd, prodTotal:cuboProdTot,
@@ -26134,17 +26176,25 @@ function _excelDetectarColunas(headers){
   }
 
   // ── CUPOM/NF (aceita "N° NFE", "NFE", "NF", "CUPOM")
-  const cupomC = normH.find(h => /^(cupom|nota|nf|cf|nfe|doc|documento)$/.test(h.norm))
+  const _naoEhDoc = h => map.documento === undefined || h.idx !== map.documento;
+  const cupomC = normH.find(h => /^(cupom|nota|nf|cf|nfe)$/.test(h.norm))
               || normH.find(h => /^n_?nfe$|^no_?nfe$|nfe$/.test(h.norm))
-              || normH.find(h => /^cupom|^nota|numero_nf/.test(h.norm));
+              || normH.find(h => /^cupom|^nota|numero_nf/.test(h.norm))
+              || normH.find(h => /^(doc|documento)$/.test(h.norm) && _naoEhDoc(h));
   if(cupomC) map.cupom = cupomC.idx;
 
   // ── [R67] DOCUMENTO (CPF/CNPJ) — chave confiável do cliente.
   // Sem isto o cliente era identificado só pelo NOME, e "MARIA SILVA" x
   // "MARIA DA SILVA" viravam duas pessoas, partindo o consumo em dois.
-  const docC = normH.find(h => /^(cpf|cnpj|cpf_cnpj|cnpj_cpf|documento|doc_cliente|cpfcnpj)$/.test(h.norm))
+  // "DOCUMENTO" é ambíguo em português: pode ser a nota ou o CPF/CNPJ.
+  // Regra: se existe outra coluna claramente de nota (NF/NFE/CUPOM), então
+  // "documento" é o CPF/CNPJ. Senão, fica valendo como número da nota.
+  const temNFexplicita = normH.some(h => /^(nf|nfe|cf|cupom|nota)$/.test(h.norm)
+                                      || /nfe$|^cupom|^nota|numero_nf/.test(h.norm));
+  const docC = normH.find(h => /^(cpf|cnpj|cpf_cnpj|cnpj_cpf|cpfcnpj|doc_cliente)$/.test(h.norm))
             || normH.find(h => /^cpf|^cnpj|cpf_cnpj|cnpj_cpf/.test(h.norm))
-            || normH.find(h => /documento.*client|client.*documento/.test(h.norm));
+            || normH.find(h => /documento.*client|client.*documento/.test(h.norm))
+            || (temNFexplicita ? normH.find(h => /^(documento|doc)$/.test(h.norm)) : null);
   if(docC) map.documento = docC.idx;
 
   // ── [R67] TELEFONE — para acionar o cliente inativo
@@ -26438,6 +26488,16 @@ window.excelProcessarUpload = function(event){
         nfs: a.nfs + (d.dedup?.nfsCorrigidas||0),
         val: a.val + (d.dedup?.valorRemovido||0)
       }), {dup:0, nfs:0, val:0});
+      // [R76] Sem NF não há como identificar a venda: o sistema cai em
+      // cliente+dia, e o ticket médio deixa de ser confiável. Precisa ser dito.
+      const _semNF = _diagnostico.reduce((a,d) => a + (d.dedup?.semNF||0), 0);
+      if(_semNF > 0){
+        const pct = Math.round(_semNF / dadosProcessados.length * 100);
+        console.warn('[crm] linhas sem NF:', _semNF, '('+pct+'%)');
+        setTimeout(() => showToast('⚠️ ' + _semNF.toLocaleString('pt-BR') + ' linha(s) ('+pct+'%) sem número de NF. '
+          + 'Sem ele a venda é identificada por cliente + dia, e o ticket médio fica aproximado. '
+          + 'Inclua a coluna de NF/Cupom na planilha para números exatos.', 'err'), 2400);
+      }
       if(_dd.dup || _dd.nfs){
         const partes = [];
         if(_dd.dup) partes.push(_dd.dup.toLocaleString('pt-BR') + ' linha(s) duplicada(s) descartada(s)');
@@ -29412,7 +29472,10 @@ function _crmRenderConjuntos(){
         + '<td style="text-align:right">'+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
-        + '<td style="font-size:10.5px;color:var(--muted)">'+(c.arquivo||'—')+'</td>'
+        + '<td style="font-size:10.5px;color:var(--muted)">'+(c.arquivo||'—')
+          + (c.dedup && c.dedup.semNF
+              ? '<div style="color:var(--verm);font-size:9.5px">⚠️ '+c.dedup.semNF.toLocaleString('pt-BR')+' linha(s) sem NF</div>'
+              : '') + '</td>'
         + '<td style="text-align:center">'
           + (isAdmin() ? '<button onclick="window.crmApagar(\''+lid+'\',\''+ano+'\')" title="Apagar este conjunto" style="background:none;border:1px solid rgba(220,53,69,.35);color:var(--verm);border-radius:5px;font-size:10px;padding:3px 8px;cursor:pointer">🗑️</button>' : '—')
         + '</td></tr>');
