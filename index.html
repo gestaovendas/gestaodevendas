@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;">
+<!-- [R89] O HTML carrega o sistema inteiro: se o navegador guardar uma cópia
+     velha, o usuário continua rodando a versão anterior e nenhuma limpeza de
+     dados resolve — o código é que está desatualizado. Estas diretivas fazem
+     o navegador revalidar o arquivo a cada abertura. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>MonAris Sales Control</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -2862,6 +2869,15 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         title="Loja a que este arquivo pertence — aplicada a todas as linhas">
         <option value="">Deduzir da planilha</option>
       </select>
+      <!-- [R87] Como interpretar a coluna de valor. Deixar isso no palpite do
+           cabeçalho fez o total oscilar entre inflado e deflacionado; agora é
+           uma escolha explícita, com o padrão da Avatim (cada linha = 1 item). -->
+      <select id="excel-modo-valor" class="admin-only" style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:12px"
+        title="Como o valor de cada linha da planilha deve ser lido">
+        <option value="somar" selected>Σ Cada linha é um item — somar</option>
+        <option value="nota">1 Coluna traz o total da nota — não somar</option>
+        <option value="auto">? Detectar pelo cabeçalho</option>
+      </select>
       <button class="btn-s admin-only" onclick="window.excelAbrirUpload()" id="excel-btn-subir" style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
       <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.excelProcessarUpload(event)">
       <button class="btn-s admin-only" onclick="window.excelLimparDados()" title="Apaga dados do Excel — não afeta vendas/contatos"
@@ -4664,6 +4680,12 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script>
+// [R89] Marcador de versão: no console, window.AVATIM_BUILD diz qual
+// arquivo o navegador está executando. Serve para distinguir "bug" de
+// "está rodando uma cópia antiga".
+window.AVATIM_BUILD = '2026-08-25';
+console.log('[Avatim] build', window.AVATIM_BUILD);
+
 // ============================================================
 // CONSTANTES
 // ============================================================
@@ -5799,6 +5821,26 @@ window.mergeMetasLoja = function(metasRemotas){
   return aceitas;
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R88] PERCENTUAIS DE MODALIDADE — quem tem o carimbo mais novo vence.
+//
+// BUG CORRIGIDO: a carga fazia sobrescrita cega. O admin salvava os
+// percentuais de Gift Back / Desconto / Cash Back, um sync chegava com a
+// cópia antiga do servidor antes do upload terminar, e a edição sumia —
+// parecia que o campo "não salvava". Mesma corrida que já tínhamos
+// resolvido nas metas, e a mesma solução.
+// ══════════════════════════════════════════════════════════════════════
+window.mergeConfigModalidades = function(remotoCfg){
+  if(!remotoCfg) return false;
+  const local = D.configModalidades;
+  const vazioLocal = !local || !Object.keys(local).length;
+  const lTs = local?._savedAt   || 0;
+  const rTs = remotoCfg._savedAt || 0;
+  // Sem carimbo do lado remoto = versão antiga; nunca derruba edição recente.
+  if(vazioLocal || rTs > lTs){ D.configModalidades = remotoCfg; return true; }
+  return false;
+};
+
 // Função auxiliar: forçar gravação só da meta da loja no principal
 window.forcarMetaPrincipal = async function(lid, valorMes){
   const mr = mesAtual();
@@ -6510,7 +6552,7 @@ window.crmVisao = function(over){
     base = window.crmCombinar(lojas, fAno ? [fAno] : null);
   }
 
-  return window.crmFiltrar(base, {ano:fAno, mes:fMes, vend:fVend});
+  return window.crmFiltrar(base, {ano:fAno, mes:fMes, vend:fVend, loja:fLoja});
 };
 
 /** Adapta linhas cruas legadas para o mesmo formato de cubo. */
@@ -6564,6 +6606,29 @@ window.crmFiltrar = function(cubo, f){
       produtos = [...acc.entries()]
         .map(([pi,a]) => ({nome:cubo.prods[pi]||'?', qtd:a.qtd, valor:a.valor, clientes:0}))
         .sort((a,b) => b.valor - a.valor);
+    } else if((D.excelDados||[]).length){
+      // [R86b] O cubo é antigo (sem a dimensão), mas as linhas cruas ainda
+      // estão carregadas: dá para responder sem mandar ninguém reimportar.
+      const _n = x => String(x||'').trim().toLowerCase()
+                        .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+      const alvo = _n(f.vend);
+      const acc = new Map();
+      (D.excelDados||[]).forEach(r => {
+        if(_n(r.vendedora) !== alvo) return;
+        if(f.loja && r.loja !== f.loja) return;
+        const d = String(r.data||'');
+        if(f.ano && d.slice(0,4) !== f.ano) return;
+        if(f.mes && d.slice(5,7) !== f.mes) return;
+        const nome = String(r.produto||'(sem produto)').trim() || '(sem produto)';
+        const a = acc.get(nome) || {qtd:0, valor:0};
+        a.qtd += Number(r.qtde||1) || 1;
+        a.valor += Number(r.valor||0) || 0;
+        acc.set(nome, a);
+      });
+      produtos = [...acc.entries()]
+        .map(([nome,a]) => ({nome, qtd:a.qtd, valor:a.valor, clientes:0}))
+        .sort((a,b) => b.valor - a.valor);
+      produtosSemDimensaoVend = produtos.length === 0;
     } else {
       produtos = [];
       produtosSemDimensaoVend = true;
@@ -6758,6 +6823,8 @@ window.crmApagar = async function(lid, ano){
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
+  // E propagar a exclusão para o cache local imediatamente.
+  if(window.idbUtilizavel()) window.crmGravarIdb().catch(()=>{});
   if(!isAdmin()){ showToast('Só o administrador pode apagar.','err'); return; }
   const cubo = ((D.crm||{})[lid]||{})[ano];
   if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
@@ -8001,7 +8068,10 @@ function _persistirLocal(){
   }
 
   // Os cubos vão para o IndexedDB independentemente do que couber aqui.
-  if(D.crm && Object.keys(D.crm).length && window.idbUtilizavel()) window.crmAgendarGravacaoIdb();
+  // Gravar SEMPRE, inclusive vazio. Condicionar a "tem cubo" fazia com que
+  // apagar tudo não chegasse ao IndexedDB: os cubos antigos ficavam lá e a
+  // hidratação os ressuscitava na carga seguinte, inflando faturamento e TM.
+  if(window.idbUtilizavel()) window.crmAgendarGravacaoIdb();
 
   for(let n = window._nivelPersist; n <= 2; n++){
     try{
@@ -8355,7 +8425,7 @@ async function loadFromFirestore(){
       }
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
       if(remoto.configCom)   D.configCom   = remoto.configCom;
-      if(remoto.configModalidades) D.configModalidades = remoto.configModalidades;
+      if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.precosOverride) D.precosOverride = remoto.precosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
@@ -26173,6 +26243,9 @@ window.excelProcessarUpload = function(event){
         return;
       }
 
+      const _modoValor = document.getElementById('excel-modo-valor')?.value || 'somar';
+      console.log('[excel] modo de valor:', _modoValor, '| detectado pelo cabeçalho:', colMap.valorTipo);
+
       const dadosProcessados = [];
       let ignoradosDadosVazios = 0;
       let ignoradosNaoVenda = 0;
@@ -26202,7 +26275,10 @@ window.excelProcessarUpload = function(event){
           vendedora: String(row[colMap.vendedora] || '').trim(),
           produto: String(row[colMap.produto] || '').trim() || '(sem produto)',
           categoria: String(row[colMap.categoria] || '').trim(),
-          _valorNF: colMap.valorTipo === 'nf',   // [R68] total da nota, não da linha
+          // [R87] A escolha do usuário manda; 'auto' mantém a detecção antiga.
+          _valorNF: _modoValor === 'nota' ? true
+                  : _modoValor === 'somar' ? false
+                  : (colMap.valorTipo === 'nf'),
           qtde: colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1,
           valor: val,
           cupom: String(row[colMap.cupom] || '').trim(),
@@ -26411,6 +26487,8 @@ window.excelLimparDados = async function(){
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
+  // E propagar a exclusão para o cache local imediatamente.
+  if(window.idbUtilizavel()) window.crmGravarIdb().catch(()=>{});
   const pares = [];
   Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
   const nLinhas = (D.excelDados||[]).length;
@@ -29297,7 +29375,11 @@ function _crmRenderProdutos(v){
   // visível (a mesma regra do filtro geral, que já é restrito à loja).
   const selP = document.getElementById('excel-prod-vend');
   if(selP){
-    const nomes = (v.vendsTabela || []).filter(Boolean).sort();
+    // Só quem tem movimento na visão atual. Usar a tabela crua do cubo
+    // listava gente sem venda no período (e de outras lojas), e escolher
+    // um desses devolvia lista vazia — parecia que o filtro não funcionava.
+    const nomes = (v.vendedoras || []).map(x => x.nome)
+      .filter(n => n && n !== '(sem vendedor(a))').sort();
     const assinatura = nomes.join('|');
     if(selP.dataset.assinatura !== assinatura){
       const atual = selP.value;
