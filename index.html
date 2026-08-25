@@ -5932,6 +5932,37 @@ window.mergeConfigModalidades = function(remotoCfg){
   return true;
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R103] GRAVAÇÃO REMOTA COM PRAZO
+//
+// O SDK do Firestore ENFILEIRA a escrita quando não consegue falar com o
+// servidor: a promessa não resolve NEM rejeita — fica pendente. Todo código
+// no formato "await fsGravar(); showToast('salvo')" ficava preso antes do
+// await, deixando na tela o balão verde de "salvando..." como se fosse
+// sucesso. O dado só existia naquele navegador, e ninguém era avisado.
+//
+// Aqui a espera tem prazo. Estourou o prazo = NÃO confirmado, e o usuário
+// precisa saber disso.
+// ══════════════════════════════════════════════════════════════════════
+window.GRAVACAO_PRAZO_MS = 12000;
+
+window.gravarRemotoComPrazo = async function(json, ms){
+  if(typeof window.fsGravar !== 'function') return {ok:false, motivo:'Firebase indisponível'};
+  const prazo = ms || window.GRAVACAO_PRAZO_MS;
+  let timer;
+  const estouro = new Promise(res => { timer = setTimeout(() => res('__PRAZO__'), prazo); });
+  try{
+    const r = await Promise.race([ window.fsGravar(json).then(() => '__OK__'), estouro ]);
+    if(r === '__PRAZO__'){
+      return {ok:false, motivo:'o servidor não confirmou em ' + Math.round(prazo/1000) + 's '
+                             + '(sem internet ou Firestore bloqueado)'};
+    }
+    return {ok:true};
+  }catch(e){
+    return {ok:false, motivo: e.code || e.message || 'erro desconhecido'};
+  }finally{ clearTimeout(timer); }
+};
+
 // Função auxiliar: forçar gravação só da meta da loja no principal
 window.forcarMetaPrincipal = async function(lid, valorMes){
   const mr = mesAtual();
@@ -15997,28 +16028,31 @@ function salvarMetasVendedoras(lid){
   _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
-  showToast(n + " vendedor(es) salvas! Sincronizando...");
+  showToast("⏳ Salvando metas de " + n + " vendedor(es)...");
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 
   (async () => {
+    const _snapMV = JSON.stringify(D);   // [FIX Race] snapshot antes de gravar
     const _okFBv = await waitForFirebase(8000);
-    if(_okFBv && window.fsGravar){
-      try{
-        // [FIX Race] Snapshot antes de gravar
-        const _snapMV = JSON.stringify(D);
-        await window.fsGravar(_snapMV);
-        window._pendingLocalData   = null;
-        window._pendingLocalDataTs = null; // [FIX Bug3]
-        showToast("✅ Metas dos(as) vendedor(es) gravados(as) no Firebase!");
-        console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
-      } catch(eV){
-        window._pendingLocalData = null;
-        showToast("⚠️ Salvo localmente. Firebase: " + (eV.code||eV.message), "warn");
-        console.error("[salvarMetasVendedoras] Firebase ERRO:", eV);
-      }
-    } else {
+    if(!_okFBv || !window.fsGravar){
       window._pendingLocalData = null;
-      showToast("⚠️ Firebase offline. Metas salvas localmente.", "warn");
+      showToast("❌ Metas salvas SÓ nesta máquina — Firebase indisponível. "
+              + "Verifique a internet e salve de novo.", "err");
+      return;
+    }
+    // [R103] com prazo: o Firestore deixa a promessa pendente quando não
+    // alcança o servidor, e o código antigo travava aqui — a tela ficava
+    // com o balão de "salvando" e ninguém sabia que não tinha subido.
+    const _rV = await window.gravarRemotoComPrazo(_snapMV);
+    if(_rV.ok){
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
+      showToast("✅ Metas gravadas no servidor — já valem para todos os usuários.");
+      console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
+    } else {
+      showToast("❌ As metas NÃO chegaram ao servidor: " + _rV.motivo
+              + ". Valem só nesta máquina — salve de novo quando a conexão voltar.", "err");
+      console.error("[salvarMetasVendedoras] não confirmado:", _rV.motivo);
     }
   })();
 }
@@ -16204,7 +16238,7 @@ function salvarMetaLoja(lid){
   window._pendingLocalDataTs = Date.now();
   // [FIX Race Condition] Snapshot antes de gravar — evita que D seja alterado durante o await
   const _snapshotMeta = JSON.stringify(D);
-  showToast("✅ Meta salva! Sincronizando...");
+  showToast("⏳ Salvando meta...");
 
   // VERIFICAÇÃO CRÍTICA: confirmar que a meta foi gravada no D
   const _verMetaNoD = D.metasLoja?.[lid]?.[_mr]?.mes;
@@ -16216,42 +16250,24 @@ function salvarMetaLoja(lid){
   (async () => {
     const _okFB = await waitForFirebase(8000);
     console.log("[salvarMetaLoja] waitForFirebase =", _okFB, "| fsGravar disponível:", !!window.fsGravar);
-    if(_okFB && window.fsGravar){
-      try{
-        console.log("[salvarMetaLoja] Chamando fsGravar com snapshot...");
-        await window.fsGravar(_snapshotMeta);
-        window._pendingLocalData   = null;
-        window._pendingLocalDataTs = null; // [FIX Bug3]
-        showToast("✅ Meta gravada no Firebase!");
-        console.log("[salvarMetaLoja] ✅ Firebase OK:", lid, _mr, "mes=", mes);
-
-        // VERIFICAÇÃO PÓS-GRAVAÇÃO: ler do Firebase imediatamente para confirmar
-        setTimeout(async ()=>{
-          try{
-            const verifyJSON = await window.fsCarregar();
-            if(verifyJSON){
-              const verifyData = JSON.parse(verifyJSON);
-              const metaVerif = verifyData.metasLoja?.[lid]?.[_mr]?.mes;
-              console.log("[salvarMetaLoja] VERIFICAÇÃO FIREBASE:", {lid, _mr, meta_no_FB: metaVerif, esperado: mes, match: metaVerif === mes});
-              if(metaVerif !== mes){
-                showToast("⚠️ ATENÇÃO: Firebase retornou meta diferente! Esperado " + mes + " mas Firebase tem " + metaVerif, "err");
-              } else {
-                console.log("[salvarMetaLoja] ✅✅ CONFIRMADO: Firebase tem a meta correta:", metaVerif);
-              }
-            }
-          }catch(eVer){
-            console.warn("[salvarMetaLoja] Erro na verificação:", eVer.message);
-          }
-        }, 2000);
-      } catch(eMeta){
-        window._pendingLocalData = null;
-        showToast("❌ FALHA ao gravar no Firebase: " + (eMeta.code||eMeta.message), "err");
-        console.error("[salvarMetaLoja] ❌ Firebase ERRO:", eMeta, eMeta.code, eMeta.message);
-      }
-    } else {
+    if(!_okFB || !window.fsGravar){
       window._pendingLocalData = null;
-      showToast("❌ Firebase indisponível. Meta salva localmente APENAS.", "err");
-      console.error("[salvarMetaLoja] Firebase NÃO DISPONÍVEL — meta NÃO foi para o servidor!");
+      showToast("❌ Meta salva SÓ nesta máquina — Firebase indisponível. "
+              + "Verifique a internet e salve de novo.", "err");
+      return;
+    }
+    // [R103] com prazo: escrita que não confirma não pode passar por sucesso
+    const _rMeta = await window.gravarRemotoComPrazo(_snapshotMeta);
+    if(_rMeta.ok){
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
+      showToast("✅ Meta gravada no servidor — já vale para todos os usuários.");
+      console.log("[salvarMetaLoja] ✅ Firebase OK:", lid, _mr, "mes=", mes);
+    } else {
+      // mantém _pendingLocalData para o próximo sync tentar de novo
+      showToast("❌ A meta NÃO chegou ao servidor: " + _rMeta.motivo
+              + ". Ela vale só nesta máquina — salve de novo quando a conexão voltar.", "err");
+      console.error("[salvarMetaLoja] ❌ não confirmado:", _rMeta.motivo);
     }
   })();
 }
