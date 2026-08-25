@@ -1496,7 +1496,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
   <div class="sb-sec">
     <div class="sb-lbl">Equipe</div>
-    <button class="ni" onclick="nav('vendedoras')" id="nav-vendedoras"><span class="ic">&#9671;</span>Vendedoras</button>
+    <button class="ni" onclick="nav('vendedoras')" id="nav-vendedoras"><span class="ic">&#9671;</span>Vendedor(es)</button>
     <button class="ni" onclick="nav('comissao')" id="nav-comissao"><span class="ic">&#36;</span>Comissoes</button>
   </div>
   <div class="sb-sec">
@@ -1618,10 +1618,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         </div>
         <div id="rank-hoje">--</div>
       </div>
-      <!-- Ranking Vendedoras da Loja (todas veem) -->
+      <!-- Ranking Vendedor(es) da Loja (todas veem) -->
       <div class="rcard" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;font-weight:600">🏆 Ranking Vendedoras</div>
+          <div style="font-size:12px;font-weight:600">🏆 Ranking Vendedor(es)</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <div style="display:flex;background:var(--cinza);border-radius:6px;overflow:hidden;border:1px solid var(--borda)">
               <button id="rank-vend-ord-fat" onclick="setRankVendOrdem('fat')"
@@ -1747,9 +1747,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <option value="ibirapuera">Shopping Ibirapuera</option>
         </select>
       </div>
-      <div class="ig"><label>Vendedora <span style="color:var(--verm)">*</span></label>
+      <div class="ig"><label>Vendedor(a) <span style="color:var(--verm)">*</span></label>
         <select id="l-vend" style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;color:var(--texto)">
-          <option value="">Selecione uma vendedora...</option>
+          <option value="">Selecione um(a) vendedor(a)...</option>
         </select>
       </div>
       <div class="ig"><label>Faturamento (R$) <span style="color:var(--verm)">*</span></label>
@@ -1791,7 +1791,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <thead>
           <tr>
             <th>Loja</th>
-            <th>Vendedora</th>
+            <th>Vendedor(a)</th>
             <th>Faturamento</th>
             <th>Atend.</th>
             <th>TM</th>
@@ -1825,9 +1825,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <!-- [R49] Ritmo da meta: o que deveria ter sido vendido até a data vigente -->
   <div class="sc" id="lanc-ritmo-box" style="margin-bottom:16px;border-left:3px solid var(--ouro)"></div>
 
-  <!-- CARDS VENDEDORAS DO DIA -->
+  <!-- CARDS VENDEDOR(ES) DO DIA -->
   <div class="sc">
-    <div class="st" style="margin-bottom:12px">🔥 Vendedoras — Realizado</div>
+    <div class="st" style="margin-bottom:12px">🔥 Vendedor(es) — Realizado</div>
     <div id="vend-lanc-grid"></div>
   </div>
 
@@ -1999,10 +1999,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
 </div>
 
-<!-- VENDEDORAS -->
+<!-- VENDEDOR(ES) -->
 <div class="page" id="page-vendedoras">
   <div class="ph">
-    <div><h1 class="pt">Ranking <span>Vendedoras</span></h1><div class="ps">Performance individual da equipe</div></div>
+    <div><h1 class="pt">Ranking <span>Vendedor(es)</span></h1><div class="ps">Performance individual da equipe</div></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div class="tabs" style="margin:0">
         <button class="tab active" id="vtab-ranking" onclick="tabPgVend('ranking',this)">Ranking</button>
@@ -2013,7 +2013,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   </div>
   <div id="form-vend" style="display:none">
     <div class="sc">
-      <div class="st">Cadastrar Vendedora</div>
+      <div class="st">Cadastrar Vendedor(a)</div>
       <div class="igrid">
         <div class="ig"><label>Nome</label><input type="text" id="vn-nome" placeholder="Nome completo"></div>
         <div class="ig admin-item" style="display:none"><label>Loja</label>
@@ -2041,7 +2041,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <strong style="color:var(--ouro)">Meta definida automaticamente</strong>
         </div>
         <div style="color:var(--muted);font-size:10px;line-height:1.6">
-          A meta será calculada dividindo a meta total da loja pelo número de vendedoras cadastradas.<br>
+          A meta será calculada dividindo a meta total da loja pelo número de vendedor(es) cadastrados(as).<br>
           Para alterar as metas individuais, acesse <strong style="color:var(--texto)">Metas por Loja</strong> (Admin) após o cadastro.
         </div>
         <div id="prev-meta-vend-val" style="margin-top:8px;font-size:12px;color:var(--texto)"></div>
@@ -2063,7 +2063,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc">
     <div class="st">Lancar Venda Individual</div>
     <div class="igrid">
-      <div class="ig"><label>Vendedora</label><select id="vl-vend"><option value="">Selecione...</option></select></div>
+      <div class="ig"><label>Vendedor(a)</label><select id="vl-vend"><option value="">Selecione...</option></select></div>
       <div class="ig"><label>Data</label><input type="date" id="vl-data"></div>
       <div class="ig"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="vl-val" placeholder="0.00" step="0.01"></div>
       <div class="ig"><label>Transacoes</label><input type="number" id="vl-trans" placeholder="0"></div>
@@ -2081,13 +2081,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
-  <!-- MEU HISTÓRICO (aba vendedora / admin) -->
+  <!-- MEU HISTÓRICO (aba vendedor(a) / admin) -->
   <div id="vend-hist-bloco" style="display:none">
     <div class="sc">
       <div class="st">🔍 Consultar Período</div>
       <div class="igrid">
         <div class="ig">
-          <label>Vendedora</label>
+          <label>Vendedor(a)</label>
           <select id="hist-sel-vend"><option value="">Selecione...</option></select>
         </div>
         <div class="ig">
@@ -2129,7 +2129,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 <!-- COMISSOES -->
 <div class="page" id="page-comissao">
-  <div class="ph"><div><h1 class="pt">Calculadora de <span>Comissoes</span></h1><div class="ps">Simule e consulte comissoes por vendedora e periodo</div></div></div>
+  <div class="ph"><div><h1 class="pt">Calculadora de <span>Comissoes</span></h1><div class="ps">Simule e consulte comissoes por vendedor(a) e periodo</div></div></div>
   <!-- Politica de comissao (admin view) -->
   <div class="sc admin-only" style="display:none">
     <div class="st">Politica de Remuneracao Avatim &mdash; Junho/2025</div>
@@ -2154,7 +2154,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="sc">
     <div class="st">Calculadora Individual</div>
     <div class="igrid">
-      <div class="ig"><label>Vendedora</label>
+      <div class="ig"><label>Vendedor(a)</label>
         <select id="com-vend" onchange="calcularComissao()">
           <option value="">Selecione...</option>
         </select>
@@ -2272,7 +2272,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
        o admin ajusta aqui mesmo, na tela onde a modalidade é usada. -->
   <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="cfg-modalidades-box">
     <div class="st">🎁 Configuração de Modalidades (Gift Back / Desconto / Cash Back)</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Percentual aplicado automaticamente quando a vendedora escolhe uma modalidade ao registrar um atendimento. A vendedora <strong>não altera</strong> — só admin.</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Percentual aplicado automaticamente quando o(a) vendedor(a) escolhe uma modalidade ao registrar um atendimento. O(A) vendedor(a) <strong>não altera</strong> — só admin.</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Configure percentuais DIFERENTES para cada perfil de cliente. Ex: aniversariantes podem ter Gift Back de 15%, inativos de 16% para incentivo maior.</div>
     <div style="overflow-x:auto">
       <table class="dtable" style="min-width:520px;font-size:12px">
@@ -2286,7 +2286,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </table>
     </div>
     <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
-      💡 Ao registrar um atendimento, se a vendedora escolher <strong>🎂 Aniversariante</strong> + <strong>🎁 Gift Back</strong>, o sistema usa o % da linha "Aniversariante × Gift Back" automaticamente.
+      💡 Ao registrar um atendimento, se o(a) vendedor(a) escolher <strong>🎂 Aniversariante</strong> + <strong>🎁 Gift Back</strong>, o sistema usa o % da linha "Aniversariante × Gift Back" automaticamente.
     </div>
 
     <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--borda)">
@@ -2300,7 +2300,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
       <div id="cfg-mod-faixas-lista" style="display:flex;flex-direction:column;gap:10px"></div>
       <div style="margin-top:8px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
-        💡 Os nomes digitados são casados com o catálogo de estoque (por código ou nome). Itens que não existirem no catálogo aparecem marcados em vermelho para a vendedora. Deixe vazio para usar a sugestão automática por preço.
+        💡 Os nomes digitados são casados com o catálogo de estoque (por código ou nome). Itens que não existirem no catálogo aparecem marcados em vermelho para o(a) vendedor(a). Deixe vazio para usar a sugestão automática por preço.
       </div>
     </div>
   </div>
@@ -2405,7 +2405,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <!-- Espelho legado: mantém compatibilidade com registros antigos -->
           <input type="hidden" id="fx-produto-escolhido" value="">
         </div>
-        <div class="ig"><label>Vendedora</label>
+        <div class="ig"><label>Vendedor(a)</label>
           <select id="fx-vend"><option value="">Selecione...</option></select>
         </div>
         <div class="ig"><label>Obs (opcional)</label>
@@ -2469,7 +2469,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📋 Registros</div>
     <div style="overflow-x:auto">
       <table class="dtable" style="min-width:900px">
-        <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade</th><th style="text-align:right">Benefício</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedor(a)</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade</th><th style="text-align:right">Benefício</th><th></th></tr></thead>
         <tbody id="tbody-fluxo"></tbody>
       </table>
     </div>
@@ -2524,7 +2524,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <option value="ibirapuera">Shopping Ibirapuera</option>
         </select>
       </div>
-      <div class="ig"><label>Vendedora respons&aacute;vel</label>
+      <div class="ig"><label>Vendedor(a) respons&aacute;vel</label>
         <select id="pr-vend"><option value="">Selecione...</option></select>
       </div>
       <div class="ig"><label>Status da resposta <span style="color:var(--verm)">*</span></label>
@@ -2590,7 +2590,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📋 Prospec&ccedil;&otilde;es Registradas</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Data</th><th>Empresa</th><th>Contato</th><th>Cargo</th><th>Status</th><th>Reuni&atilde;o</th><th>Vendedora</th><th>Loja</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Empresa</th><th>Contato</th><th>Cargo</th><th>Status</th><th>Reuni&atilde;o</th><th>Vendedor(a)</th><th>Loja</th><th></th></tr></thead>
         <tbody id="tbody-prospec"></tbody>
       </table>
     </div>
@@ -2684,7 +2684,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <button class="rel-tab"        data-aba="mensal"     onclick="_relTab('mensal',this)">📅 Comparativo Mensal</button>
     <button class="rel-tab"        data-aba="anual"      onclick="_relTab('anual',this)">📈 Comparativo Anual</button>
     <button class="rel-tab"        data-aba="benchlojas" onclick="_relTab('benchlojas',this)">🏆 Benchmark Lojas</button>
-    <button class="rel-tab"        data-aba="benchvends" onclick="_relTab('benchvends',this)">👥 Benchmark Vendedoras</button>
+    <button class="rel-tab"        data-aba="benchvends" onclick="_relTab('benchvends',this)">👥 Benchmark Vendedor(es)</button>
     <button class="rel-tab"        data-aba="igp"        onclick="_relTab('igp',this)">⭐ IGP</button>
     <button class="rel-tab"        data-aba="preditivo"  onclick="_relTab('preditivo',this)">🔮 Preditivo</button>
     <button class="rel-tab"        data-aba="projecao"   onclick="_relTab('projecao',this)">🎯 Projeção de Metas</button>
@@ -2949,7 +2949,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="ph">
     <div>
       <h1 class="pt">Acompanh. <span>Meta Geral</span></h1>
-      <div class="ps">Consolidado da rede por período — lojas e vendedoras</div>
+      <div class="ps">Consolidado da rede por período — lojas e vendedor(es)</div>
     </div>
     <div style="display:flex;gap:8px">
       <button class="btn-p" onclick="exportarAcompGeralCSV()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
@@ -2981,7 +2981,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div class="st">📊 Performance por Loja</div>
     <div style="overflow-x:auto">
       <table class="dtable">
-        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th>Vendedoras</th></tr></thead>
+        <thead><tr><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>PA</th><th>Nº Vendas</th><th>Vendedor(es)</th></tr></thead>
         <tbody id="tbody-ag-lojas"></tbody>
       </table>
     </div>
@@ -2990,9 +2990,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
   </div>
 
-  <!-- Expandível: vendedoras por loja -->
+  <!-- Expandível: vendedor(es) por loja -->
   <div class="sc" style="margin-top:16px">
-    <div class="st">👥 Ranking de Vendedoras</div>
+    <div class="st">👥 Ranking de Vendedor(es)</div>
     <div id="ag-vendedoras-container">--</div>
   </div>
 </div>
@@ -3015,7 +3015,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div id="lojas-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px">--</div>
   <div class="g2">
     <div class="rcard"><div style="font-size:12px;font-weight:600;margin-bottom:14px">Ranking Lojas</div><div id="rank-lojas">--</div></div>
-    <div class="rcard"><div style="font-size:12px;font-weight:600;margin-bottom:14px">Top Vendedoras da Rede</div><div id="rank-vend-rede">--</div></div>
+    <div class="rcard"><div style="font-size:12px;font-weight:600;margin-bottom:14px">Top Vendedor(es) da Rede</div><div id="rank-vend-rede">--</div></div>
   </div>
 </div>
 
@@ -3074,8 +3074,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
                 <td style="padding:3px 0;color:var(--muted)">Cliente · Nome · Comprador</td></tr>
             <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Telefone</td>
                 <td style="padding:3px 0;color:var(--muted)">Telefone · Celular · Fone · WhatsApp — usado para acionar inativos</td></tr>
-            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Vendedora</td>
-                <td style="padding:3px 0;color:var(--muted)">Vendedora · Vendedor · Operador · Atendente</td></tr>
+            <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Vendedor(a)</td>
+                <td style="padding:3px 0;color:var(--muted)">Vendedor(a) · Vendedor · Operador · Atendente</td></tr>
             <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Produto</td>
                 <td style="padding:3px 0;color:var(--muted)">Produto · Item · Descrição · SKU</td></tr>
             <tr><td style="padding:3px 6px 3px 0;white-space:nowrap">Quantidade</td>
@@ -3111,10 +3111,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="excel-imports-lista"></div>
   </div>
 
-  <!-- [NEW R40] Alerta de vendedoras órfãs — só admin -->
+  <!-- [NEW R40] Alerta de vendedor(es) órfãos(ãs) — só admin -->
   <div class="sc admin-only" style="margin-bottom:14px;display:none;background:rgba(255,107,122,.06);border:1px solid rgba(255,107,122,.35)" id="excel-orfas-box">
-    <div class="st" style="color:#ff6b7a">⚠️ Vendedoras sem loja identificada</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Essas vendedoras não estão cadastradas no sistema (ou o nome não bate), então as vendas delas <strong style="color:#ff6b7a">não aparecem para nenhuma loja</strong>. Selecione a loja de cada uma e clique em Atribuir.</div>
+    <div class="st" style="color:#ff6b7a">⚠️ Vendedor(es) sem loja identificada</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Esses(as) vendedor(es) não estão cadastrados(as) no sistema (ou o nome não bate), então as vendas deles(as) <strong style="color:#ff6b7a">não aparecem para nenhuma loja</strong>. Selecione a loja de cada um(a) e clique em Atribuir.</div>
     <div id="excel-orfas-lista"></div>
   </div>
 
@@ -3148,7 +3148,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
       <select id="excel-filtro-vend" onchange="window.excelRender()"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
-        <option value="">👩 Todas as vendedoras</option>
+        <option value="">👥 Todos(as) vendedor(es)</option>
       </select>
 
       <button class="btn-s" onclick="window.excelLimparFiltros()" style="font-size:10px;padding:6px 10px">Limpar</button>
@@ -3188,9 +3188,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="excel-produtos"></div>
   </div>
 
-  <!-- [NEW R39] Ranking de Vendedoras (Excel) -->
+  <!-- [NEW R39] Ranking de Vendedor(es) (Excel) -->
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">🏆 Ranking de Vendedoras</div>
+    <div class="st">🏆 Ranking de Vendedor(es)</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Performance no período/loja filtrado — cupons, faturamento, TM, P.A. e clientes únicos.</div>
     <div id="excel-rank-vends"></div>
   </div>
@@ -3211,14 +3211,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="excel-cross-produtos"></div>
   </div>
 
-  <!-- [NEW R39] Base de Clientes por Vendedora -->
+  <!-- [NEW R39] Base de Clientes por Vendedor(a) -->
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">👥 Base de Clientes por Vendedora</div>
+    <div class="st">👥 Base de Clientes por Vendedor(a)</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-      <label style="font-size:11px;color:var(--muted)">Vendedora:</label>
+      <label style="font-size:11px;color:var(--muted)">Vendedor(a):</label>
       <select id="excel-carteira-vend" onchange="window.excelRender()"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px;min-width:220px">
-        <option value="">Selecione uma vendedora…</option>
+        <option value="">Selecione um(a) vendedor(a)…</option>
       </select>
       <label style="font-size:11px;color:var(--muted)">Inativos há mais de:</label>
       <select id="excel-carteira-dias" onchange="window.excelRender()"
@@ -3283,10 +3283,10 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <option value="365">1 ano</option>
           <option value="540">18 meses</option>
         </select>
-        <!-- [R69] filtrar a carteira de uma vendedora -->
+        <!-- [R69] filtrar a carteira de um(a) vendedor(a) -->
         <select id="ct-inat-vend" onchange="window.renderInativos180()"
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
-          <option value="">👩 Todas as vendedoras</option>
+          <option value="">👥 Todos(as) vendedor(es)</option>
         </select>
         <button onclick="window.exportarInativosExcel()" title="Exporta a lista como está na tela — mesmo filtro e mesma ordenação"
           style="background:rgba(33,115,70,.15);border:1px solid rgba(33,115,70,.5);color:#4caf7d;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">📊 Excel</button>
@@ -3349,7 +3349,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
       <select id="ct-filtro-vend" onchange="renderContatos()"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
-        <option value="">👥 Todas as vendedoras</option>
+        <option value="">👥 Todos(as) vendedor(es)</option>
       </select>
 
       <select id="ct-filtro-tipo" onchange="renderContatos()"
@@ -3379,15 +3379,15 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div id="contatos-por-loja" style="margin-top:10px"></div>
   </div>
 
-  <!-- [NEW 13/08] Ranking de vendedoras -->
+  <!-- [NEW 13/08] Ranking de vendedor(es) -->
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">🏆 Ranking de Vendedoras — Contatos Realizados</div>
+    <div class="st">🏆 Ranking de Vendedor(es) — Contatos Realizados</div>
     <div id="contatos-ranking" style="margin-top:10px"></div>
   </div>
 
-  <!-- Contatos por vendedora (detalhado) -->
+  <!-- Contatos por vendedor(a) (detalhado) -->
   <div class="sc" style="margin-bottom:14px">
-    <div class="st">👥 Detalhamento por Vendedora</div>
+    <div class="st">👥 Detalhamento por Vendedor(a)</div>
     <div id="contatos-por-vend" style="margin-top:10px"></div>
   </div>
 
@@ -3403,7 +3403,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <th>Data</th>
           <th>Cliente</th>
           <th>Tipo</th>
-          <th>Vendedora</th>
+          <th>Vendedor(a)</th>
           <th>Loja</th>
           <th>Retorno</th>
           <th style="width:80px;text-align:center">Ações</th>
@@ -3460,7 +3460,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       </div>
 
       <div>
-        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">VENDEDORA *</label>
+        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">VENDEDOR(A) *</label>
         <select id="ct-form-vend"
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
         </select>
@@ -3488,7 +3488,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         </label>
         <input type="date" id="ct-form-proximo"
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">Data em que a vendedora deve retomar este contato.</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Data em que o(a) vendedor(a) deve retomar este contato.</div>
       </div>
 
       <div>
@@ -3508,7 +3508,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 
 <div class="page" id="page-rankings">
   <div class="ph">
-    <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedoras por loja e ranking geral da rede</div></div>
+    <div><h1 class="pt">Rankings <span>Completos</span></h1><div class="ps">Lojas, vendedor(es) por loja e ranking geral da rede</div></div>
     <button class="btn-p" onclick="exportarRelatorioRanking()" style="font-size:12px;padding:8px 16px">⬇️ CSV</button>
     <button class="btn-p" onclick="exportarPDFRanking()" style="font-size:12px;padding:8px 16px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a">📄 PDF</button>
     <button class="btn-p" onclick="toggleDivulgacaoRanking()" style="font-size:12px;padding:8px 16px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="Escolher quais rankings publicar e gerar o PDF de divulgação">📢 Modo Divulgação</button>
@@ -3602,18 +3602,18 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div id="rank-tm-lojas">--</div>
       </div>
     </div>
-    <!-- 3 Rankings de Vendedoras -->
+    <!-- 3 Rankings de Vendedor(es) -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:16px">
       <div class="rcard">
-        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedoras</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedor(es)</div>
         <div id="rank-full-vends-rede">--</div>
       </div>
       <div class="rcard">
-        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedoras</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedor(es)</div>
         <div id="rank-meta-vends-rede">--</div>
       </div>
       <div class="rcard">
-        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedoras</div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedor(es)</div>
         <div id="rank-tm-vends">--</div>
       </div>
     </div>
@@ -3628,7 +3628,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
       <button class="tab" id="rtab-ano" onclick="tabRankPerLoja('ano',this)">🏆 Ano</button>
       <button class="tab" id="rtab-hist" onclick="tabRankPerLoja('hist',this)">📅 Histórico</button>
     </div>
-    <!-- Seletor de loja (admin vê todas, vendedora vê só a sua) -->
+    <!-- Seletor de loja (admin vê todas, vendedor(a) vê só a sua) -->
     <div id="rank-loja-sel" style="margin-bottom:16px;display:none">
       <div class="ig" style="max-width:260px">
         <label>Selecionar Loja</label>
@@ -3645,20 +3645,20 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     </div>
     <!-- Card da loja -->
     <div id="rank-loja-header" style="margin-bottom:16px"></div>
-    <!-- Podio vendedoras -->
+    <!-- Podio vendedor(es) -->
     <div id="rank-podio-vends" style="margin-bottom:18px"></div>
     <!-- Ranking TM da loja -->
     <div class="rcard" style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--azul)">🎯 Ticket Médio por Vendedora</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:14px;color:var(--azul)">🎯 Ticket Médio por Vendedor(a)</div>
       <div id="rank-tm-vends-loja">--</div>
     </div>
     <!-- Tabela detalhada -->
     <div id="rank-loja-ranking-bloco">
       <div class="sc">
-        <div class="st" id="rank-loja-titulo">Vendedoras</div>
+        <div class="st" id="rank-loja-titulo">Vendedor(es)</div>
         <div style="overflow-x:auto">
           <table class="dtable">
-            <thead><tr><th>#</th><th>Vendedora</th><th>Vendas</th><th>% Meta</th><th>% Super</th><th>Projecao Mes</th><th>Status</th></tr></thead>
+            <thead><tr><th>#</th><th>Vendedor(a)</th><th>Vendas</th><th>% Meta</th><th>% Super</th><th>Projecao Mes</th><th>Status</th></tr></thead>
             <tbody id="tbody-rank-loja"></tbody>
           </table>
         </div>
@@ -3671,7 +3671,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div class="st">🔍 Consultar Período</div>
         <div class="igrid">
           <div class="ig">
-            <label>Vendedora</label>
+            <label>Vendedor(a)</label>
             <select id="rh-sel-vend"><option value="">Todas da loja</option></select>
           </div>
           <div class="ig"><label>De</label><input type="date" id="rh-de"></div>
@@ -3688,7 +3688,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <div id="rh-tabela"></div>
         </div>
         <div class="sc" style="margin-top:0">
-          <div class="st" style="margin-bottom:10px">👩 Performance por Vendedora</div>
+          <div class="st" style="margin-bottom:10px">👩 Performance por Vendedor(a)</div>
           <div id="rh-por-vend"></div>
         </div>
       </div>
@@ -3745,9 +3745,9 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div id="rel-camp-ranking"></div>
       </div>
 
-      <!-- Ranking vendedoras -->
+      <!-- Ranking vendedor(es) -->
       <div class="admin-only" style="margin-bottom:18px;display:none">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">👩 RANKING DE VENDEDORAS</div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;letter-spacing:.5px">👩 RANKING DE VENDEDOR(ES)</div>
         <div id="rel-camp-rank-vend"></div>
       </div>
 
@@ -3917,7 +3917,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div class="ig"><label>Data</label>
           <input type="date" id="camp-real-data">
         </div>
-        <div class="ig"><label>Faturamento do Dia (R$) <span style="font-size:9px;color:var(--ouro);font-weight:600">— auto: soma das vendedoras</span></label>
+        <div class="ig"><label>Faturamento do Dia (R$) <span style="font-size:9px;color:var(--ouro);font-weight:600">— auto: soma dos(as) vendedor(es)</span></label>
           <input type="text" id="camp-real-fat" placeholder="Será calculado automaticamente" readonly style="background:rgba(201,168,76,.06);font-weight:700;color:var(--ouro)">
         </div>
         <div class="ig"><label>Nº de Atendimentos <span style="font-size:9px;color:var(--azul);font-weight:600">— auto: soma das qtds</span></label>
@@ -3930,14 +3930,14 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           <textarea id="camp-real-obs" placeholder="Destaques, produtos mais vendidos..."></textarea>
         </div>
 
-        <!-- Vendedoras do dia -->
+        <!-- Vendedor(es) do dia -->
         <div class="ig" style="grid-column:span 2">
           <label style="display:flex;align-items:center;gap:8px">
-            Resultado por Vendedora
+            Resultado por Vendedor(a)
             <span style="font-size:9px;color:var(--muted);font-weight:400">— opcional, mas recomendado</span>
           </label>
           <div id="camp-vend-campos" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-            <div style="font-size:11px;color:var(--muted);padding:8px">Selecione uma campanha para ver as vendedoras</div>
+            <div style="font-size:11px;color:var(--muted);padding:8px">Selecione uma campanha para ver os(as) vendedor(es)</div>
           </div>
         </div>
       </div>
@@ -3947,7 +3947,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.6px;margin-bottom:8px">📅 LANÇAMENTOS ANTERIORES</div>
         <div id="camp-historico-lista" style="max-height:180px;overflow-y:auto"></div>
       </div>
-      <!-- Ranking vendedoras desta campanha -->
+      <!-- Ranking vendedor(es) desta campanha -->
       <div id="camp-rank-vend-wrap" style="display:none;margin-top:14px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);border-radius:10px;padding:12px"></div>
 
       <div class="btn-r" style="margin-top:14px">
@@ -4174,7 +4174,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 <!-- RELATORIO (ADMIN) -->
 <div class="page" id="page-relatorio">
   <div class="ph">
-    <div><h1 class="pt">Relatorio <span id="rel-titulo-per">Semanal</span></h1><div class="ps">Ranking completo lojas e vendedoras</div></div>
+    <div><h1 class="pt">Relatorio <span id="rel-titulo-per">Semanal</span></h1><div class="ps">Ranking completo lojas e vendedor(es)</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <select id="rel-periodo" onchange="document.getElementById('rel-titulo-per').textContent=this.value==='semana'?'Semanal':'Mensal'" style="padding:6px 10px;border-radius:8px;background:var(--card2);color:var(--texto);border:1px solid var(--borda);font-size:12px">
         <option value="semana">📅 Semanal</option>
@@ -4232,7 +4232,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
         <div>📅 <strong style="color:var(--texto)">Meta Diaria</strong> = Meta Mensal &divide; dias reais do mes <span style="color:var(--verde);font-size:11px">(com 2 casas decimais — ex: R$&nbsp;6.129,03 × 31 = R$&nbsp;190.000,00 ✅)</span></div>
         <div>📆 <strong style="color:var(--texto)">Meta Semanal</strong> = Meta Mensal &divide; 4,33 semanas <span style="color:var(--verde);font-size:11px">(com 2 casas decimais)</span></div>
         <div>📊 <strong style="color:var(--texto)">Super Meta</strong> = 125% da meta mensal (ou valor customizado)</div>
-        <div>👩 <strong style="color:var(--texto)">Meta por Vendedora</strong> = Meta Mensal &divide; nº de vendedoras ativas <span style="color:var(--verde);font-size:11px">(com 2 casas decimais)</span></div>
+        <div>👩 <strong style="color:var(--texto)">Meta por Vendedor(a)</strong> = Meta Mensal &divide; nº de vendedor(es) ativos(as) <span style="color:var(--verde);font-size:11px">(com 2 casas decimais)</span></div>
         <div style="margin-top:8px;padding:8px 12px;background:rgba(46,204,135,.06);border:1px solid rgba(46,204,135,.2);border-radius:6px;font-size:11px;color:var(--verde)">
           ✅ <strong>Distribuição precisa:</strong> Ex. R$&nbsp;190.000 em 31 dias → meta diária = R$&nbsp;6.129,03 (exata, sem arredondamento que causava desvio).
         </div>
@@ -4596,18 +4596,18 @@ service cloud.firestore {
     <div id="gestao-status-lojas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;padding:4px 0"></div>
   </div>
 
-  <!-- RANKINGS VENDEDORAS (3 categorias) -->
+  <!-- RANKINGS VENDEDOR(ES) (3 categorias) -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px">
     <div class="rcard">
-      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedoras</div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--ouro)">🏆 Maior Faturamento — Vendedor(es)</div>
       <div id="gestao-rank-fat-vends">--</div>
     </div>
     <div class="rcard">
-      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedoras</div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--verde)">🎯 Maior % da Meta — Vendedor(es)</div>
       <div id="gestao-rank-meta-vends">--</div>
     </div>
     <div class="rcard">
-      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedoras</div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--azul)">🎫 Maior Ticket Médio — Vendedor(es)</div>
       <div id="gestao-rank-tm-vends">--</div>
     </div>
   </div>
@@ -4700,7 +4700,7 @@ service cloud.firestore {
   <!-- TABS -->
   <div class="tabs" style="margin-bottom:0">
     <button class="tab active" id="htab-loja" onclick="tabHistorico('loja',this)">📋 Por Loja</button>
-    <button class="tab" id="htab-vend" onclick="tabHistorico('vend',this)">👤 Por Vendedora</button>
+    <button class="tab" id="htab-vend" onclick="tabHistorico('vend',this)">👤 Por Vendedor(a)</button>
   </div>
 
   <!-- ─── BLOCO: POR LOJA ─────────────────────────────────── -->
@@ -4753,16 +4753,22 @@ service cloud.firestore {
         <div id="hist-loja-tabela" style="overflow-x:auto"></div>
       </div>
 
-      <!-- Ranking por vendedora -->
+      <!-- Ranking por vendedor(a) -->
       <div class="sc" style="padding:16px 14px">
-        <div style="font-size:12px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Por Vendedora</div>
+        <div style="font-size:12px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Por Vendedor(a)</div>
         <div id="hist-loja-por-vend" style="overflow-x:auto"></div>
+      </div>
+
+      <!-- [R81] Conciliação com o CRM Clientes -->
+      <div class="sc" style="padding:16px 14px;margin-top:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--roxo);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🔗 Conciliação — Lançado × CRM Clientes</div>
+        <div id="hist-loja-conciliacao"></div>
       </div>
 
     </div>
   </div>
 
-  <!-- ─── BLOCO: POR VENDEDORA ─────────────────────────────── -->
+  <!-- ─── BLOCO: POR VENDEDOR(A) ─────────────────────────────── -->
   <div id="hist-bloco-vend" style="display:none">
 
     <!-- Filtro -->
@@ -4778,7 +4784,7 @@ service cloud.firestore {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;max-width:680px">
         <div>
-          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Vendedora</label>
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Vendedor(a)</label>
           <select id="hist-pg-sel-vend" style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:9px 12px;color:var(--texto);font-size:13px">
             <option value="">Selecione...</option>
           </select>
@@ -4809,6 +4815,12 @@ service cloud.firestore {
           <div id="hist-pg-periodo-label" style="font-size:11px;color:var(--muted)"></div>
         </div>
         <div id="hist-pg-tabela" style="overflow-x:auto"></div>
+      </div>
+
+      <!-- [R81] Conciliação com o CRM Clientes -->
+      <div class="sc" style="padding:16px 14px;margin-top:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--roxo);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🔗 Conciliação — Lançado × CRM Clientes</div>
+        <div id="hist-pg-conciliacao"></div>
       </div>
     </div>
   </div>
@@ -4913,41 +4925,41 @@ window.USUARIOS={
 
 // Vendedoras padrao — EDITE OS NOMES AQUI
 const VENDEDORAS_PADRAO=[
-  {id:"v_m1",nome:"Vendedora 1",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_m2",nome:"Vendedora 2",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_m3",nome:"Vendedora 3",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_m4",nome:"Vendedora 4",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_m5",nome:"Vendedora 5",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_l1",nome:"Vendedora 1",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_l2",nome:"Vendedora 2",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_l3",nome:"Vendedora 3",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_l4",nome:"Vendedora 4",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_l5",nome:"Vendedora 5",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_p1",nome:"Vendedora 1",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_p2",nome:"Vendedora 2",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_p3",nome:"Vendedora 3",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_p4",nome:"Vendedora 4",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_p5",nome:"Vendedora 5",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_s1",nome:"Vendedora 1",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_s2",nome:"Vendedora 2",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_s3",nome:"Vendedora 3",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_s4",nome:"Vendedora 4",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_s5",nome:"Vendedora 5",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_j1",nome:"Vendedora 1",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_j2",nome:"Vendedora 2",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_j3",nome:"Vendedora 3",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_j4",nome:"Vendedora 4",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_j5",nome:"Vendedora 5",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_pi1",nome:"Vendedora 1",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_pi2",nome:"Vendedora 2",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_pi3",nome:"Vendedora 3",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_pi4",nome:"Vendedora 4",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_pi5",nome:"Vendedora 5",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_i1",nome:"Vendedora 1",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_i2",nome:"Vendedora 2",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_i3",nome:"Vendedora 3",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_i4",nome:"Vendedora 4",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
-  {id:"v_i5",nome:"Vendedora 5",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_m1",nome:"Vendedor(a) 1",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_m2",nome:"Vendedor(a) 2",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_m3",nome:"Vendedor(a) 3",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_m4",nome:"Vendedor(a) 4",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_m5",nome:"Vendedor(a) 5",loja:"mooca",      metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_l1",nome:"Vendedor(a) 1",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_l2",nome:"Vendedor(a) 2",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_l3",nome:"Vendedor(a) 3",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_l4",nome:"Vendedor(a) 4",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_l5",nome:"Vendedor(a) 5",loja:"leopoldina", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_p1",nome:"Vendedor(a) 1",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_p2",nome:"Vendedor(a) 2",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_p3",nome:"Vendedor(a) 3",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_p4",nome:"Vendedor(a) 4",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_p5",nome:"Vendedor(a) 5",loja:"perdizes",   metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_s1",nome:"Vendedor(a) 1",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_s2",nome:"Vendedor(a) 2",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_s3",nome:"Vendedor(a) 3",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_s4",nome:"Vendedor(a) 4",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_s5",nome:"Vendedor(a) 5",loja:"santana",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_j1",nome:"Vendedor(a) 1",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_j2",nome:"Vendedor(a) 2",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_j3",nome:"Vendedor(a) 3",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_j4",nome:"Vendedor(a) 4",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_j5",nome:"Vendedor(a) 5",loja:"jarpaul",    metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_pi1",nome:"Vendedor(a) 1",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_pi2",nome:"Vendedor(a) 2",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_pi3",nome:"Vendedor(a) 3",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_pi4",nome:"Vendedor(a) 4",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_pi5",nome:"Vendedor(a) 5",loja:"pinheiros", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_i1",nome:"Vendedor(a) 1",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_i2",nome:"Vendedor(a) 2",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_i3",nome:"Vendedor(a) 3",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_i4",nome:"Vendedor(a) 4",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
+  {id:"v_i5",nome:"Vendedor(a) 5",loja:"ibirapuera", metaMes:10000,superMetaMes:12500,metaAniv:0,metaInativ:0},
 ];
 
 const PRODUTOS=[
@@ -5567,7 +5579,7 @@ if(!D.vendedoras) D.vendedoras=[];
       if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
     });
     _persistirLocal();
-    console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedoras fantasmas (padrão antigo). Tombstones criados.");
+    console.warn("[Avatim MIGRAÇÃO] Removidas "+idsParaTombstonar.size+" vendedor(es) fantasmas (padrão antigo). Tombstones criados.");
   }
 })();
 
@@ -5602,12 +5614,12 @@ if(!D.vendedoras) D.vendedoras=[];
       });
       console.warn("[Avatim MIGRAÇÃO META]", lid, ": meta loja R$"+metaMesLoja+
         " | soma antiga: R$"+somaMetaIndividual.toFixed(2)+
-        " → redistribuída: R$"+mv+" × "+vendsLoja.length+" vendedoras");
+        " → redistribuída: R$"+mv+" × "+vendsLoja.length+" vendedor(es)");
     }
   });
   if(corrigidas > 0){
     _persistirLocal();
-    console.warn("[Avatim MIGRAÇÃO META] Total corrigido: "+corrigidas+" vendedoras");
+    console.warn("[Avatim MIGRAÇÃO META] Total corrigido: "+corrigidas+" vendedor(es)");
   }
 })();
 if(!D.vendasVend) D.vendasVend={};
@@ -5972,7 +5984,7 @@ function _isCampExcluido(id){
 function _fatLancamento(r){
   if(r && r.vendedoras && typeof r.vendedoras === 'object'){
     const soma = Object.values(r.vendedoras).reduce((s,v)=>s+(Number(v)||0),0);
-    if(soma > 0) return soma; // soma das vendedoras é fonte da verdade
+    if(soma > 0) return soma; // soma dos(as) vendedor(es) é fonte da verdade
   }
   return Number(r?.fat)||0;
 }
@@ -6107,7 +6119,7 @@ window.backupInspecionar = function(event){
       try{
         const obj = JSON.parse(d.dados || '{}');
         const partes = [];
-        if(obj.vendedoras) partes.push(obj.vendedoras.length + ' vendedoras');
+        if(obj.vendedoras) partes.push(obj.vendedoras.length + ' vendedor(es)');
         if(obj.contatos)   partes.push(obj.contatos.length + ' contatos');
         if(obj.fluxo)      partes.push(obj.fluxo.length + ' fluxo');
         // [R60] Vendas vivem SÓ nos docs loja_* — contar os dias lançados
@@ -6116,7 +6128,7 @@ window.backupInspecionar = function(event){
           const nDias = Object.values(obj.vendas).reduce((s,o)=>s+Object.keys(o||{}).length,0);
           partes.push(nDias + ' dia(s) de venda');
         }
-        if(obj.vendasVend) partes.push(Object.keys(obj.vendasVend).length + ' vendedora(s) c/ lançamento');
+        if(obj.vendasVend) partes.push(Object.keys(obj.vendasVend).length + ' vendedor(a)(s) c/ lançamento');
         if(obj.excelDados && obj.excelDados.length) partes.push(obj.excelDados.length + ' linhas Excel');
         if(obj.crm)        partes.push('CRM: ' + Object.keys(obj.crm).join(','));
         if(obj.linhas)     partes.push((obj.linhas||0).toLocaleString('pt-BR') + ' linhas agregadas');
@@ -6607,7 +6619,7 @@ window.crmTemCubos = function(){
   return Object.keys(D.crm || {}).some(l => Object.keys(D.crm[l] || {}).length);
 };
 
-/** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedora. */
+/** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedor(a). */
 window.crmVisao = function(){
   const fAno  = document.getElementById('excel-filtro-ano')?.value  || '';
   const fMes  = document.getElementById('excel-filtro-mes')?.value  || '';
@@ -6643,7 +6655,7 @@ window.crmCombinarDeLinhas = function(linhas){
   return c;
 };
 
-/** Aplica filtros de mês e vendedora sobre um cubo já combinado. */
+/** Aplica filtros de mês e vendedor(a) sobre um cubo já combinado. */
 window.crmFiltrar = function(cubo, f){
   f = f || {};
   const mesOk = mi => {
@@ -7057,7 +7069,7 @@ window.crmAgregar = function(linhas, opts){
     if(!d.tel && r.telefone) d.tel = String(r.telefone).trim();
     if(!d.doc && docCli) d.doc = docCli;
     if(r.data<d.pri) d.pri=r.data;   // guardado como indice de mes na saida
-    if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedora da compra mais recente
+    if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedor(a) da compra mais recente
     d.cupons.add(cup);
     d.i+=qt;
     // Uma nota pertence a UM cliente — evita a mesma NF entrar duas vezes
@@ -7264,6 +7276,118 @@ window.crmCombinar = function(lojas, anos){
     clientes: [...clientes.values()].sort((a,b)=>b.total-a.total),
     clientesUnicos: clientes.size
   };
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R81] VÍNCULO HISTÓRICO ↔ CRM CLIENTES — conciliação do realizado
+//
+// O Histórico mostra o que a loja LANÇOU. O CRM guarda o que a planilha
+// oficial FATUROU. São duas fontes para o mesmo número, e até agora não
+// conversavam: ninguém via a diferença sem abrir as duas telas.
+//
+// O cubo do CRM é de grão MENSAL. Por isso a conciliação só é honesta em
+// meses INTEIROS — um período que corta o mês ao meio compararia 12 dias
+// de lançamento contra o mês fechado da planilha e acusaria uma
+// divergência que não existe. Meses parciais aparecem marcados e ficam
+// fora do total.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Realizado do CRM no período, por mês e por vendedor(a)+mês. */
+window.crmRealizadoPeriodo = function(lid, de, ate){
+  const lojas = lid ? [lid] : LOJAS.map(l=>l.id);
+  const anos = [];
+  for(let a = Number(de.slice(0,4)); a <= Number(ate.slice(0,4)); a++) anos.push(String(a));
+  const cubo = window.crmCombinar(lojas, anos);
+  const porMes = new Map(), porVendMes = new Map();
+  (cubo.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
+    const mes = (cubo.meses||[])[mi];
+    if(!mes || mes < de.slice(0,7) || mes > ate.slice(0,7)) return;
+    const a = porMes.get(mes) || {fat:0,notas:0,itens:0,clientes:0};
+    a.fat+=f; a.notas+=cup; a.itens+=it; a.clientes+=cli; porMes.set(mes,a);
+    const nome = _crmNorm((cubo.vends||[])[vi]);
+    if(nome){
+      const k = nome+'|'+mes;
+      const b = porVendMes.get(k) || {fat:0,notas:0,itens:0};
+      b.fat+=f; b.notas+=cup; b.itens+=it; porVendMes.set(k,b);
+    }
+  });
+  return {porMes, porVendMes, temDados: porMes.size>0};
+};
+
+/** Um mês só é comparável se o período cobrir do dia 1 ao último dia. */
+window._mesInteiroNoPeriodo = function(mes, de, ate){
+  const [y,m] = mes.split('-').map(Number);
+  const ultimo = new Date(y, m, 0).getDate();
+  return de <= (mes+'-01') && ate >= (mes+'-'+String(ultimo).padStart(2,'0'));
+};
+
+/**
+ * Desenha a tabela de conciliação.
+ * lancPorMes: {'2025-02': {fat, trans}}   crmPorMes: Map(mes -> {fat, notas})
+ */
+window._histRenderConciliacao = function(elId, lancPorMes, crmPorMes, de, ate){
+  const el = document.getElementById(elId); if(!el) return;
+  const meses = [...new Set([...Object.keys(lancPorMes||{}), ...crmPorMes.keys()])].sort();
+
+  if(!crmPorMes.size){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">'
+      + 'Sem dados de CRM para este período. Importe a planilha em <strong>CRM Clientes</strong> '
+      + 'para conferir o lançado contra o faturado.</div>';
+    return;
+  }
+
+  // R$ -100,00 lê mal; o sinal vem antes do símbolo.
+  const fmtDif = d => (d<0?'-':'+') + fmt(Math.abs(d));
+  let tLanc=0, tCrm=0, nParciais=0;
+  const linhas = meses.map(mes=>{
+    const lanc = (lancPorMes||{})[mes] || {fat:0,trans:0};
+    const crm  = crmPorMes.get(mes)   || null;
+    const inteiro = window._mesInteiroNoPeriodo(mes, de, ate);
+    const mesFmt = mes.split('-').reverse().join('/');
+
+    if(!crm){
+      return `<tr><td>${mesFmt}</td><td style="color:var(--verde);font-weight:600">${fmt(lanc.fat)}</td>`
+        + `<td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td>`
+        + `<td style="color:var(--muted);font-size:11px">sem CRM no mês</td></tr>`;
+    }
+    if(!inteiro){ nParciais++; }
+    else { tLanc += lanc.fat; tCrm += crm.fat; }
+
+    const dif = lanc.fat - crm.fat;
+    const pct = crm.fat>0 ? dif/crm.fat*100 : 0;
+    // Até 1% de diferença é arredondamento/devolução — não é divergência.
+    const ok  = Math.abs(pct) <= 1;
+    const cor = ok ? 'var(--verde)' : Math.abs(pct)<=5 ? 'var(--ouro)' : 'var(--verm)';
+    return `<tr${inteiro?'':' style="opacity:.55"'}>
+      <td>${mesFmt}${inteiro?'':' <span style="font-size:9px;color:var(--laranja)" title="O período não cobre o mês inteiro — comparação parcial">PARCIAL</span>'}</td>
+      <td style="color:var(--verde);font-weight:600">${fmt(lanc.fat)}</td>
+      <td style="color:var(--azul);font-weight:600">${fmt(crm.fat)}</td>
+      <td style="color:${cor};font-weight:700">${fmtDif(dif)}</td>
+      <td style="color:${cor};font-weight:700">${ok?'✓ confere':(pct>=0?'+':'')+pct.toFixed(1)+'%'}</td>
+    </tr>`;
+  }).join('');
+
+  const difT = tLanc - tCrm;
+  const pctT = tCrm>0 ? difT/tCrm*100 : 0;
+  const corT = Math.abs(pctT)<=1 ? 'var(--verde)' : Math.abs(pctT)<=5 ? 'var(--ouro)' : 'var(--verm)';
+
+  el.innerHTML = `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+    <thead><tr><th>Mês</th><th>Lançado (Histórico)</th><th>Faturado (CRM)</th><th>Diferença</th><th>Situação</th></tr></thead>
+    <tbody>${linhas}</tbody>
+    ${tCrm>0 ? `<tfoot><tr style="border-top:2px solid var(--borda);font-weight:700">
+      <td>Total (meses inteiros)</td>
+      <td style="color:var(--verde)">${fmt(tLanc)}</td>
+      <td style="color:var(--azul)">${fmt(tCrm)}</td>
+      <td style="color:${corT}">${fmtDif(difT)}</td>
+      <td style="color:${corT}">${pctT>=0?'+':''}${pctT.toFixed(1)}%</td>
+    </tr></tfoot>` : ''}
+  </table></div>
+  <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">
+    O <strong>lançado</strong> é o que a loja registrou no sistema; o <strong>faturado</strong> vem da
+    planilha importada em CRM Clientes. O lançamento continua sendo a fonte oficial — o CRM é conferência.
+    ${nParciais ? 'Meses marcados como <strong>PARCIAL</strong> não são comparáveis (o CRM tem grão mensal e o período não cobre o mês inteiro), então ficam fora do total.' : ''}
+  </div>`;
 };
 
 
@@ -7836,7 +7960,7 @@ async function loadFromFirestore(){
       if(remoto.realProd)      D.realProd      = remoto.realProd;
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
-        console.log("[Avatim] loadFromFirestore: vendedoras encontradas", remoto.vendedoras.length);
+        console.log("[Avatim] loadFromFirestore: vendedor(es) encontradas", remoto.vendedoras.length);
         // Atualizar tombstone local com o do remoto
         if(remoto._vendsExcluidas?.length){
           if(!D._vendsExcluidas) D._vendsExcluidas=[];
@@ -8259,7 +8383,7 @@ function forcarSincronizacao(){
       carregarDash();
       const lid = lojaId();
       const vends = vendsAtivas(lid);
-      showToast(`✅ Sincronizado! ${vends.length} vendedoras carregadas.`, "ok");
+      showToast(`✅ Sincronizado! ${vends.length} vendedor(es) carregadas.`, "ok");
     } else {
       console.warn("[Avatim] ⚠️  Firebase não respondeu, usando localStorage");
       showToast("⚠️  Firebase não respondeu, usando dados locais", "warn");
@@ -8271,7 +8395,7 @@ function forcarSincronizacao(){
 }
 function arquivarVendedora(vid, arquivar){
   const idx = D.vendedoras.findIndex(v=>v.id===vid);
-  if(idx<0){ showToast("Vendedora não encontrada","err"); return; }
+  if(idx<0){ showToast("Vendedor(a) não encontrada","err"); return; }
   D.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
   D.vendedoras[idx]._savedAt = Date.now(); // [FIX cross-device] timestamp para merge
   const nome = D.vendedoras[idx].nome;
@@ -9356,11 +9480,11 @@ function gerarDiagnostico(){
           }).join('')}
         </div>
 
-        <!-- KPIs por Loja (ranking vendedoras top) -->
+        <!-- KPIs por Loja (ranking vendedor(es) top) -->
         <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">👩 Top Vendedoras da Rede</div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">👩 Top Vendedor(es) da Rede</div>
           <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;font-size:9px;color:var(--muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--borda)">
-            <span>Vendedora</span><span style="text-align:right">%</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span>
+            <span>Vendedor(a)</span><span style="text-align:right">%</span><span style="text-align:right">Fat.</span><span style="text-align:right">TM</span>
           </div>
           ${todasVends.sort((a,b)=>b.pct-a.pct).slice(0,10).map((v,idx)=>{
             const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
@@ -9488,7 +9612,7 @@ function gerarDiagnostico(){
     </div>
 
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚡ Melhor & Pior Vendedora</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚡ Melhor & Pior Vendedor(a)</div>
       ${melhor?`<div style="background:rgba(46,204,135,.08);border:1px solid rgba(46,204,135,.2);border-radius:8px;padding:10px;margin-bottom:8px">
         <div style="font-size:9px;color:var(--verde);font-weight:600;margin-bottom:4px">🏆 MAIOR POTENCIALIZADOR</div>
         <div style="font-size:13px;font-weight:700">${melhor.nome}</div>
@@ -9629,9 +9753,9 @@ function gerarDiagnostico(){
         })()}
       </div>
 
-      <!-- KPIs por Vendedora -->
+      <!-- KPIs por Vendedor(a) -->
       <div style="background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:16px">
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📋 KPIs por Vendedora</div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📋 KPIs por Vendedor(a)</div>
         ${vendsData.map((v,idx)=>{
           const corV2=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
           const medalV=['🥇','🥈','🥉'][idx]||'';
@@ -10094,7 +10218,7 @@ function renderPainelDia(){
   if(grid){
     const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
     if(!vends.length){
-      grid.innerHTML = "<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Nenhuma vendedora cadastrada nesta loja.</div>";
+      grid.innerHTML = "<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Nenhum(a) vendedor(a) cadastrado(a) nesta loja.</div>";
     } else {
       grid.innerHTML = "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px'>" +
         vends.map(v=>{
@@ -10257,7 +10381,7 @@ function carregarVendsForm(lidOverride){
   if(typeof window.renderRitmoMeta === 'function') window.renderRitmoMeta(lid);
 
   if(!vends.length){
-    grid.innerHTML="<div style='color:var(--muted);font-size:12px;padding:12px 0'>Sem vendedoras cadastradas para esta loja.</div>";
+    grid.innerHTML="<div style='color:var(--muted);font-size:12px;padding:12px 0'>Sem vendedor(es) cadastrados(as) para esta loja.</div>";
     return;
   }
   const tblMap={VR:"gold",ESP:"ok",VS:"azul",VP:"warn",VD:"zero"};
@@ -10622,7 +10746,7 @@ function adicionarVenda(){
   if(typeof atualizarSomaDia === 'function') atualizarSomaDia();
 
   limparCamposLanc();
-  showToast(_cv ? 'Venda adicionada ao card da vendedora — clique em Salvar Lançamento' : 'Venda adicionada!');
+  showToast(_cv ? 'Venda adicionada ao card do(a) vendedor(a) — clique em Salvar Lançamento' : 'Venda adicionada!');
 }
 
 function atualizaTotal(){
@@ -10668,7 +10792,7 @@ async function salvarLanc(){
 
   // Faturamento = soma dos campos de cada vendedora
   const vends = vendsAtivas(lid);
-  if(!vends.length){ _abortar("Nenhuma vendedora cadastrada nesta loja!"); return; }
+  if(!vends.length){ _abortar("Nenhum(a) vendedor(a) cadastrado(a) nesta loja!"); return; }
 
   let fat = 0;
   const vendasParaSalvar = [];
@@ -10692,7 +10816,7 @@ async function salvarLanc(){
     totalItens += vitens;
   });
 
-  if(fat === 0){ _abortar("Preencha o valor de pelo menos uma vendedora!"); return; }
+  if(fat === 0){ _abortar("Preencha o valor de pelo menos um(a) vendedor(a)!"); return; }
 
   // [NEW 23/07] O P.A. só existe se as peças forem lançadas. Avisa quando há
   // atendimentos mas nenhuma peça — sem bloquear o salvamento.
@@ -10705,7 +10829,7 @@ async function salvarLanc(){
       "é o número de itens que cada cliente levou.\n\n" +
       "OK = salvar assim mesmo   |   Cancelar = voltar e preencher"
     );
-    if(!_segue){ showToast("Preencha o campo Peças de cada vendedora.","warn"); return; }
+    if(!_segue){ showToast("Preencha o campo Peças de cada vendedor(a).","warn"); return; }
     window._salvandoLanc = true;
   }
 
@@ -10907,7 +11031,7 @@ function renderConsolidadoLanc(lid){
 }
 
 async function deletarLanc(lid, data){
-  if(!confirm("Excluir lançamento de "+data+"? Isso remove os dados de todas as vendedoras neste dia.")) return;
+  if(!confirm("Excluir lançamento de "+data+"? Isso remove os dados de todos(as) vendedor(es) neste dia.")) return;
   // Tombstone para impedir que o Firebase reinsira
   if(!D._vendasExcluidas) D._vendasExcluidas = {};
   if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid] = [];
@@ -11273,7 +11397,7 @@ function renderMetas(){
 
   const metaVendEl = document.getElementById("metas-vend-dash");
   if(vendsDash.length===0){
-    metaVendEl.innerHTML="<div style='color:var(--muted);font-size:12px;padding:16px 0;text-align:center'>Nenhuma vendedora cadastrada.</div>";
+    metaVendEl.innerHTML="<div style='color:var(--muted);font-size:12px;padding:16px 0;text-align:center'>Nenhum(a) vendedor(a) cadastrado(a).</div>";
   } else if(isAdmin()){
     // Agrupa por loja
     let html="";
@@ -11351,7 +11475,7 @@ function renderMetas(){
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <div>
               <span style="font-size:12px;font-weight:600;color:var(--texto)">${l.nome}</span>
-              <span style="font-size:9px;color:var(--muted);margin-left:6px">${nv} vendedoras</span>
+              <span style="font-size:9px;color:var(--muted);margin-left:6px">${nv} vendedor(es)</span>
             </div>
             <div style="text-align:right">
               <div style="font-size:13px;font-weight:700;color:${cl}">${fmt(rl)}</div>
@@ -11982,7 +12106,7 @@ ${catPDF.orfaos.length ? `<p style="font-size:13.5px;color:#a00;margin-top:8px">
 
 <h2>Registros Detalhados${regs.length>100?" (primeiros 100)":""}</h2>
 <table>
-  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedora</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade / Produtos</th><th style="text-align:right">Benefício</th><th style="text-align:right">Diferença paga</th></tr></thead>
+  <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vendedor(a)</th><th>Loja</th><th style="text-align:right">Valor</th><th>Modalidade / Produtos</th><th style="text-align:right">Benefício</th><th style="text-align:right">Diferença paga</th></tr></thead>
   <tbody>${rowsRegs}</tbody>
 </table>
 <div class="foot">MonAris Sales Control — ${new Date().toLocaleString("pt-BR")}</div>
@@ -12009,8 +12133,8 @@ function toggleFormVend(){
     const el=document.getElementById("prev-meta-vend-val");
     if(el){
       el.innerHTML=estimada>0
-        ? `<span style="color:var(--ouro)">Estimativa: </span><strong style="color:var(--texto)">${fmt(estimada)}/mês por vendedora</strong> <span style="color:var(--muted)">(meta loja ${fmt(metaLoja.mes)} ÷ ${nAtual+1} vendedoras)</span>`
-        : `<span style="color:var(--muted)">⚠️ Meta da loja ainda não definida. Cadastre a vendedora e defina a meta em <strong>Metas por Loja</strong>.</span>`;
+        ? `<span style="color:var(--ouro)">Estimativa: </span><strong style="color:var(--texto)">${fmt(estimada)}/mês por vendedor(a)</strong> <span style="color:var(--muted)">(meta loja ${fmt(metaLoja.mes)} ÷ ${nAtual+1} vendedoras)</span>`
+        : `<span style="color:var(--muted)">⚠️ Meta da loja ainda não definida. Cadastre o(a) vendedor(a) e defina a meta em <strong>Metas por Loja</strong>.</span>`;
     }
   }
 }
@@ -12065,9 +12189,9 @@ function salvarVend(){
   if(isAdmin()) renderMetasLojas();
 }
 function excluirVend(id){
-  if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedoras.','err');return;}
+  if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedor(es).','err');return;}
   const vObj = D.vendedoras.find(v=>v.id===id);
-  if(!confirm('Excluir '+( vObj?.nome||'esta vendedora')+'? Os dados históricos serão mantidos mas ela não aparecerá mais no sistema.')) return;
+  if(!confirm('Excluir '+( vObj?.nome||'este(a) vendedor(a)')+'? Os dados históricos serão mantidos mas ela não aparecerá mais no sistema.')) return;
   // Remover da lista
   D.vendedoras = D.vendedoras.filter(v=>v.id!==id);
   // Guardar tombstone — impede que syncs futuros restaurem a vendedora
@@ -12075,7 +12199,7 @@ function excluirVend(id){
   if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
   // Não deletar vendasVend — dados históricos preservados
   save();
-  showToast('✅ '+(vObj?.nome||'Vendedora')+' excluída.');
+  showToast('✅ '+(vObj?.nome||'Vendedor(a)')+' excluída.');
   renderTabelaVend();
   renderVendRanking(_tabVend);
   carregarVendsForm();
@@ -12240,10 +12364,10 @@ function buscarHistVend(){
   const vendId = document.getElementById('hist-sel-vend')?.value;
   const de     = document.getElementById('hist-de')?.value;
   const ate    = document.getElementById('hist-ate')?.value;
-  if(!vendId || !de || !ate){ showToast('Selecione vendedora e período','err'); return; }
+  if(!vendId || !de || !ate){ showToast('Selecione vendedor(a) e período','err'); return; }
   if(de > ate){ showToast('Data inicial deve ser anterior à final.','err'); return; }
   const v = D.vendedoras.find(v2=>v2.id===vendId);
-  if(!v){ showToast('Vendedora não encontrada','err'); return; }
+  if(!v){ showToast('Vendedor(a) não encontrada','err'); return; }
   const vd = D.vendasVend[vendId]||{};
 
   // Filtrar dias no período
@@ -12325,7 +12449,7 @@ function buscarHistVend(){
           <div style="font-weight:600">${c.nome||'Campanha'}</div>
           <div style="font-size:11px;color:var(--muted)">${c.inicio||''} a ${c.fim||''}</div>
         </div>`).join('')
-      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma campanha registrada para esta vendedora.</div>`;
+      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma campanha registrada para este(a) vendedor(a).</div>`;
   }
 
   // ── Comparação de crescimento TM mês a mês e ano a ano ────────
@@ -12460,7 +12584,7 @@ function renderVendRanking(per){
       <div style="font-size:9px;color:${c}">${pct.toFixed(0)}% meta | ${spct.toFixed(0)}% super</div>
       <div style="font-size:9px;color:var(--muted);margin-top:2px">Meta: ${fmt(v.metaPerV)} | Super: ${fmt(v.superPerV||0)}</div>
     </div>`;
-  }).join(""):"<div style='color:var(--muted);font-size:12px'>Sem vendedoras.</div>";
+  }).join(""):"<div style='color:var(--muted);font-size:12px'>Sem vendedor(es).</div>";
 }
 
 function calcProjecao_vend(id){
@@ -12541,7 +12665,7 @@ function renderTabelaVend(){
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
       <td style="white-space:nowrap">${btnArquivar}${btnExcluir}</td>
     </tr>`;
-  }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Nenhuma vendedora encontrada.</td></tr>";
+  }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Nenhum(a) vendedor(a) encontrado(a).</td></tr>";
 }
 
 // ============================================================
@@ -12652,7 +12776,7 @@ function calcularComissao(){
   const id      = document.getElementById("com-vend").value;
   const valInput= parseBR(document.getElementById("com-val")?.value)||0;
   const per     = document.getElementById("com-per")?.value||"mes";
-  if(!id){document.getElementById("com-resultado").innerHTML="<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Selecione uma vendedora.</div>";return;}
+  if(!id){document.getElementById("com-resultado").innerHTML="<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Selecione um(a) vendedor(a).</div>";return;}
   const v = D.vendedoras.find(x=>x.id===id);
   if(!v){document.getElementById("com-resultado").innerHTML="";return;}
 
@@ -12801,13 +12925,13 @@ function renderRankComissao(){
   }).sort((a,b)=>b.comissao-a.comissao);
   document.getElementById("rank-comissao").innerHTML=ranked.length?`
     <div style="overflow-x:auto"><table class="dtable">
-      <thead><tr><th>#</th><th>Vendedora</th><th>Cargo</th><th>Loja</th><th>Vendas Mes</th><th>% Meta</th><th>Taxa</th><th>Bonus Prod</th><th>Comissao</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Cargo</th><th>Loja</th><th>Vendas Mes</th><th>% Meta</th><th>Taxa</th><th>Bonus Prod</th><th>Comissao</th></tr></thead>
       <tbody>${ranked.map((v,i)=>{
         const c=v.pct>=120?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--verm)";
         const tbl=getComConfig(v.cargo||'ESP');
         return `<tr><td>${["🥇","🥈","🥉"][i]||i+1}</td><td><strong>${v.nome}</strong></td><td style="font-size:10px;color:var(--muted)">${tbl.nome}</td><td style="font-size:11px;color:var(--muted)">${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja}</td><td>${fmt(v.vm)}</td><td style="color:${c};font-weight:700">${v.pct.toFixed(0)}%</td><td>${v.taxa}%</td><td style="color:var(--laranja)">${v.bonus_prod>0?fmt(v.bonus_prod):"—"}</td><td style="font-weight:700;color:var(--ouro)">${fmt(v.comissao)}</td></tr>`;
       }).join("")}</tbody>
-    </table></div>`:"<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Sem vendedoras.</div>";
+    </table></div>`:"<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Sem vendedor(es).</div>";
 }
 
 // ============================================================
@@ -13538,7 +13662,7 @@ function renderRelCamp(){
             </div>
           </div>`;
         }).join('')
-      : '<div style="color:var(--muted);font-size:12px;padding:8px">Sem lançamentos com vendedoras registradas.</div>';
+      : '<div style="color:var(--muted);font-size:12px;padding:8px">Sem lançamentos com vendedor(es) registrados(as).</div>';
   }
 
   // ── TABELA DETALHADA ────────────────────────────────────────
@@ -13745,7 +13869,7 @@ function exportarPDFCamp(){
         <td>${v.loja}</td>
         <td>${fmt(v.fat)}</td>
       </tr>`).join('')
-    : '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px">Sem lançamentos com vendedoras registradas.</td></tr>';
+    : '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px">Sem lançamentos com vendedor(es) registrados(as).</td></tr>';
 
   // ── Tabela: Detalhe por Campanha ──────────────────────────────
   const rowsCamps = objs.map(o=>{
@@ -13902,15 +14026,15 @@ function exportarPDFCamp(){
     </div>
     ${_tabelaImpacto}
 
-    <h2 style="margin-top:18px">🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedora</h2>
+    <h2 style="margin-top:18px">🏪 Ranking de Lojas — Atingimento e Detalhe por Vendedor(a)</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja / Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>🎁 Kits</th><th>Nº Venda</th><th>Obs</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja / Vendedor(a)</th><th>Faturado</th><th>Meta</th><th>%</th><th>Atend.</th><th>🎁 Kits</th><th>Nº Venda</th><th>Obs</th></tr></thead>
       <tbody>${rowsLojas}</tbody>
     </table>
 
-    <h2>👩 Ranking de Vendedoras</h2>
+    <h2>👩 Ranking de Vendedor(es)</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturado na Campanha</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>Faturado na Campanha</th></tr></thead>
       <tbody>${rowsVends}</tbody>
     </table>
 
@@ -14225,7 +14349,7 @@ function renderVendCampForm(campId){
   // vendsAtivas já filtra: nome=loja, cargo VRLL, ativa===false
   const vends = vendsAtivas(lid);
   if(!vends.length){
-    el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhuma vendedora cadastrada</div>';
+    el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum(a) vendedor(a) cadastrado(a)</div>';
     return;
   }
   // [FIX 23/07] Só pré-preencher quando é EDIÇÃO explícita de um lançamento.
@@ -14290,7 +14414,7 @@ function renderVendCampForm(campId){
       </div>
     </div>`).join('');
   calcTotalVendsCamp();
-  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: meta por vendedora
+  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: meta por vendedor(a)
 }
 
 function calcTotalVendsCamp(){
@@ -14442,7 +14566,7 @@ function renderHistoricoCamp(campId, lid){
     if(rvList.length){
       rankVendWrap.style.display='';
       rankVendWrap.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏆 Ranking Vendedoras — Campanha</div>
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏆 Ranking Vendedor(es) — Campanha</div>
         ${rvList.map((v,i)=>{
           const c = i===0?'var(--ouro)':i===1?'var(--muted)':i===2?'#cd7f32':'var(--texto)';
           const barW = Math.round(v.fat/rvMax*100);
@@ -14574,7 +14698,7 @@ async function salvarCampReal(){
     obs,
     vendedoras: _vendData.vendedoras,
     vendQtds:   _vendData.vendQtds,
-    vendKits:   _vendData.vendKits, // [NEW] kits por vendedora
+    vendKits:   _vendData.vendKits, // [NEW] kits por vendedor(a)
     vendNrs:    _vendData.vendNrs,
     vendObss:   _vendData.vendObss,
     lancadoEm: hoje()
@@ -14640,7 +14764,7 @@ async function salvarCampReal(){
   // Resultado: a loja lançava R$ 500, salvava, e a barra ficava em zero.
   atualizarObjetivoCamp();
   atualizarProgrCamp();
-  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: atualiza meta/realizado por vendedora
+  atualizarMetasVendsCamp(); // [NEW 25/07] Bug 2: atualiza meta/realizado por vendedor(a)
   renderHistoricoCamp(campId, lid);
   renderCampLista();
 }
@@ -14799,12 +14923,12 @@ function renderCampLista(){
       .filter(v=>{
         if(isAdmin() || _campFiltroLoja) return true; // admin e filtro ativo veem tudo
         const vObj = D.vendedoras.find(x=>x.id===v.vId);
-        return !vObj || vObj.loja===lid; // loja só vê suas vendedoras
+        return !vObj || vObj.loja===lid; // loja só vê seus(uas) vendedor(es)
       })
       .sort((a,b)=>b.val-a.val);
     const rankVendHTML = rankVendArr.length ? `
       <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
-        <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-bottom:10px">🏆 RANKING DE VENDEDORAS</div>
+        <div style="font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-bottom:10px">🏆 RANKING DE VENDEDOR(ES)</div>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${rankVendArr.map((v,i)=>{
             const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}º`;
@@ -15090,7 +15214,7 @@ function renderMetasLojas(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div>
           <div style="font-size:13px;font-weight:700">${loja.nome}</div>
-          <div style="font-size:9px;color:var(--muted)">${loja.cnpj} &middot; ${nv} vendedoras</div>
+          <div style="font-size:9px;color:var(--muted)">${loja.cnpj} &middot; ${nv} vendedor(es)</div>
           ${m._herdado?`<div style="font-size:9px;color:var(--ouro);margin-top:2px">⚠️ Sem meta para ${nomeMes(_mesMeta)} — herdando de ${nomeMes(m._de)}</div>`:''}
           ${!ehMesAtual?`<div style="font-size:9px;color:var(--azul);margin-top:2px">📅 Editando ${nomeMes(_mesMeta)}</div>`:''}
         </div>
@@ -15139,11 +15263,11 @@ function renderMetasLojas(){
             </div>
           </div>
           <div style="background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.2);border-radius:6px;padding:9px;text-align:center;margin-bottom:6px">
-            <div style="font-size:8px;color:var(--roxo);margin-bottom:3px">META POR VENDEDORA · ${nv} vendedoras</div>
+            <div style="font-size:8px;color:var(--roxo);margin-bottom:3px">META POR VENDEDOR(A) · ${nv} vendedor(es)</div>
             <div style="font-size:15px;font-weight:700;color:var(--roxo)" id="ml-pv-${loja.id}">${m.mes&&nv?fmt(parseFloat((m.mes/nv).toFixed(2))):'--'}</div>
           </div>
         </div>
-        <div style="display:flex;gap:6px"><button onclick="redistribuirMetaVends('${loja.id}')" style="flex:1;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.5);border-radius:7px;padding:10px;color:#a78bfa;font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer" title="Divide a meta da loja igualmente entre as vendedoras ativas">🔄 Redistribuir</button><button onclick="salvarMetaLoja('${loja.id}')" style="flex:2;background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:7px;padding:10px;color:var(--preto);font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer">💾 Salvar Meta da Loja</button></div>
+        <div style="display:flex;gap:6px"><button onclick="redistribuirMetaVends('${loja.id}')" style="flex:1;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.5);border-radius:7px;padding:10px;color:#a78bfa;font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer" title="Divide a meta da loja igualmente entre os(as) vendedor(es) ativos(as)">🔄 Redistribuir</button><button onclick="salvarMetaLoja('${loja.id}')" style="flex:2;background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:7px;padding:10px;color:var(--preto);font-family:DM Sans,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer">💾 Salvar Meta da Loja</button></div>
       </div>
       ${renderMetasVendSection(loja.id)}
     </div>`;
@@ -15257,7 +15381,7 @@ function salvarMetasVendedoras(lid){
   _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
   window._pendingLocalDataTs = Date.now();
-  showToast(n + " vendedoras salvas! Sincronizando...");
+  showToast(n + " vendedor(es) salvas! Sincronizando...");
   renderMetasLojas(); carregarDash(); carregarVendsForm();
 
   (async () => {
@@ -15269,7 +15393,7 @@ function salvarMetasVendedoras(lid){
         await window.fsGravar(_snapMV);
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
-        showToast("✅ Metas das vendedoras gravadas no Firebase!");
+        showToast("✅ Metas dos(as) vendedor(es) gravados(as) no Firebase!");
         console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
       } catch(eV){
         window._pendingLocalData = null;
@@ -15333,9 +15457,9 @@ function renderMetasVendSection(lid){
       </div>
     </div>`).join("");
   return `<div style="margin-top:12px;background:rgba(91,141,239,.04);border:1px solid rgba(91,141,239,.15);border-radius:10px;padding:14px">
-    <div style="font-size:9px;color:var(--azul);font-weight:700;letter-spacing:1px;margin-bottom:10px">👤 METAS INDIVIDUAIS — ${vends.length} VENDEDORAS</div>
+    <div style="font-size:9px;color:var(--azul);font-weight:700;letter-spacing:1px;margin-bottom:10px">👤 METAS INDIVIDUAIS — ${vends.length} VENDEDOR(ES)</div>
     ${rows}
-    <button onclick="salvarMetasVendedoras('${lid}')" style="width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(91,141,239,.9),rgba(91,141,239,.7));border:none;border-radius:7px;padding:10px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 Salvar Metas das Vendedoras</button>
+    <button onclick="salvarMetasVendedoras('${lid}')" style="width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(91,141,239,.9),rgba(91,141,239,.7));border:none;border-radius:7px;padding:10px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 Salvar Metas das Vendedor(es)</button>
   </div>`;
 }
 function calcAcumVend(vid){
@@ -15353,8 +15477,8 @@ function redistribuirMetaVends(lid){
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||250;
   if(mes<=0){ showToast("Preencha a meta da loja primeiro!","err"); return; }
   const vends = vendsAtivas(lid);
-  if(!vends.length){ showToast("Sem vendedoras ativas para distribuir.","err"); return; }
-  if(!confirm("Redistribuir a meta da loja igualmente entre "+vends.length+" vendedoras?\n\nIsso sobrescreve os valores atuais dos campos das vendedoras.")) return;
+  if(!vends.length){ showToast("Sem vendedor(es) ativos(as) para distribuir.","err"); return; }
+  if(!confirm("Redistribuir a meta da loja igualmente entre "+vends.length+" vendedor(es)?\n\nIsso sobrescreve os valores atuais dos campos dos(as) vendedor(es).")) return;
   const metaVend  = parseFloat((mes/vends.length).toFixed(2));
   const superVend = parseFloat((smes/vends.length).toFixed(2));
   vends.forEach(v => {
@@ -15374,7 +15498,7 @@ function redistribuirMetaVends(lid){
       delete tvEl.dataset.manual;
     }
   });
-  showToast("✅ Redistribuído: "+fmt(metaVend)+" por vendedora. Não esqueça de clicar em Salvar Meta da Loja.");
+  showToast("✅ Redistribuído: "+fmt(metaVend)+" por vendedor(a). Não esqueça de clicar em Salvar Meta da Loja.");
 }
 function salvarMetaLoja(lid){
   const metaCli=parseInt(document.getElementById("ml-cli-"+lid)?.value)||0;
@@ -15790,7 +15914,7 @@ function copiarWhats(){
   let t="🌸 *RANKING SEMANAL AVATIM* 🌸\n\n";
   ld.forEach((l,i)=>t+=`${med[i]} *${l.nome}*\n   ${fmt(l.sem)} (${l.pct.toFixed(0)}%)\n\n`);
   const vends=D.vendedoras.map(v=>({...v,val:calcVendPer(v.id,"semana")})).sort((a,b)=>b.val-a.val).filter(v=>v.val>0).slice(0,5);
-  if(vends.length){t+="👩 *TOP 5 VENDEDORAS*\n\n";vends.forEach((v,i)=>t+=`${["🥇","🥈","🥉","4","5"][i]} ${v.nome} — ${fmt(v.val)}\n`);}
+  if(vends.length){t+="👩 *TOP 5 VENDEDOR(ES)*\n\n";vends.forEach((v,i)=>t+=`${["🥇","🥈","🥉","4","5"][i]} ${v.nome} — ${fmt(v.val)}\n`);}
   t+="\n💪 Bora superar na proxima semana!";
   navigator.clipboard.writeText(t).then(()=>showToast("Copiado!")).catch(()=>showToast("Erro ao copiar.","err"));
 }
@@ -16367,7 +16491,7 @@ function buscarHistLoja(){
       return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,idealV,gapV};
     }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
     pv.innerHTML=vendsData.length?`<div style="overflow-x:auto"><table class="dtable">
-      <thead><tr><th>#</th><th>Vendedora</th><th>Realizado</th><th>Ideal</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Realizado</th><th>Ideal</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
       <tbody>${vendsData.map((v,i)=>{
         const cg=v.gapV>=0?'var(--verde)':'var(--verm)';
         const cf=v.fat>0?'var(--verde)':'var(--muted)';
@@ -16419,7 +16543,7 @@ function renderRankingLoja() {
   const perV  = per==='hoje'?'dia':per;
 
   // Header da loja
-  document.getElementById('rank-loja-titulo').textContent = `Vendedoras — ${loja?.nome}`;
+  document.getElementById('rank-loja-titulo').textContent = `Vendedor(es) — ${loja?.nome}`;
   document.getElementById('rank-loja-header').innerHTML = `
     <div style="background:var(--card);border:1px solid ${cor};border-radius:12px;padding:18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
       <div style="flex:1;min-width:180px">
@@ -16524,7 +16648,7 @@ function renderRankingLoja() {
           <td style="color:${c2};font-size:11px;font-weight:600">${status}</td>
         </tr>`;
       }).join('')
-    : `<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">Sem vendedoras cadastradas.</td></tr>`;
+    : `<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">Sem vendedor(es) cadastrados(as).</td></tr>`;
 }
 
 function renderRankingAdmin() {
@@ -16550,7 +16674,7 @@ function renderRankingAdmin() {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
           <div style="font-size:13px;font-weight:700">${loja.nome}</div>
-          <div style="font-size:10px;color:var(--muted)">${vends.length} vendedoras</div>
+          <div style="font-size:10px;color:var(--muted)">${vends.length} vendedor(es)</div>
         </div>
         <div style="text-align:right">
           <div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${cor}">${pct.toFixed(0)}%</div>
@@ -17550,7 +17674,7 @@ function exportarRelatorioRanking(){
   });
 
   // Ranking Vendedoras
-  csv += '\nRANKING DE VENDEDORAS\n';
+  csv += '\nRANKING DE VENDEDOR(ES)\n';
   csv += 'Posição,Nome,Loja,Faturamento,Meta Período,% Meta\n';
   const hj2 = hoje();
   const vendsExp = D.vendedoras.map(v=>{
@@ -17595,7 +17719,7 @@ function compartilharWhatsApp(){
   });
 
   // Top Vendedoras
-  txt += `\n👩 *TOP VENDEDORAS*\n`;
+  txt += `\n👩 *TOP VENDEDOR(ES)*\n`;
   const vendsW = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
     const mMes=Number(v.metaMes)||0;
@@ -17803,21 +17927,21 @@ function exportarPDFRanking() {
       <tbody>${rowsTMLoja.length?rowsTMLoja:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
     </table>
 
-    <h2>👩 Vendedoras — Maior % da Meta</h2>
+    <h2>👩 Vendedor(es) — Maior % da Meta</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
       <tbody>${rowsVends.length?rowsVends:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
     </table>
 
-    <h2>💰 Vendedoras — Maior Faturamento</h2>
+    <h2>💰 Vendedor(es) — Maior Faturamento</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
       <tbody>${rowsVendsFat.length?rowsVendsFat:'<tr><td colspan="6">Sem dados.</td></tr>'}</tbody>
     </table>
 
-    <h2>🎫 Vendedoras — Maior Ticket Médio</h2>
+    <h2>🎫 Vendedor(es) — Maior Ticket Médio</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>TM</th><th>Atend.</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>TM</th><th>Atend.</th></tr></thead>
       <tbody>${rowsVendsTM.length?rowsVendsTM:'<tr><td colspan="5">Sem dados.</td></tr>'}</tbody>
     </table>`;
 
@@ -18352,9 +18476,9 @@ function exportarPDFDiagnostico(){
     </div>
 
     <div class="section">
-      <h2>👩 Ranking de Vendedoras — Toda a Rede</h2>
+      <h2>👩 Ranking de Vendedor(es) — Toda a Rede</h2>
       <table>
-        <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th></tr></thead>
+        <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th></tr></thead>
         <tbody>${[...redeData.flatMap(l=>l.vends.map(v=>({...v,lojaNome:l.nome})))].sort((a,b)=>b.pct-a.pct).map((v,i)=>{
           const bd=v.pct>=100?'badge-ok':v.pct>=70?'badge-warn':'badge-bad';
           return `<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
@@ -18415,7 +18539,7 @@ function exportarPDFDiagnostico(){
         <div class="diag-box bad" style="flex:1;text-align:center"><div style="font-size:28px;font-weight:900">${abaixo}</div><div class="kl">🔴 Abaixo de 70%</div></div>
       </div>
       <table>
-        <thead><tr><th>#</th><th>Vendedora</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th><th>Atend.</th></tr></thead>
+        <thead><tr><th>#</th><th>Vendedor(a)</th><th>Faturado</th><th>Meta</th><th>%</th><th>TM</th><th>Atend.</th></tr></thead>
         <tbody>${vends.map((v,i)=>{
           const bd=v.pct>=100?'badge-ok':v.pct>=70?'badge-warn':'badge-bad';
           return `<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'º'}</td><td><strong>${v.nome}</strong></td>
@@ -18573,12 +18697,12 @@ function exportarPDFGeral(){
 
   // ── 3. VENDEDORAS ─────────────────────────────────────────────
   const lojas4Vend = _adm ? LOJAS : LOJAS.filter(l=>l.id===lid);
-  let secVends='<div class="section"><h2>👩 Vendedoras — Metas e Performance no Mês</h2>';
+  let secVends='<div class="section"><h2>👩 Vendedor(es) — Metas e Performance no Mês</h2>';
   lojas4Vend.forEach(l=>{
     const vv=vendsAtivas(l.id);
     if(!vv.length) return;
     if(_adm) secVends+=`<div style="font-size:12px;font-weight:700;color:#1a1a3a;margin:10px 0 6px;border-bottom:1px solid #c9a84c;padding-bottom:4px">${l.nome}</div>`;
-    secVends+=`<table style="margin-bottom:12px"><thead><tr><th>Vendedora</th><th>Cargo</th><th>Meta Mês</th><th>Realizado</th><th>%</th><th>TM</th></tr></thead><tbody>`;
+    secVends+=`<table style="margin-bottom:12px"><thead><tr><th>Vendedor(a)</th><th>Cargo</th><th>Meta Mês</th><th>Realizado</th><th>%</th><th>TM</th></tr></thead><tbody>`;
     vv.forEach(v=>{
       const vm=calcVendPer(v.id,'mes'), mV=Number(v.metaMes)||0;
       const pct=mV>0?vm/mV*100:0;
@@ -18770,9 +18894,9 @@ function exportarPDFGestao() {
       <tbody>${rowsTM.length?rowsTM:'<tr><td colspan="4">Sem dados de atendimento no período.</td></tr>'}</tbody>
     </table>
 
-    <h2>👩 Ranking Vendedoras — Maior % da Meta</h2>
+    <h2>👩 Ranking Vendedor(es) — Maior % da Meta</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th><th>Loja</th><th>% Meta</th><th>Status</th></tr></thead>
       <tbody>${rowsVG.length?rowsVG:'<tr><td colspan="5">Sem lançamentos no período.</td></tr>'}</tbody>
     </table>
 
@@ -18868,9 +18992,9 @@ function exportarPDFRelatorio() {
       </div>
     </div>
 
-    <h2>👩 Performance das Vendedoras — Este Mês</h2>
+    <h2>👩 Performance das Vendedor(es) — Este Mês</h2>
     <table>
-      <thead><tr><th>#</th><th>Vendedora</th>${isAdmin()?'<th>Loja</th>':''}<th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Vendedor(a)</th>${isAdmin()?'<th>Loja</th>':''}<th>Faturamento</th><th>% Meta</th><th>Status</th></tr></thead>
       <tbody>${vends.map((v,i)=>`<tr>
         <td>${i+1}</td><td><strong>${v.nome}</strong></td>
         ${isAdmin()?`<td>${v.loja}</td>`:''}
@@ -18913,7 +19037,7 @@ function exportarRelatorioGestao(){
   });
 
   // Top vendedoras
-  csv += '\nTOP VENDEDORAS\n';
+  csv += '\nTOP VENDEDOR(ES)\n';
   csv += 'Nome,Loja,Faturamento,% Meta\n';
   D.vendedoras.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
@@ -19567,7 +19691,7 @@ async function buscarHistoricoLoja(){
 
     pv.innerHTML = vendsData.length
       ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
-          <thead><tr><th>#</th><th>Vendedora</th><th>Faturamento</th><th>Meta do Período</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
+          <thead><tr><th>#</th><th>Vendedor(a)</th><th>Faturamento</th><th>Meta do Período</th><th>TM Médio</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th></tr></thead>
           <tbody>${vendsData.map((v,i)=>{
             const gap=v.fat-v.ideal; const cg=gap>=0?'var(--verde)':'var(--verm)';
             return `<tr>
@@ -19580,7 +19704,25 @@ async function buscarHistoricoLoja(){
             </tr>`;
           }).join('')}</tbody>
         </table></div>`
-      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum lançamento por vendedora neste período.</div>`;
+      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum lançamento por vendedor(a) neste período.</div>`;
+  }
+
+  // [R81] Conciliação com o CRM: o lançado precisa virar mensal para
+  // encostar no cubo do CRM, que é de grão mensal.
+  try{
+    const lancMes = {};
+    dias.forEach(d=>{
+      const mes = d.slice(0,7);
+      if(!lancMes[mes]) lancMes[mes] = {fat:0, trans:0};
+      lancMes[mes].fat   += diasMap[d].fat;
+      lancMes[mes].trans += diasMap[d].trans;
+    });
+    const crmP = window.crmRealizadoPeriodo(lid, de, ate);
+    window._histRenderConciliacao('hist-loja-conciliacao', lancMes, crmP.porMes, de, ate);
+  }catch(e){
+    console.warn('[Avatim] conciliação CRM (loja):', e.message);
+    const _ce = document.getElementById('hist-loja-conciliacao');
+    if(_ce) _ce.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">Não foi possível montar a conciliação: '+e.message+'</div>';
   }
 
   // Label do período
@@ -19650,10 +19792,10 @@ async function buscarHistoricoVend(){
   const vendId = document.getElementById('hist-pg-sel-vend')?.value;
   const de     = document.getElementById('hist-pg-de')?.value;
   const ate    = document.getElementById('hist-pg-ate')?.value;
-  if(!vendId || !de || !ate){ showToast('Selecione vendedora e período','err'); return; }
+  if(!vendId || !de || !ate){ showToast('Selecione vendedor(a) e período','err'); return; }
 
   const v = D.vendedoras.find(v2=>v2.id===vendId);
-  if(!v){ showToast('Vendedora não encontrada','err'); return; }
+  if(!v){ showToast('Vendedor(a) não encontrada','err'); return; }
 
   // Se não há dados locais para o período, buscar do Firebase
   const vdCheck = D.vendasVend[vendId]||{};
@@ -19707,6 +19849,38 @@ async function buscarHistoricoVend(){
   </div>`).join('');
 
   // Tabela
+  // [R81] Conciliação desta pessoa: o CRM guarda o nome como veio na
+  // planilha, então o casamento é por nome normalizado. Sem correspondência,
+  // a tabela avisa em vez de mostrar zero — zero pareceria venda não faturada.
+  try{
+    const lancMesV = {};
+    dias.forEach(d=>{
+      const mes = d.slice(0,7);
+      if(!lancMesV[mes]) lancMesV[mes] = {fat:0, trans:0};
+      lancMesV[mes].fat   += Number(vd[d].val  ||0);
+      lancMesV[mes].trans += Number(vd[d].trans||0);
+    });
+    const crmPV  = window.crmRealizadoPeriodo(v.loja||null, de, ate);
+    const chave  = _crmNorm(v.nome);
+    const crmMes = new Map();
+    crmPV.porVendMes.forEach((val, k)=>{
+      const corte = k.lastIndexOf('|');
+      if(k.slice(0, corte) === chave) crmMes.set(k.slice(corte+1), {fat:val.fat, notas:val.notas});
+    });
+    const _cv = document.getElementById('hist-pg-conciliacao');
+    if(crmPV.temDados && !crmMes.size && _cv){
+      _cv.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">'
+        + 'O CRM tem dados do período, mas nenhuma venda no nome <strong>'+v.nome+'</strong>. '
+        + 'Confira se o nome cadastrado bate com o que a planilha exporta.</div>';
+    } else {
+      window._histRenderConciliacao('hist-pg-conciliacao', lancMesV, crmMes, de, ate);
+    }
+  }catch(e){
+    console.warn('[Avatim] conciliação CRM (vendedor):', e.message);
+    const _ce2 = document.getElementById('hist-pg-conciliacao');
+    if(_ce2) _ce2.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">Não foi possível montar a conciliação: '+e.message+'</div>';
+  }
+
   const tab = document.getElementById('hist-pg-tabela');
   if(tab) tab.innerHTML = dias.length
     ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
@@ -19766,6 +19940,7 @@ function exportarHistoricoPDF(){
   const kpis  = document.getElementById(lojaAtivo ? 'hist-loja-kpis' : 'hist-pg-kpis')?.innerHTML || '';
   const tab   = document.getElementById(lojaAtivo ? 'hist-loja-tabela' : 'hist-pg-tabela')?.innerHTML || '';
   const pvend = lojaAtivo ? (document.getElementById('hist-loja-por-vend')?.innerHTML || '') : '';
+  const conc  = document.getElementById(lojaAtivo ? 'hist-loja-conciliacao' : 'hist-pg-conciliacao')?.innerHTML || '';
 
   const win = window.open('', '_blank', 'width=960,height=700');
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head>
@@ -19795,7 +19970,8 @@ tr:nth-child(even) td{background:#fafaf7}
 <div class="periodo">${lbl || 'Período não especificado'}</div>
 <div class="kpis">${_kpisParaPDF(kpis)}</div>
 ${tab ? '<h2>Lançamentos dia a dia</h2><div>' + _tabelaParaPDF(tab) + '</div>' : ''}
-${pvend ? '<h2>Desempenho por vendedora</h2><div>' + _tabelaParaPDF(pvend) + '</div>' : ''}
+${pvend ? '<h2>Desempenho por vendedor(a)</h2><div>' + _tabelaParaPDF(pvend) + '</div>' : ''}
+${conc && conc.indexOf('<table')>=0 ? '<h2>Conciliação — Lançado × CRM Clientes</h2><div>' + _tabelaParaPDF(conc) + '</div>' : ''}
 <div class="footer">MonAris Sales Control · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
 </body></html>`);
   win.document.close();
@@ -21342,7 +21518,7 @@ function renderVendedorasAcompGeral(dados){
     `;
   });
 
-  container.innerHTML = html || '<div style="color:var(--muted);text-align:center;padding:20px">Sem vendedoras neste período</div>';
+  container.innerHTML = html || '<div style="color:var(--muted);text-align:center;padding:20px">Sem vendedor(es) neste período</div>';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -23043,13 +23219,13 @@ function _relBenchVends(){
 
   return `
     <div class="sc">
-      <div class="st">👥 Benchmark entre Vendedoras — Top 15 de ${_relMesLabel(mesAtual)}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">Ordenado por faturamento no mês. Só vendedoras com lançamentos.</div>
+      <div class="st">👥 Benchmark entre Vendedor(es) — Top 15 de ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Ordenado por faturamento no mês. Só vendedor(es) com lançamentos.</div>
       <div style="overflow-x:auto;margin-top:12px">
         <table class="rel-tabela">
           <thead><tr>
             <th>POS.</th>
-            <th>VENDEDORA</th>
+            <th>VENDEDOR(A)</th>
             <th class="num">REALIZADO</th>
             <th class="num">META</th>
             <th class="num">% META</th>
@@ -23057,7 +23233,7 @@ function _relBenchVends(){
             <th class="num">P.A.</th>
             <th class="num">ATEND.</th>
           </tr></thead>
-          <tbody>${linhasHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Nenhuma vendedora com lançamentos neste mês.</td></tr>'}</tbody>
+          <tbody>${linhasHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Nenhum(a) vendedor(a) com lançamentos neste mês.</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -23543,7 +23719,7 @@ function exportarRelatorioPDF(){
     mensal:     'Comparativo Mensal',
     anual:      'Comparativo Anual',
     benchlojas: 'Benchmark entre Lojas',
-    benchvends: 'Benchmark entre Vendedoras',
+    benchvends: 'Benchmark entre Vendedor(es)',
     igp:        'Índice Geral de Performance (IGP)',
     preditivo:  'Indicadores Preditivos',
     projecao:   'Projeção de Metas',
@@ -23899,13 +24075,13 @@ window._rkMontarRankings = function(per, ref){
 // Catálogo dos rankings publicáveis (ordem = ordem no PDF)
 const _RK_CATALOGO = [
   {id:'fat_lojas',   titulo:'🏆 Maior Faturamento — Lojas'},
-  {id:'fat_vends',   titulo:'🏆 Maior Faturamento — Vendedoras'},
+  {id:'fat_vends',   titulo:'🏆 Maior Faturamento — Vendedor(es)'},
   {id:'tm_lojas',    titulo:'🎫 Maior Ticket Médio — Lojas'},
-  {id:'tm_vends',    titulo:'🎫 Maior Ticket Médio — Vendedoras'},
+  {id:'tm_vends',    titulo:'🎫 Maior Ticket Médio — Vendedor(es)'},
   {id:'cresc_lojas', titulo:'📈 Maior Crescimento — Lojas'},
-  {id:'cresc_vends', titulo:'📈 Maior Crescimento — Vendedoras'},
+  {id:'cresc_vends', titulo:'📈 Maior Crescimento — Vendedor(es)'},
   {id:'meta_lojas',  titulo:'🎯 Mais Próximo da Meta — Lojas'},
-  {id:'meta_vends',  titulo:'🎯 Mais Próximo da Meta — Vendedoras'}
+  {id:'meta_vends',  titulo:'🎯 Mais Próximo da Meta — Vendedor(es)'}
 ];
 
 // Abrir/fechar o painel de seleção
@@ -24338,7 +24514,7 @@ function exportarModoDivulgacaoCamp(){
   const body = `
     <h2>Ranking de Lojas</h2>
     ${_htmlPodio(rankLojas)}
-    <h2>Ranking de Vendedoras</h2>
+    <h2>Ranking de Vendedor(es)</h2>
     ${_htmlPodio(rankVends)}
   `;
   _abrirJanelaDivulgacao('Resultado da Campanha', campNome, body);
@@ -24461,7 +24637,7 @@ function _popularVendsFormContato(lid){
   const vends = vendsAtivas(lid);
   selVend.innerHTML = vends.length
     ? vends.map(v => `<option value="${v.id}">${v.nome}</option>`).join('')
-    : '<option value="">— Sem vendedoras ativas —</option>';
+    : '<option value="">— Sem vendedor(es) ativos(as) —</option>';
 }
 
 function fecharFormContato(){
@@ -24484,7 +24660,7 @@ function salvarContato(){
   const obs     = document.getElementById('ct-form-obs').value.trim();
 
   if(!cliente){ showToast('Informe o nome do cliente.','err'); return; }
-  if(!vendId){ showToast('Selecione a vendedora que fez o contato.','err'); return; }
+  if(!vendId){ showToast('Selecione o(a) vendedor(a) que fez o contato.','err'); return; }
   if(!data){ showToast('Informe a data.','err'); return; }
 
   const now = Date.now();
@@ -24596,7 +24772,7 @@ function renderContatos(){
     const vendSelAtual = selVend.value;
     const vendsFiltradas = vendsVis.filter(v => v.ativa !== false)
         .sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
-    selVend.innerHTML = '<option value="">👥 Todas as vendedoras</option>' +
+    selVend.innerHTML = '<option value="">👥 Todos(as) vendedor(es)</option>' +
       vendsFiltradas.map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
     // Restaurar seleção se ainda existir na nova lista
     if(vendSelAtual && vendsFiltradas.some(v => v.id === vendSelAtual)){
@@ -24719,7 +24895,7 @@ function renderContatos(){
         <div style="overflow-x:auto">
           <table class="dtable" style="min-width:520px">
             <thead><tr>
-              <th>Vendedora</th>
+              <th>Vendedor(a)</th>
               <th>Loja</th>
               <th style="text-align:center">Total</th>
               <th style="text-align:center" title="Aniversariante">🎂</th>
@@ -24758,7 +24934,7 @@ function renderContatos(){
       // Detectar o motivo: sem dados no D vs filtros muito restritos
       const totalContatosD = (D.contatos||[]).length;
       const msgExtra = totalContatosD === 0
-        ? '<br><br><strong style="color:var(--ouro)">⚠️ D.contatos está VAZIO neste dispositivo.</strong><br><span style="font-size:11px">Se as vendedoras já registraram contatos, clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard para forçar a sincronização.</span>'
+        ? '<br><br><strong style="color:var(--ouro)">⚠️ D.contatos está VAZIO neste dispositivo.</strong><br><span style="font-size:11px">Se os(as) vendedor(es) já registraram contatos, clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard para forçar a sincronização.</span>'
         : '<br><span style="font-size:11px">Existem '+totalContatosD+' contato(s) em outros filtros. Tente <strong>Limpar filtros</strong>.</span>';
       porVendEl.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">Nenhum contato no período/filtros selecionados.' + msgExtra + '</div>';
     }
@@ -24778,7 +24954,7 @@ function renderContatos(){
       if(msgEl){
         const totalContatosD = (D.contatos||[]).length;
         msgEl.innerHTML = totalContatosD === 0
-          ? '<strong style="color:var(--ouro)">⚠️ Este dispositivo não tem contatos em D.</strong><br><br><span>Se as vendedoras já registraram, os dados podem não ter sincronizado.<br>Clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard.</span>'
+          ? '<strong style="color:var(--ouro)">⚠️ Este dispositivo não tem contatos em D.</strong><br><br><span>Se os(as) vendedor(es) já registraram, os dados podem não ter sincronizado.<br>Clique em <strong>🔍 Diagnóstico + Sync</strong> no cabeçalho do Dashboard.</span>'
           : 'Nenhum contato no filtro selecionado.<br><span style="font-size:11px">Existem '+totalContatosD+' contato(s) em outros filtros. Tente Limpar filtros.</span>';
       }
     }
@@ -24866,7 +25042,7 @@ function exportarPDFContatos(){
   }
   if(fVend){
     const v = D.vendedoras.find(x=>x.id===fVend);
-    partesFiltro.push('Vendedora: ' + (v?.nome || fVend));
+    partesFiltro.push('Vendedor(a): ' + (v?.nome || fVend));
   }
   if(fTipo){
     partesFiltro.push('Tipo: ' + (CT_TIPOS[fTipo]?.label || fTipo));
@@ -25032,10 +25208,10 @@ function exportarPDFContatos(){
     <div class="kpi"><div class="kpi-l">📵 Sem resposta</div><div class="kpi-v" style="color:#dc3545">${naoRetCount + invalidoCount}</div></div>
   </div>
 
-  <h2>Contatos por Vendedora</h2>
+  <h2>Contatos por Vendedor(a)</h2>
   <table>
     <thead><tr>
-      <th>Vendedora</th>
+      <th>Vendedor(a)</th>
       <th>Loja</th>
       <th style="text-align:center">Total</th>
       <th style="text-align:center">🎂 Aniv.</th>
@@ -25060,7 +25236,7 @@ function exportarPDFContatos(){
       <th>Data</th>
       <th>Cliente</th>
       <th>Tipo</th>
-      <th>Vendedora</th>
+      <th>Vendedor(a)</th>
       <th>Loja</th>
       <th>Retorno</th>
       <th>Observação</th>
@@ -25425,9 +25601,9 @@ window.diagnosticoSync = async function(){
   const nVendVend = Object.keys(D.vendasVend||{}).length;
   const nContatos = (D.contatos||[]).length;
   const nFluxo = (D.fluxo||[]).length;
-  console.log('  Vendedoras cadastradas:', nVend);
+  console.log('  Vendedor(es) cadastradas:', nVend);
   console.log('  Lojas com vendas:', nVendaLojas, '→', Object.keys(D.vendas||{}));
-  console.log('  Vendedoras com vendasVend:', nVendVend);
+  console.log('  Vendedor(es) com vendasVend:', nVendVend);
   console.log('  Contatos:', nContatos);
   console.log('  Fluxo:', nFluxo);
 
@@ -25456,9 +25632,9 @@ window.diagnosticoSync = async function(){
       return;
     }
     const remoto = JSON.parse(remotoJSON);
-    console.log('  Vendedoras remotas:', (remoto.vendedoras||[]).length);
+    console.log('  Vendedor(es) remotas:', (remoto.vendedoras||[]).length);
     console.log('  Lojas com vendas remotas:', Object.keys(remoto.vendas||{}).length, '→', Object.keys(remoto.vendas||{}));
-    console.log('  Vendedoras com vendasVend remoto:', Object.keys(remoto.vendasVend||{}).length);
+    console.log('  Vendedor(es) com vendasVend remoto:', Object.keys(remoto.vendasVend||{}).length);
     console.log('  Contatos remotos:', (remoto.contatos||[]).length);
 
     // 4) DISCREPÂNCIAS
@@ -25665,9 +25841,9 @@ window.abrirModalDiagnostico = async function(){
   push('');
 
   push('📱 DADOS LOCAIS (neste dispositivo)');
-  push('  Vendedoras cadastradas: ' + (D.vendedoras||[]).length);
+  push('  Vendedor(es) cadastradas: ' + (D.vendedoras||[]).length);
   push('  Lojas com vendas: ' + Object.keys(D.vendas||{}).length);
-  push('  Vendedoras com vendasVend: ' + Object.keys(D.vendasVend||{}).length);
+  push('  Vendedor(es) com vendasVend: ' + Object.keys(D.vendasVend||{}).length);
   push('  Contatos: ' + (D.contatos||[]).length);
   push('  Fluxo: ' + (D.fluxo||[]).length);
 
@@ -25716,10 +25892,10 @@ window.abrirModalDiagnostico = async function(){
       return;
     }
     const remoto = JSON.parse(remotoJSON);
-    push('  Vendedoras remotas: ' + (remoto.vendedoras||[]).length);
+    push('  Vendedor(es) remotas: ' + (remoto.vendedoras||[]).length);
     push('  Lojas com vendas remotas: ' + Object.keys(remoto.vendas||{}).length +
          (Object.keys(remoto.vendas||{}).length ? ' → ' + Object.keys(remoto.vendas||{}).join(', ') : ''));
-    push('  Vendedoras com vendasVend remoto: ' + Object.keys(remoto.vendasVend||{}).length);
+    push('  Vendedor(es) com vendasVend remoto: ' + Object.keys(remoto.vendasVend||{}).length);
     push('  Contatos remotos: ' + (remoto.contatos||[]).length);
     push('  Fluxo remoto: ' + (remoto.fluxo||[]).length);
 
@@ -25920,7 +26096,7 @@ function _renderContatosPorLoja(contatos){
         <thead><tr>
           <th>Loja</th>
           <th style="text-align:center">Total</th>
-          <th style="text-align:center" title="Vendedoras ativas nos contatos">👥</th>
+          <th style="text-align:center" title="Vendedor(es) ativas nos contatos">👥</th>
           <th style="text-align:center" title="Aniversariante">🎂</th>
           <th style="text-align:center" title="Inativo">💤</th>
           <th style="text-align:center" title="Pós-venda">📦</th>
@@ -26033,7 +26209,7 @@ function _renderContatosRanking(contatos){
       <table class="dtable" style="min-width:500px">
         <thead><tr>
           <th style="text-align:center;width:40px">#</th>
-          <th>Vendedora</th>
+          <th>Vendedor(a)</th>
           <th>Loja</th>
           <th style="text-align:center">Total</th>
           <th style="text-align:center">🛒</th>
@@ -26536,7 +26712,7 @@ window.excelAbrirUpload = function(){
   window.excelPopularLojaImport();
   const sel = document.getElementById('excel-loja-import');
   if(sel && !sel.value){
-    if(!confirm('Nenhuma loja selecionada.\n\nO sistema vai tentar deduzir a loja de cada linha pela coluna Loja ou pela vendedora.\n\n'
+    if(!confirm('Nenhuma loja selecionada.\n\nO sistema vai tentar deduzir a loja de cada linha pela coluna Loja ou pelo(a) vendedor(a).\n\n'
       + 'Se o arquivo é de UMA loja específica, cancele e selecione-a no seletor ao lado — é mais confiável.\n\nContinuar deduzindo?')) return;
   }
   document.getElementById('excel-file-input').click();
@@ -27007,7 +27183,7 @@ function _excelPopularVendedoras(){
   });
 
   const lista = [...conjunto.entries()].sort((a,b) => a[1].localeCompare(b[1]));
-  sel.innerHTML = '<option value="">👩 Todas as vendedoras</option>' +
+  sel.innerHTML = '<option value="">👥 Todos(as) vendedor(es)</option>' +
     lista.map(([norm, nome]) => `<option value="${norm}">${nome}</option>`).join('');
   if(atual && lista.some(([n]) => n === atual)) sel.value = atual;
   else sel.value = '';
@@ -27032,7 +27208,7 @@ function _excelPopularCarteiraVend(){
   });
   const lista = [...conjunto.entries()].sort((a,b) => a[1].localeCompare(b[1]));
 
-  sel.innerHTML = '<option value="">Selecione uma vendedora…</option>' +
+  sel.innerHTML = '<option value="">Selecione um(a) vendedor(a)…</option>' +
     lista.map(([norm, nome]) => `<option value="${norm}">${nome}</option>`).join('');
   if(atual && lista.some(([n]) => n === atual)) sel.value = atual;
 }
@@ -27119,7 +27295,7 @@ function _excelRenderRankingVendedoras(dados){
   }).sort((a,b) => b.fat - a.fat);
 
   if(!linhas.length){
-    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados de vendedoras no filtro atual.</div>';
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem dados de vendedor(es) no filtro atual.</div>';
     return;
   }
 
@@ -27151,7 +27327,7 @@ function _excelRenderRankingVendedoras(dados){
       <table class="dtable" style="min-width:640px;font-size:11px">
         <thead><tr>
           <th style="width:36px;text-align:center">#</th>
-          <th>Vendedora</th>
+          <th>Vendedor(a)</th>
           <th>Loja</th>
           <th style="text-align:center">Cupons</th>
           <th style="text-align:right">Faturamento</th>
@@ -27344,7 +27520,7 @@ function _excelRenderCarteiraVendedora(){
   const diasCorte = parseInt(document.getElementById('excel-carteira-dias')?.value || '60', 10);
 
   if(!vendNorm){
-    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">👆 Selecione uma vendedora acima para ver a carteira dela.</div>';
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">👆 Selecione um(a) vendedor(a) acima para ver a carteira dele(a).</div>';
     return;
   }
 
@@ -27360,7 +27536,7 @@ function _excelRenderCarteiraVendedora(){
   });
 
   if(!dados.length){
-    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem histórico de vendas para esta vendedora.</div>';
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Sem histórico de vendas para este(a) vendedor(a).</div>';
     return;
   }
 
@@ -27690,7 +27866,7 @@ function _excelRenderOrfas(){
     <div style="overflow-x:auto">
       <table class="dtable" style="min-width:600px;font-size:11px">
         <thead><tr>
-          <th>Vendedora (não cadastrada)</th>
+          <th>Vendedor(a) (não cadastrada)</th>
           <th style="text-align:center">Linhas</th>
           <th style="text-align:right">Faturamento</th>
           <th>Período</th>
@@ -27722,7 +27898,7 @@ function _excelRenderOrfas(){
       </table>
     </div>
     <div style="margin-top:10px;padding:8px 12px;background:rgba(78,201,255,.06);border-left:3px solid #4ec9ff;font-size:11px;color:var(--muted)">
-      💡 <strong>Dica:</strong> cadastre a vendedora em Metas → Vendedoras com a loja dela ANTES de subir a planilha. Assim o sistema deduz a loja automaticamente. Se cadastrar depois, atualize a página para rededuzir.
+      💡 <strong>Dica:</strong> cadastre o(a) vendedor(a) em Metas → Vendedor(es) com a loja dele(a) ANTES de subir a planilha. Assim o sistema deduz a loja automaticamente. Se cadastrar depois, atualize a página para rededuzir.
     </div>
   `;
 }
@@ -29147,7 +29323,7 @@ window.exportarExcelFluxo = function(){
     L.push([]);
 
     L.push(['REGISTROS DETALHADOS']);
-    const cab = ['Data','Cliente','Origem','Canal','Vendedora','Loja','Valor R$',
+    const cab = ['Data','Cliente','Origem','Canal','Vendedor(a)','Loja','Valor R$',
                  'Modalidade','% aplicado','Benefício R$','Diferença paga R$','Produtos escolhidos','Ticket','Observação'];
     if(p.id === 'aniversario') cab.splice(2, 0, 'Aniversário');
     L.push(cab);
@@ -29220,7 +29396,7 @@ window.exportarExcelFluxo = function(){
 
   // ── Aba: Registros (tudo, sem corte) ───────────────────────────────
   const todos = [['TODOS OS REGISTROS DO PERÍODO'],[],
-    ['Data','Cliente','Perfil','Aniversário','Origem','Canal','Vendedora','Loja','Valor R$',
+    ['Data','Cliente','Perfil','Aniversário','Origem','Canal','Vendedor(a)','Loja','Valor R$',
      'Modalidade','% aplicado','Benefício R$','Diferença paga R$','Produtos escolhidos','Ticket','Observação']];
   const nomePerfil = id => (typeof _PERFIS_MODALIDADE !== 'undefined'
     ? (_PERFIS_MODALIDADE.find(x=>x.id===(id||'novo'))?.nome || id || '') : (id||''));
@@ -29343,17 +29519,41 @@ function _crmPopularFiltros(){
     selL.innerHTML = '<option value="">🏪 Todas as lojas</option>'
       + lojas.map(l => '<option value="'+l+'">'+((LOJAS.find(x=>x.id===l)?.nome)||l)+'</option>').join('');
   }
-  // Vendedora — a partir do cubo
+  // [FIX R80] Vendedoras: só as que atuam(ram) NA LOJA selecionada.
+  // Antes listava a rede inteira — o usuário via nomes de outras lojas e
+  // podia filtrar por alguém que nunca vendeu ali, obtendo tela vazia.
   const selV = document.getElementById('excel-filtro-vend');
   if(selV){
-    const at = selV.value;
+    const lojaSel = document.getElementById('excel-filtro-loja')?.value || '';
+    const lojasConsideradas = lojaSel
+      ? [lojaSel]
+      : window.crmLojasVisiveis();
+
     const nomes = new Set();
-    Object.values(D.crm||{}).forEach(o => Object.values(o).forEach(c => (c.vends||[]).forEach(n => n && nomes.add(n))));
-    (D.excelDados||[]).forEach(r => { if(r.vendedora) nomes.add(r.vendedora); });
-    if(nomes.size && selV.options.length <= 1){
-      selV.innerHTML = '<option value="">👩 Todas as vendedoras</option>'
+    lojasConsideradas.forEach(lid => {
+      Object.values((D.crm||{})[lid] || {}).forEach(c => {
+        (c.vends||[]).forEach(n => { if(n) nomes.add(n); });
+      });
+    });
+    // base antiga em linhas cruas
+    (D.excelDados||[]).forEach(r => {
+      if(!r.vendedora) return;
+      if(lojaSel && r.loja !== lojaSel) return;
+      if(!isAdmin() && r.loja !== lojaId()) return;
+      nomes.add(r.vendedora);
+    });
+
+    // Repopular quando a loja muda — antes um guard de "options.length<=1"
+    // congelava a lista na primeira montagem.
+    const assinatura = lojaSel + '::' + [...nomes].sort().join('|');
+    if(selV.dataset.assinatura !== assinatura){
+      const at = selV.value;
+      selV.innerHTML = '<option value="">👥 Todos(as) vendedor(es)</option>'
         + [...nomes].sort().map(n => '<option value="'+n+'">'+n+'</option>').join('');
-      if(at) selV.value = at;
+      selV.dataset.assinatura = assinatura;
+      // manter a seleção só se ela ainda existe nesta loja
+      if(at && nomes.has(at)) selV.value = at;
+      else if(at) selV.value = '';
     }
   }
 }
@@ -29372,7 +29572,7 @@ function _crmRenderMelhores(v){
     + '<td style="font-size:10.5px;color:var(--muted)">'+(c.telefone||'—')+'</td>'
     + '<td style="font-size:10.5px;color:var(--muted)">'+(c.ultima||'').split('-').reverse().join('/')+'</td></tr>');
   el.innerHTML = _crmTabela(
-    [{t:'#'},{t:'Cliente'},{t:'Vendedora'},{t:'Notas',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Telefone'},{t:'Última'}],
+    [{t:'#'},{t:'Cliente'},{t:'Vendedor(a)'},{t:'Notas',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Telefone'},{t:'Última'}],
     linhas, 'Nenhum cliente no filtro atual.')
     + (v.clientes.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+v.clientes.length.toLocaleString('pt-BR')+'</div>':'');
 }
@@ -29398,7 +29598,7 @@ function _crmRenderInativos(v){
     '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
       + inativos.length.toLocaleString('pt-BR') + ' cliente(s) sem comprar há mais de ' + dias + ' dias · '
       + fmt(inativos.reduce((s,c)=>s+c.total,0)) + ' em histórico</div>'
-    + _crmTabela([{t:'Cliente'},{t:'Vendedora'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Notas',dir:'center'},{t:'Telefone'}],
+    + _crmTabela([{t:'Cliente'},{t:'Vendedor(a)'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Notas',dir:'center'},{t:'Telefone'}],
         linhas, 'Nenhum cliente inativo nesse prazo.')
     + (inativos.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+inativos.length.toLocaleString('pt-BR')+'</div>':'');
 }
@@ -29427,19 +29627,59 @@ function _crmRenderVendedoras(v){
     + '<td style="text-align:right;font-weight:700;color:var(--verde)">'+fmt(x.fat)+'</td>'
     + '<td style="text-align:right">'+fmt(x.cupons>0?x.fat/x.cupons:0)+'</td>'
     + '<td style="text-align:center">'+(x.cupons>0?(x.itens/x.cupons).toFixed(2).replace('.',','):'—')+'</td></tr>');
-  el.innerHTML = _crmTabela([{t:'#'},{t:'Vendedora'},{t:'Cupons',dir:'center'},{t:'Faturamento',dir:'right'},{t:'TM',dir:'right'},{t:'P.A.',dir:'center'}],
-    linhas, 'Nenhuma vendedora no filtro atual.');
+  el.innerHTML = _crmTabela([{t:'#'},{t:'Vendedor(a)'},{t:'Cupons',dir:'center'},{t:'Faturamento',dir:'right'},{t:'TM',dir:'right'},{t:'P.A.',dir:'center'}],
+    linhas, 'Nenhum(a) vendedor(a) no filtro atual.');
 }
 
 function _crmRenderCross(v){
   const el = document.getElementById('excel-cross-produtos');
   if(!el) return;
-  const linhas = v.cross.slice(0,30).map((c,i) =>
+
+  // [FIX R80] O seletor só tinha "top combos" e o render ignorava a escolha.
+  // Agora lista os produtos que aparecem em algum par, para dar para
+  // explorar "quem comprou X levou também...".
+  const sel = document.getElementById('excel-cross-base');
+  if(sel){
+    const nomes = new Set();
+    (v.cross||[]).forEach(c => { nomes.add(c.a); nomes.add(c.b); });
+    const ordenados = [...nomes].sort();
+    const assinatura = ordenados.join('|');
+    if(sel.dataset.assinatura !== assinatura){
+      const at = sel.value;
+      sel.innerHTML = '<option value="">🎯 Top combos automaticamente (todos os produtos)</option>'
+        + ordenados.map(n => '<option value="'+String(n).replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+      sel.dataset.assinatura = assinatura;
+      if(at && nomes.has(at)) sel.value = at;
+    }
+  }
+  const base = sel?.value || '';
+
+  let linhas, titulo;
+  if(base){
+    // Só os pares que envolvem o produto escolhido, mostrando o OUTRO item
+    const pares = (v.cross||[])
+      .filter(c => c.a === base || c.b === base)
+      .map(c => ({outro: c.a === base ? c.b : c.a, n: c.n}))
+      .sort((x,y) => y.n - x.n);
+    titulo = 'Quem comprou <strong style="color:var(--ouro)">' + base + '</strong> também levou:';
+    linhas = pares.slice(0,30).map((c,i) =>
+      '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
+      + '<td>'+c.outro+'</td>'
+      + '<td style="text-align:center;font-weight:700;color:var(--ouro)">'+c.n+'</td></tr>');
+    el.innerHTML =
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'+titulo+'</div>'
+      + _crmTabela([{t:'#'},{t:'Também comprou'},{t:'Clientes',dir:'center'}],
+          linhas, 'Nenhuma combinação registrada com este produto.');
+    return;
+  }
+
+  linhas = (v.cross||[]).slice(0,30).map((c,i) =>
     '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
     + '<td>'+c.a+'</td><td>'+c.b+'</td>'
     + '<td style="text-align:center;font-weight:700;color:var(--ouro)">'+c.n+'</td></tr>');
   el.innerHTML =
-    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Pares de produtos comprados pelo mesmo cliente.</div>'
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Pares de produtos comprados pelo mesmo cliente. '
+    + 'Escolha um produto acima para ver com o que ele costuma sair.</div>'
     + _crmTabela([{t:'#'},{t:'Produto A'},{t:'Produto B'},{t:'Clientes',dir:'center'}],
         linhas, 'Sem combinações suficientes para cruzar.');
 }
@@ -29539,9 +29779,9 @@ window.renderInativos180 = function(){
     const marcado = selV.value;
     const assinatura = nomes.join('|');
     if(selV.dataset.assinatura !== assinatura){
-      selV.innerHTML = '<option value="">👩 Todas as vendedoras</option>'
+      selV.innerHTML = '<option value="">👥 Todos(as) vendedor(es)</option>'
         + nomes.map(n => '<option value="'+n+'">'+n+'</option>').join('')
-        + '<option value="__sem__">— sem vendedora —</option>';
+        + '<option value="__sem__">— sem vendedor(a) —</option>';
       selV.dataset.assinatura = assinatura;
       if(marcado) selV.value = marcado;
     }
@@ -29618,7 +29858,7 @@ window.renderInativos180 = function(){
         + _ctTh('Já gastou','total','right')
         + _ctTh('Notas','notas','center')
         + '<th>Telefone</th>'
-        + _ctTh('Vendedora','vendedora')
+        + _ctTh('Vendedor(a)','vendedora')
         + _ctTh('Último contato','contato')
         + '<th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
       + inativos.slice(0,50).map(c => {
@@ -29677,8 +29917,8 @@ window.exportarInativosExcel = function(){
   const fVend = document.getElementById('ct-inat-vend')?.value || '';
   const ord   = window._ctInatOrd || {campo:'total', dir:-1};
   const rotuloOrd = ({nome:'Cliente', dias:'Sem comprar', total:'Já gastou',
-                      notas:'Notas', vendedora:'Vendedora', contato:'Último contato'})[ord.campo] || ord.campo;
-  const alvoVend = fVend === '__sem__' ? 'Sem vendedora' : (fVend || 'Todas as vendedoras');
+                      notas:'Notas', vendedora:'Vendedor(a)', contato:'Último contato'})[ord.campo] || ord.campo;
+  const alvoVend = fVend === '__sem__' ? 'Sem vendedor(a)' : (fVend || 'Todos(as) vendedor(es)');
   const dBR = d => d ? String(d).split('-').reverse().join('/') : '';
 
   const wb = XLSX.utils.book_new();
@@ -29686,14 +29926,14 @@ window.exportarInativosExcel = function(){
   L.push(['CLIENTES INATIVOS']);
   L.push([]);
   L.push(['Critério', 'Sem comprar há mais de ' + dias + ' dias']);
-  L.push(['Vendedora', alvoVend]);
+  L.push(['Vendedor(a)', alvoVend]);
   L.push(['Ordenação', rotuloOrd + ' — ' + (ord.dir === 1 ? 'crescente' : 'decrescente')]);
   L.push(['Gerado em', new Date().toLocaleString('pt-BR')]);
   L.push(['Total de clientes', lista.length]);
   L.push(['Valor já comprado', Number(lista.reduce((s,c) => s + (c.total||0), 0).toFixed(2))]);
   L.push(['Nunca contatados', lista.filter(c => !c.ultimoContato).length]);
   L.push([]);
-  L.push(['Cliente','CPF/CNPJ','Telefone','Vendedora','Dias sem comprar',
+  L.push(['Cliente','CPF/CNPJ','Telefone','Vendedor(a)','Dias sem comprar',
           'Última compra','Já gastou R$','Notas','Ticket médio R$','Último contato']);
 
   lista.forEach(c => {
@@ -29915,7 +30155,7 @@ function _renderAlertaMesContatos(){
   if(!linhas.length){
     corpo.innerHTML = '<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px">'
       + 'Nenhum contato de aniversariante ou inativo registrado em '+_MESES_PT[mes-1]+'/'+ano+'.<br>'
-      + '<span style="font-size:11px">Cadastre as metas em Metas → Vendedoras e registre os contatos aqui.</span></div>';
+      + '<span style="font-size:11px">Cadastre as metas em Metas → Vendedor(es) e registre os contatos aqui.</span></div>';
     return;
   }
 
@@ -29931,7 +30171,7 @@ function _renderAlertaMesContatos(){
     '<div style="overflow-x:auto">'
     + '<table class="dtable" style="min-width:560px;font-size:12px">'
       + '<thead><tr>'
-        + '<th style="text-align:left">Vendedora</th>'
+        + '<th style="text-align:left">Vendedor(a)</th>'
         + '<th style="text-align:center">🎂 Aniversariantes</th>'
         + '<th style="text-align:center">💤 Inativos</th>'
         + '<th style="text-align:center">🛒 Viraram compra</th>'
@@ -29960,7 +30200,7 @@ function _renderAlertaMesContatos(){
       + '</tbody></table></div>'
     + (semVendedora > 0
         ? '<div style="margin-top:8px;padding:7px 11px;background:rgba(255,107,122,.08);border-left:3px solid #ff6b7a;font-size:11px;color:var(--muted)">'
-          + '⚠️ '+semVendedora+' contato(s) do mês estão sem vendedora válida e não entram na apuração.</div>'
+          + '⚠️ '+semVendedora+' contato(s) do mês estão sem vendedor(a) válido(a) e não entram na apuração.</div>'
         : '');
 }
 
