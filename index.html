@@ -5833,12 +5833,28 @@ window.mergeMetasLoja = function(metasRemotas){
 window.mergeConfigModalidades = function(remotoCfg){
   if(!remotoCfg) return false;
   const local = D.configModalidades;
-  const vazioLocal = !local || !Object.keys(local).length;
-  const lTs = local?._savedAt   || 0;
-  const rTs = remotoCfg._savedAt || 0;
-  // Sem carimbo do lado remoto = versão antiga; nunca derruba edição recente.
-  if(vazioLocal || rTs > lTs){ D.configModalidades = remotoCfg; return true; }
-  return false;
+  if(!local || !Object.keys(local).length){ D.configModalidades = remotoCfg; return true; }
+
+  // [R88b] Comparar _savedAt entre máquinas não funciona: o carimbo vem do
+  // relógio de cada uma. Uma máquina adiantada fazia a edição ANTIGA dela
+  // vencer para sempre, e as telas divergiam sem explicação.
+  //
+  // Esta config é do admin e tem uma fonte só — o documento 'principal'.
+  // Então o servidor manda, exceto na máquina que acabou de editar e ainda
+  // não confirmou o envio: essa preserva o que digitou.
+  if(window._cfgModPendente){
+    const lTs = local._savedAt   || 0;
+    const rTs = remotoCfg._savedAt || 0;
+    if(rTs >= lTs){                      // o servidor já tem a nossa edição
+      window._cfgModPendente = false;
+      D.configModalidades = remotoCfg;
+      return true;
+    }
+    return false;                        // ainda não subiu: não perder o que foi digitado
+  }
+
+  D.configModalidades = remotoCfg;
+  return true;
 };
 
 // Função auxiliar: forçar gravação só da meta da loja no principal
@@ -6771,6 +6787,7 @@ window.crmSincronizar = async function(){
  * Admin lê de todas; loja lê só a própria.
  */
 window.crmCarregar = async function(){
+  window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   let db, mod;
   try{ ({mod, db} = await _bkFirestore()); }
   catch(e){ console.warn('[crm] carregar: Firestore indisponível'); return 0; }
@@ -6820,6 +6837,7 @@ window.crmCarregar = async function(){
 
 /** Apaga um conjunto loja/ano — local e remoto. */
 window.crmApagar = async function(lid, ano){
+  window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
@@ -6957,6 +6975,20 @@ window.crmDedup = function(linhas){
           notas: porNF.size, semNF, original: (linhas||[]).length};
 };
 
+// [R90] "CONSUMIDOR FINAL" e afins são vendas REAIS sem cliente identificado.
+// Elas contam no faturamento, no ticket médio, nos produtos e no ranking de
+// vendedor(a) — mas não podem entrar nas LISTAS de clientes: viravam um
+// "cliente" gigante no topo dos melhores, e no cruzamento de produtos
+// juntavam compras de pessoas diferentes, inventando combos que não existem.
+window._crmAnonimo = function(nome, doc){
+  if(String(doc||'').replace(/\D/g,'')) return false;   // tem CPF/CNPJ: identificado
+  const n = String(nome||'').trim().toLowerCase()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  if(!n) return true;
+  return /^(consumidor|consumidor final|cliente|cliente final|consumidor nao identificado|nao identificado|nao informado|sem cliente|sem identificacao|diversos|avulso|balcao|a vista)$/.test(n)
+      || /^\(sem cliente\)$/.test(n);
+};
+
 window.crmAgregar = function(linhas, opts){
   opts = opts || {};
   // [R65] a menos que o chamador já tenha deduplicado
@@ -6965,6 +6997,7 @@ window.crmAgregar = function(linhas, opts){
     linhas = dd.linhas;
     opts._dedup = dd;
   }
+  const anonNotas = new Set(); let anonFat = 0;   // [R90] vendas sem cliente identificado
   const TOP_PROD_MES = opts.topProdMes || 120;
   const TOP_CROSS    = opts.topCross   || 150;
 
@@ -7010,11 +7043,13 @@ window.crmAgregar = function(linhas, opts){
     if(!dtMax||r.data>dtMax) dtMax=r.data;
 
     const docCli = String(r.documento||'').replace(/\D/g,'');
+    const anon = window._crmAnonimo(r.cliente, docCli);
     const cn = docCli || norm(r.cliente) || '(sem cliente)';
 
     let a=mesVend.get(mi+'|'+vi);
     if(!a){ a={f:0,i:0,cupons:new Set(),cli:new Set()}; mesVend.set(mi+'|'+vi,a); }
-    a.f+=val; a.i+=qt; a.cupons.add(cup); a.cli.add(cn);
+    a.f+=val; a.i+=qt; a.cupons.add(cup);
+    if(!anon) a.cli.add(cn);   // [R90] anônimo não conta como cliente único
 
     let b=mesProd.get(mi+'|'+pi);
     if(!b){ b={q:0,f:0}; mesProd.set(mi+'|'+pi,b); }
@@ -7026,26 +7061,35 @@ window.crmAgregar = function(linhas, opts){
 
     let c=prodTot.get(pi);
     if(!c){ c={q:0,f:0,cli:new Set()}; prodTot.set(pi,c); }
-    c.q+=qt; c.f+=val; c.cli.add(cn);
+    c.q+=qt; c.f+=val;
+    if(!anon) c.cli.add(cn);
 
-    let d=cliente.get(cn);
-    if(!d){
-      d={n:String(r.cliente||'(sem cliente)').trim(), doc:docCli, tel:String(r.telefone||'').trim(),
-         v:vi, pri:r.data, ult:r.data, cupons:new Set(), t:0, i:0};
-      cliente.set(cn,d);
+    // [R90] Venda sem cliente identificado: o dinheiro conta em tudo acima,
+    // mas ela não vira "cliente". Sem isto, CONSUMIDOR FINAL aparecia como o
+    // melhor cliente da base e o cruzamento de produtos misturava compras de
+    // pessoas diferentes.
+    if(!anon){
+      let d=cliente.get(cn);
+      if(!d){
+        d={n:String(r.cliente||'(sem cliente)').trim(), doc:docCli, tel:String(r.telefone||'').trim(),
+           v:vi, pri:r.data, ult:r.data, cupons:new Set(), t:0, i:0};
+        cliente.set(cn,d);
+      }
+      if(!d.tel && r.telefone) d.tel = String(r.telefone).trim();
+      if(!d.doc && docCli) d.doc = docCli;
+      if(r.data<d.pri) d.pri=r.data;   // guardado como indice de mes na saida
+      if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedor(a) da compra mais recente
+      d.cupons.add(cup);
+      d.i+=qt;
+      // Uma nota pertence a UM cliente — evita a mesma NF entrar duas vezes
+      // quando a planilha traz o nome grafado de formas diferentes.
+      if(!nfCliente.has(cup)) nfCliente.set(cup, cn);
+      nfValor.set(cup, (nfValor.get(cup)||0) + val);
+
+      let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
+    } else {
+      anonNotas.add(cup); anonFat += val;
     }
-    if(!d.tel && r.telefone) d.tel = String(r.telefone).trim();
-    if(!d.doc && docCli) d.doc = docCli;
-    if(r.data<d.pri) d.pri=r.data;   // guardado como indice de mes na saida
-    if(r.data>d.ult){ d.ult=r.data; d.v=vi; }   // vendedor(a) da compra mais recente
-    d.cupons.add(cup);
-    d.i+=qt;
-    // Uma nota pertence a UM cliente — evita a mesma NF entrar duas vezes
-    // quando a planilha traz o nome grafado de formas diferentes.
-    if(!nfCliente.has(cup)) nfCliente.set(cup, cn);
-    nfValor.set(cup, (nfValor.get(cup)||0) + val);
-
-    let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
   }
 
   // [R67] Total de cada cliente = soma das NOTAS dele, cada uma uma vez.
@@ -7112,6 +7156,7 @@ window.crmAgregar = function(linhas, opts){
                           valorRemovido:r2(opts._dedup.valorRemovido), notas:opts._dedup.notas,
                           semNF:opts._dedup.semNF||0} : null,
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
+    anonimo:{notas:anonNotas.size, fat:r2(anonFat)},   // [R90] o que ficou fora das listas
     meses:tMes, vends:tVend, prods:tProd,
     mesVend:cuboMesVend, mesProd:cuboMesProd, vendProd:cuboVendProd, prodTotal:cuboProdTot,
     clientes:cuboClientes, cross:cuboCross
@@ -7151,6 +7196,7 @@ window.crmFatiarClientes = function(clientes){
 
 /** Guarda o cubo de uma loja/ano em D.crm e devolve um diagnóstico. */
 window.crmGuardar = function(lid, ano, cubo){
+  window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   if(!D.crm) D.crm = {};
   if(!D.crm[lid]) D.crm[lid] = {};
   D.crm[lid][ano] = cubo;
@@ -7426,6 +7472,43 @@ window._anivInativoDoMes = function(lid, mesRef){
  * @param {string} deMes  'AAAA-MM'
  * @param {string} ateMes 'AAAA-MM'
  */
+/**
+ * [R91] CRM por loja e mês, memoizado.
+ * Os relatórios pedem o mesmo par loja/mês dezenas de vezes (9 abas, vários
+ * meses cada). Recombinar o cubo a cada pedido deixava a tela lenta, então o
+ * resultado fica em cache até o CRM mudar.
+ */
+window._crmVersao = window._crmVersao || 0;
+const _crmMesCache = new Map();
+
+window.crmMesesDaLoja = function(lid, ano){
+  const chave = window._crmVersao + '|' + lid + '|' + ano;
+  const emCache = _crmMesCache.get(chave);
+  if(emCache) return emCache;
+
+  const mapa = new Map();
+  try{
+    const cubo = window.crmCombinar([lid], [String(ano)]);
+    (cubo.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
+      const mes = (cubo.meses||[])[mi]; if(!mes) return;
+      const a = mapa.get(mes) || {fat:0, notas:0, itens:0, clientes:0};
+      a.fat+=f; a.notas+=cup; a.itens+=it; a.clientes+=cli;
+      mapa.set(mes, a);
+    });
+  }catch(e){ console.warn('[R91] CRM por loja/mês:', e.message); }
+
+  if(_crmMesCache.size > 200) _crmMesCache.clear();   // não crescer sem fim
+  _crmMesCache.set(chave, mapa);
+  return mapa;
+};
+
+/** Números do CRM para uma loja num mês, ou null se não houver. */
+window.crmDoMes = function(lid, mesRef){
+  if(!lid || !mesRef) return null;
+  const m = window.crmMesesDaLoja(lid, mesRef.slice(0,4)).get(mesRef);
+  return (m && m.fat > 0) ? m : null;
+};
+
 window.historicoConsolidado = function(lid, deMes, ateMes){
   const lojas = lid ? [lid] : LOJAS.map(l => l.id);
 
@@ -8012,6 +8095,7 @@ window.crmAgendarGravacaoIdb = function(){
 
 /** Hidrata D.crm a partir do IndexedDB, sem sobrescrever o que já veio. */
 window.crmHidratarIdb = async function(){
+  window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   try{
     const cubos = await window.crmLerIdb();
     if(!cubos || !Object.keys(cubos).length) return 0;
@@ -22599,19 +22683,36 @@ function _relMesAnoAnt(mesRef){
 // Agrega múltiplas lojas em um único objeto de indicadores
 function _relAgregar(lojas, mesRef){
   let meta=0, real=0, itens=0, atend=0;
+  let usouCRM = false, usouOutra = false;
   lojas.forEach(l=>{
-    meta  += metaDoMes(l.id, mesRef).valor || 0;
-    real  += realizadoDoMes(l.id, mesRef).valor || 0;
-    atend += vendasDoMes(l.id, mesRef) || 0;
-    // Itens totais para P.A. da rede
-    const paObj = paDoMes(l.id, mesRef);
-    const vObj  = vendasDoMes(l.id, mesRef);
-    if(paObj > 0 && vObj > 0) itens += paObj * vObj;
+    meta += metaDoMes(l.id, mesRef).valor || 0;
+
+    // [R91] A planilha do CRM é a fonte mais fiel do faturado. Quando ela
+    // cobre o mês, faturamento, atendimentos e itens saem TODOS dela — se
+    // viessem de fontes diferentes, o ticket médio e o P.A. seriam divisões
+    // entre bases distintas. Sem CRM no mês, valem as fontes de sempre.
+    const crm = typeof window.crmDoMes === 'function' ? window.crmDoMes(l.id, mesRef) : null;
+    if(crm){
+      usouCRM = true;
+      real  += crm.fat;
+      atend += crm.notas;
+      itens += crm.itens;
+    } else {
+      const rl = realizadoDoMes(l.id, mesRef).valor || 0;
+      if(rl > 0) usouOutra = true;
+      real  += rl;
+      atend += vendasDoMes(l.id, mesRef) || 0;
+      const paObj = paDoMes(l.id, mesRef);
+      const vObj  = vendasDoMes(l.id, mesRef);
+      if(paObj > 0 && vObj > 0) itens += paObj * vObj;
+    }
   });
   const tm = atend > 0 ? real/atend : 0;
   const pa = atend > 0 ? itens/atend : 0;
   const pct= meta > 0 ? (real/meta)*100 : 0;
-  return { meta, real, itens, atend, tm, pa, pct };
+  // fonte: 'crm' · 'lancamento' · 'misto' (algumas lojas com CRM, outras não)
+  const fonte = usouCRM && usouOutra ? 'misto' : usouCRM ? 'crm' : usouOutra ? 'lancamento' : null;
+  return { meta, real, itens, atend, tm, pa, pct, fonte };
 }
 
 // ── Troca de aba ─────────────────────────────────────────────────────
@@ -27715,7 +27816,12 @@ function _migrarConfigModalidades(){
     inativo:     {giftback: Math.max(flatGB, 16), desconto: flatDE, cashback: flatCB},
     aniversario: {giftback: flatGB, desconto: Math.min(flatDE, 10), cashback: flatCB}
   };
-  cfg._savedAt = Date.now();
+  // [R88c] NÃO carimbar aqui. Isto é um padrão derivado, não uma edição.
+  // A migração roda na renderização, ANTES de os dados chegarem do servidor:
+  // ao carimbar com Date.now() ela fazia os valores PADRÃO parecerem a versão
+  // mais recente da rede, e a configuração real do admin era recusada ao
+  // chegar. A máquina exibia 15/12/0 para sempre.
+  cfg._migrado = true;
 }
 
 // Retorna o % de uma modalidade para o perfil escolhido
@@ -28242,6 +28348,7 @@ window.salvarConfigModalidades = function(){
     });
   });
   D.configModalidades._savedAt = Date.now();
+  window._cfgModPendente = true;
   save();
   showToast("Percentuais salvos.", "ok");
   // [R43] o form de registro fica na mesma página: recalcular na hora
@@ -28257,6 +28364,7 @@ window.gbFaixaAdicionar = function(){
   if(!Array.isArray(D.configModalidades.faixasGiftBack)) D.configModalidades.faixasGiftBack = [];
   D.configModalidades.faixasGiftBack.push({id:"gb"+Date.now(), min:0, max:0, produtos:[]});
   D.configModalidades._savedAt = Date.now();
+  window._cfgModPendente = true;
   save();
   window._configModalidadesRender();
 };
@@ -28266,6 +28374,7 @@ window.gbFaixaRemover = function(id){
   const cfg = D.configModalidades || {};
   cfg.faixasGiftBack = (cfg.faixasGiftBack||[]).filter(f => f.id !== id);
   cfg._savedAt = Date.now();
+  window._cfgModPendente = true;
   save();
   window._configModalidadesRender();
 };
@@ -28281,6 +28390,7 @@ window.gbFaixaAtualizar = function(id){
   f.max = mx;
   f.produtos = pt ? pt.split(/\n+/).map(s=>s.trim()).filter(Boolean) : [];
   cfg._savedAt = Date.now();
+  window._cfgModPendente = true;
   save();
   // [R43] refletir na sugestão de produtos se o form estiver aberto
   if(typeof window._fxRenderProdutos === "function"
