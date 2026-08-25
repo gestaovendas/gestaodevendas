@@ -1275,6 +1275,11 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
 .sb-brand{padding:20px;border-bottom:1px solid var(--borda)}
 .sb-brand .bn{font-family:"Playfair Display",serif;font-size:20px;font-weight:900;letter-spacing:4px;background:linear-gradient(135deg,var(--ouro),var(--ouro2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .sb-brand .lnome{font-size:11px;color:var(--muted);margin-top:2px}
+#sync-badge{display:none;align-items:center;gap:8px;margin:0;padding:10px 14px;
+  background:var(--card2,var(--cinza));border-bottom:1px solid var(--borda);
+  font-size:10.5px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;
+  position:sticky;top:0;z-index:2}
+#sync-badge:hover{filter:brightness(1.25)}
 .sb-sec{padding:10px 10px 2px}.sb-lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);padding:0 8px;margin-bottom:4px}
 .ni{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:all .2s;font-size:12px;color:var(--muted);font-weight:400;border:none;background:none;width:100%;text-align:left}
 .ni:hover{background:var(--card2);color:var(--texto)}.ni.active{background:rgba(201,168,76,.12);color:var(--ouro);font-weight:600}
@@ -1475,6 +1480,13 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
   <div class="lnome" id="sb-lnome" style="margin-top:6px">...</div>
   <div style="font-size:8px;color:rgba(201,168,76,.35);text-align:center;margin-top:1px">v2.5.0</div>
 </div>
+
+<!-- [R74] Estado da sincronização — na lateral, abaixo da marca.
+     Flutuando no canto superior direito ele cobria os botões de várias
+     telas. Aqui ocupa espaço próprio: nada fica por baixo, e a navegação
+     desce naturalmente. Fica grudado no topo quando a lateral rola. -->
+<div id="sync-badge" onclick="window.syncAgora()" title="Clique para sincronizar agora"></div>
+
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
     <button class="ni active" onclick="nav('dash')" id="nav-dash"><span class="ic">&#9672;</span>Dashboard</button>
@@ -1530,8 +1542,6 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
     <div><h1 class="pt">Dashboard <span id="dash-lnome"></span></h1><div class="ps" id="dash-data"></div></div>
     <div style="display:flex;gap:8px;align-items:center">
       <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 14px;font-size:11px;color:var(--muted)" id="dash-badge"></div>
-      <!-- [R61] Estado da sincronização — visível para TODOS os perfis -->
-      <div id="sync-badge" style="display:none;align-items:center;gap:7px;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:6px 12px;font-size:10.5px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap" onclick="window.syncAgora()" title="Clique para sincronizar agora"></div>
       <div id="cosmos-badge" style="display:none;background:var(--card);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:6px 12px;font-size:10px;color:var(--azul)">☁️ Cosmos</div>
       <button onclick="window.abrirModalDiagnostico()" title="Ver diagnóstico completo, discrepâncias e forçar sincronização"
         style="background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.5);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--ouro);cursor:pointer;font-weight:600">🔍 Diagnóstico + Sync</button>
@@ -6128,6 +6138,77 @@ window.backupInspecionar = function(event){
 
 
 
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R73] GATILHOS DE SINCRONIZAÇÃO
+// O sync só acontecia por relógio (loja 60s, admin 30s) e ainda era
+// adiado por até 60s depois de qualquer gravação local. Resultado: a
+// pessoa abria uma tela e via dado velho sem entender por quê.
+//
+// Agora há gatilhos por AÇÃO — entrar no sistema, trocar de tela, gerar
+// relatório, voltar para a aba. Com uma trava de frequência, para não
+// transformar cada clique numa leitura do Firestore.
+// ══════════════════════════════════════════════════════════════════════
+
+window._syncUltimoPull = 0;
+window._syncPullEmCurso = false;
+
+/**
+ * Busca dados novos, respeitando um intervalo mínimo entre chamadas.
+ * @param {string} motivo aparece no console e no tooltip
+ * @param {object} opts {minimoMs, forcar}
+ */
+window.sincronizarSeNecessario = async function(motivo, opts){
+  opts = opts || {};
+  const minimo = opts.minimoMs !== undefined ? opts.minimoMs : 8000;
+  const agora = Date.now();
+
+  if(window._syncPullEmCurso) return false;
+  if(!opts.forcar && (agora - window._syncUltimoPull) < minimo) return false;
+  if(typeof window._syncPull !== 'function') return false;
+  if(document.hidden && !opts.forcar) return false;
+
+  window._syncPullEmCurso = true;
+  window._syncUltimoPull = agora;
+  try{
+    await window._syncPull();
+    console.log('[Avatim] 🔄 sync por gatilho:', motivo);
+    return true;
+  }catch(e){
+    console.warn('[Avatim] sync por gatilho falhou (' + motivo + '):', e.message);
+    return false;
+  }finally{
+    window._syncPullEmCurso = false;
+  }
+};
+
+/** Registra os gatilhos. Chamado uma vez, depois do login. */
+window.instalarGatilhosSync = function(){
+  if(window._gatilhosInstalados) return;
+  window._gatilhosInstalados = true;
+
+  // Voltar para a aba: quem estava em outra janela quer ver o estado atual
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) window.sincronizarSeNecessario('aba reativada', {minimoMs:10000});
+  });
+
+  // Recuperar a conexão depois de ficar offline
+  window.addEventListener('online', () => {
+    window.sincronizarSeNecessario('conexão restabelecida', {forcar:true});
+  });
+
+  // Antes de fechar, empurrar o que ainda não subiu
+  window.addEventListener('beforeunload', () => {
+    try{
+      if(window._pendingLocalData && window.fsGravar) window.fsGravar(JSON.stringify(D));
+    }catch(e){}
+  });
+
+  console.log('[Avatim] gatilhos de sync instalados');
+};
+
+
 // ══════════════════════════════════════════════════════════════════════
 // [R72] RE-RENDERIZAÇÃO CENTRAL DA PÁGINA ATIVA
 // O auto-refresh só redesenhava uma LISTA FIXA de páginas — 4 para loja,
@@ -6238,19 +6319,38 @@ window.agendarRerender = function(motivo){
 // ══════════════════════════════════════════════════════════════════════
 
 const SYNC_CHAVE = 'avatim_ultimo_sync';
+const SYNC_CHAVE_PULL = 'avatim_ultimo_pull';
 
-window._syncEstado = {estado:'inicial', ts:0, msg:''};
+// [FIX R75] Havia UM carimbo só, e ele era gravado apenas nas ESCRITAS.
+// Trocar de tela faz LEITURA — então o indicador seguia dizendo "há 12
+// minutos" mesmo com a busca acontecendo. Agora os dois sentidos são
+// registrados: ts = último envio, tsPull = último recebimento.
+window._syncEstado = {estado:'inicial', ts:0, tsPull:0, msg:''};
 
 function _syncCarregarUltimo(){
   try{
     const v = Number(localStorage.getItem(SYNC_CHAVE) || 0);
-    if(v > 0){ window._syncEstado = {estado:'ok', ts:v, msg:''}; }
+    const p = Number(localStorage.getItem(SYNC_CHAVE_PULL) || 0);
+    if(v > 0 || p > 0){ window._syncEstado = {estado: v>0?'ok':'inicial', ts:v, tsPull:p, msg:''}; }
   }catch(e){}
 }
 
+/** Marca uma LEITURA bem-sucedida (dados recebidos do Firebase). */
+window._syncMarcarPull = function(){
+  const e = window._syncEstado || {};
+  e.tsPull = Date.now();
+  window._syncEstado = e;
+  try{ localStorage.setItem(SYNC_CHAVE_PULL, String(e.tsPull)); }catch(err){}
+  window._syncRender();
+};
+
 /** Marca o estado atual e redesenha. */
 window._syncMarcar = function(estado, msg){
-  window._syncEstado = {estado, ts: estado==='ok' ? Date.now() : (window._syncEstado.ts||0), msg: msg||''};
+  const anterior = window._syncEstado || {};
+  window._syncEstado = {estado,
+    ts: estado==='ok' ? Date.now() : (anterior.ts||0),
+    tsPull: anterior.tsPull || 0,
+    msg: msg||''};
   if(estado === 'ok'){
     try{ localStorage.setItem(SYNC_CHAVE, String(Date.now())); }catch(e){}
   }
@@ -6271,10 +6371,13 @@ window._syncRender = function(){
   if(!el) return;
   el.style.display = 'flex';
 
-  const {estado, ts, msg} = window._syncEstado;
-  const quando = _syncHaQuanto(ts);
-  // Mais de 1 dia sem sucesso é problema mesmo que o último envio tenha dado certo
-  const diasSem = ts ? (Date.now()-ts)/86400000 : 999;
+  const {estado, ts, tsPull, msg} = window._syncEstado;
+  // "Atualizado há X" para o usuário significa "os dados são desta época" —
+  // e isso vale para qualquer contato com o servidor, não só para envios.
+  const tsContato = Math.max(Number(ts)||0, Number(tsPull)||0);
+  const quando = _syncHaQuanto(tsContato);
+  // Mais de 1 dia sem contato é problema mesmo que o último envio tenha ido
+  const diasSem = tsContato ? (Date.now()-tsContato)/86400000 : 999;
   const velho = diasSem > 1;
 
   let cor, ponto, texto, titulo;
@@ -6285,19 +6388,23 @@ window._syncRender = function(){
     cor='var(--verm)'; ponto='var(--verm)';
     texto = quando ? 'Falhou · último envio ' + quando : 'Falha ao sincronizar';
     titulo='Não foi possível gravar: ' + (msg||'erro desconhecido') + '. Clique para tentar de novo.';
-  } else if(estado === 'inicial' && !ts){
+  } else if(estado === 'inicial' && !tsContato){
     cor='var(--muted)'; ponto='var(--muted)'; texto='Sem sincronizar ainda';
     titulo='Nenhuma sincronização registrada neste navegador';
   } else if(velho){
     cor='var(--verm)'; ponto='var(--verm)'; texto='Sem enviar ' + quando;
     titulo='Este navegador não grava no Firebase há mais de um dia. Clique para tentar agora.';
   } else {
-    cor='var(--verde)'; ponto='var(--verde)'; texto='Sincronizado ' + quando;
-    titulo='Dados enviados ao Firebase. Clique para forçar novo envio.';
+    cor='var(--verde)'; ponto='var(--verde)'; texto='Atualizado ' + quando;
+    titulo = 'Último envio: ' + (ts ? _syncHaQuanto(ts) : 'nunca')
+           + ' · Última leitura: ' + (tsPull ? _syncHaQuanto(tsPull) : 'nunca')
+           + '. Clique para enviar agora.';
   }
 
   el.style.color = cor;
-  el.style.borderColor = cor.replace('var(--','rgba(').length ? cor : cor;
+  // [R74] Faixa colorida à esquerda: dá o estado de relance na lateral,
+  // sem depender de enxergar o pontinho.
+  el.style.borderLeft = '3px solid ' + cor;
   el.title = titulo;
   el.innerHTML =
     '<span style="width:8px;height:8px;border-radius:50%;background:'+ponto+';flex:0 0 8px;'
@@ -8661,6 +8768,9 @@ function showApp(){
 
   restaurarConfigCosmos();
   CosmosDB.init();
+  // [R73] gatilhos + primeira busca ao entrar no sistema
+  if(typeof window.instalarGatilhosSync === 'function') window.instalarGatilhosSync();
+  setTimeout(() => { window.sincronizarSeNecessario?.('entrou no sistema', {forcar:true}); }, 800);
   // [R61] O badge de sync vale para TODOS: a loja precisa saber se as
   // vendas dela subiram. Só o de Cosmos continua restrito ao admin.
   if(typeof window._syncRender === 'function') window._syncRender();
@@ -8803,6 +8913,11 @@ function logout(){
 // ============================================================
 let _tabLojas="hoje";
 function nav(pg){
+  // [R73] Trocar de tela é o momento em que a pessoa vai OLHAR o dado —
+  // então é a hora de buscar novidade. A trava de 15s evita que navegar
+  // rápido entre abas vire uma enxurrada de leituras.
+  setTimeout(() => { window.sincronizarSeNecessario?.('abriu ' + pg); }, 50);
+
   // Bloquear páginas admin para lojas
   // [FIX 23/07] 'mesant' saiu da lista — Mês Anterior agora é visível a todos
   const pgsAdmin=['metaslojas','relatorio','config','lojas','rankings','gestao','lancperloja','acompgeral','lanchistorico','historicoanu','historico'];
@@ -11554,6 +11669,9 @@ function renderFluxo(){
 }
 
 function exportarPDFFluxo(){
+  // [R73] Um relatório com dado velho é pior que nenhum relatório:
+  // dispara uma busca ao gerar (não bloqueia — o próximo já sai atualizado).
+  window.sincronizarSeNecessario?.('gerando PDF do fluxo');
   const lojaFiltro = isAdmin() ? (document.getElementById("fx-sel-loja")?.value||"") : lojaId();
   let regs = D.fluxo ? D.fluxo.filter(r=>!lojaFiltro||r.loja===lojaFiltro) : [];
   regs = filtrarFluxoData(regs);
@@ -12667,6 +12785,9 @@ function renderRankComissao(){
 // SEMANA
 // ============================================================
 function exportarPDFSemana(){
+  // [R73] Um relatório com dado velho é pior que nenhum relatório:
+  // dispara uma busca ao gerar (não bloqueia — o próximo já sai atualizado).
+  window.sincronizarSeNecessario?.('gerando PDF da semana');
   const _adm  = isAdmin();
   const hj    = hoje();
   const hoje_d = new Date(hj+'T12:00:00');
@@ -16752,8 +16873,10 @@ function iniciarAutoRefresh(){
         // [FIX B] Guard com timeout — pendente <60s pula, >60s força sync
         if(window._pendingLocalData){
           const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
-          if(pendingAge < 60000){
-            console.log("[Avatim] syncLoja: pendingLocalData ativo — adiando sync");
+          // [R75] 60s era muito: o usuário trocava de tela e nada acontecia.
+          // 15s já cobre a gravação em curso sem travar a leitura seguinte.
+          if(pendingAge < 15000){
+            console.log("[Avatim] syncLoja: gravação em curso — leitura adiada");
             return;
           }
           window._pendingLocalData = null;
@@ -16834,12 +16957,17 @@ function iniciarAutoRefresh(){
           });
         }
         _persistirLocal();
+        // [FIX R75] carimbar a LEITURA — é o que faz o indicador refletir
+        // que a tela acabou de receber dados novos.
+        window._syncMarcarPull?.();
         // [FIX R72] Antes só 4 páginas eram redesenhadas; nas demais o dado
         // chegava e a tela ficava velha até um F5.
         window.rerenderPaginaAtiva?.('syncLoja');
         console.log('[Avatim] 🔄 syncLoja: dados atualizados');
       }catch(e){ console.warn('[Avatim] syncLoja erro:', e.message); }
     }
+    // [R73] exposta para os gatilhos (login, troca de tela, relatório…)
+    window._syncPull = syncLoja;
     syncLoja();
     _autoRefreshTimer = setInterval(syncLoja, 60000);
     return;
@@ -16849,8 +16977,8 @@ function iniciarAutoRefresh(){
     // Se _pendingLocalData ficar preso (bug), não bloquear syncAdmin para sempre
     if(window._pendingLocalData){
       const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
-      if(pendingAge < 60000){
-        console.log("[Avatim] syncAdmin: pendingLocalData ativo (" + Math.round(pendingAge/1000) + "s) — adiando sync");
+      if(pendingAge < 15000){   // [R75] era 60s — bloqueava o gatilho de tela
+        console.log("[Avatim] syncAdmin: gravação em curso (" + Math.round(pendingAge/1000) + "s) — leitura adiada");
         return;
       }
       // [FIX Bug3] Mais de 60s pendente — forçar limpeza para não bloquear sync para sempre
@@ -16951,10 +17079,11 @@ function iniciarAutoRefresh(){
     // [FIX R61] Antes esta linha sobrescrevia o badge com o horário da
     // LEITURA do admin. "Sync 14:32" parecia confirmar envio, mas era só
     // releitura — mascarava uma gravação que havia falhado.
-    if(typeof window._syncRender === 'function') window._syncRender();
+    window._syncMarcarPull?.();   // [FIX R75] leitura carimbada
     // [FIX R72] mesma lista fixa de antes, agora pelo despachante central
     window.rerenderPaginaAtiva?.('syncAdmin');
   }
+  window._syncPull = syncAdmin;
   syncAdmin();
   _autoRefreshTimer=setInterval(syncAdmin,30000);
 }
@@ -23839,6 +23968,9 @@ window._rkDivRef = function(){
 
 // Gerar o PDF de divulgação com os rankings marcados
 window.gerarDivulgacaoRankings = function(){
+  // [R73] Um relatório com dado velho é pior que nenhum relatório:
+  // dispara uma busca ao gerar (não bloqueia — o próximo já sai atualizado).
+  window.sincronizarSeNecessario?.('gerando divulgação de rankings');
   const per = document.getElementById('rk-div-per')?.value || 'mes';
   const ref = window._rkDivRef();
   const dados = window._rkMontarRankings(per, ref);
@@ -28874,6 +29006,9 @@ function _dBR(d){ return d ? String(d).split('-').reverse().join('/') : '—'; }
 // ══════════════════════════════════════════════════════════════════════
 
 window.exportarExcelFluxo = function(){
+  // [R73] Um relatório com dado velho é pior que nenhum relatório:
+  // dispara uma busca ao gerar (não bloqueia — o próximo já sai atualizado).
+  window.sincronizarSeNecessario?.('gerando Excel do fluxo');
   // SheetJS sob demanda (mesmo padrão do excelProcessarUpload)
   if(typeof XLSX === 'undefined'){
     const sc = document.createElement('script');
