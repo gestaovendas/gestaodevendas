@@ -2634,15 +2634,6 @@ body:not(.logado) #appScreen{display:none!important}
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px">
         <option value="">🌐 Rede toda</option>
       </select>
-      <!-- [R95] Período de referência e período de comparação. Antes tudo era
-           fixo no mês corrente: não dava para analisar um mês fechado nem
-           escolher contra o que comparar. -->
-      <select id="rel-mes-ref" onchange="window._relMesRef=this.value;renderRelatorios()"
-        title="Mês/ano analisado"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px"></select>
-      <select id="rel-mes-comp" onchange="window._relMesComp=this.value;renderRelatorios()"
-        title="Período usado como comparação"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:8px 12px;color:var(--texto);font-size:12px"></select>
       <button class="btn-s" onclick="renderRelatorios()" style="font-size:12px">🔄 Atualizar</button><button class="btn-s" onclick="exportarRelatorioPDF()" style="font-size:12px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Exportar a aba atual para PDF (via impressão do navegador)">📄 Exportar PDF</button>
     </div>
   </div>
@@ -22726,17 +22717,64 @@ function _relMesAnoAnt(mesRef){
 // _relMesComparado(base, modo) → contra o que comparar. 'auto' devolve o
 // padrão de cada card (mês anterior ou mesmo mês do ano anterior); um valor
 // 'AAAA-MM' explícito vence sempre.
-window._relMesRef  = window._relMesRef  || '';
-window._relMesComp = window._relMesComp || 'auto';
+// Cada relatório guarda o SEU período. Um filtro único para as 9 abas
+// aparecia até onde não fazia diferença, e mudar o mês num relatório
+// alterava outro sem o usuário pedir.
+window._relFiltro = window._relFiltro || {};
 
-function _relMesBase(){
-  const m = window._relMesRef;
+function _relEstado(aba){
+  if(!window._relFiltro[aba]) window._relFiltro[aba] = {ref:'', comp:'auto'};
+  return window._relFiltro[aba];
+}
+/** Mês analisado por este relatório (padrão: mês corrente). */
+function _relRef(aba){
+  const m = _relEstado(aba).ref;
   return /^\d{4}-\d{2}$/.test(m||'') ? m : hoje().slice(0,7);
 }
-function _relMesComparado(base, modo){
-  const esc = window._relMesComp;
+/** Contra o que este relatório compara. 'auto' usa o padrão do tipo. */
+function _relComp(aba, base, modo){
+  const esc = _relEstado(aba).comp;
   if(/^\d{4}-\d{2}$/.test(esc||'')) return esc;
   return modo === 'anoant' ? _relMesAnoAnt(base) : _relMesAnterior(base);
+}
+window._relSetFiltro = function(aba, campo, valor){
+  _relEstado(aba)[campo] = valor;
+  renderRelatorios();
+};
+
+/**
+ * Barra de filtro do relatório. `comparacao` só entra onde o relatório
+ * de fato compara dois períodos — nos demais seria um controle inerte.
+ */
+function _relBarra(aba, opts){
+  opts = opts || {};
+  const meses = _relMesesOfertados();
+  const ref   = _relRef(aba);
+  const est   = _relEstado(aba);
+  const lista = meses.includes(ref) ? meses : [ref].concat(meses);
+
+  const opcoesRef = lista.map(m =>
+    '<option value="'+m+'"'+(m===ref?' selected':'')+'>'+_relMesLabel(m)+'</option>').join('');
+
+  let compHtml = '';
+  if(opts.comparacao){
+    const rotuloAuto = opts.rotuloAuto || 'mês anterior';
+    const opcoesComp = '<option value="auto"'+(est.comp==='auto'?' selected':'')+'>⟲ Automático ('+rotuloAuto+')</option>'
+      + lista.map(m => '<option value="'+m+'"'+(est.comp===m?' selected':'')+'>'+_relMesLabel(m)+'</option>').join('');
+    compHtml = '<label style="font-size:11px;color:var(--muted)">Comparar com</label>'
+      + '<select onchange="window._relSetFiltro(\''+aba+'\',\'comp\',this.value)" '
+      + 'style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 11px;color:var(--texto);font-size:12px">'
+      + opcoesComp + '</select>';
+  }
+
+  return '<div class="sc" style="margin-bottom:12px;padding:12px 14px">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    + '<label style="font-size:11px;color:var(--muted)">'+(opts.rotuloRef||'Período')+'</label>'
+    + '<select onchange="window._relSetFiltro(\''+aba+'\',\'ref\',this.value)" '
+    + 'style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 11px;color:var(--texto);font-size:12px">'
+    + opcoesRef + '</select>'
+    + compHtml
+    + '</div></div>';
 }
 /** Meses que têm dado em alguma fonte, inclusive o CRM. */
 function _relMesesOfertados(){
@@ -22749,30 +22787,6 @@ function _relMesesOfertados(){
   set.add(hoje().slice(0,7));
   return [...set].sort().reverse();
 }
-/** Preenche os dois seletores sem perder a escolha atual. */
-function _relPopularPeriodos(){
-  const meses = _relMesesOfertados();
-  const selR = document.getElementById('rel-mes-ref');
-  const selC = document.getElementById('rel-mes-comp');
-  const assinatura = meses.join('|');
-
-  if(selR && selR.dataset.assinatura !== assinatura){
-    selR.innerHTML = meses.map(m => '<option value="'+m+'">📅 '+_relMesLabel(m)+'</option>').join('');
-    selR.dataset.assinatura = assinatura;
-  }
-  if(selR){
-    const base = _relMesBase();
-    if(!meses.includes(base)) selR.insertAdjacentHTML('afterbegin', '<option value="'+base+'">📅 '+_relMesLabel(base)+'</option>');
-    selR.value = base;
-  }
-  if(selC && selC.dataset.assinatura !== assinatura){
-    selC.innerHTML = '<option value="auto">⟲ Comparação automática</option>'
-      + meses.map(m => '<option value="'+m+'">vs '+_relMesLabel(m)+'</option>').join('');
-    selC.dataset.assinatura = assinatura;
-  }
-  if(selC) selC.value = /^\d{4}-\d{2}$/.test(window._relMesComp||'') ? window._relMesComp : 'auto';
-}
-
 function _relCrm(lid, mesRef){
   return typeof window.crmDoMes === 'function' ? window.crmDoMes(lid, mesRef) : null;
 }
@@ -22847,7 +22861,6 @@ function renderRelatorios(){
   if(sel && !isAdmin() && sel.parentElement && sel.parentElement.style){
     sel.parentElement.style.display = 'none';
   }
-  _relPopularPeriodos();
   const aba = window._relAbaAtual || 'executivo';
   try{
     if(aba === 'executivo')   el.innerHTML = _relExecutivo();
@@ -22871,8 +22884,8 @@ function renderRelatorios(){
 // ══════════════════════════════════════════════════════════════════════
 function _relExecutivo(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
-  const mesAnt   = _relMesComparado(mesAtual,'anterior');
+  const mesAtual = _relRef('executivo');
+  const mesAnt   = _relComp('executivo', mesAtual, 'anterior');
 
   const agrAtu = _relAgregar(lojas, mesAtual);
   const agrAnt = _relAgregar(lojas, mesAnt);
@@ -22942,7 +22955,7 @@ function _relExecutivo(){
       </div>
     </div>` : '';
 
-  return `
+  return _relBarra('executivo', {comparacao:true, rotuloAuto:'mês anterior'}) + `
     <div class="sc">
       <div class="st">📊 Executivo — ${_relMesLabel(mesAtual)}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">
@@ -22964,8 +22977,8 @@ function _relExecutivo(){
 // ══════════════════════════════════════════════════════════════════════
 function _relMensal(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
-  const mesAnt   = _relMesComparado(mesAtual,'anterior');
+  const mesAtual = _relRef('mensal');
+  const mesAnt   = _relComp('mensal', mesAtual, 'anterior');
 
   // Comparativo por loja
   const linhas = lojas.map(l=>{
@@ -22995,7 +23008,7 @@ function _relMensal(){
       <td class="num"><span class="${r.dPA.cls}">${r.dPA.txt}</span></td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('mensal', {comparacao:true, rotuloAuto:'mês anterior'}) + `
     <div class="sc">
       <div class="st">📅 Comparativo — ${_relMesLabel(mesAtual)} vs ${_relMesLabel(mesAnt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">Valor grande = mês atual. Valor pequeno abaixo = mês anterior. ▲/▼ = variação.</div>
@@ -23020,8 +23033,8 @@ function _relMensal(){
 // ══════════════════════════════════════════════════════════════════════
 function _relAnual(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
-  const mesAnoAnt = _relMesComparado(mesAtual,'anoant');
+  const mesAtual = _relRef('anual');
+  const mesAnoAnt = _relComp('anual', mesAtual, 'anoant');
 
   const linhas = lojas.map(l=>{
     // Mês atual vs mesmo mês do ano anterior
@@ -23052,7 +23065,7 @@ function _relAnual(){
       <td class="num"><span class="${r.dYtd.cls}">${r.dYtd.txt}</span></td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('anual', {comparacao:true, rotuloAuto:'mesmo mês do ano anterior'}) + `
     <div class="sc">
       <div class="st">📈 Comparativo Anual — ${_relMesLabel(mesAtual)} vs ${_relMesLabel(mesAnoAnt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">YoY do mês + YTD (jan até o mês atual, comparado ao mesmo período do ano anterior).</div>
@@ -23079,7 +23092,7 @@ function _relAnual(){
 // ══════════════════════════════════════════════════════════════════════
 function _relBenchLojas(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('benchlojas');
 
   const dados = lojas.map(l=>{
     const meta = metaDoMes(l.id, mesAtual).valor || 0;
@@ -23116,7 +23129,7 @@ function _relBenchLojas(){
       <td class="num">${d.atend > 0 ? d.atend.toLocaleString('pt-BR') : '--'} <small style="color:var(--muted)">${_pos(rAtend[d.id])}</small></td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('benchlojas', {}) + `
     <div class="sc">
       <div class="st">🏆 Benchmark entre Lojas — ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada loja tem sua posição em 5 indicadores. Ordenado por % da meta.</div>
@@ -23142,7 +23155,7 @@ function _relBenchLojas(){
 // ══════════════════════════════════════════════════════════════════════
 function _relBenchVends(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('benchvends');
   const lojaIds = new Set(lojas.map(l=>l.id));
 
   const vends = (D.vendedoras || []).filter(v =>
@@ -23183,7 +23196,7 @@ function _relBenchVends(){
       <td class="num" style="color:var(--muted)">${v.atend > 0 ? v.atend.toLocaleString('pt-BR') : '--'}</td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('benchvends', {}) + `
     <div class="sc">
       <div class="st">👥 Benchmark entre Vendedor(es) — Top 15 de ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">Ordenado por faturamento no mês. Só vendedor(es) com lançamentos.</div>
@@ -23212,7 +23225,7 @@ function _relBenchVends(){
 // ══════════════════════════════════════════════════════════════════════
 function _relIGP(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('igp');
 
   const dados = lojas.map(l=>{
     const meta = metaDoMes(l.id, mesAtual).valor || 0;
@@ -23255,7 +23268,7 @@ function _relIGP(){
       <td class="num" style="color:var(--muted)">${d.atend.toLocaleString('pt-BR')}</td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('igp', {}) + `
     <div class="sc">
       <div class="st">⭐ Índice Geral de Performance (IGP) — ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
@@ -23427,7 +23440,7 @@ function _relProjecao(){
 // ══════════════════════════════════════════════════════════════════════
 function _relCruzamento(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('cruzamento');
 
   // Dados base por loja
   const pts = lojas.map(l=>{
@@ -23497,7 +23510,7 @@ function _relCruzamento(){
       <td class="num" style="color:${p.pctCamp>=20?'var(--verde)':p.pctCamp>=10?'var(--ouro)':'var(--muted)'};font-weight:600">${p.pctCamp.toFixed(1)}%</td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('cruzamento', {}) + `
     <div class="sc">
       <div class="st">🔗 Cruzamento: TM × P.A. — ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
