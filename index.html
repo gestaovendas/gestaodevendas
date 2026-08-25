@@ -6743,6 +6743,20 @@ window.crmFiltrar = function(cubo, f){
     vendedora: cubo.vends[c.v] || '', primeira: c.pri, ultima: c.ult,
     compras: c.compras, total: c.total, itens: c.itens, loja: c.loja
   }));
+
+  // [R100] Filtro na EXIBIÇÃO, não só na importação. Cubos gerados antes da
+  // regra ainda trazem "CONSUMIDOR FINAL" como um cliente só — e com ele um
+  // vendedor só, o que concentrava todo esse faturamento numa pessoa. Aqui
+  // ele sai das LISTAS de cliente; o dinheiro continua inteiro no faturamento
+  // e no ranking de vendedor(a), que vêm de mesVend (linha a linha).
+  const _anonFora = clientes.filter(c => window._crmAnonimo(c.nome, c.documento));
+  const anonimoListas = {
+    clientes: _anonFora.length,
+    fat: Math.round(_anonFora.reduce((s,c) => s + (c.total||0), 0) * 100) / 100,
+    compras: _anonFora.reduce((s,c) => s + (c.compras||0), 0)
+  };
+  clientes = clientes.filter(c => !window._crmAnonimo(c.nome, c.documento));
+
   if(f.vend) clientes = clientes.filter(c => c.vendedora === f.vend);
   if(f.ano || f.mes){
     clientes = clientes.filter(c => {
@@ -6778,6 +6792,7 @@ window.crmFiltrar = function(cubo, f){
     mesesCount: mesesUsados.size,
     produtos,
     produtosSemDimensaoVend,
+    anonimoListas,
     clientes: clientes.sort((a,b)=>b.total-a.total),
     vendedoras: [...porVend.values()].sort((a,b)=>b.fat-a.fat),
     cross: (cubo.cross||[]).map(([a,b,n]) => ({a:cubo.prods[a]||'?', b:cubo.prods[b]||'?', n})),
@@ -6856,6 +6871,7 @@ window.crmSincronizar = async function(){
   } else {
     showToast('✅ CRM sincronizado: ' + ok + ' conjunto(s) em ' + docs + ' documento(s).','ok');
   }
+  return {ok, total: pares.length, docs, erros};
 };
 
 /**
@@ -7057,13 +7073,48 @@ window.crmDedup = function(linhas){
 // "cliente" gigante no topo dos melhores, e no cruzamento de produtos
 // juntavam compras de pessoas diferentes, inventando combos que não existem.
 window._crmAnonimo = function(nome, doc){
-  if(String(doc||'').replace(/\D/g,'')) return false;   // tem CPF/CNPJ: identificado
   const n = String(nome||'').trim().toLowerCase()
-              .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
-  if(!n) return true;
-  return /^(consumidor|consumidor final|cliente|cliente final|consumidor nao identificado|nao identificado|nao informado|sem cliente|sem identificacao|diversos|avulso|balcao|a vista)$/.test(n)
-      || /^\(sem cliente\)$/.test(n);
+              .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+              .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+
+  if(!n) return true;                    // sem nome nenhum
+
+  // [R101] O NOME manda, mesmo havendo CPF/CNPJ na linha. O sistema de origem
+  // costuma preencher esse campo com documento de fachada nas vendas de
+  // balcão — e antes eu tratava a linha como identificada por causa dele,
+  // deixando "CONSUMIDOR FINAL" voltar às listas mesmo após reimportar.
+  if(/^consumidor\b/.test(n)) return true;              // consumidor, consumidor final...
+  if(/^cliente( final| balcao| avulso| nao identificado)?$/.test(n)) return true;
+  if(/^(nao|n) ?(identificado|informado)$/.test(n)) return true;
+  if(/^n ?i$/.test(n)) return true;                      // "N/I", "N I", "NI"
+  if(/^sem (nome|cliente|identificacao|cadastro)$/.test(n)) return true;
+  if(/^(diversos|avulso|avulsa|balcao|a vista|varejo|venda balcao|nao consta|n consta|ni|nd)$/.test(n)) return true;
+  if(/nao identificad/.test(n)) return true;             // "cliente nao identificado"
+
+  return false;
 };
+
+/** Nomes tratados como "sem cliente identificado" na base atual — para conferência. */
+window.crmAnonimosNaBase = function(){
+  const vistos = new Map();
+  (D.excelDados||[]).forEach(r => {
+    if(!window._crmAnonimo(r.cliente, r.documento)) return;
+    const k = String(r.cliente||'(vazio)').trim() || '(vazio)';
+    const a = vistos.get(k) || {linhas:0, fat:0};
+    a.linhas++; a.fat += Number(r.valor)||0; vistos.set(k, a);
+  });
+  Object.values(D.crm||{}).forEach(anos => Object.values(anos||{}).forEach(c => {
+    (c.clientes||[]).forEach(arr => {
+      const nome = arr[0], doc = arr[7]||'';
+      if(!window._crmAnonimo(nome, doc)) return;
+      const k = String(nome||'(vazio)').trim() || '(vazio)';
+      const a = vistos.get(k) || {linhas:0, fat:0};
+      a.linhas += arr[4]||0; a.fat += arr[5]||0; vistos.set(k, a);
+    });
+  }));
+  return [...vistos.entries()].map(([nome,v]) => ({nome, ...v})).sort((a,b)=>b.fat-a.fat);
+};
+
 
 window.crmAgregar = function(linhas, opts){
   opts = opts || {};
@@ -26563,7 +26614,7 @@ window.excelProcessarUpload = function(event){
   }
 
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try {
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, {type:'array', cellDates:false});
@@ -26782,13 +26833,28 @@ window.excelProcessarUpload = function(event){
       const _ignorados = [];
       if(ignoradosDadosVazios > 0) _ignorados.push(ignoradosDadosVazios+' sem data/valor');
       if(ignoradosNaoVenda > 0)    _ignorados.push(ignoradosNaoVenda+' não-venda');
-      showToast('✅ ' + dadosProcessados.length.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
-        + (_ignorados.length ? ' · ignoradas: ' + _ignorados.join(', ') : ''), 'ok');
       console.log('[crm] importação agregada:', _diagnostico);
 
-      // Subir os cubos para que as lojas enxerguem a análise
+      // [R102] O envio ao Firestore era "dispare e esqueça": a tela dizia
+      // "importado" e, se a subida falhasse, o erro ia só para o console — as
+      // outras máquinas nunca recebiam nada e ninguém ficava sabendo. Agora a
+      // importação ESPERA o envio e conta o que de fato aconteceu.
+      const _msgLocal = dadosProcessados.length.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
+        + (_ignorados.length ? ' · ignoradas: ' + _ignorados.join(', ') : '');
+      let _envio = null;
       if(typeof window.crmSincronizar === 'function'){
-        window.crmSincronizar().catch(e => console.warn('[crm] sync pós-importação:', e.message));
+        showToast('⏳ ' + _msgLocal + ' — enviando ao servidor...', 'ok');
+        try{ _envio = await window.crmSincronizar(); }
+        catch(e){ _envio = {ok:0, total:1, erros:[e.code||e.message]}; }
+      }
+      if(_envio && _envio.erros && _envio.erros.length){
+        showToast('⚠️ ' + _msgLocal + ' — mas o envio ao servidor FALHOU ('
+          + _envio.erros.join(' | ') + '). Os dados valem só nesta máquina até você clicar em '
+          + '"Reenviar ao Firebase".', 'err');
+      } else if(_envio){
+        showToast('✅ ' + _msgLocal + ' — enviado ao servidor, já visível nas outras máquinas.', 'ok');
+      } else {
+        showToast('⚠️ ' + _msgLocal + ' — sem envio ao servidor nesta sessão.', 'warn');
       }
 
       // Reset input para permitir re-upload do mesmo arquivo
@@ -27033,7 +27099,7 @@ window.excelRender = function(){
       kpiEl.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--muted);font-size:12px">${totalBase === 0 ? 'Sem dados. Suba uma planilha para começar.' : 'Nenhum registro no filtro atual. Total na base: '+totalBase}</div>`;
     } else {
       const totalFat = dados.reduce((s,r) => s + (r.valor||0), 0);
-      const clientesUnicos = new Set(dados.map(r => (r.cliente||'').toLowerCase().trim())).size;
+      const clientesUnicos = new Set(dados.filter(r => !window._crmAnonimo(r.cliente, r.documento)).map(r => (r.cliente||'').toLowerCase().trim())).size;
       const nCupons = new Set(dados.filter(r => r.cupom).map(r => r.cupom)).size || dados.length;
       const nProdutos = new Set(dados.map(r => (r.produto||'').toLowerCase().trim())).size;
       const tm = nCupons > 0 ? totalFat / nCupons : 0;
@@ -27072,6 +27138,8 @@ function _excelRenderMelhoresClientes(dados){
   const porCliente = {};
   dados.forEach(r => {
     const key = (r.cliente || '').trim();
+    // [R100] venda sem cliente identificado não vira "cliente" em lista nenhuma
+    if(window._crmAnonimo(r.cliente, r.documento)) return;
     if(!key || key === '(sem cliente)') return;
     if(!porCliente[key]) porCliente[key] = { nome:key, total:0, compras:new Set(), lojaFreq:{}, ult:'' };
     porCliente[key].total += r.valor || 0;
@@ -27146,6 +27214,8 @@ function _excelRenderInativos(dados){
   const porCliente = {};
   base.forEach(r => {
     const key = (r.cliente || '').trim();
+    // [R100] venda sem cliente identificado não vira "cliente" em lista nenhuma
+    if(window._crmAnonimo(r.cliente, r.documento)) return;
     if(!key || key === '(sem cliente)') return;
     if(!porCliente[key]) porCliente[key] = { nome:key, total:0, compras:0, ult:'', lojaFreq:{} };
     porCliente[key].total += r.valor || 0;
@@ -27219,7 +27289,7 @@ function _excelRenderProdutos(dados){
     porProd[key].qtde += Number(r.qtde) || 0;
     porProd[key].valor += Number(r.valor) || 0;
     porProd[key].linhas++;
-    if(r.cliente) porProd[key].clientes.add(r.cliente.toLowerCase().trim());
+    if(r.cliente && !window._crmAnonimo(r.cliente, r.documento)) porProd[key].clientes.add(r.cliente.toLowerCase().trim());
   });
 
   const linhasQtde = Object.values(porProd)
@@ -27394,7 +27464,7 @@ function _excelRenderRankingVendedoras(dados){
     porVend[norm].qtde += Number(r.qtde) || 0;
     porVend[norm].linhas++;
     if(r.cupom) porVend[norm].cupons.add(r.cupom);
-    if(r.cliente) porVend[norm].clientes.add(_crmNorm(r.cliente));
+    if(r.cliente && !window._crmAnonimo(r.cliente, r.documento)) porVend[norm].clientes.add(_crmNorm(r.cliente));
   });
 
   const linhas = Object.values(porVend).map(v => {
@@ -27486,6 +27556,9 @@ function _excelRenderCruzamentoProdutos(dados){
   const porCliente = {};
   dados.forEach(r => {
     if(!r.cliente || !r.produto) return;
+    // [R100] sem isto, compras de PESSOAS DIFERENTES sob o mesmo rótulo
+    // viravam um cliente só e geravam combos que nunca aconteceram
+    if(window._crmAnonimo(r.cliente, r.documento)) return;
     const cli = _crmNorm(r.cliente);
     if(!porCliente[cli]) porCliente[cli] = new Set();
     porCliente[cli].add(_crmNorm(r.produto));
@@ -29710,6 +29783,16 @@ function _crmRenderMelhores(v){
     [{t:'#'},{t:'Cliente'},{t:'Vendedor(a)'},{t:'Notas',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Telefone'},{t:'Última'}],
     linhas, 'Nenhum cliente no filtro atual.')
     + (v.clientes.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+v.clientes.length.toLocaleString('pt-BR')+'</div>':'');
+  // [R100] Transparência: o valor sem cliente identificado não sumiu — ele
+  // continua no faturamento e no ranking de vendedor(a); só não vira "pessoa".
+  const _an = v.anonimoListas;
+  if(_an && _an.fat > 0){
+    el.insertAdjacentHTML('beforeend',
+      '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'
+      + '🕶️ <strong>' + fmt(_an.fat) + '</strong> em ' + _an.compras + ' compra(s) sem cliente identificado '
+      + 'ficaram fora desta lista. O valor continua no faturamento, no ticket médio e no ranking de '
+      + 'vendedor(a) — distribuído por quem fez cada venda.</div>');
+  }
 }
 
 function _crmRenderInativos(v){
