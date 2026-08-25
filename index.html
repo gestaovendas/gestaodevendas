@@ -3288,6 +3288,8 @@ body{font-family:"DM Sans",sans-serif;background:var(--fundo);color:var(--texto)
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
           <option value="">👩 Todas as vendedoras</option>
         </select>
+        <button onclick="window.exportarInativosExcel()" title="Exporta a lista como está na tela — mesmo filtro e mesma ordenação"
+          style="background:rgba(33,115,70,.15);border:1px solid rgba(33,115,70,.5);color:#4caf7d;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">📊 Excel</button>
       </div>
     </div>
     <div id="ct-inativos180"></div>
@@ -6939,23 +6941,19 @@ window.crmApagar = async function(lid, ano){
  *      e a análise por produto continua fazendo sentido.
  */
 window.crmDedup = function(linhas){
-  const vistos = new Set();
-  const unicas = [];
-  let dupExatas = 0;
+  // [FIX R78] Regra corrigida com a realidade do export da Avatim:
+  // CADA LINHA É UM ITEM DA NOTA. Três linhas iguais na mesma NF são três
+  // unidades do mesmo produto — não uma duplicata.
+  //
+  // Por isso duas coisas que eu fazia antes foram REMOVIDAS:
+  //  (a) descartar "linhas idênticas" — apagava unidades e subtraía receita;
+  //  (b) adivinhar que valores repetidos significavam o total da nota —
+  //      numa nota de 3 sabonetes de R$ 15 isso registraria R$ 15.
+  //
+  // O total da nota só é tratado como valor único quando a PLANILHA declara
+  // isso no nome da coluna ("Valor NF"), caso em que não há adivinhação.
+  const unicas = (linhas||[]).map(r => Object.assign({}, r));
 
-  (linhas||[]).forEach(r => {
-    const k = [r.cupom||'', r.data||'', r.produto||'', r.cliente||'', r.valor, r.qtde].join('|');
-    if(vistos.has(k)){ dupExatas++; return; }
-    vistos.add(k);
-    unicas.push(Object.assign({}, r));   // cópia: não mexer no array do chamador
-  });
-
-  // [FIX R76] A chave da venda era SÓ o número da NF. Mas a numeração
-  // reinicia (cupom fiscal reinicia por dia/série), então o mesmo número
-  // em datas diferentes são vendas diferentes — e estavam sendo fundidas
-  // numa só, com perda de faturamento. A chave passa a ser DATA + NF.
-  // Linhas sem NF não entram nesta consolidação: sem identificador não há
-  // como afirmar que pertencem à mesma venda.
   const porNF = new Map();
   let semNF = 0;
   unicas.forEach(r => {
@@ -6969,32 +6967,21 @@ window.crmDedup = function(linhas){
   let nfsCorrigidas = 0, valorRemovido = 0;
   porNF.forEach(rs => {
     if(rs.length < 2) return;
-    const v0 = Number(rs[0].valor) || 0;
-    if(v0 <= 0) return;
+    // Só age quando a coluna foi declarada como total da NOTA.
+    if(!rs.every(r => r._valorNF === true)) return;
 
-    // [R68] Dois caminhos para saber que o valor é o TOTAL DA NOTA:
-    //  (a) a planilha declarou a coluna como "Valor NF" — certeza;
-    //  (b) todas as linhas trazem o mesmo valor — forte indício.
-    const declaradoNF = rs.every(r => r._valorNF === true);
-    const todasIguais = rs.every(r => Math.abs((Number(r.valor)||0) - v0) < 0.005);
-    if(!declaradoNF && !todasIguais) return;
-
-    // Com "Valor NF" declarado, o total da nota é o maior valor visto —
-    // não a soma, e nem necessariamente repetido em todas as linhas.
-    const totalNota = declaradoNF
-      ? rs.reduce((mx,r) => Math.max(mx, Number(r.valor)||0), 0)
-      : v0;
+    const totalNota = rs.reduce((mx,r) => Math.max(mx, Number(r.valor)||0), 0);
+    if(totalNota <= 0) return;
     const somaAtual = rs.reduce((a,r) => a + (Number(r.valor)||0), 0);
+    if(somaAtual <= totalNota) return;   // já está coerente
 
     nfsCorrigidas++;
-    valorRemovido += Math.max(0, somaAtual - totalNota);
+    valorRemovido += somaAtual - totalNota;
     const qTot = rs.reduce((s,r) => s + (Number(r.qtde)||1), 0) || rs.length;
     rs.forEach(r => { r.valor = totalNota * ((Number(r.qtde)||1) / qTot); });
   });
 
-  // Nota com uma linha só e valor declarado como total da NF: já está certo.
-
-  return {linhas: unicas, dupExatas, nfsCorrigidas, valorRemovido,
+  return {linhas: unicas, dupExatas: 0, nfsCorrigidas, valorRemovido,
           notas: porNF.size, semNF, original: (linhas||[]).length};
 };
 
@@ -26498,11 +26485,11 @@ window.excelProcessarUpload = function(event){
           + 'Sem ele a venda é identificada por cliente + dia, e o ticket médio fica aproximado. '
           + 'Inclua a coluna de NF/Cupom na planilha para números exatos.', 'err'), 2400);
       }
-      if(_dd.dup || _dd.nfs){
+      if(_dd.nfs){
         const partes = [];
-        if(_dd.dup) partes.push(_dd.dup.toLocaleString('pt-BR') + ' linha(s) duplicada(s) descartada(s)');
-        if(_dd.nfs) partes.push(_dd.nfs.toLocaleString('pt-BR') + ' nota(s) com o valor repetido em todas as linhas — '
-          + 'contadas uma vez (' + fmt(_dd.val) + ' que seriam somados a mais)');
+        if(_dd.nfs) partes.push(_dd.nfs.toLocaleString('pt-BR') + ' nota(s) com coluna de "Valor NF" — '
+          + 'o total foi contado uma vez e rateado entre os itens ('
+          + fmt(_dd.val) + ' que seriam somados a mais)');
         console.warn('[crm] deduplicação:', partes.join(' | '));
         setTimeout(() => showToast('🔎 Deduplicação: ' + partes.join(' · '), 'warn'), 1200);
       }
@@ -29594,6 +29581,12 @@ window.renderInativos180 = function(){
     return (r || (a.total||0) - (b.total||0)) * _ord.dir;
   });
 
+  // [R79] Guardar a lista já filtrada e ordenada: o Excel exporta ESTA,
+  // não uma recalculada — assim planilha e tela nunca discordam.
+  window._ctInatLista = inativos.map(c => Object.assign({}, c, {
+    ultimoContato: _ultCt(c) || ''
+  }));
+
   const cnt = document.getElementById('ct-inat-count');
   if(cnt) cnt.textContent = inativos.length.toLocaleString('pt-BR');
 
@@ -29651,6 +29644,82 @@ window.renderInativos180 = function(){
     + (inativos.length > 50
         ? '<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando os 50 de maior valor, de ' + inativos.length.toLocaleString('pt-BR') + '</div>'
         : '');
+};
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R79] EXPORTAÇÃO DA LISTA DE INATIVOS
+// Exporta exatamente o que está na tela: mesmo corte de dias, mesmo
+// filtro de vendedora e mesma ordenação de coluna. A planilha sai da
+// MESMA lista que a tabela renderizou — não de um recálculo paralelo,
+// que divergiria assim que uma regra mudasse.
+// Diferença proposital: a tela mostra os 50 primeiros, o Excel leva todos.
+// ══════════════════════════════════════════════════════════════════════
+
+window.exportarInativosExcel = function(){
+  if(typeof XLSX === 'undefined'){
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload  = () => window.exportarInativosExcel();
+    sc.onerror = () => showToast('❌ Não foi possível carregar o gerador de Excel (sem internet?).','err');
+    document.head.appendChild(sc);
+    showToast('⏳ Carregando gerador de Excel...','ok');
+    return;
+  }
+
+  // Garantir que a lista reflete os controles atuais
+  if(typeof window.renderInativos180 === 'function') window.renderInativos180();
+  const lista = window._ctInatLista || [];
+  if(!lista.length){ showToast('Nenhum cliente inativo na seleção atual.','warn'); return; }
+
+  const dias  = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
+  const fVend = document.getElementById('ct-inat-vend')?.value || '';
+  const ord   = window._ctInatOrd || {campo:'total', dir:-1};
+  const rotuloOrd = ({nome:'Cliente', dias:'Sem comprar', total:'Já gastou',
+                      notas:'Notas', vendedora:'Vendedora', contato:'Último contato'})[ord.campo] || ord.campo;
+  const alvoVend = fVend === '__sem__' ? 'Sem vendedora' : (fVend || 'Todas as vendedoras');
+  const dBR = d => d ? String(d).split('-').reverse().join('/') : '';
+
+  const wb = XLSX.utils.book_new();
+  const L = [];
+  L.push(['CLIENTES INATIVOS']);
+  L.push([]);
+  L.push(['Critério', 'Sem comprar há mais de ' + dias + ' dias']);
+  L.push(['Vendedora', alvoVend]);
+  L.push(['Ordenação', rotuloOrd + ' — ' + (ord.dir === 1 ? 'crescente' : 'decrescente')]);
+  L.push(['Gerado em', new Date().toLocaleString('pt-BR')]);
+  L.push(['Total de clientes', lista.length]);
+  L.push(['Valor já comprado', Number(lista.reduce((s,c) => s + (c.total||0), 0).toFixed(2))]);
+  L.push(['Nunca contatados', lista.filter(c => !c.ultimoContato).length]);
+  L.push([]);
+  L.push(['Cliente','CPF/CNPJ','Telefone','Vendedora','Dias sem comprar',
+          'Última compra','Já gastou R$','Notas','Ticket médio R$','Último contato']);
+
+  lista.forEach(c => {
+    L.push([
+      c.nome || '',
+      c.documento || '',
+      c.telefone || '',
+      c.vendedora || '',
+      Number(c.dias) || 0,
+      dBR(c.ultima),
+      Number((c.total||0).toFixed(2)),
+      Number(c.compras) || 0,
+      Number((((c.compras||0) > 0 ? c.total/c.compras : 0)).toFixed(2)),
+      c.ultimoContato ? dBR(c.ultimoContato) : 'nunca'
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(L);
+  ws['!cols'] = [{wch:34},{wch:18},{wch:17},{wch:20},{wch:16},{wch:13},{wch:14},{wch:8},{wch:15},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Inativos');
+
+  const slug = alvoVend.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w]+/g,'-').toLowerCase();
+  const nome = 'inativos-' + dias + 'dias-' + slug + '-'
+             + new Date().toISOString().slice(0,10) + '.xlsx';
+  XLSX.writeFile(wb, nome);
+  showToast('📊 ' + lista.length.toLocaleString('pt-BR') + ' cliente(s) exportados — ' + nome, 'ok');
 };
 
 /** Abre o formulário de contato já preenchido como reativação. */
