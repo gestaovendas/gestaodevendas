@@ -4074,6 +4074,20 @@ body:not(.logado) #appScreen{display:none!important}
         🔒 Senhas protegidas com hash SHA-256. Consulte o arquivo <strong style="color:var(--ouro)">avatim_senhas.txt</strong> enviado pela Monique.
       </div>
     </div>
+
+    <!-- [R97] Controle de lojas ativas/arquivadas.
+         O arquivamento já existia, mas escondido num botão dos cards de
+         "Todas as Lojas". Uma loja fechada é uma decisão de gestão e precisa
+         de um lugar próprio, com o estado visível. -->
+    <div class="sc">
+      <div class="st">🏪 Lojas Ativas e Arquivadas</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
+        Uma loja arquivada <strong>sai do dashboard, dos rankings, das metas e de todos os relatórios</strong>,
+        mas <strong>nenhum dado é apagado</strong> — vendas, clientes e histórico continuam guardados e voltam
+        inteiros ao reativar. Use para loja fechada ou em reforma.
+      </div>
+      <div id="cfg-lojas-status"></div>
+    </div>
     <div class="sc" style="margin-top:12px">
       <div class="st">Regra de Calculo de Metas</div>
       <div style="background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.15);border-radius:10px;padding:14px;font-size:12px;line-height:2;color:var(--muted)">
@@ -4720,6 +4734,59 @@ Object.defineProperty(globalThis, 'LOJAS', {
   configurable: true
 });
 
+/**
+ * [R97] Painel de lojas ativas/arquivadas nas Configurações.
+ * Mostra as 7 lojas com o estado atual e o que cada ação significa. O
+ * arquivamento em si já existia — o que faltava era um lugar onde a gestão
+ * enxergasse a situação e decidisse, em vez de um ícone perdido num card.
+ */
+window.renderCfgLojas = function(){
+  const el = document.getElementById('cfg-lojas-status');
+  if(!el) return;
+  if(!isAdmin()){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">'
+      + 'Apenas a gestão controla o arquivamento de lojas.</div>';
+    return;
+  }
+
+  const linhas = LOJAS_TODAS.map(l => {
+    const arq = lojaArquivada(l.id);
+    // O que a loja tem guardado — deixa claro que arquivar não apaga nada.
+    const nVendas = Object.keys((D.vendas || {})[l.id] || {}).length;
+    const nVends  = (D.vendedoras || []).filter(v => v.loja === l.id).length;
+    const anosCrm = Object.keys((D.crm || {})[l.id] || {}).length;
+    const guarda  = [
+      nVendas ? nVendas + ' dia(s) de venda' : '',
+      nVends  ? nVends  + ' vendedor(es)'    : '',
+      anosCrm ? anosCrm + ' ano(s) de CRM'   : ''
+    ].filter(Boolean).join(' · ') || 'sem dados ainda';
+
+    return `<tr${arq ? ' style="opacity:.6"' : ''}>
+      <td><strong style="${arq ? 'text-decoration:line-through;color:var(--muted)' : ''}">${l.nome}</strong>
+          <div style="font-size:9px;color:var(--muted)">${l.cnpj || l.id}</div></td>
+      <td>${arq
+            ? '<span class="sbadge" style="background:rgba(255,255,255,.06);color:var(--muted)">📦 Arquivada</span>'
+            : '<span class="sbadge ok">● Ativa</span>'}</td>
+      <td style="font-size:10px;color:var(--muted)">${guarda}</td>
+      <td style="text-align:right">
+        ${arq
+          ? `<button onclick="reativarLoja('${l.id}')" style="background:var(--verde);color:var(--preto);border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">↩️ Reativar</button>`
+          : `<button onclick="arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📦 Arquivar</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const nArq = LOJAS_TODAS.filter(l => lojaArquivada(l.id)).length;
+  el.innerHTML = `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
+      <thead><tr><th>Loja</th><th>Status</th><th>Dados guardados</th><th style="text-align:right">Ação</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px">
+      ${LOJAS_TODAS.length - nArq} ativa(s) · ${nArq} arquivada(s).
+      A mudança vale para todas as máquinas assim que sincronizar.
+    </div>`;
+};
+
 // Ações de arquivar/reativar loja (só admin) — seguem a mesma REGRA DE
 // AUTORIDADE de campanhas: gestão só pelo admin
 function arquivarLoja(lid){
@@ -4752,6 +4819,7 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
   showToast(arquivar ? '📦 '+nome+' arquivada' : '✅ '+nome+' reativada');
   if(typeof carregarDash === 'function') carregarDash();
   if(typeof renderLojas === 'function') renderLojas();
+  if(typeof window.renderCfgLojas === 'function') window.renderCfgLojas();
   // Firebase direto — bypass do save() com guards
   try{
     const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
@@ -5548,6 +5616,8 @@ function metaDoMes(lid, mesRef){
 }
 // Realizado do mês cruzando lançamento diário e histórico manual
 function realizadoDoMes(lid, mesRef){
+  // [R99] Sem CRM aqui: crmDoMesPreferido() chama esta função para saber o
+  // que foi lançado. Quem decide a fonte é _fatDoMes(), abaixo.
   const diario = calcMesRef(lid, mesRef) || 0;
   if(diario > 0) return {valor:diario, origem:'diario'};
   const hist = histMesGet(lid, mesRef);
@@ -5584,7 +5654,7 @@ function histLojaDoMes(lid, mesRef){
 function histMesPARede(mesRef){
   let itens=0, atend=0;
   LOJAS.forEach(l=>{
-    const d = _itensAtendDoMes(l.id, mesRef);
+    const d = window.itensAtendDoMes(l.id, mesRef);
     itens += d.itens; atend += d.atend;
   });
   // legado entra uma única vez (não pertence a nenhuma loja)
@@ -6209,7 +6279,8 @@ const _RENDER_PAGINA = {
   rankings:    () => renderRankings('rede'),
   gestao:      () => renderGestao(),
   estoque:     () => { renderCampLista?.(); if(typeof renderRelCamp === 'function') renderRelCamp(); },
-  metaslojas:  () => renderMetasLojas()
+  metaslojas:  () => renderMetasLojas(),
+  config:      () => window.renderCfgLojas?.()
   // 'acompgeral' fica de fora de propósito: aquela tela só busca quando o
   // usuário clica, e redesenhar sozinho contrariaria esse desenho.
 };
@@ -7505,6 +7576,40 @@ window.crmMesesDaLoja = function(lid, ano){
   if(_crmMesCache.size > 200) _crmMesCache.clear();   // não crescer sem fim
   _crmMesCache.set(chave, mapa);
   return mapa;
+};
+
+/**
+ * [R99] Regra ÚNICA de qual fonte vale para o mês.
+ *
+ * Mês FECHADO → o CRM manda: é a planilha oficial, mais fiel que o
+ * lançamento manual da loja.
+ * Mês CORRENTE → o lançamento manda: as lojas registram todo dia, enquanto
+ * a importação do CRM costuma vir depois do fechamento. Preferir o CRM aqui
+ * mostraria um número velho justamente na tela que se olha para gerir o dia.
+ * Se não houver lançamento no mês corrente, o CRM entra como base.
+ */
+window.crmDoMesPreferido = function(lid, mesRef){
+  const crm = window.crmDoMes(lid, mesRef);
+  if(!crm) return null;
+  if(mesRef < hoje().slice(0,7)) return crm;         // mês fechado
+  const lancado = realizadoDoMes(lid, mesRef).valor || 0;
+  return lancado > 0 ? null : crm;                    // corrente: lançamento manda
+};
+
+/** [R99] Faturamento do mês pela fonte que vale. */
+window.fatDoMes = function(lid, mesRef){
+  const c = window.crmDoMesPreferido(lid, mesRef);
+  return c ? {valor: c.fat, origem: 'crm'} : realizadoDoMes(lid, mesRef);
+};
+/** [R99] Atendimentos (notas) do mês pela fonte que vale. */
+window.atendDoMes = function(lid, mesRef){
+  const c = window.crmDoMesPreferido(lid, mesRef);
+  return c ? c.notas : vendasDoMes(lid, mesRef);
+};
+/** [R99] Itens e atendimentos do mês pela fonte que vale. */
+window.itensAtendDoMes = function(lid, mesRef){
+  const c = window.crmDoMesPreferido(lid, mesRef);
+  return c ? {itens: c.itens, atend: c.notas} : _itensAtendDoMes(lid, mesRef);
 };
 
 /** Números do CRM para uma loja num mês, ou null se não houver. */
@@ -9294,7 +9399,7 @@ function calcProjecao(lid){
   // que já cruza diário + histórico com precedência).
   if(!lid) return null;
   const mesRef = hoje().slice(0,7);
-  const realMes = realizadoDoMes(lid, mesRef).valor || calcMes(lid);
+  const realMes = window.fatDoMes(lid, mesRef).valor || calcMes(lid);
   const dp = diasAbertosPassados(lid);
   const dr = diasAbertosRestantes(lid);
   const du = diasAbertosNoMes(lid);
@@ -9622,6 +9727,10 @@ function nav(pg){
     relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
     contatos:()=>{ if(typeof renderContatos==="function") renderContatos(); },
     excel:()=>{ if(typeof window.excelRender==="function") window.excelRender(); },
+    config:()=>{
+      // [R97] painel de lojas ativas/arquivadas
+      if(typeof window.renderCfgLojas === 'function') window.renderCfgLojas();
+    },
     lancperloja:()=>{
       // [NEW] Lançamento por Loja
       const dIniEl = document.getElementById('lpl-data-ini');
@@ -10313,7 +10422,7 @@ function carregarDash(){
     // [FIX 26/07] realMes considera histórico (bug do painel Santana)
     realSem=calcSem(_lidC);
     const _hjMR2 = hj.slice(0,7);
-    realMes = Math.max(calcMes(_lidC), realizadoDoMes(_lidC, _hjMR2).valor || 0);
+    realMes = Math.max(calcMes(_lidC), window.fatDoMes(_lidC, _hjMR2).valor || 0);
     // Meta diária progressiva: (meta restante) ÷ dias úteis restantes
     const _diasRest = diasAbertosRestantes(_lidC);
     // [FIX 26/07] _acum vinha só de calcMesAte (lançamento diário). Se a
@@ -10321,7 +10430,7 @@ function carregarDash(){
     // (105k - 0) / 4 = 26k — completamente irreal. Agora usa
     // realizadoDoMes que já cruza as duas origens.
     const _hjMR = hj.slice(0,7);
-    const _acumHist = realizadoDoMes(_lidC, _hjMR).valor || 0;
+    const _acumHist = window.fatDoMes(_lidC, _hjMR).valor || 0;
     const _acumDia  = calcMesAte(_lidC, hj);
     const _acum     = Math.max(_acumDia, _acumHist);
     const _rest     = Math.max(0, (metas.mes||0) - _acum);
@@ -20835,8 +20944,8 @@ function renderMesAnteriorDashboard(){
   let totMeta = 0, totFat = 0, totVendas = 0;
   LOJAS.forEach(loja=>{
     totMeta   += metaDoMes(loja.id, mesRef).valor;
-    totFat    += realizadoDoMes(loja.id, mesRef).valor;
-    totVendas += vendasDoMes(loja.id, mesRef);
+    totFat    += window.fatDoMes(loja.id, mesRef).valor;
+    totVendas += window.atendDoMes(loja.id, mesRef);
   });
   // [FIX 22/07] registro migrado da estrutura antiga (sem loja) entra UMA vez.
   // Antes ele era devolvido para cada uma das 7 lojas e somado 7x.
@@ -20856,7 +20965,7 @@ function renderMesAnteriorDashboard(){
   const _origEl = document.getElementById('mesant-origem');
   if(_origEl){
     let _itensTot = 0;
-    LOJAS.forEach(l=>{ _itensTot += _itensAtendDoMes(l.id, mesRef).itens; });
+    LOJAS.forEach(l=>{ _itensTot += window.itensAtendDoMes(l.id, mesRef).itens; });
     const _l = histMesLegado(mesRef);
     if(_l) _itensTot += Number(_l.qtditens||0);
     if(totFat === 0){
@@ -22134,11 +22243,11 @@ function renderPerformance(){
       } else {
         // Loja inteira
         meta = metaDoMes(lid, mr).valor || 0;
-        real = realizadoDoMes(lid, mr).valor || 0;
+        real = window.fatDoMes(lid, mr).valor || 0;
         const paObj = typeof paDoMes === 'function' ? paDoMes(lid, mr) : {valor:0};
         pa = paObj.valor || 0;
         // TM e atendimentos: usar vendasDoMes se existir
-        const atendObj = typeof vendasDoMes === 'function' ? vendasDoMes(lid, mr) : {valor:0};
+        const atendObj = typeof vendasDoMes === 'function' ? window.atendDoMes(lid, mr) : {valor:0};
         nAtend = atendObj.valor || 0;
         tm = nAtend > 0 ? real / nAtend : 0;
       }
@@ -22303,14 +22412,27 @@ function _varYoY(atual, anterior){
 
 // ── Dados completos de uma loja num mês ───────────────────────────
 function _dadosLojaMes(lid, mesRef){
-  const meta   = metaDoMes(lid, mesRef).valor;
+  const meta = metaDoMes(lid, mesRef).valor;
+
+  // [R98] O Controle Ano a Ano não enxergava o CRM: lojas cujo faturamento só
+  // existe na planilha importada apareciam zeradas em alguns períodos, e a
+  // comparação ano a ano ficava sem base. Mesma regra do Histórico e dos
+  // relatórios — quando o CRM cobre o mês, faturamento, atendimentos e itens
+  // saem TODOS dele, para o TM e o P.A. não dividirem bases diferentes.
+  const crm = typeof window.crmDoMes === 'function' ? window.crmDoMes(lid, mesRef) : null;
+  if(crm){
+    const tmC = crm.notas > 0 ? crm.fat / crm.notas : 0;
+    const paC = crm.notas > 0 ? crm.itens / crm.notas : 0;
+    return { meta, real: crm.fat, vendas: crm.notas, itens: crm.itens, tm: tmC, pa: paC, fonte: 'crm' };
+  }
+
   const real   = realizadoDoMes(lid, mesRef).valor;
   const vendas = vendasDoMes(lid, mesRef);          // cupons / atendimentos
   const ia     = _itensAtendDoMes(lid, mesRef);     // { itens, atend }
   const itens  = ia.itens;
   const tm     = vendas > 0 ? real / vendas : 0;
   const pa     = vendas > 0 ? itens / vendas : 0;   // P.A. = itens ÷ vendas
-  return { meta, real, vendas, itens, tm, pa };
+  return { meta, real, vendas, itens, tm, pa, fonte: real > 0 ? 'lancamento' : null };
 }
 
 // ── Linhas do controle: ano atual x ano anterior, por loja ────────
@@ -22398,7 +22520,10 @@ function renderControle(){
   }
 
   // Seletor de mês
-  const listaMeses = (typeof mesesDisponiveis === 'function' ? mesesDisponiveis() : [mesRef]);
+  // [R98] incluir os meses que só existem no CRM — antes não dava nem para
+  // selecionar o período importado.
+  const listaMeses = (typeof _relMesesOfertados === 'function' ? _relMesesOfertados()
+                    : (typeof mesesDisponiveis === 'function' ? mesesDisponiveis() : [mesRef]));
   if(!listaMeses.includes(mesRef)) listaMeses.unshift(mesRef);
   const seletor = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
@@ -22713,8 +22838,8 @@ function _relMesAnoAnt(mesRef){
 // quando o CRM cobre o mês, os três saem dele; senão, valem as fontes de
 // sempre. Manter a assinatura de origem deixa a troca ser 1:1 no código.
 // [R95] Período analisado e período de comparação.
-// _relMesBase()  → o mês que o usuário escolheu (padrão: mês corrente)
-// _relMesComparado(base, modo) → contra o que comparar. 'auto' devolve o
+// _relRef(aba)   → o mês que o usuário escolheu naquele relatório
+// _relComp(aba, base, modo) → contra o que comparar. 'auto' devolve o
 // padrão de cada card (mês anterior ou mesmo mês do ano anterior); um valor
 // 'AAAA-MM' explícito vence sempre.
 // Cada relatório guarda o SEU período. Um filtro único para as 9 abas
@@ -23299,11 +23424,11 @@ function _relIGP(){
 // ══════════════════════════════════════════════════════════════════════
 function _relPreditivo(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('preditivo');
 
   // Últimos 3 meses fechados (excluindo o mês atual)
   const meses = [];
-  let m = _relMesComparado(mesAtual,'anterior');
+  let m = _relComp('preditivo', mesAtual, 'anterior');
   for(let i=0;i<3;i++){ meses.unshift(m); m = _relMesAnterior(m); }
 
   const linhas = lojas.map(l=>{
@@ -23339,7 +23464,7 @@ function _relPreditivo(){
       <td class="num" style="font-weight:600;color:var(--azul)">${r.previsaoReal > 0 ? fmt(r.previsaoReal) : '--'}</td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('preditivo', {}) + `
     <div class="sc">
       <div class="st">🔮 Indicadores Preditivos — Baseado nos últimos 3 meses fechados</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
@@ -23369,7 +23494,7 @@ function _relPreditivo(){
 // ══════════════════════════════════════════════════════════════════════
 function _relProjecao(){
   const lojas = _relLojasVisiveis();
-  const mesAtual = _relMesBase();
+  const mesAtual = _relRef('projecao');
   const hj = hoje();
   const _mesAntFn = _relMesAnterior;
 
@@ -23408,7 +23533,7 @@ function _relProjecao(){
       <td class="num" style="color:var(--verde)">${fmt(r.projOtimista)}<br><small style="color:${_corPct(r.pctOtim)}">${r.pctOtim.toFixed(0)}%</small></td>
     </tr>`).join('');
 
-  return `
+  return _relBarra('projecao', {}) + `
     <div class="sc">
       <div class="st">🎯 Projeção de Metas — ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
@@ -27533,9 +27658,18 @@ function _excelRenderCarteiraVendedora(){
   const nomeVend = dados[0].vendedora;
 
   // Agregar por cliente
+  // [R96] Venda sem cliente identificado É desta vendedor(a) — o valor conta
+  // no total dela. O que não pode é virar uma "pessoa" na carteira: todas
+  // essas vendas têm o mesmo nome e viravam um cliente gigante.
   const porCliente = {};
+  let anonTotal = 0; const anonCompras = new Set();
   dados.forEach(r => {
     const key = _crmNorm(r.cliente);
+    if(window._crmAnonimo(r.cliente, r.documento)){
+      anonTotal += r.valor || 0;
+      anonCompras.add(r.data + '|' + (r.cupom||''));
+      return;
+    }
     if(!key || key === 'sem cliente') return;
     if(!porCliente[key]) porCliente[key] = {
       nome: r.cliente, total: 0, compras: new Set(), ult: '', primeira: '', produtos: new Set()
@@ -27566,8 +27700,9 @@ function _excelRenderCarteiraVendedora(){
   const totalClientes = linhasBase.length;
   const inativos = linhasBase.filter(c => c.inativo).sort((a,b) => b.total - a.total);
   const ativos = linhasBase.filter(c => !c.inativo).sort((a,b) => b.total - a.total);
-  const totalFat = linhasBase.reduce((s,c) => s + c.total, 0);
-  const totalCompras = linhasBase.reduce((s,c) => s + c.nCompras, 0);
+  // O total da vendedor(a) inclui o que ela vendeu sem cliente identificado.
+  const totalFat = linhasBase.reduce((s,c) => s + c.total, 0) + anonTotal;
+  const totalCompras = linhasBase.reduce((s,c) => s + c.nCompras, 0) + anonCompras.size;
 
   const banner = `
     <div style="background:rgba(201,168,76,.08);border-left:3px solid var(--ouro);padding:10px 14px;margin-bottom:12px;font-size:12px;display:flex;flex-wrap:wrap;gap:20px;align-items:center">
@@ -27575,6 +27710,7 @@ function _excelRenderCarteiraVendedora(){
       <div>👥 <strong>${totalClientes}</strong> cliente${totalClientes===1?'':'s'}</div>
       <div>💰 <strong style="color:var(--verde)">${fmt(totalFat)}</strong> total</div>
       <div>🧾 <strong>${totalCompras}</strong> compras</div>
+      ${anonTotal > 0 ? '<div style="color:var(--muted)">🕶️ <strong>'+fmt(anonTotal)+'</strong> em '+anonCompras.size+' venda(s) sem cliente identificado — conta no total, fora da lista</div>' : ''}
       <div>💤 <strong style="color:${inativos.length>0?'var(--verm)':'var(--verde)'}">${inativos.length}</strong> inativos (>${diasCorte}d)</div>
     </div>
   `;
