@@ -6787,6 +6787,31 @@ window.crmFiltrar = function(cubo, f){
   // vendedor só, o que concentrava todo esse faturamento numa pessoa. Aqui
   // ele sai das LISTAS de cliente; o dinheiro continua inteiro no faturamento
   // e no ranking de vendedor(a), que vêm de mesVend (linha a linha).
+  // [R105] A compra registrada na Origem do Fluxo também conta como compra.
+  //
+  // Antes, só a planilha importada atualizava a última compra do cliente. Na
+  // prática: a vendedor(a) contatava a inativa, a cliente vinha e comprava,
+  // o atendimento era registrado no fluxo — e a cliente continuava na lista
+  // de inativos até a próxima importação, semanas depois. A régua mandava
+  // abordar de novo quem já tinha voltado.
+  //
+  // Só entra lançamento com valor > 0: atendimento sem compra não reativa.
+  const _nrm = x => String(x||'').trim().toLowerCase()
+                      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  const _compraFluxo = new Map();
+  (D.fluxo||[]).forEach(f => {
+    if(!f || !(Number(f.valor) > 0)) return;
+    const k = _nrm(f.nome); if(!k) return;
+    const d = String(f.data||''); if(!d) return;
+    if(!_compraFluxo.has(k) || d > _compraFluxo.get(k)) _compraFluxo.set(k, d);
+  });
+  if(_compraFluxo.size){
+    clientes.forEach(c => {
+      const d = _compraFluxo.get(_nrm(c.nome));
+      if(d && d > String(c.ultima||'')){ c.ultima = d; c.compraNoFluxo = true; }
+    });
+  }
+
   const _anonFora = clientes.filter(c => window._crmAnonimo(c.nome, c.documento));
   const anonimoListas = {
     clientes: _anonFora.length,
