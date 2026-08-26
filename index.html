@@ -3136,6 +3136,13 @@ body:not(.logado) #appScreen{display:none!important}
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
           <option value="">👥 Todos(as) vendedor(es)</option>
         </select>
+        <!-- [R104] Quem já foi abordado sai da régua de trabalho. -->
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer"
+               title="Cliente já contatado depois da última compra sai da lista — o registro fica no histórico de Clientes Contatados">
+          <input type="checkbox" id="ct-inat-ocultar-contatados" checked onchange="window.renderInativos180()"
+                 style="width:14px;height:14px;cursor:pointer">
+          ocultar já contatados
+        </label>
         <button onclick="window.exportarInativosExcel()" title="Exporta a lista como está na tela — mesmo filtro e mesma ordenação"
           style="background:rgba(33,115,70,.15);border:1px solid rgba(33,115,70,.5);color:#4caf7d;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">📊 Excel</button>
       </div>
@@ -30068,6 +30075,25 @@ window.renderInativos180 = function(){
     if(!ex || (ct.data||'') > (ex.data||'')) contatados.set(k, ct);
   });
 
+  // [R104] Inativo já contatado sai da régua.
+  //
+  // A comparação é com a ÚLTIMA COMPRA, não simplesmente "existe contato":
+  // um contato de dois anos atrás não pode esconder para sempre quem voltou
+  // a comprar e ficou inativo de novo. Só vale a abordagem feita DEPOIS da
+  // última compra — essa sim já tratou desta inatividade.
+  //
+  // Nada é apagado: o contato continua no histórico de Clientes Contatados,
+  // e o contador abaixo mostra quantos saíram.
+  const _contatoCobre = c => {
+    const ct = contatados.get(_norm(c.nome));
+    if(!ct || !ct.data) return false;
+    const ultCompra = String(c.ultima || '');
+    return !ultCompra || ct.data >= ultCompra;
+  };
+  const _ocultarContatados = document.getElementById('ct-inat-ocultar-contatados')?.checked !== false;
+  const _jaTratados = inativos.filter(_contatoCobre);
+  if(_ocultarContatados) inativos = inativos.filter(c => !_contatoCobre(c));
+
   // Ordenar conforme a coluna escolhida
   const _ord = window._ctInatOrd;
   const _txt = x => String(x||'').toLowerCase();
@@ -30100,14 +30126,24 @@ window.renderInativos180 = function(){
 
   if(!inativos.length){
     el.innerHTML = '<div style="color:var(--verde);font-size:12px;padding:14px;text-align:center">'
-      + '✅ Nenhum cliente sem comprar há mais de ' + dias + ' dias na base atual.</div>';
+      + (_jaTratados.length
+          ? '✅ Todos os inativos há mais de ' + dias + ' dias já foram contatados ('
+            + _jaTratados.length + '). Os registros estão no histórico de Clientes Contatados.'
+          : '✅ Nenhum cliente sem comprar há mais de ' + dias + ' dias na base atual.')
+      + '</div>';
     return;
   }
 
   const semContato = inativos.filter(c => !contatados.has(_norm(c.nome)));
   const potencial  = inativos.reduce((s,c) => s + (c.total||0), 0);
+  const _avisoTratados = _jaTratados.length
+    ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">'
+      + '✅ <strong>' + _jaTratados.length + '</strong> cliente(s) já contatado(s) depois da última compra '
+      + (_ocultarContatados ? 'estão ocultos' : 'aparecem marcados')
+      + ' — o registro segue no histórico de Clientes Contatados.</div>'
+    : '';
 
-  el.innerHTML =
+  el.innerHTML = _avisoTratados +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
       + '<div style="flex:1;min-width:150px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;text-align:center">'
         + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Inativos</div>'
