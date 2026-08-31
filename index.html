@@ -290,6 +290,51 @@ try{
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
+        // ══════════════════════════════════════════════════════════════
+        // [R107] TRAVA ANTI-APAGAMENTO
+        //
+        // A guarda do save() era "if(!temDados && !isAdmin())" — o admin
+        // passava SEMPRE, inclusive com D vazio. E salvarMetaLoja,
+        // arquivarLoja e outras chamam fsGravar direto, sem guarda nenhuma.
+        // Bastava a carga do servidor falhar (offline, aba aberta antes do
+        // login, erro no merge) para o D ficar vazio e a próxima gravação
+        // sobrescrever o 'principal' com arrays vazios, destruindo
+        // vendedores, metas, campanhas e fluxo de toda a rede.
+        //
+        // Aqui a gravação compara o que vai sair com o que já está lá. Se o
+        // novo payload esvazia o que existe, ela é RECUSADA — o dado remoto
+        // é preservado e o usuário é avisado.
+        // ══════════════════════════════════════════════════════════════
+        const _peso = o => ({
+          vendedoras:    (o?.vendedoras    || []).length,
+          campanhas:     (o?.campanhas     || []).length,
+          campRealizados:(o?.campRealizados|| []).length,
+          fluxo:         (o?.fluxo         || []).length,
+          contatos:      (o?.contatos      || []).length,
+          metasLoja:     Object.keys(o?.metasLoja || {}).length
+        });
+        try{
+          const _snapAntes = await getDoc(doc(db,"avatim","principal"));
+          if(_snapAntes.exists()){
+            const _antes  = _peso(JSON.parse(_snapAntes.data().dados || "{}"));
+            const _depois = _peso(D2_principal);
+            const _sumiu = Object.keys(_antes).filter(k => _antes[k] > 0 && _depois[k] === 0);
+            if(_sumiu.length){
+              const _detalhe = _sumiu.map(k => k + ': ' + _antes[k] + '→0').join(', ');
+              console.error('[Avatim] GRAVAÇÃO RECUSADA — esvaziaria o servidor:', _detalhe);
+              if(typeof showToast === 'function'){
+                showToast('🛡️ Gravação BLOQUEADA: esta máquina está sem dados carregados e '
+                  + 'apagaria o servidor (' + _detalhe + '). Recarregue a página antes de '
+                  + 'salvar qualquer coisa.', 'err');
+              }
+              throw new Error('gravacao-recusada-esvaziaria-servidor');
+            }
+          }
+        }catch(eGuarda){
+          if(eGuarda && eGuarda.message === 'gravacao-recusada-esvaziaria-servidor') throw eGuarda;
+          console.warn('[Avatim] trava anti-apagamento não pôde conferir o remoto:', eGuarda.code||eGuarda.message);
+        }
+
         await setDoc(doc(db,"avatim","principal"), {
           dados: JSON.stringify(D2_principal),
           ts: Date.now(),
@@ -4095,6 +4140,18 @@ body:not(.logado) #appScreen{display:none!important}
       </div>
       <div id="cfg-lojas-status"></div>
     </div>
+
+    <!-- [R109] Recuperação de campanhas órfãs -->
+    <div class="sc">
+      <div class="st">🎯 Campanhas sem definição</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+        Os <strong>lançamentos</strong> de campanha ficam guardados nos documentos das lojas; as
+        <strong>definições</strong> ficam no documento principal. Se as definições se perderem, os
+        lançamentos continuam salvos mas ficam órfãos — sem campanha que os exiba. Aqui dá para
+        remontar as campanhas a partir deles.
+      </div>
+      <div id="cfg-camp-orfas"></div>
+    </div>
     <div class="sc" style="margin-top:12px">
       <div class="st">Regra de Calculo de Metas</div>
       <div style="background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.15);border-radius:10px;padding:14px;font-size:12px;line-height:2;color:var(--muted)">
@@ -4747,6 +4804,47 @@ Object.defineProperty(globalThis, 'LOJAS', {
  * arquivamento em si já existia — o que faltava era um lugar onde a gestão
  * enxergasse a situação e decidisse, em vez de um ícone perdido num card.
  */
+window.renderCfgCampOrfas = function(){
+  const el = document.getElementById('cfg-camp-orfas');
+  if(!el) return;
+  if(!isAdmin()){ el.innerHTML = ''; return; }
+  const orfas = window.campanhasOrfas();
+  if(!orfas.length){
+    el.innerHTML = '<div style="color:var(--verde);font-size:12px;padding:10px">'
+      + '✅ Nenhuma campanha órfã — todo lançamento tem sua campanha.</div>';
+    return;
+  }
+  const tot = orfas.reduce((s2,o) => s2 + o.n, 0);
+  const fatT = orfas.reduce((s2,o) => s2 + o.fat, 0);
+  el.innerHTML = '<div style="background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.3);'
+    + 'border-radius:8px;padding:12px;margin-bottom:10px">'
+    + '<div style="font-size:12px;color:#ff6b7a;font-weight:700;margin-bottom:6px">'
+    + '⚠️ ' + orfas.length + ' campanha(s) com lançamento mas sem definição</div>'
+    + '<div style="font-size:11px;color:var(--muted)">'
+    + tot + ' lançamento(s) preservado(s), somando ' + fmt(fatT) + '. '
+    + 'Eles existem, mas não aparecem porque a campanha que os agrupa foi perdida.</div></div>'
+    + '<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">'
+    + '<thead><tr><th>Período</th><th style="text-align:center">Lançamentos</th>'
+    + '<th style="text-align:right">Faturado</th><th style="text-align:center">Lojas</th></tr></thead><tbody>'
+    + orfas.slice(0,12).map(o =>
+        '<tr><td>' + (o.ini ? o.ini.split('-').reverse().join('/') : '?') + ' → '
+        + (o.fim ? o.fim.split('-').reverse().join('/') : '?') + '</td>'
+        + '<td style="text-align:center">' + o.n + '</td>'
+        + '<td style="text-align:right;color:var(--ouro)">' + fmt(o.fat) + '</td>'
+        + '<td style="text-align:center">' + o.lojas.length + '</td></tr>').join('')
+    + '</tbody></table></div>'
+    + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<button class="btn-p" onclick="window.restaurarCampanhasDoBackup()" style="font-size:12px">'
+    + '📂 Trazer campanhas do backup (com nomes)</button>'
+    + '<button class="btn-s" onclick="window.recuperarCampanhas()" style="font-size:12px">'
+    + '♻️ Recriar sem nomes, pelos lançamentos</button></div>'
+    + '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'
+    + 'O <strong>primeiro</strong> traz nome e meta originais — carregue antes o arquivo de backup em '
+    + '💾 Backup &amp; Restauração (só carregar, sem restaurar tudo). Ele mexe apenas nas campanhas: '
+    + 'vendas e lançamentos posteriores ao backup ficam intactos.<br>'
+    + 'O <strong>segundo</strong> não precisa de arquivo, mas cria nomes provisórios.</div>';
+};
+
 window.renderCfgLojas = function(){
   const el = document.getElementById('cfg-lojas-status');
   if(!el) return;
@@ -4827,6 +4925,7 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
   if(typeof carregarDash === 'function') carregarDash();
   if(typeof renderLojas === 'function') renderLojas();
   if(typeof window.renderCfgLojas === 'function') window.renderCfgLojas();
+      if(typeof window.renderCfgCampOrfas === 'function') window.renderCfgCampOrfas();
   // Firebase direto — bypass do save() com guards
   try{
     const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
@@ -6318,7 +6417,7 @@ const _RENDER_PAGINA = {
   gestao:      () => renderGestao(),
   estoque:     () => { renderCampLista?.(); if(typeof renderRelCamp === 'function') renderRelCamp(); },
   metaslojas:  () => renderMetasLojas(),
-  config:      () => window.renderCfgLojas?.()
+  config:      () => { window.renderCfgLojas?.(); window.renderCfgCampOrfas?.(); }
   // 'acompgeral' fica de fora de propósito: aquela tela só busca quando o
   // usuário clica, e redesenhar sozinho contrariaria esse desenho.
 };
@@ -9844,6 +9943,7 @@ function nav(pg){
     config:()=>{
       // [R97] painel de lojas ativas/arquivadas
       if(typeof window.renderCfgLojas === 'function') window.renderCfgLojas();
+      if(typeof window.renderCfgCampOrfas === 'function') window.renderCfgCampOrfas();
     },
     lancperloja:()=>{
       // [NEW] Lançamento por Loja
@@ -15446,6 +15546,128 @@ async function salvarCampReal(){
 }
 
 // ── RENDER PRINCIPAL ─────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// [R109] RECUPERAR CAMPANHAS A PARTIR DOS LANÇAMENTOS
+//
+// As DEFINIÇÕES de campanha (campObjetivos) moram só no doc 'principal'.
+// Os LANÇAMENTOS (campRealizados) têm cópia nos docs loja_*. Quando o
+// principal foi esvaziado, as definições sumiram e os lançamentos ficaram
+// órfãos: 357 registros existindo sem nenhuma campanha para exibi-los.
+//
+// Cada lançamento carrega campId, loja, data e faturamento — o suficiente
+// para remontar a campanha. O que NÃO existe no lançamento é o nome e a
+// meta, então esses ficam para o usuário corrigir; o resto é recuperado.
+// ══════════════════════════════════════════════════════════════════════
+window.campanhasOrfas = function(){
+  const conhecidas = new Set((D.campObjetivos||[]).map(o => o.id));
+  const porCamp = new Map();
+  (D.campRealizados||[]).forEach(r => {
+    if(!r || !r.campId || conhecidas.has(r.campId)) return;
+    const a = porCamp.get(r.campId) || {campId:r.campId, n:0, fat:0, ini:'', fim:'', lojas:new Set()};
+    a.n++;
+    a.fat += _fatLancamento(r);
+    const d = String(r.data||'');
+    if(d && (!a.ini || d < a.ini)) a.ini = d;
+    if(d && (!a.fim || d > a.fim)) a.fim = d;
+    if(r.lojaId) a.lojas.add(r.lojaId);
+    porCamp.set(r.campId, a);
+  });
+  return [...porCamp.values()]
+    .map(a => Object.assign({}, a, {lojas:[...a.lojas]}))
+    .sort((x,y) => String(y.ini).localeCompare(String(x.ini)));
+};
+
+/**
+ * [R110] Restauração CIRÚRGICA: traz só as definições de campanha do backup.
+ *
+ * Restaurar o backup inteiro sobrescreveria os lançamentos feitos DEPOIS
+ * dele — e esses são justamente os que sobreviveram. Aqui só os
+ * campObjetivos são lidos do arquivo e mesclados; nada mais é tocado.
+ * Assim os nomes e metas voltam corretos e os lançamentos novos ficam.
+ */
+window.restaurarCampanhasDoBackup = function(){
+  if(!isAdmin()){ showToast('Apenas a gestão pode restaurar.','err'); return; }
+  const pacote = window._bkPacote;
+  if(!pacote){
+    showToast('Carregue o arquivo de backup primeiro em "📂 Carregar arquivo de backup".','err');
+    return;
+  }
+  let doBackup = [];
+  try{
+    const principal = (pacote.docs || {})['principal'];
+    if(principal && principal.dados) doBackup = JSON.parse(principal.dados).campObjetivos || [];
+  }catch(e){
+    showToast('Não consegui ler as campanhas do backup: ' + e.message, 'err'); return;
+  }
+  if(!doBackup.length){ showToast('O backup não tem definições de campanha.','warn'); return; }
+
+  if(!D.campObjetivos) D.campObjetivos = [];
+  const existentes = new Set(D.campObjetivos.map(o => o.id));
+  const novas = doBackup.filter(o => o && o.id && !existentes.has(o.id));
+  // quantas dessas têm lançamento hoje — é o que volta a aparecer
+  const comLanc = novas.filter(o =>
+    (D.campRealizados||[]).some(r => r.campId === o.id)).length;
+
+  if(!novas.length){
+    showToast('Todas as campanhas do backup já existem aqui — nada a fazer.','ok'); return;
+  }
+  if(!confirm('Trazer ' + novas.length + ' definição(ões) de campanha do backup de '
+      + new Date(pacote.geradoEm).toLocaleString('pt-BR') + '?\n\n'
+      + novas.slice(0,8).map(o => '• ' + (o.nome||o.id)).join('\n')
+      + (novas.length > 8 ? '\n… e mais ' + (novas.length-8) : '')
+      + '\n\n' + comLanc + ' delas têm lançamentos guardados e voltarão a aparecer.\n\n'
+      + 'SOMENTE as campanhas são trazidas — vendas, lançamentos e todo o resto '
+      + 'ficam exatamente como estão.')) return;
+
+  novas.forEach(o => D.campObjetivos.push(o));
+  save();
+  if(typeof renderCampLista === 'function') renderCampLista();
+  if(typeof window.renderCfgCampOrfas === 'function') window.renderCfgCampOrfas();
+  showToast('✅ ' + novas.length + ' campanha(s) restaurada(s) com nome e meta originais. '
+          + 'Nenhum lançamento foi alterado.', 'ok');
+};
+
+window.recuperarCampanhas = function(){
+  if(!isAdmin()){ showToast('Apenas a gestão pode recuperar campanhas.','err'); return; }
+  const orfas = window.campanhasOrfas();
+  if(!orfas.length){ showToast('Nenhuma campanha órfã — todos os lançamentos têm campanha.','ok'); return; }
+
+  const resumo = orfas.slice(0,10).map(o =>
+    '• ' + (o.ini ? o.ini.split('-').reverse().join('/') : '?') +
+    ' a ' + (o.fim ? o.fim.split('-').reverse().join('/') : '?') +
+    ' — ' + o.n + ' lançamento(s), ' + fmt(o.fat) + ', ' + o.lojas.length + ' loja(s)'
+  ).join('\n');
+
+  if(!confirm('Encontrei ' + orfas.length + ' campanha(s) com lançamentos mas sem definição:\n\n'
+    + resumo + (orfas.length > 10 ? '\n… e mais ' + (orfas.length-10) : '')
+    + '\n\nRecriar as definições a partir dos lançamentos?\n'
+    + 'As datas, lojas e valores vêm dos próprios lançamentos.\n'
+    + 'O NOME e a META não existem nos lançamentos — entram como provisórios '
+    + 'para você renomear e ajustar.')) return;
+
+  if(!D.campObjetivos) D.campObjetivos = [];
+  orfas.forEach(o => {
+    const mes = o.ini ? o.ini.slice(0,7).split('-').reverse().join('/') : '';
+    D.campObjetivos.push({
+      id: o.campId,
+      tipo: 'kits',
+      nome: 'Campanha recuperada' + (mes ? ' — ' + mes : ''),
+      ini: o.ini || '', fim: o.fim || '',
+      metaRede: 0,
+      metasPorLoja: o.lojas.reduce((m,l) => { m[l] = 0; return m; }, {}),
+      obs: 'Definição recriada a partir de ' + o.n + ' lançamento(s) preservado(s). '
+         + 'Renomeie e informe a meta.',
+      produtos: [],
+      criadoEm: hoje(), criadoPor: 'recuperacao',
+      _recuperada: true
+    });
+  });
+  save();
+  renderCampLista();
+  showToast('✅ ' + orfas.length + ' campanha(s) recuperada(s) com seus lançamentos. '
+          + 'Renomeie e informe as metas.', 'ok');
+};
+
 function renderCampLista(){
   initCampData();
   const el = document.getElementById('camp-lista-adm') || document.getElementById('camp-lista'); // [FIX 24/07] usa o destino que existir
@@ -16082,6 +16304,10 @@ function salvarMetasVendedoras(lid){
       showToast("✅ Metas gravadas no servidor — já valem para todos os usuários.");
       console.log("[salvarMetasVendedoras] Firebase OK:", lid, "n=", n, "soma=", somaMes);
     } else {
+      // [FIX R103b] ver comentário em salvarMetaLoja: pendência não zerada
+      // bloqueia a leitura do servidor.
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
       showToast("❌ As metas NÃO chegaram ao servidor: " + _rV.motivo
               + ". Valem só nesta máquina — salve de novo quando a conexão voltar.", "err");
       console.error("[salvarMetasVendedoras] não confirmado:", _rV.motivo);
@@ -16296,7 +16522,12 @@ function salvarMetaLoja(lid){
       showToast("✅ Meta gravada no servidor — já vale para todos os usuários.");
       console.log("[salvarMetaLoja] ✅ Firebase OK:", lid, _mr, "mes=", mes);
     } else {
-      // mantém _pendingLocalData para o próximo sync tentar de novo
+      // [FIX R103b] ZERAR mesmo na falha. Deixar o snapshot pendente bloqueia
+      // o merge do que vem do servidor — o sistema parava de ler o banco e as
+      // telas ficavam vazias. O dado local já está no localStorage; o aviso
+      // abaixo diz ao usuário para salvar de novo.
+      window._pendingLocalData   = null;
+      window._pendingLocalDataTs = null;
       showToast("❌ A meta NÃO chegou ao servidor: " + _rMeta.motivo
               + ". Ela vale só nesta máquina — salve de novo quando a conexão voltar.", "err");
       console.error("[salvarMetaLoja] ❌ não confirmado:", _rMeta.motivo);
