@@ -15659,11 +15659,32 @@ window.restaurarCampanhasDoBackup = function(){
       + 'ficam exatamente como estão.')) return;
 
   novas.forEach(o => D.campObjetivos.push(o));
-  save();
+  _persistirLocal();
   if(typeof renderCampLista === 'function') renderCampLista();
   if(typeof window.renderCfgCampOrfas === 'function') window.renderCfgCampOrfas();
-  showToast('✅ ' + novas.length + ' campanha(s) restaurada(s) com nome e meta originais. '
-          + 'Nenhum lançamento foi alterado.', 'ok');
+
+  // [R110c] Confirmar o envio ANTES de dizer que deu certo. Antes eu chamava
+  // save() e mostrava o balão verde na hora — mas save() sobe de forma
+  // assíncrona e, se o Firestore não confirmar, a restauração ficaria só
+  // nesta máquina sem ninguém saber. Recuperação silenciosamente local é
+  // pior que falha visível: as lojas continuariam sem as campanhas.
+  showToast('⏳ ' + novas.length + ' campanha(s) recuperada(s) aqui — enviando ao servidor...', 'ok');
+  (async () => {
+    const okFB = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
+    if(!okFB || !window.fsGravar){
+      showToast('⚠️ Campanhas recuperadas SÓ nesta máquina — Firebase indisponível. '
+              + 'As outras máquinas não vão vê-las. Verifique a conexão e use o botão de novo.', 'err');
+      return;
+    }
+    const r = await window.gravarRemotoComPrazo(JSON.stringify(D));
+    if(r.ok){
+      showToast('✅ ' + novas.length + ' campanha(s) gravada(s) no servidor — já valem para todas as '
+              + 'máquinas e lojas. Nenhum lançamento foi alterado.', 'ok');
+    }else{
+      showToast('⚠️ As campanhas voltaram AQUI, mas não chegaram ao servidor: ' + r.motivo
+              + '. As outras máquinas ainda não as verão — use o botão de novo quando a conexão voltar.', 'err');
+    }
+  })();
 };
 
 window.recuperarCampanhas = function(){
