@@ -3074,6 +3074,21 @@ body:not(.logado) #appScreen{display:none!important}
           <option value="365">1 ano</option>
         </select>
       </div>
+      <!-- [R114b] Mesmo controle de follow-up, aqui no CRM Clientes.
+           É a MESMA configuração (D.configFollowUp) — mudar aqui vale lá e
+           vice-versa. Duas telas mostrando o mesmo bloco, nunca dois ajustes
+           divergentes. -->
+      <div class="admin-only" id="fup-box-crm" style="display:none;background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:12px;margin:10px 0">
+        <div style="font-size:11px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
+          🔁 Prazo para reabordar (follow-up)
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+          Depois de contatado, o cliente sai da régua de inativos. Se <strong>não comprar</strong>
+          dentro do prazo, ele <strong>volta</strong> para nova tentativa. Em dias, por tipo de
+          contato. Use <strong>0</strong> para nunca reabordar.
+        </div>
+        <div id="fup-config-crm"></div>
+      </div>
       <div id="excel-inativos"></div>
     </div>
   </div>
@@ -3192,6 +3207,17 @@ body:not(.logado) #appScreen{display:none!important}
         <select id="ct-inat-vend" onchange="window.renderInativos180()"
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
           <option value="">👥 Todos(as) vendedor(es)</option>
+        </select>
+        <!-- [R117] Busca por cliente: a régua passa de centenas de linhas e a
+             vendedora precisa achar UMA pessoa. Sem isto, só rolando. -->
+        <input type="text" id="ct-inat-busca" placeholder="🔍 Buscar cliente..." autocomplete="off"
+          oninput="window.renderInativos180()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 10px;color:var(--texto);font-size:11px;min-width:170px">
+        <!-- [R117] Mês do último contato -->
+        <select id="ct-inat-mes" onchange="window.renderInativos180()"
+          title="Mês em que o cliente foi contatado"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px">
+          <option value="">📅 Qualquer mês de contato</option>
         </select>
         <!-- [R104] Quem já foi abordado sai da régua de trabalho. -->
         <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer"
@@ -8038,6 +8064,23 @@ window.historicoConsolidado = function(lid, deMes, ateMes){
         if(r.origem && !fonte) fonte = (r.origem === 'diario') ? 'lancamento' : 'historico';
       });
       fat = fatL; atend = atendL; itens = itensL;
+
+      // [R116] Último recurso: a Origem do Fluxo. Um mês pode ter só
+      // atendimentos registrados no fluxo — sem planilha importada e sem
+      // lançamento no Painel do Dia. Antes esse mês aparecia ZERADO, como se
+      // a loja não tivesse vendido. Não há risco de contar duas vezes: isto
+      // só entra quando as outras fontes não trouxeram nada.
+      if(fat === 0){
+        let fatF = 0, atendF = 0;
+        (D.fluxo || []).forEach(f => {
+          if(!f || !String(f.data||'').startsWith(mes)) return;
+          const fl = f.loja || f.lojaId || '';
+          if(lid && fl !== lid) return;
+          const v = Number(f.valor) || 0;
+          if(v > 0){ fatF += v; atendF++; }
+        });
+        if(fatF > 0){ fat = fatF; atend = atendF; itens = 0; fonte = 'fluxo'; }
+      }
     }
 
     // Meta: soma das lojas do recorte
@@ -8068,6 +8111,7 @@ window.historicoConsolidado = function(lid, deMes, ateMes){
     l.varFat   = (ant && temDado) ? varia(l.fat,   ant.fat)   : null;
     l.varTm    = (ant && temDado) ? varia(l.tm,    ant.tm)    : null;
     l.varAtend = (ant && temDado) ? varia(l.atend, ant.atend) : null;
+    l.varPa    = (ant && temDado) ? varia(l.pa,    ant.pa)    : null;
     l.comparadoCom = (ant && temDado) ? ant.mes : null;
     if(l.fat > 0) ant = l;
   });
@@ -8107,8 +8151,8 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
     return;
   }
 
-  const rotuloFonte = {crm:'CRM', lancamento:'Lançamento', historico:'Base histórica'};
-  const corFonte    = {crm:'var(--azul)', lancamento:'var(--verde)', historico:'var(--muted)'};
+  const rotuloFonte = {crm:'CRM', lancamento:'Lançamento', historico:'Base histórica', fluxo:'Origem do Fluxo'};
+  const corFonte    = {crm:'var(--azul)', lancamento:'var(--verde)', historico:'var(--muted)', fluxo:'var(--roxo)'};
 
   const corpo = comDado.map(l => {
     const mesFmt = l.mes.split('-').reverse().join('/');
@@ -8124,6 +8168,8 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
       <td>${window._setaVar(l.varTm)}</td>
       <td style="text-align:center">${l.atend || '—'}</td>
       <td>${window._setaVar(l.varAtend)}</td>
+      <td style="text-align:center">${l.pa > 0 ? l.pa.toFixed(2).replace('.',',') : '—'}</td>
+      <td>${window._setaVar(l.varPa)}</td>
       <td style="text-align:center;color:var(--roxo)">${l.aniv || '—'}</td>
       <td style="text-align:center;color:var(--laranja)">${l.inativ || '—'}</td>
       <td><span style="font-size:9px;color:${corFonte[l.fonte] || 'var(--muted)'};text-transform:uppercase;letter-spacing:.5px">${rotuloFonte[l.fonte] || '—'}</span></td>
@@ -8135,6 +8181,7 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
   const tFat   = comDado.reduce((s, l) => s + l.fat, 0);
   const tMeta  = comDado.reduce((s, l) => s + l.meta, 0);
   const tAtend = comDado.reduce((s, l) => s + l.atend, 0);
+  const tItens = comDado.reduce((s, l) => s + (l.itens || 0), 0);
   const tAniv  = comDado.reduce((s, l) => s + l.aniv, 0);
   const tInat  = comDado.reduce((s, l) => s + l.inativ, 0);
   const tPct   = tMeta > 0 ? tFat / tMeta * 100 : 0;
@@ -8146,6 +8193,7 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
     <thead><tr>
       <th>Mês</th><th>Faturamento</th><th>Meta</th><th>% Meta</th><th>Cresc.</th>
       <th>Ticket Médio</th><th>Evol. TM</th><th style="text-align:center">Atend.</th><th>Evol. Atend.</th>
+      <th style="text-align:center">P.A.</th><th>Evol. P.A.</th>
       <th style="text-align:center">Aniv.</th><th style="text-align:center">Inativos</th><th>Fonte</th>
     </tr></thead>
     <tbody>${corpo}</tbody>
@@ -8158,6 +8206,8 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
       <td style="color:var(--azul)">${fmt(tAtend > 0 ? tFat / tAtend : 0)}</td>
       <td></td>
       <td style="text-align:center">${tAtend || '—'}</td>
+      <td></td>
+      <td style="text-align:center">${tAtend > 0 && tItens > 0 ? (tItens/tAtend).toFixed(2).replace('.',',') : '—'}</td>
       <td></td>
       <td style="text-align:center;color:var(--roxo)">${tAniv || '—'}</td>
       <td style="text-align:center;color:var(--laranja)">${tInat || '—'}</td>
@@ -30297,6 +30347,8 @@ function _crmRenderProdutos(v){
 
   // [R86] Seletor próprio deste card: só vendedor(es) que aparecem na base
   // visível (a mesma regra do filtro geral, que já é restrito à loja).
+  if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
+
   const selP = document.getElementById('excel-prod-vend');
   if(selP){
     // Só quem tem movimento na visão atual. Usar a tabela crua do cubo
@@ -30506,11 +30558,12 @@ window.followUpDias = function(tipoContato){
   return isFinite(v) && v >= 0 ? v : 45;
 };
 
-window.salvarFollowUp = function(){
+window.salvarFollowUp = function(sufixo){
   if(!isAdmin()){ showToast('Apenas a gestão define os prazos.','err'); return; }
+  sufixo = sufixo || '';
   const cfg = _followUpConfig();
   window.TIPOS_CONTATO_FOLLOWUP.forEach(t => {
-    const el = document.getElementById('fup-' + t.id);
+    const el = document.getElementById('fup-' + t.id + sufixo);
     if(el && el.value !== ''){
       const v = parseInt(el.value, 10);
       if(isFinite(v) && v >= 0) cfg[t.id] = v;
@@ -30518,12 +30571,22 @@ window.salvarFollowUp = function(){
   });
   D.configFollowUp._savedAt = Date.now();
   save();
+  // as duas telas refletem: quem mudou aqui vê lá também
+  if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
   if(typeof window.renderInativos180 === 'function') window.renderInativos180();
-  showToast('Prazos de follow-up salvos.','ok');
+  if(typeof window.excelRender === 'function') { try{ window.excelRender(); }catch(e){} }
+  showToast('Prazos de follow-up salvos — vale para as duas telas.','ok');
 };
 
 window.renderFollowUpConfig = function(){
-  const el = document.getElementById('fup-config');
+  // [R114b] Dois lugares mostram o MESMO ajuste: Clientes Contatados e
+  // CRM Clientes. A configuração é uma só (D.configFollowUp) — o sufixo no
+  // id dos campos evita colisão sem criar um segundo estado.
+  ['', '-crm'].forEach(sufixo => _renderFollowUpEm(sufixo));
+};
+
+function _renderFollowUpEm(sufixo){
+  const el = document.getElementById('fup-config' + sufixo);
   if(!el) return;
   if(!isAdmin()){
     el.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">'
@@ -30536,12 +30599,12 @@ window.renderFollowUpConfig = function(){
     + window.TIPOS_CONTATO_FOLLOWUP.map(t =>
         '<div class="ig" style="min-width:150px">'
         + '<label style="font-size:10px">' + t.nome + '</label>'
-        + '<input type="number" min="0" id="fup-' + t.id + '" value="' + cfg[t.id] + '"'
+        + '<input type="number" min="0" id="fup-' + t.id + sufixo + '" value="' + cfg[t.id] + '"'
         + ' style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;'
         + 'padding:6px 8px;color:var(--texto);font-size:12px;width:100%"></div>').join('')
-    + '<button class="btn-p" onclick="window.salvarFollowUp()" style="font-size:12px;padding:7px 14px">Salvar prazos</button>'
+    + '<button class="btn-p" onclick="window.salvarFollowUp(\'' + sufixo + '\')" style="font-size:12px;padding:7px 14px">Salvar prazos</button>'
     + '</div>';
-};
+}
 
 window.renderInativos180 = function(){
   if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
@@ -30636,7 +30699,47 @@ window.renderInativos180 = function(){
     const dias = _diasEntre(ct.data, _hojeISO);
     return dias !== null && dias >= prazo;
   };
-  const _ocultarContatados = document.getElementById('ct-inat-ocultar-contatados')?.checked !== false;
+  // [R117] Busca por nome/documento/telefone — a régua tem centenas de linhas.
+  const _busca = _norm(document.getElementById('ct-inat-busca')?.value || '');
+  if(_busca){
+    // Só comparar documento quando a busca TEM dígitos: '333'.includes('')
+    // é verdadeiro, então uma busca por texto casaria com todo mundo.
+    const _buscaNum = _busca.replace(/\D/g,'');
+    inativos = inativos.filter(c =>
+      _norm(c.nome).includes(_busca)
+      || _norm(c.vendedora||'').includes(_busca)
+      || _norm(c.telefone||'').includes(_busca)
+      || (_buscaNum && String(c.documento||'').includes(_buscaNum))
+      || (_buscaNum && String(c.telefone||'').replace(/\D/g,'').includes(_buscaNum)));
+  }
+
+  // [R117] Mês do último contato — popular a partir dos contatos existentes.
+  const _selMes = document.getElementById('ct-inat-mes');
+  if(_selMes){
+    const meses = [...new Set([...contatados.values()]
+      .map(ct => String(ct.data||'').slice(0,7)).filter(m => /^\d{4}-\d{2}$/.test(m)))]
+      .sort().reverse();
+    const assin = meses.join('|');
+    if(_selMes.dataset.assinatura !== assin){
+      const atual = _selMes.value;
+      _selMes.innerHTML = '<option value="">📅 Qualquer mês de contato</option>'
+        + meses.map(m => '<option value="'+m+'">'+m.split('-').reverse().join('/')+'</option>').join('');
+      _selMes.dataset.assinatura = assin;
+      _selMes.value = meses.includes(atual) ? atual : '';
+    }
+  }
+  const _mesContato = _selMes?.value || '';
+  if(_mesContato){
+    // com filtro de mês, só quem TEM contato naquele mês — e aí não faz
+    // sentido esconder contatados: é exatamente o que se quer ver.
+    inativos = inativos.filter(c => {
+      const ct = contatados.get(_norm(c.nome));
+      return ct && String(ct.data||'').slice(0,7) === _mesContato;
+    });
+  }
+
+  const _ocultarContatados = !_mesContato
+    && document.getElementById('ct-inat-ocultar-contatados')?.checked !== false;
   const _jaTratados = inativos.filter(_contatoCobre);
   if(_ocultarContatados) inativos = inativos.filter(c => !_contatoCobre(c));
 
