@@ -1546,6 +1546,18 @@ body:not(.logado) #appScreen{display:none!important}
      telas. Aqui ocupa espaço próprio: nada fica por baixo, e a navegação
      desce naturalmente. Fica grudado no topo quando a lateral rola. -->
 <div id="sync-badge" onclick="window.syncAgora()" title="Clique para sincronizar agora"></div>
+<!-- [R113b] O botão de descartar a cópia local ficava só em Configurações, que
+     é tela de admin — justamente as máquinas de LOJA, que mais sofrem com
+     estado local defeituoso, não o alcançavam. Aqui fica ao lado do indicador
+     de sincronização, visível para todos os perfis. -->
+<div style="padding:0 14px 10px;margin-top:-4px">
+  <button onclick="window.recarregarDoServidor()" id="btn-reler-servidor"
+    title="Use se esta máquina mostra dados diferentes das outras. Só LÊ do servidor — o que não tiver subido daqui será perdido."
+    style="width:100%;background:transparent;border:1px solid var(--borda);color:var(--muted);
+           border-radius:6px;padding:5px 8px;font-size:10px;cursor:pointer;font-family:DM Sans,sans-serif">
+    🔄 Dados diferentes? Reler do servidor
+  </button>
+</div>
 
   <div class="sb-sec">
     <div class="sb-lbl">Principal</div>
@@ -3192,6 +3204,19 @@ body:not(.logado) #appScreen{display:none!important}
           style="background:rgba(33,115,70,.15);border:1px solid rgba(33,115,70,.5);color:#4caf7d;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer">📊 Excel</button>
       </div>
     </div>
+    <!-- [R114] Prazos de reabordagem, definidos pela gestão -->
+    <div class="admin-only" id="fup-box" style="display:none;background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:12px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
+        🔁 Prazo para reabordar (follow-up)
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        Depois de contatado, o cliente sai desta lista. Se <strong>não comprar</strong> dentro do prazo
+        abaixo, ele <strong>volta</strong> para nova tentativa. Defina em dias, por tipo de contato —
+        a cadência não é a mesma para um aniversariante e para um inativo.
+        Use <strong>0</strong> para nunca reabordar.
+      </div>
+      <div id="fup-config"></div>
+    </div>
     <div id="ct-inativos180"></div>
   </div>
 
@@ -4141,6 +4166,23 @@ body:not(.logado) #appScreen{display:none!important}
       <div id="cfg-lojas-status"></div>
     </div>
 
+    <!-- [R113] Sincronia desta máquina -->
+    <div class="sc">
+      <div class="st">🔄 Esta máquina está diferente das outras?</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        O sistema guarda uma cópia local para funcionar rápido e offline, e nas dúvidas de
+        sincronização ele <strong>preserva o que está aqui</strong> — o que é certo para não perder
+        trabalho, mas faz um estado local defeituoso sombrear o servidor mesmo depois de recarregar.
+        O sinal típico é: <strong>só a janela anônima mostra os dados certos</strong>.
+        Este botão descarta a cópia local e relê tudo do servidor. Ele <strong>só lê</strong> —
+        não envia nada e não altera o servidor. Em compensação, o que existir apenas nesta
+        máquina e não tiver subido será perdido, e precisará ser relançado.
+      </div>
+      <button class="btn-p" onclick="window.recarregarDoServidor()" style="font-size:12px">
+        🔄 Descartar cópia local e reler do servidor
+      </button>
+    </div>
+
     <!-- [R109] Recuperação de campanhas órfãs -->
     <div class="sc">
       <div class="st">🎯 Campanhas sem definição</div>
@@ -4763,11 +4805,45 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script>
-// [R89] Marcador de versão: no console, window.AVATIM_BUILD diz qual
-// arquivo o navegador está executando. Serve para distinguir "bug" de
-// "está rodando uma cópia antiga".
-window.AVATIM_BUILD = '2026-08-25';
-console.log('[Avatim] build', window.AVATIM_BUILD);
+// [R112] Marcador de versão.
+//
+// A data sozinha não serve: é uma string que eu preciso lembrar de trocar, e
+// da última vez não troquei — o console dizia 25/08 num arquivo publicado
+// depois disso, e concluímos errado que a publicação não tinha subido.
+//
+// Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
+// mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
+// naquele navegador, sem depender de eu manter uma data em dia.
+window.AVATIM_BUILD = '2026-08-31';
+window.AVATIM_RECURSOS = {
+  travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
+  gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
+  recuperarCampanhas:    () => typeof window.recuperarCampanhas === 'function',
+  campanhasDoBackup:     () => typeof window.restaurarCampanhasDoBackup === 'function',
+  crmEmIndexedDB:        () => typeof window.crmGravarIdb === 'function',
+  fonteUnicaDoMes:       () => typeof window.crmDoMesPreferido === 'function',
+  clienteSemNomeOculto:  () => typeof window._crmAnonimo === 'function',
+  produtosPorVendedor:   () => typeof window.crmMesesDaLoja === 'function',
+  historicoUnico:        () => typeof window.historicoConsolidado === 'function',
+  filtroPorRelatorio:    () => typeof window._relBarra === 'function',
+  arquivarLojas:         () => typeof window.renderCfgLojas === 'function',
+  inativoContatadoSai:   () => !!document.getElementById('ct-inat-ocultar-contatados'),
+  recarregarDoServidor:  () => typeof window.recarregarDoServidor === 'function',
+  followUpConfiguravel:  () => typeof window.followUpDias === 'function'
+};
+window.avatimVerificar = function(){
+  const r = {};
+  Object.entries(window.AVATIM_RECURSOS).forEach(([k,f]) => {
+    try{ r[k] = f() ? '✅ ativo' : '❌ AUSENTE'; }catch(e){ r[k] = '❌ erro'; }
+  });
+  const faltando = Object.values(r).filter(v => v !== '✅ ativo').length;
+  console.log('[Avatim] build declarado:', window.AVATIM_BUILD);
+  console.table(r);
+  console.log(faltando ? '⚠️ ' + faltando + ' recurso(s) ausente(s) — este navegador está com código antigo.'
+                       : '✅ Todos os recursos presentes.');
+  return r;
+};
+console.log('[Avatim] build', window.AVATIM_BUILD, '— rode avatimVerificar() para conferir os recursos');
 
 // ============================================================
 // CONSTANTES
@@ -4844,6 +4920,61 @@ window.renderCfgCampOrfas = function(){
     + 'vendas e lançamentos posteriores ao backup ficam intactos.<br>'
     + 'O <strong>segundo</strong> não precisa de arquivo, mas cria nomes provisórios.</div>';
 };
+
+/**
+ * [R113] Descartar o estado local e reler tudo do servidor.
+ *
+ * Várias regras de merge preservam o dado LOCAL quando o carimbo dele parece
+ * mais recente. Isso protege edição não sincronizada, mas tem um efeito
+ * colateral: um estado local defeituoso (carimbo furado, relógio adiantado,
+ * gravação parcial) passa a sombrear o servidor PARA SEMPRE naquele
+ * navegador — recarregar não resolve, e só janela anônima mostra a verdade.
+ *
+ * Aqui o estado local é descartado de propósito, para o navegador reler tudo.
+ * Antes disso, o que ainda não subiu é enviado — senão a limpeza perderia
+ * trabalho de verdade.
+ */
+window.recarregarDoServidor = async function(){
+  // [R113c] NÃO enviar nada antes de limpar.
+  //
+  // A versão anterior subia o D local "para não perder trabalho". Mas quem
+  // usa este botão está justamente DESCONFIANDO do estado local — enviá-lo
+  // por cima do servidor é o mesmo mecanismo que pode ter apagado as
+  // campanhas. Entre perder um lançamento e corromper a base de todos, a
+  // escolha é clara: aqui só se LÊ do servidor, nunca se escreve.
+  //
+  // O que estiver só nesta máquina será perdido — por isso o aviso mostra
+  // o que existe aqui, para a decisão ser informada.
+  const diasLanc = Object.values(D.vendasVend || {})
+    .reduce((s2,o) => s2 + Object.keys(o||{}).length, 0);
+  const nFluxo    = (D.fluxo || []).length;
+  const nContatos = (D.contatos || []).length;
+
+  const inventario =
+      '• ' + diasLanc + ' dia(s) de lançamento por vendedor(a)\n'
+    + '• ' + nFluxo + ' registro(s) de Origem do Fluxo\n'
+    + '• ' + nContatos + ' contato(s)';
+
+  if(!confirm(
+      'DESCARTAR os dados guardados NESTE navegador e reler tudo do servidor?\n\n'
+    + 'Use quando esta máquina mostra informação diferente das outras.\n\n'
+    + 'NADA é enviado ao servidor e NADA é apagado lá — esta operação só LÊ.\n\n'
+    + 'Mas o que existir apenas aqui e ainda não tiver subido SERÁ PERDIDO.\n'
+    + 'Nesta máquina existem hoje:\n' + inventario + '\n\n'
+    + 'Se houver lançamento de hoje que talvez não tenha sincronizado, '
+    + 'CANCELE, confirme com a loja e refaça o lançamento depois.\n\nContinuar?')) return;
+
+  try{ localStorage.removeItem('avatim_v5'); localStorage.removeItem('avatim_pending'); }
+  catch(e){ console.warn('[R113] localStorage:', e.message); }
+  try{ if(window.indexedDB) indexedDB.deleteDatabase('avatim'); }
+  catch(e){ console.warn('[R113] IndexedDB:', e.message); }
+  window._pendingLocalData = null;
+  window._pendingLocalDataTs = null;
+
+  showToast('🔄 Cópia local descartada — recarregando do servidor...', 'ok');
+  setTimeout(() => location.reload(), 600);
+};
+
 
 window.renderCfgLojas = function(){
   const el = document.getElementById('cfg-lojas-status');
@@ -30340,7 +30471,80 @@ function _ctTh(rot, campo, align){
     + 'title="Clique para ordenar">' + rot + ' ' + _ctSeta(campo) + '</th>';
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// [R114] JANELA DE FOLLOW-UP
+//
+// Até aqui, um inativo contatado saía da régua e não voltava — mesmo sem
+// ter comprado. Na prática o cliente era abordado uma vez e esquecido.
+//
+// Agora o contato "cobre" o cliente por um PRAZO. Passado o prazo sem
+// compra, ele volta para a lista para nova tentativa. O prazo é definido
+// pelo admin, por tipo de contato, porque a cadência não é a mesma: um
+// aniversariante não se reaborda em 30 dias, um inativo sim.
+// ══════════════════════════════════════════════════════════════════════
+window.TIPOS_CONTATO_FOLLOWUP = [
+  {id:'inativo',     nome:'💤 Cliente inativo',  padrao:45},
+  {id:'aniversario', nome:'🎂 Aniversariante',   padrao:90},
+  {id:'pos_venda',   nome:'📦 Pós-venda',        padrao:60},
+  {id:'mensagem',    nome:'💌 Mensagem',         padrao:30},
+  {id:'imediata',    nome:'⚡ Imediata',          padrao:15},
+  {id:'outro',       nome:'💬 Outro contato',    padrao:45}
+];
+
+function _followUpConfig(){
+  if(!D.configFollowUp || typeof D.configFollowUp !== 'object') D.configFollowUp = {};
+  window.TIPOS_CONTATO_FOLLOWUP.forEach(t => {
+    if(!(t.id in D.configFollowUp)) D.configFollowUp[t.id] = t.padrao;
+  });
+  return D.configFollowUp;
+}
+
+/** Prazo em dias para reabordar, conforme o tipo do contato. */
+window.followUpDias = function(tipoContato){
+  const cfg = _followUpConfig();
+  const v = Number(cfg[tipoContato]);
+  return isFinite(v) && v >= 0 ? v : 45;
+};
+
+window.salvarFollowUp = function(){
+  if(!isAdmin()){ showToast('Apenas a gestão define os prazos.','err'); return; }
+  const cfg = _followUpConfig();
+  window.TIPOS_CONTATO_FOLLOWUP.forEach(t => {
+    const el = document.getElementById('fup-' + t.id);
+    if(el && el.value !== ''){
+      const v = parseInt(el.value, 10);
+      if(isFinite(v) && v >= 0) cfg[t.id] = v;
+    }
+  });
+  D.configFollowUp._savedAt = Date.now();
+  save();
+  if(typeof window.renderInativos180 === 'function') window.renderInativos180();
+  showToast('Prazos de follow-up salvos.','ok');
+};
+
+window.renderFollowUpConfig = function(){
+  const el = document.getElementById('fup-config');
+  if(!el) return;
+  if(!isAdmin()){
+    el.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">'
+      + 'Somente a gestão define os prazos de reabordagem.</div>';
+    return;
+  }
+  const cfg = _followUpConfig();
+  el.innerHTML =
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+    + window.TIPOS_CONTATO_FOLLOWUP.map(t =>
+        '<div class="ig" style="min-width:150px">'
+        + '<label style="font-size:10px">' + t.nome + '</label>'
+        + '<input type="number" min="0" id="fup-' + t.id + '" value="' + cfg[t.id] + '"'
+        + ' style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;'
+        + 'padding:6px 8px;color:var(--texto);font-size:12px;width:100%"></div>').join('')
+    + '<button class="btn-p" onclick="window.salvarFollowUp()" style="font-size:12px;padding:7px 14px">Salvar prazos</button>'
+    + '</div>';
+};
+
 window.renderInativos180 = function(){
+  if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
   const el = document.getElementById('ct-inativos180');
   if(!el) return;
   const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
@@ -30400,11 +30604,37 @@ window.renderInativos180 = function(){
   //
   // Nada é apagado: o contato continua no histórico de Clientes Contatados,
   // e o contador abaixo mostra quantos saíram.
+  // [R114] O contato cobre o cliente por um PRAZO, não para sempre.
+  // Duas condições: ter sido feito depois da última compra (já tratou desta
+  // inatividade) E ainda estar dentro da janela de follow-up do seu tipo.
+  // Vencido o prazo sem compra, o cliente volta para nova tentativa.
+  const _hojeISO = hoje();
+  const _diasEntre = (de, ate) => {
+    if(!de || !ate) return null;
+    const [ya,ma,da] = de.split('-').map(Number);
+    const [yb,mb,db] = ate.split('-').map(Number);
+    return Math.round((new Date(yb,mb-1,db) - new Date(ya,ma-1,da)) / 86400000);
+  };
   const _contatoCobre = c => {
     const ct = contatados.get(_norm(c.nome));
     if(!ct || !ct.data) return false;
     const ultCompra = String(c.ultima || '');
-    return !ultCompra || ct.data >= ultCompra;
+    if(ultCompra && ct.data < ultCompra) return false;      // contato anterior à compra
+    const prazo = window.followUpDias(ct.tipo);
+    if(prazo === 0) return true;                             // 0 = nunca reabordar
+    const dias = _diasEntre(ct.data, _hojeISO);
+    return dias !== null && dias < prazo;                    // ainda dentro da janela
+  };
+  // quem VOLTOU por vencimento do prazo — merece destaque, não é um inativo qualquer
+  const _venceuFollowUp = c => {
+    const ct = contatados.get(_norm(c.nome));
+    if(!ct || !ct.data) return false;
+    const ultCompra = String(c.ultima || '');
+    if(ultCompra && ct.data < ultCompra) return false;
+    const prazo = window.followUpDias(ct.tipo);
+    if(prazo === 0) return false;
+    const dias = _diasEntre(ct.data, _hojeISO);
+    return dias !== null && dias >= prazo;
   };
   const _ocultarContatados = document.getElementById('ct-inat-ocultar-contatados')?.checked !== false;
   const _jaTratados = inativos.filter(_contatoCobre);
@@ -30434,7 +30664,8 @@ window.renderInativos180 = function(){
   // [R79] Guardar a lista já filtrada e ordenada: o Excel exporta ESTA,
   // não uma recalculada — assim planilha e tela nunca discordam.
   window._ctInatLista = inativos.map(c => Object.assign({}, c, {
-    ultimoContato: _ultCt(c) || ''
+    ultimoContato: _ultCt(c) || '',
+    reabordar: _venceuFollowUp(c)          // [R114] voltou por vencimento do prazo
   }));
 
   const cnt = document.getElementById('ct-inat-count');
@@ -30452,6 +30683,13 @@ window.renderInativos180 = function(){
 
   const semContato = inativos.filter(c => !contatados.has(_norm(c.nome)));
   const potencial  = inativos.reduce((s,c) => s + (c.total||0), 0);
+  const _reabordar = inativos.filter(_venceuFollowUp).length;
+  const _avisoReabordar = _reabordar
+    ? '<div style="font-size:11px;color:var(--ouro);margin-bottom:8px;padding:8px 10px;'
+      + 'background:rgba(201,168,76,.08);border-left:3px solid var(--ouro);border-radius:4px">'
+      + '🔁 <strong>' + _reabordar + '</strong> cliente(s) voltaram à lista: foram contatados, '
+      + 'não compraram e o prazo de follow-up venceu.</div>'
+    : '';
   const _avisoTratados = _jaTratados.length
     ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">'
       + '✅ <strong>' + _jaTratados.length + '</strong> cliente(s) já contatado(s) depois da última compra '
@@ -30459,7 +30697,7 @@ window.renderInativos180 = function(){
       + ' — o registro segue no histórico de Clientes Contatados.</div>'
     : '';
 
-  el.innerHTML = _avisoTratados +
+  el.innerHTML = _avisoReabordar + _avisoTratados +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
       + '<div style="flex:1;min-width:150px;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px;text-align:center">'
         + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Inativos</div>'
