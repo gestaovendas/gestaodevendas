@@ -262,6 +262,9 @@ try{
           realProd:      D2.realProd      || {},
           configCom:     D2.configCom     || {},
           configModalidades: D2.configModalidades || {},
+          // [R119] ajuste manual de dias abertos por loja/mês — decisão da
+          // gestão, precisa valer para todas as máquinas
+          diasAbertosOverride: D2.diasAbertosOverride || {},
           fluxo:         D2.fluxo         || [],
           saldosOverride:D2.saldosOverride|| {},
           precosOverride:D2.precosOverride|| {},
@@ -4855,7 +4858,9 @@ window.AVATIM_RECURSOS = {
   arquivarLojas:         () => typeof window.renderCfgLojas === 'function',
   inativoContatadoSai:   () => !!document.getElementById('ct-inat-ocultar-contatados'),
   recarregarDoServidor:  () => typeof window.recarregarDoServidor === 'function',
-  followUpConfiguravel:  () => typeof window.followUpDias === 'function'
+  followUpConfiguravel:  () => typeof window.followUpDias === 'function',
+  metaPorDiasTrab:       () => typeof window.redistribuirPorDiasTrab === 'function',
+  diasAbertosAjustavel:  () => typeof window.ajustarDiasAbertos === 'function'
 };
 window.avatimVerificar = function(){
   const r = {};
@@ -9053,6 +9058,7 @@ async function loadFromFirestore(){
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
       if(remoto.configCom)   D.configCom   = remoto.configCom;
       if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
+      if(remoto.diasAbertosOverride) D.diasAbertosOverride = remoto.diasAbertosOverride;
       if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
       if(remoto.precosOverride) D.precosOverride = remoto.precosOverride;
       if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
@@ -9310,10 +9316,28 @@ function diasDoMes(mesRef){
 // Demais lojas: seg a sab (fecha domingo = dia 0)
 const LOJAS_7DIAS = ["mooca","ibirapuera"]; // abrem domingo também
 
-function diasAbertosNoMes(lid){
-  // Conta dias em que a loja abre no mês atual
+function diasAbertosNoMes(lid, mesRef){
+  // [R118] Aceita mesRef ('AAAA-MM'). Sem argumento continua no mês atual —
+  // os chamadores antigos seguem funcionando. Era preciso porque a tela de
+  // metas navega entre meses e contava sempre os dias do mês corrente.
   const h = new Date();
-  const ano = h.getFullYear(), mes = h.getMonth();
+  let ano = h.getFullYear(), mes = h.getMonth();
+  if(/^\d{4}-\d{2}$/.test(mesRef||'')){
+    ano = Number(mesRef.slice(0,4)); mes = Number(mesRef.slice(5,7)) - 1;
+  }
+
+  // [R119] Ajuste manual de dias abertos, por loja e mês.
+  //
+  // A regra automática (rua fecha domingo, shopping abre todo dia) não sabe de
+  // feriado, reforma, falta de energia ou inventário. Quando o gestor informa
+  // o número real, ele MANDA — e como isto está dentro da função, os ~30
+  // pontos que calculam meta, projeção, ranking e PDF passam a usar o número
+  // certo sem precisar ser tocados um a um.
+  const _mrOv = String(ano) + '-' + String(mes + 1).padStart(2, '0');
+  const _ov = D.diasAbertosOverride && D.diasAbertosOverride[lid]
+            && D.diasAbertosOverride[lid][_mrOv];
+  const _ovN = Number(_ov);
+  if(isFinite(_ovN) && _ovN > 0) return Math.round(_ovN);
   const totalDias = new Date(ano, mes+1, 0).getDate();
   const abre7 = LOJAS_7DIAS.includes(lid);
   let count = 0;
@@ -9429,6 +9453,97 @@ function arquivarVendedora(vid, arquivar){
     }
   })();
 }
+// ══════════════════════════════════════════════════════════════════════
+// [R118] DIAS TRABALHADOS E META PROPORCIONAL
+//
+// A meta individual não é a meta da loja dividida igualmente: quem trabalhou
+// menos dias no mês (folga, férias, entrada no meio do mês) não pode receber
+// a mesma meta de quem trabalhou o mês inteiro.
+//
+//   Meta diária da loja = Meta mensal ÷ dias de abertura da loja
+//   Meta individual     = Meta diária × dias trabalhados pelo vendedor(a)
+//
+// Os dias ficam POR MÊS (v.diasTrab['AAAA-MM']), porque mudam todo mês. Sem
+// valor informado, assume-se o mês inteiro — assim nada muda para quem não
+// usa o controle.
+// ══════════════════════════════════════════════════════════════════════
+
+/** [R119] Dias abertos que a REGRA automática calcularia, ignorando o ajuste. */
+function diasAbertosAutomatico(lid, mesRef){
+  const h = new Date();
+  let ano = h.getFullYear(), mes = h.getMonth();
+  if(/^\d{4}-\d{2}$/.test(mesRef||'')){
+    ano = Number(mesRef.slice(0,4)); mes = Number(mesRef.slice(5,7)) - 1;
+  }
+  const totalDias = new Date(ano, mes+1, 0).getDate();
+  const abre7 = LOJAS_7DIAS.includes(lid);
+  let n = 0;
+  for(let d=1; d<=totalDias; d++){
+    const dow = new Date(ano, mes, d).getDay();
+    if(abre7 || dow !== 0) n++;
+  }
+  return n;
+}
+
+/** [R119] Há ajuste manual para esta loja/mês? */
+function temAjusteDiasAbertos(lid, mesRef){
+  mesRef = mesRef || mesAtual();
+  const v = D.diasAbertosOverride && D.diasAbertosOverride[lid]
+         && D.diasAbertosOverride[lid][mesRef];
+  return isFinite(Number(v)) && Number(v) > 0;
+}
+
+/** [R119] Define (ou limpa, com valor vazio) os dias abertos da loja no mês. */
+function setDiasAbertos(lid, mesRef, dias){
+  if(!D.diasAbertosOverride || typeof D.diasAbertosOverride !== 'object') D.diasAbertosOverride = {};
+  if(!D.diasAbertosOverride[lid]) D.diasAbertosOverride[lid] = {};
+  const n = Number(dias);
+  if(dias === '' || dias === null || !isFinite(n) || n <= 0){
+    delete D.diasAbertosOverride[lid][mesRef];         // volta para a regra automática
+  } else {
+    D.diasAbertosOverride[lid][mesRef] = Math.min(31, Math.max(1, Math.round(n)));
+  }
+  D._diasAbertosTs = Date.now();
+}
+
+/** Dias trabalhados por um(a) vendedor(a) no mês. Padrão: mês inteiro. */
+function diasTrabVend(vendId, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return 0;
+  mesRef = mesRef || (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const reg = v.diasTrab && v.diasTrab[mesRef];
+  const n = Number(reg);
+  if(isFinite(n) && n >= 0) return n;
+  return diasAbertosNoMes(v.loja, mesRef);      // não informado = mês inteiro
+}
+
+/** Grava os dias trabalhados do mês. */
+function setDiasTrabVend(vendId, mesRef, dias){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return;
+  if(!v.diasTrab || typeof v.diasTrab !== 'object') v.diasTrab = {};
+  const n = Number(dias);
+  if(dias === '' || dias === null || !isFinite(n)) delete v.diasTrab[mesRef];
+  else v.diasTrab[mesRef] = Math.max(0, Math.round(n));
+  v._savedAt = Date.now();
+}
+
+/** Meta diária da loja no mês = meta mensal ÷ dias de abertura. */
+function metaDiaLojaBase(lid, mesRef){
+  mesRef = mesRef || (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const metaMes = (metaDoMes(lid, mesRef).valor) || 0;
+  const dias = diasAbertosNoMes(lid, mesRef);
+  return dias > 0 ? metaMes / dias : 0;
+}
+
+/** Meta individual proporcional aos dias trabalhados. */
+function metaVendPorDias(vendId, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return 0;
+  mesRef = mesRef || (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  return Math.round(metaDiaLojaBase(v.loja, mesRef) * diasTrabVend(vendId, mesRef));
+}
+
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*1.255);
@@ -16555,11 +16670,105 @@ function salvarMetasVendedoras(lid){
     }
   })();
 }
+/**
+ * [R119] Ajusta os dias de abertura da loja no mês exibido.
+ *
+ * Grava e re-renderiza na hora, porque tudo na tela depende disso: a meta
+ * diária, a prévia de cada vendedor(a) e a soma. Valor vazio volta à regra
+ * automática.
+ */
+window.ajustarDiasAbertos = function(lid, valor){
+  if(!isAdmin()){ showToast('Apenas a gestão ajusta os dias de abertura.','err'); return; }
+  const mr = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const auto = diasAbertosAutomatico(lid, mr);
+  setDiasAbertos(lid, mr, valor);
+  const agora = diasAbertosNoMes(lid, mr);
+  _persistirLocal();
+  if(typeof renderMetasLojas === 'function') renderMetasLojas();
+  showToast(temAjusteDiasAbertos(lid, mr)
+    ? '📅 ' + agora + ' dia(s) de abertura neste mês (a regra automática daria ' + auto + '). '
+      + 'Metas e projeções já usam esse número. Salve as metas para gravar no servidor.'
+    : '📅 De volta à regra automática: ' + auto + ' dia(s).', 'ok');
+};
+
+/** [R118] Previa ao digitar os dias: o usuário vê a meta antes de salvar. */
+window._previewMetaPorDias = function(vendId, lid){
+  const mr  = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const el  = document.getElementById('mv-dias-' + vendId);
+  const prev= document.getElementById('mv-dias-prev-' + vendId);
+  if(!el || !prev) return;
+  const dias = el.value === '' ? diasAbertosNoMes(lid, mr) : Number(el.value);
+  if(!isFinite(dias) || dias < 0){ prev.textContent = ''; return; }
+  prev.textContent = '→ ' + fmt(Math.round(metaDiaLojaBase(lid, mr) * dias));
+};
+
+/**
+ * [R118] Redistribui as metas individuais pelos dias trabalhados.
+ *
+ * Substitui a divisão em partes iguais, que dava a mesma meta a quem
+ * trabalhou 25 dias e a quem trabalhou 12. Só preenche os campos na tela —
+ * nada é gravado até o usuário clicar em salvar, e nada vai ao Firebase aqui.
+ */
+window.redistribuirPorDiasTrab = function(lid){
+  const mr = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const metaDia = metaDiaLojaBase(lid, mr);
+  if(metaDia <= 0){
+    showToast('Defina a meta mensal da loja antes de redistribuir.','warn');
+    return;
+  }
+  const vends = vendsAtivas(lid);
+  let soma = 0;
+  vends.forEach(v => {
+    const elD = document.getElementById('mv-dias-' + v.id);
+    const dias = (elD && elD.value !== '') ? Number(elD.value) : diasAbertosNoMes(lid, mr);
+    if(!isFinite(dias) || dias < 0) return;
+    const meta = Math.round(metaDia * dias);
+    soma += meta;
+    const elM = document.getElementById('mv-mes-' + v.id);
+    if(elM){ elM.value = meta; elM.dataset.manual = '1'; }
+    const elS = document.getElementById('mv-smes-' + v.id);
+    if(elS && !elS.value){ elS.value = Math.round(meta * 1.25); }
+    window._previewMetaPorDias(v.id, lid);
+  });
+  const metaLoja = (metaDoMes(lid, mr).valor) || 0;
+  const dif = soma - metaLoja;
+  showToast('Metas redistribuídas por dias trabalhados. Soma: ' + fmt(soma)
+    + (Math.abs(dif) > 1 ? ' — ' + (dif > 0 ? 'acima' : 'abaixo') + ' da meta da loja em ' + fmt(Math.abs(dif))
+       + ' (esperado quando há folga/férias)' : '')
+    + '. Clique em salvar para gravar.', 'ok');
+};
+
 function renderMetasVendSection(lid){
   // [FIX] vendsAtivas exclui vendedoras arquivadas (ativa===false)
   // Arquivadas não devem aparecer para receber novas metas
   const vends=vendsAtivas(lid);
   if(!vends.length) return "";
+  // [R118] Base do rateio, visível: sem ver a meta diária da loja o usuário
+  // não tem como conferir se a meta individual saiu certa.
+  const _mrDias  = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const _diasAbre = diasAbertosNoMes(lid, _mrDias);
+  const _metaDia  = metaDiaLojaBase(lid, _mrDias);
+  const _cabDias = `
+    <div style="background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.25);border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <div><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Dias de abertura</div>
+           <div style="display:flex;align-items:center;gap:6px">
+             <input type="number" min="1" max="31" id="ml-diasabre-${lid}" value="${_diasAbre}"
+               title="Dias em que a loja abre no mês. A regra automática calcula ${diasAbertosAutomatico(lid,_mrDias)}; ajuste aqui em caso de feriado, reforma ou fechamento."
+               onchange="ajustarDiasAbertos('${lid}', this.value)"
+               style="width:62px;background:var(--cinza);border:1px solid ${temAjusteDiasAbertos(lid,_mrDias)?'var(--ouro)':'var(--borda)'};border-radius:5px;padding:4px 6px;color:var(--texto);font-size:15px;font-weight:700;text-align:center">
+             ${temAjusteDiasAbertos(lid,_mrDias)
+               ? '<button onclick="ajustarDiasAbertos(\''+lid+'\',\'\')" title="Voltar para a regra automática ('+diasAbertosAutomatico(lid,_mrDias)+' dias)" style="background:none;border:none;color:var(--ouro);font-size:10px;cursor:pointer;padding:0">✎ ajustado · voltar ao automático</button>'
+               : '<span style="font-size:9px;color:var(--muted)">automático</span>'}
+           </div></div>
+      <div><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Meta diária da loja</div>
+           <div style="font-size:15px;font-weight:700;color:var(--ouro)">${fmt(_metaDia)}</div></div>
+      <div style="flex:1;min-width:220px;font-size:10px;color:var(--muted);line-height:1.5">
+        Meta individual = meta diária × dias trabalhados. Deixe os dias em branco para
+        considerar o mês inteiro.
+        <button class="btn-s" onclick="redistribuirPorDiasTrab('${lid}')"
+          style="font-size:10px;padding:4px 10px;margin-left:6px">⚖️ Redistribuir por dias trabalhados</button>
+      </div>
+    </div>`;
   // Layout: 2 linhas por vendedora — linha 1: nome+acum | meta | super; linha 2: ticket | aniv | inativ
   const rows=vends.map(v=>`
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:10px 12px;margin-bottom:8px">
@@ -16570,7 +16779,15 @@ function renderMetasVendSection(lid){
         </div>
         <div style="font-size:10px;color:var(--muted);background:var(--cinza);padding:3px 8px;border-radius:10px">${v.cargo||'ESP'}</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:.7fr 1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:8px;color:var(--verde);font-weight:600;margin-bottom:3px">DIAS TRAB.</div>
+          <input type="number" min="0" max="31" id="mv-dias-${v.id}" value="${(v.diasTrab && v.diasTrab[_mrDias] !== undefined) ? v.diasTrab[_mrDias] : ''}"
+            placeholder="${_diasAbre}" title="Dias trabalhados no mês. Vazio = mês inteiro (${_diasAbre} dias)."
+            oninput="_previewMetaPorDias('${v.id}','${lid}')"
+            style="width:100%;background:var(--cinza);border:1px solid rgba(46,204,135,.3);border-radius:5px;padding:6px 8px;color:var(--verde);font-size:12px;font-weight:700;outline:none;box-sizing:border-box">
+          <div id="mv-dias-prev-${v.id}" style="font-size:8px;color:var(--muted);margin-top:2px"></div>
+        </div>
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:600;margin-bottom:3px">META MÊS (R$)</div>
           <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
@@ -16607,6 +16824,7 @@ function renderMetasVendSection(lid){
     </div>`).join("");
   return `<div style="margin-top:12px;background:rgba(91,141,239,.04);border:1px solid rgba(91,141,239,.15);border-radius:10px;padding:14px">
     <div style="font-size:9px;color:var(--azul);font-weight:700;letter-spacing:1px;margin-bottom:10px">👤 METAS INDIVIDUAIS — ${vends.length} VENDEDOR(ES)</div>
+    ${_cabDias}
     ${rows}
     <button onclick="salvarMetasVendedoras('${lid}')" style="width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(91,141,239,.9),rgba(91,141,239,.7));border:none;border-radius:7px;padding:10px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 Salvar Metas das Vendedor(es)</button>
   </div>`;
@@ -16690,6 +16908,9 @@ function salvarMetaLoja(lid){
       if(idx!==-1 && mesEl){
         // [FIX A] Salvar mesmo se mv===0 (usuário pode querer zerar meta)
         // Só não contar na soma se mv===0
+        // [R118] dias trabalhados do mês, junto da meta
+        const _elD = document.getElementById('mv-dias-'+v.id);
+        if(_elD) setDiasTrabVend(v.id, _mesMeta||mesAtual(), _elD.value);
         D.vendedoras[idx].metaMes       = mv;
         D.vendedoras[idx].superMetaMes  = smv;
         D.vendedoras[idx].ticketAlvo    = tick;
@@ -16709,19 +16930,26 @@ function salvarMetaLoja(lid){
     // da loja é fonte de verdade. Vendedoras herdam proporcionalmente.
     const _vr = vendsAtivas(lid);
     if(_vr.length > 0){
-      const mv = parseFloat((mes/_vr.length).toFixed(2));
-      const smv = parseFloat((smes/_vr.length).toFixed(2));
+      // [R118] Rateio POR DIAS TRABALHADOS, não em partes iguais.
+      // Dividir igualmente dava a mesma meta a quem trabalhou o mês inteiro e
+      // a quem esteve de férias metade dele.
+      const _mrD  = _mesMeta || mesAtual();
+      const _diasAb = diasAbertosNoMes(lid, _mrD);
+      const _metaDiaL = _diasAb > 0 ? mes  / _diasAb : 0;
+      const _superDiaL= _diasAb > 0 ? smes / _diasAb : 0;
       const _tsB = Date.now();
       _vr.forEach(v=>{
         const i = D.vendedoras.findIndex(x=>x.id===v.id);
-        if(i !== -1){
-          D.vendedoras[i].metaMes = mv;
-          D.vendedoras[i].superMetaMes = smv;
-          D.vendedoras[i]._savedAt = _tsB; // timestamp para sync cross-device
-          somaMes += mv;
-          somaSmes += smv;
-          nVend++;
-        }
+        if(i === -1) return;
+        const _dias = diasTrabVend(v.id, _mrD);
+        const mv  = parseFloat((_metaDiaL  * _dias).toFixed(2));
+        const smv = parseFloat((_superDiaL * _dias).toFixed(2));
+        D.vendedoras[i].metaMes = mv;
+        D.vendedoras[i].superMetaMes = smv;
+        D.vendedoras[i]._savedAt = _tsB; // timestamp para sync cross-device
+        somaMes += mv;
+        somaSmes += smv;
+        nVend++;
       });
     }
   }
