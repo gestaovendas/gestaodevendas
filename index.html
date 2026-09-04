@@ -172,6 +172,115 @@ try{
     try{ await signOut(auth); }catch(e){}
   };
 
+  // ══════════════════════════════════════════════════════════════
+  // [R125] O documento "principal" estourou o limite do Firestore.
+  //
+  //   invalid-argument: The value of property "dados" is longer than
+  //   1048487 bytes.
+  //
+  // A partir daí NENHUMA gravação do admin passava: metas, dias
+  // trabalhados, exclusão no fluxo, arquivamento de loja — tudo ficava só
+  // na máquina e o servidor devolvia a versão velha no carregamento
+  // seguinte. Era isso que aparecia como "os dados não vêm sincronizados".
+  //
+  // A saída é a mesma já usada nos cubos do CRM: fatiar. O JSON continua
+  // sendo UM texto; só é partido em pedaços que cabem, gravados em
+  // "principal" (pedaço 0, mais a contagem) e "principal_p1", "_p2"… A
+  // leitura remonta e faz JSON.parse do texto inteiro. Nenhum campo mudou
+  // de lugar e nada é descartado para caber.
+  //
+  // O corte é por BYTES em UTF-8, que é o que o Firestore mede — acento e
+  // emoji ocupam mais de um byte, e cortar por caractere estouraria de
+  // novo. Pares substitutos (emoji) nunca são partidos ao meio: quebraria
+  // o JSON ao juntar.
+  // ══════════════════════════════════════════════════════════════
+  const PRINCIPAL_LIMITE_BYTES = 800000;   // folga sob os 1.048.487 do Firestore
+
+  function _fatiarPorBytes(texto, maxBytes){
+    const enc = new TextEncoder();
+    if(enc.encode(texto).length <= maxBytes) return [texto];
+    const partes = [];
+    let ini = 0;
+    while(ini < texto.length){
+      let lo = 1, hi = Math.min(texto.length - ini, maxBytes);
+      while(lo < hi){
+        const meio = Math.ceil((lo + hi) / 2);
+        if(enc.encode(texto.substr(ini, meio)).length <= maxBytes) lo = meio; else hi = meio - 1;
+      }
+      // não partir um par substituto (emoji) ao meio
+      const ultimo = texto.charCodeAt(ini + lo - 1);
+      if(ultimo >= 0xD800 && ultimo <= 0xDBFF && (ini + lo) < texto.length) lo--;
+      if(lo <= 0) lo = 1;
+      partes.push(texto.substr(ini, lo));
+      ini += lo;
+    }
+    return partes;
+  }
+
+  /**
+   * Grava um documento fatiado. Vale para "principal" e para os "loja_*" —
+   * o doc da Mooca, com 70 dias de vendas mais fluxo e contatos, corre o
+   * mesmo risco. `extras` são os campos que acompanham (lojaId, por).
+   * Devolve quantos pedaços foram gravados.
+   */
+  async function _gravarDocFatiado(db, doc, setDoc, docId, obj, extras){
+    const texto  = JSON.stringify(obj);
+    const partes = _fatiarPorBytes(texto, PRINCIPAL_LIMITE_BYTES);
+    const ts = Date.now();
+    await setDoc(doc(db,"avatim",docId),
+      Object.assign({ dados: partes[0], partes: partes.length, ts }, extras||{}));
+    for(let i = 1; i < partes.length; i++){
+      await setDoc(doc(db,"avatim",docId+"_p"+i),
+        Object.assign({ dados: partes[i], ts }, extras||{}));
+    }
+    if(partes.length > 1) console.log("[Avatim] " + docId + " gravado em " + partes.length + " pedaços");
+    return partes.length;
+  }
+
+  /**
+   * Lê um documento fatiado e remonta o texto. Pedaço faltando devolve null
+   * em vez de JSON truncado: dado pela metade é pior que dado nenhum — a
+   * tela cai no localStorage em vez de mostrar número errado.
+   */
+  async function _lerDocTexto(db, doc, getDoc, docId){
+    const snap = await getDoc(doc(db,"avatim",docId));
+    if(!snap.exists()) return null;
+    const d = snap.data();
+    let texto = d.dados || "";
+    const n = Number(d.partes) || 1;
+    if(n > 1){
+      const ids = [];
+      for(let i = 1; i < n; i++) ids.push(docId+"_p"+i);
+      const extras = await Promise.all(ids.map(id => getDoc(doc(db,"avatim",id))));
+      for(let i = 0; i < extras.length; i++){
+        if(!extras[i].exists()){
+          console.error("[Avatim] " + docId + ": pedaço " + ids[i] + " não encontrado — leitura abortada");
+          return null;
+        }
+        texto += extras[i].data().dados || "";
+      }
+    }
+    return texto;
+  }
+
+  /** Lê e já faz o parse. Devolve null quando não há dado utilizável. */
+  async function _lerDocObj(db, doc, getDoc, docId){
+    try{
+      const texto = await _lerDocTexto(db, doc, getDoc, docId);
+      if(!texto) return null;
+      return JSON.parse(texto);
+    }catch(e){
+      console.error("[Avatim] " + docId + " ilegível:", e.message);
+      return null;
+    }
+  }
+  // Expostos para as ferramentas que vivem fora deste módulo (diagnósticos e
+  // correções manuais). Elas liam e gravavam o "principal" cru — com o
+  // documento fatiado leriam JSON pela metade e, pior, gravariam de volta SEM
+  // a contagem de pedaços, deixando os demais órfãos e o documento ilegível.
+  window._avatimLerDoc    = (docId) => _lerDocObj(db, doc, getDoc, docId);
+  window._avatimGravarDoc = (docId, obj, extras) => _gravarDocFatiado(db, doc, setDoc, docId, obj, extras);
+
   // Gravar no Firestore — garante auth antes
   // ── ARQUITETURA CORRETA: cada loja salva no SEU documento ──────────
   // doc "principal" = admin (metas, vendedoras, campanhas)
@@ -205,9 +314,8 @@ try{
       if(isAdm){
         // Admin: merge preventivo com campRealizados do Firestore
         try {
-          const snapAtual = await getDoc(doc(db,"avatim","principal"));
-          if(snapAtual.exists()){
-            const atual = JSON.parse(snapAtual.data().dados||"{}");
+          const atual = await _lerDocObj(db, doc, getDoc, "principal");
+          if(atual){
             if(atual.campRealizados && atual.campRealizados.length){
               if(!D2.campRealizados) D2.campRealizados = [];
               atual.campRealizados.forEach(r=>{
@@ -317,9 +425,11 @@ try{
           metasLoja:     Object.keys(o?.metasLoja || {}).length
         });
         try{
-          const _snapAntes = await getDoc(doc(db,"avatim","principal"));
-          if(_snapAntes.exists()){
-            const _antes  = _peso(JSON.parse(_snapAntes.data().dados || "{}"));
+          // [R125] a trava precisa enxergar o documento INTEIRO; lendo só o
+          // primeiro pedaço ela veria campos vazios e recusaria toda gravação.
+          const _objAntes = await _lerDocObj(db, doc, getDoc, "principal");
+          if(_objAntes){
+            const _antes  = _peso(_objAntes);
             const _depois = _peso(D2_principal);
             const _sumiu = Object.keys(_antes).filter(k => _antes[k] > 0 && _depois[k] === 0);
             if(_sumiu.length){
@@ -338,11 +448,9 @@ try{
           console.warn('[Avatim] trava anti-apagamento não pôde conferir o remoto:', eGuarda.code||eGuarda.message);
         }
 
-        await setDoc(doc(db,"avatim","principal"), {
-          dados: JSON.stringify(D2_principal),
-          ts: Date.now(),
-          por: email
-        });
+        // [R125] fatiado — este documento passou de 1 MiB e a gravação
+        // vinha sendo recusada pelo Firestore com invalid-argument.
+        await _gravarDocFatiado(db, doc, setDoc, "principal", D2_principal, { por: email });
         console.log("[Avatim] ✅ Admin: principal salvo (config only)");
 
         // [FIX 23/07] Propagar lançamentos feitos PELO ADMIN para os docs das
@@ -359,8 +467,7 @@ try{
             const docIdA = "loja_"+lidA;
             let remotoA = {};
             try{
-              const snapA = await getDoc(doc(db,"avatim",docIdA));
-              if(snapA.exists()) remotoA = JSON.parse(snapA.data().dados||"{}");
+              remotoA = (await _lerDocObj(db, doc, getDoc, docIdA)) || {};
             }catch(eR){ console.warn("[Avatim] admin: leitura de "+docIdA+" falhou:", eR.code||eR.message); }
 
             // vendas consolidadas — dia a dia, o mais RECENTE vence
@@ -499,9 +606,8 @@ try{
 
         // ── Merge com Firebase: preservar histórico não presente localmente ──
         try{
-          const snapExist = await getDoc(doc(db,"avatim",docId));
-          if(snapExist.exists()){
-            const existing = JSON.parse(snapExist.data().dados||"{}");
+          const existing = await _lerDocObj(db, doc, getDoc, docId);
+          if(existing){
             // Vendas: adicionar dias do Firebase que não existem localmente
             Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
               if(!(dt in vendasLoja) && !excDias.includes(dt)) vendasLoja[dt] = dados;
@@ -534,8 +640,10 @@ try{
         // [FIX CRÍTICO] Incluir vendedoras e metasLoja no doc da loja
         // Antes só salvava vendas — metas editadas pela loja nunca chegavam ao Firebase
         // e eram perdidas na próxima carga (loadFromFirestore restaurava do principal)
-        const payload = {
-          dados: JSON.stringify({
+        // [R125] o objeto é montado solto; quem serializa e fatia é o
+        // _gravarDocFatiado. O doc da Mooca, com 70 dias de vendas mais
+        // fluxo e contatos, corre o mesmo risco de estourar 1 MiB.
+        const _dadosLoja = {
             vendas:         { [lid]: vendasLoja },
             vendasVend:     vendasVendLoja,
             campRealizados: campLoja,
@@ -560,16 +668,26 @@ try{
             _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
             _vendasVendExcluidas: D2._vendasVendExcluidas  || {},
             _campExcluidos:       D2._campExcluidos       || []
-          }),
+        };
+        const payload = {
+          dados:  JSON.stringify(_dadosLoja),
           lojaId: lid,
           ts:     Date.now(),
           por:    email
         };
 
         try{
-          await setDoc(doc(db,"avatim",docId), payload);
+          await _gravarDocFatiado(db, doc, setDoc, docId, _dadosLoja, { lojaId: lid, por: email });
         }catch(eSdkWrite){
           // Se SDK write falha (ex: auth insuficiente), tentar via REST API com idToken
+          // [R125] O caminho REST grava tudo num PATCH só. Se o documento
+          // precisou ser fatiado, ele não dá conta — e gravar o texto inteiro
+          // aqui reintroduziria exatamente o erro de 1 MiB. Nesse caso a falha
+          // é propagada, para o usuário ver o aviso em vez de um "salvo" falso.
+          if(new TextEncoder().encode(payload.dados).length > PRINCIPAL_LIMITE_BYTES){
+            console.error("[Avatim] " + docId + " grande demais para o caminho REST — repropagando a falha");
+            throw eSdkWrite;
+          }
           if(window._fbIdToken){
             console.warn("[Avatim] setDoc falhou, tentando REST:", eSdkWrite.code);
             const token = await window.fbGetToken();
@@ -632,8 +750,7 @@ try{
       const isAdm = email === "admin\u0040avatim.com";
 
       // Sempre lê o doc principal (tem metas, vendedoras, campanhas)
-      const snapPrincipal = await getDoc(doc(db,"avatim","principal"));
-      let base = snapPrincipal.exists() ? JSON.parse(snapPrincipal.data().dados) : null;
+      let base = await _lerDocObj(db, doc, getDoc, "principal");
 
       if(!base){
         console.log("[Avatim] Nenhum dado no Firestore ainda");
@@ -643,16 +760,17 @@ try{
       if(isAdm){
         // Admin lê TODOS os docs de loja em PARALELO (muito mais rápido que sequencial)
         const LOJAS_IDS = ["mooca","leopoldina","perdizes","santana","jarpaul","pinheiros","ibirapuera"];
+        // [R125] remonta os pedaços de cada loja — o doc pode ter sido fatiado.
         const snaps = await Promise.allSettled(
-          LOJAS_IDS.map(lid => getDoc(doc(db,"avatim","loja_"+lid)))
+          LOJAS_IDS.map(lid => _lerDocObj(db, doc, getDoc, "loja_"+lid))
         );
         snaps.forEach((result, idx) => {
           const lid = LOJAS_IDS[idx];
           if(result.status !== 'fulfilled'){ console.warn("[Avatim] Erro loja "+lid+":", result.reason?.message); return; }
-          const snap = result.value;
-          if(!snap.exists()){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
+          const pedacoLido = result.value;
+          if(!pedacoLido){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
           try{
-            const pedaco = JSON.parse(snap.data().dados||"{}");
+            const pedaco = pedacoLido;
             // Merge vendas da loja
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
@@ -859,9 +977,9 @@ try{
         const lid = lojaMap[email];
         if(lid){
           try{
-            const snap = await getDoc(doc(db,"avatim","loja_"+lid));
-            if(snap.exists()){
-              const pedaco = JSON.parse(snap.data().dados);
+            const pedacoLoja = await _lerDocObj(db, doc, getDoc, "loja_"+lid);
+            if(pedacoLoja){
+              const pedaco = pedacoLoja;
               // Copiar vendas do doc loja_* para o base (objeto retornado ao loadFromFirestore)
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
@@ -4865,7 +4983,9 @@ window.AVATIM_RECURSOS = {
   releituraAutomatica:   () => typeof window._carregarComRetentativa === 'function',
   lancamentoPreservado:  () => typeof window._lancMarcarDigitado === 'function',
   gravacaoSempreComPrazo:() => typeof window.fsGravarComPrazo === 'function',
-  diagnosticoFluxo:      () => typeof window.avatimFluxoDuplicados === 'function'
+  diagnosticoFluxo:      () => typeof window.avatimFluxoDuplicados === 'function',
+  documentoFatiado:      () => typeof window._avatimLerDoc === 'function',
+  diagnosticoTamanho:    () => typeof window.avatimTamanhos === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -4907,6 +5027,33 @@ window.avatimFluxoDuplicados = function(){
   console.log('[Avatim] ' + dup.length + ' registro(s) com cópia em D.fluxo:');
   console.table(linhas);
   return linhas;
+};
+
+/**
+ * [R125] Quanto ocupa cada campo do que sobe ao servidor.
+ *
+ * O Firestore recusa qualquer documento acima de 1.048.487 bytes, e foi
+ * isso que travou TODA gravação do admin. Agora o documento é fatiado e
+ * cabe — mas continua valendo saber quem está crescendo, porque cada
+ * pedaço é uma leitura a mais em toda abertura do sistema.
+ *
+ * Rode avatimTamanhos() no console. Não altera nada.
+ */
+window.avatimTamanhos = function(){
+  const bytes = v => new TextEncoder().encode(JSON.stringify(v === undefined ? null : v)).length;
+  const kb = n => (n/1024).toFixed(1) + ' KB';
+  const campos = Object.keys(D || {}).map(k => ({ campo: k, bytes: bytes(D[k]) }))
+                       .sort((a,b) => b.bytes - a.bytes);
+  const total = campos.reduce((s,c) => s + c.bytes, 0);
+  console.log('[Avatim] D inteiro: ' + kb(total));
+  console.table(campos.slice(0, 15).map(c => ({
+    campo: c.campo, tamanho: kb(c.bytes),
+    pct: (c.bytes/total*100).toFixed(1) + '%'
+  })));
+  const LIM = 1048487;
+  console.log('Limite do Firestore por documento: ' + kb(LIM)
+            + ' — acima disso o documento é fatiado em pedaços.');
+  return campos;
 };
 
 window.avatimVerificar = function(){
@@ -6135,12 +6282,13 @@ window.debugMeta = async function(lid){
 
     console.log("\n📍 CAMADA 3: Firestore — doc 'principal' (admin grava aqui)");
     const snapP = await getDoc(doc(_db, "avatim", "principal"));
-    if(snapP.exists()){
-      const principal = JSON.parse(snapP.data().dados||"{}");
+    const principal = await window._avatimLerDoc("principal");   // [R125] remonta os pedaços
+    if(principal){
       const pMeta = principal?.metasLoja?.[lid]?.[mr];
       console.log("   meta:", pMeta);
       console.log("   _savedAt:", pMeta?._savedAt, "→", pMeta?._savedAt ? new Date(pMeta._savedAt).toLocaleString('pt-BR') : 'sem timestamp');
-      console.log("   ts doc:", snapP.data().ts, "por:", snapP.data().por);
+      console.log("   ts doc:", snapP.exists()?snapP.data().ts:"—", "por:", snapP.exists()?snapP.data().por:"—",
+                  "| pedaços:", snapP.exists()?(Number(snapP.data().partes)||1):"—");
     } else {
       console.log("   ❌ doc 'principal' não existe");
     }
@@ -6321,10 +6469,8 @@ window.forcarMetaPrincipal = async function(lid, valorMes){
   const { getDoc, setDoc, doc } = fbMod;
   const _db = window._fbDb;
 
-  const snapP = await getDoc(doc(_db, "avatim", "principal"));
-  if(!snapP.exists()){ console.error("❌ Doc principal não existe"); return; }
-
-  const principal = JSON.parse(snapP.data().dados||"{}");
+  const principal = await window._avatimLerDoc("principal");   // [R125] remonta os pedaços
+  if(!principal){ console.error("❌ Doc principal não existe ou está ilegível"); return; }
   if(!principal.metasLoja) principal.metasLoja = {};
   if(!principal.metasLoja[lid]) principal.metasLoja[lid] = {};
 
@@ -6342,11 +6488,9 @@ window.forcarMetaPrincipal = async function(lid, valorMes){
   };
   principal.metasLoja[lid][mr] = novaMeta;
 
-  await setDoc(doc(_db, "avatim", "principal"), {
-    dados: JSON.stringify(principal),
-    ts: Date.now(),
-    por: window._currentUser?.email || "debug"
-  });
+  // [R125] grava fatiado: escrever cru aqui apagaria a contagem de pedaços e
+  // deixaria o documento ilegível para todo mundo.
+  await window._avatimGravarDoc("principal", principal, { por: window._currentUser?.email || "debug" });
   console.log("✅ Meta forçada no principal:", lid, mr, valorMes);
   console.log("   Agora recarregue a página em todas as máquinas");
 };
