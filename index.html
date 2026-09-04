@@ -2485,7 +2485,7 @@ body:not(.logado) #appScreen{display:none!important}
         </div>
       </div>
       <div class="btn-r">
-        <button class="btn-p" onclick="salvarFluxo()">Salvar</button>
+        <button class="btn-p" id="fx-btn-salvar" onclick="salvarFluxo()">Salvar</button>
         <button class="btn-s" onclick="toggleFormFluxo()">Cancelar</button>
       </div>
     </div>
@@ -4860,8 +4860,55 @@ window.AVATIM_RECURSOS = {
   recarregarDoServidor:  () => typeof window.recarregarDoServidor === 'function',
   followUpConfiguravel:  () => typeof window.followUpDias === 'function',
   metaPorDiasTrab:       () => typeof window.redistribuirPorDiasTrab === 'function',
-  diasAbertosAjustavel:  () => typeof window.ajustarDiasAbertos === 'function'
+  diasAbertosAjustavel:  () => typeof window.ajustarDiasAbertos === 'function',
+  remotoVazioNaoApaga:   () => typeof _aceitaRemoto === 'function',
+  releituraAutomatica:   () => typeof window._carregarComRetentativa === 'function',
+  lancamentoPreservado:  () => typeof window._lancMarcarDigitado === 'function',
+  gravacaoSempreComPrazo:() => typeof window.fsGravarComPrazo === 'function',
+  diagnosticoFluxo:      () => typeof window.avatimFluxoDuplicados === 'function'
 };
+/**
+ * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
+ *
+ * Não consegui reproduzir a duplicação em teste: um clique gera um registro,
+ * e todos os merges (principal, loja_*, backup, syncLoja, syncAdmin) já
+ * deduplicam por id. Então a duplicata só pode existir com ids DIFERENTES —
+ * e a diferença entre os ts diz de onde ela veio:
+ *
+ *   ts idênticos ou a milissegundos  → a função rodou duas vezes no mesmo
+ *                                      clique (bug de disparo)
+ *   ts a segundos/minutos            → o registro foi lançado duas vezes,
+ *                                      provavelmente por causa do aviso de
+ *                                      falha de envio
+ *   ids iguais                       → aí sim é problema de merge
+ *
+ * Rode no console e me mande a saída. Não altera nem apaga nada.
+ */
+window.avatimFluxoDuplicados = function(){
+  const chave = f => [f.nome, f.origem, f.vendId, f.loja, f.valor||0, f.data].join('|');
+  const grupos = {};
+  (D.fluxo||[]).forEach(f => { (grupos[chave(f)] = grupos[chave(f)] || []).push(f); });
+  const dup = Object.entries(grupos).filter(([,g]) => g.length > 1);
+  if(!dup.length){ console.log('[Avatim] nenhum registro duplicado em D.fluxo ('+(D.fluxo||[]).length+' registros)'); return []; }
+  const linhas = [];
+  dup.forEach(([k, g]) => {
+    const ts = g.map(f => Number(f.ts)||0).sort((a,b)=>a-b);
+    linhas.push({
+      registro: k,
+      copias: g.length,
+      ids: g.map(f=>f.id).join(' , '),
+      idsIguais: new Set(g.map(f=>f.id)).size === 1,
+      intervaloMs: ts[ts.length-1] - ts[0],
+      veredito: new Set(g.map(f=>f.id)).size === 1 ? 'MERGE (ids iguais)'
+              : (ts[ts.length-1] - ts[0]) < 2000 ? 'DISPARO DUPLO (mesmo clique)'
+              : 'LANCADO DUAS VEZES (' + Math.round((ts[ts.length-1]-ts[0])/1000) + 's de intervalo)'
+    });
+  });
+  console.log('[Avatim] ' + dup.length + ' registro(s) com cópia em D.fluxo:');
+  console.table(linhas);
+  return linhas;
+};
+
 window.avatimVerificar = function(){
   const r = {};
   Object.entries(window.AVATIM_RECURSOS).forEach(([k,f]) => {
@@ -5092,7 +5139,7 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
   try{
     const _okAL = typeof waitForFirebase === 'function' ? await waitForFirebase(8000) : false;
     if(_okAL && window.fsGravar){
-      await window.fsGravar(JSON.stringify(D));
+      await window.fsGravarComPrazo(JSON.stringify(D));
       window._pendingLocalData   = null;
       window._pendingLocalDataTs = null;
       console.log('[Avatim] _toggleLojaArquivada Firebase OK:', lid, 'arquivada=', arquivar);
@@ -6173,6 +6220,25 @@ window.mergeMetasLoja = function(metasRemotas){
 // parecia que o campo "não salvava". Mesma corrida que já tínhamos
 // resolvido nas metas, e a mesma solução.
 // ══════════════════════════════════════════════════════════════════════
+/**
+ * [R121] Aceita o valor remoto só quando ele não esvazia o que já existe.
+ *
+ * O padrão antigo era `if(remoto.X) D.X = remoto.X`. Em JavaScript `[]` e `{}`
+ * são VERDADEIROS, então um campo vazio no servidor sobrescrevia o dado local
+ * a cada carga — e a tela abria zerada sem nenhum erro aparente.
+ *
+ * Regra: remoto com conteúdo sempre vale. Remoto vazio só vale quando o local
+ * também está vazio (aí não há nada a perder).
+ */
+function _aceitaRemoto(local, remoto){
+  if(remoto === undefined || remoto === null) return false;
+  const tam = v => Array.isArray(v) ? v.length
+                 : (v && typeof v === 'object') ? Object.keys(v).length
+                 : (v ? 1 : 0);
+  if(tam(remoto) > 0) return true;      // remoto tem conteúdo
+  return tam(local) === 0;              // ambos vazios: tanto faz
+}
+
 window.mergeConfigModalidades = function(remotoCfg){
   if(!remotoCfg) return false;
   const local = D.configModalidades;
@@ -6229,6 +6295,23 @@ window.gravarRemotoComPrazo = async function(json, ms){
   }catch(e){
     return {ok:false, motivo: e.code || e.message || 'erro desconhecido'};
   }finally{ clearTimeout(timer); }
+};
+
+/**
+ * [R124] Mesma gravação de sempre, com prazo.
+ *
+ * Vários pontos do sistema faziam `try{ await fsGravar(...) }catch{...}`. O
+ * catch parecia cobrir a falha de rede, mas não cobria a pior delas: quando o
+ * Firestore não alcança o servidor ele deixa a promessa PENDENTE — nem resolve
+ * nem rejeita. O await ficava parado para sempre, o catch nunca rodava e o
+ * usuário ficava sem resposta nenhuma. Este invólucro mantém o contrato
+ * (lança em caso de falha), então nada em volta precisou mudar — só que agora
+ * a pendura vira erro em GRAVACAO_PRAZO_MS e o catch existente funciona.
+ */
+window.fsGravarComPrazo = async function(json, ms){
+  const r = await window.gravarRemotoComPrazo(json, ms);
+  if(!r.ok) throw new Error(r.motivo);
+  return true;
 };
 
 // Função auxiliar: forçar gravação só da meta da loja no principal
@@ -6798,7 +6881,7 @@ window.syncAgora = async function(){
       showToast('Firebase não disponível. Verifique a conexão.','err');
       return;
     }
-    await window.fsGravar(JSON.stringify(D));
+    await window.fsGravarComPrazo(JSON.stringify(D));
     window._syncMarcar('ok');
     showToast('✅ Dados enviados ao Firebase.','ok');
   }catch(e){
@@ -8794,32 +8877,40 @@ function save(){
 
     const ok = await waitForFirebase(5000);
     if(ok && window.fsGravar){
-      try{
-        if(typeof window._syncMarcar === 'function') window._syncMarcar('enviando');
-        await window.fsGravar(JSON.stringify(D));
+      // [R124] Este é o caminho de gravação mais usado do sistema e era o
+      // único que ainda chamava fsGravar cru, sem prazo — justamente contra a
+      // regra do projeto. O Firestore deixa a promessa PENDENTE quando não
+      // alcança o servidor: não resolve nem rejeita. O `await` ficava parado
+      // para sempre, o catch nunca rodava, nenhum aviso aparecia, o retry de
+      // 10s nunca era agendado e o indicador de sync ficava travado em
+      // "enviando". Do lado de quem usa: "o sistema disse que salvou" — sem
+      // ter salvado. Com prazo, a falha vira uma resposta e é tratada.
+      if(typeof window._syncMarcar === 'function') window._syncMarcar('enviando');
+      const _rSave = await window.gravarRemotoComPrazo(JSON.stringify(D));
+      if(_rSave.ok){
         // [FIX Race Condition] Dados gravados — limpar snapshot pendente
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
         if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
         console.log("[Avatim] save() sincronizado com Firebase OK");
-      }catch(e){
-        console.warn("[Avatim] save() Firebase erro:", e.code||e.message);
-        if(typeof window._syncMarcar === 'function') window._syncMarcar('erro', e.code||e.message);
+      } else {
+        console.warn("[Avatim] save() Firebase erro:", _rSave.motivo);
+        if(typeof window._syncMarcar === 'function') window._syncMarcar('erro', _rSave.motivo);
         // [FIX A] SEMPRE zerar _pendingLocalData ao falhar — nunca deixar syncAdmin bloqueado
         window._pendingLocalData = null;
-        showToast('⚠️ Salvo localmente. Falha Firebase: ' + (e.code||e.message), 'warn');
-        // Retry após 10s
+        showToast('⚠️ Registro guardado nesta máquina; o envio ao servidor falhou ('
+        + _rSave.motivo + '). NÃO lance de novo — o envio se repete sozinho em 10s.', 'warn');
+        // Retry após 10s — também com prazo, pelo mesmo motivo.
         setTimeout(async ()=>{
-          if(window.fsGravar){
-            try{
-              await window.fsGravar(JSON.stringify(D));
-              if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
-              showToast('✅ Sincronizado com sucesso!', 'ok');
-            }
-            catch(e2){
-              console.warn("[Avatim] Retry save falhou:", e2.message);
-              showToast('❌ Dado salvo so localmente. Verifique conexao e faca login novamente.', 'err');
-            }
+          if(!window.fsGravar) return;
+          const _r2 = await window.gravarRemotoComPrazo(JSON.stringify(D));
+          if(_r2.ok){
+            if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
+            showToast('✅ Sincronizado com sucesso!', 'ok');
+          } else {
+            console.warn("[Avatim] Retry save falhou:", _r2.motivo);
+            showToast('❌ O dado está guardado nesta máquina, mas não subiu ao servidor. '
+                    + 'Não lance de novo: verifique a conexão e use "Dados diferentes? Reler do servidor".', 'err');
           }
         }, 10000);
       }
@@ -8828,20 +8919,24 @@ function save(){
       if(typeof window._syncMarcar === 'function') window._syncMarcar('erro','Firebase indisponível');
       // [FIX A] Zerar _pendingLocalData para não bloquear syncAdmin
       window._pendingLocalData = null;
-      showToast('⚠️ Firebase indisponivel. Tentando reconectar...', 'warn');
+      showToast('⚠️ Servidor fora de alcance. O registro está guardado aqui — '
+                    + 'não lance de novo, estamos reconectando.', 'warn');
       const retryOk = await waitForFirebase(30000);
       if(retryOk && window.fsGravar){
-        try{
-          await window.fsGravar(JSON.stringify(D));
+        // [R124] mesmo motivo do bloco acima: sem prazo isto podia ficar
+        // pendurado indefinidamente depois de "reconectar".
+        const _r3 = await window.gravarRemotoComPrazo(JSON.stringify(D));
+        if(_r3.ok){
           if(typeof window._syncMarcar === 'function') window._syncMarcar('ok');
           showToast('✅ Reconectado e sincronizado com sucesso!', 'ok');
-        }
-        catch(e){
-          console.warn("[Avatim] save() retry falhou:", e.message);
-          showToast('❌ Nao foi possivel sincronizar. Dado salvo localmente.', 'err');
+        } else {
+          console.warn("[Avatim] save() retry falhou:", _r3.motivo);
+          showToast('❌ Não foi possível enviar ao servidor. O dado está guardado nesta máquina '
+                  + '— não lance de novo; tente de novo quando a conexão voltar.', 'err');
         }
       } else {
-        showToast('❌ Sem conexao com Firebase. Dado salvo localmente.', 'err');
+        showToast('❌ Sem conexão com o servidor. O dado está guardado nesta máquina '
+                + '— não lance de novo; ele sobe quando a conexão voltar.', 'err');
       }
     }
   }, 1500);
@@ -8931,8 +9026,8 @@ async function loadFromFirestore(){
       // Bug anterior: D.metasLoja = remoto.metasLoja apagava metas salvas localmente
       // antes do fsGravar terminar (race condition)
       if(remoto.metasLoja) window.mergeMetasLoja(remoto.metasLoja);
-      if(remoto.campanhas)     D.campanhas     = remoto.campanhas;
-      if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+      if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
+      if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
       // [FIX 21/07] histórico NUNCA era mesclado do remoto — em outro
       // dispositivo, ou após limpar cache, os meses lançados sumiam.
       if(remoto.historicoMeses){
@@ -8962,9 +9057,9 @@ async function loadFromFirestore(){
           });
         });
       }
-      if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
-      if(remoto.metasProd)     D.metasProd     = remoto.metasProd;
-      if(remoto.realProd)      D.realProd      = remoto.realProd;
+      if(_aceitaRemoto(D.arquivos, remoto.arquivos)) D.arquivos = remoto.arquivos;
+      if(_aceitaRemoto(D.metasProd, remoto.metasProd)) D.metasProd = remoto.metasProd;
+      if(_aceitaRemoto(D.realProd, remoto.realProd)) D.realProd = remoto.realProd;
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
         console.log("[Avatim] loadFromFirestore: vendedor(es) encontradas", remoto.vendedoras.length);
@@ -9053,15 +9148,15 @@ async function loadFromFirestore(){
       // [NEW 13/08] excelDados: substitui inteiro (admin é autoridade)
       if(Array.isArray(remoto.excelDados)){
         D.excelDados = remoto.excelDados;
-        if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
+        if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
       }
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
-      if(remoto.configCom)   D.configCom   = remoto.configCom;
+      if(_aceitaRemoto(D.configCom, remoto.configCom)) D.configCom = remoto.configCom;
       if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
-      if(remoto.diasAbertosOverride) D.diasAbertosOverride = remoto.diasAbertosOverride;
-      if(remoto.saldosOverride) D.saldosOverride = remoto.saldosOverride;
-      if(remoto.precosOverride) D.precosOverride = remoto.precosOverride;
-      if(remoto.produtosExtras) D.produtosExtras = remoto.produtosExtras;
+      if(_aceitaRemoto(D.diasAbertosOverride, remoto.diasAbertosOverride)) D.diasAbertosOverride = remoto.diasAbertosOverride;
+      if(_aceitaRemoto(D.saldosOverride, remoto.saldosOverride)) D.saldosOverride = remoto.saldosOverride;
+      if(_aceitaRemoto(D.precosOverride, remoto.precosOverride)) D.precosOverride = remoto.precosOverride;
+      if(_aceitaRemoto(D.produtosExtras, remoto.produtosExtras)) D.produtosExtras = remoto.produtosExtras;
       // [FIX] reaplicar no array PRODUTOS em memória — antes só D era atualizado
       // e o catálogo na tela ficava defasado até um F5.
       if(typeof window.aplicarOverridesProdutos === 'function') window.aplicarOverridesProdutos(D);
@@ -9398,6 +9493,48 @@ function vendsAtivas(lid){
 // [FIX CRÍTICO SINCRONIZAÇÃO] Função para forçar reload completo dos dados
 
 // ── Arquivar / reativar vendedora
+/**
+ * [R122] Releitura automática no login — só quando a primeira falha.
+ *
+ * `loadFromFirestore()` devolve `false` quando o Firebase não ficou pronto em
+ * 3 s ou quando `fsCarregar()` volta vazio. O `showApp` ignorava esse retorno:
+ * renderizava do mesmo jeito, com o que houvesse no localStorage, e não avisava
+ * ninguém. Daí o sintoma "todo login vem tudo zerado e só volta apertando
+ * 'Dados diferentes? Reler do servidor'" — o botão faz exatamente esta mesma
+ * chamada, e a essa altura o Firebase já subiu.
+ *
+ * Aqui a tela é pintada na primeira volta (para não ficar em branco) e, SÓ se
+ * a leitura falhou, o sistema tenta de novo sozinho — 1,5 s, 4 s, 9 s. Na
+ * primeira que der certo, repinta e avisa. Se as três falharem, avisa que os
+ * números são desta máquina e aponta o botão manual, que continua existindo.
+ *
+ * Só lê. Nenhuma retentativa grava nada no Firebase.
+ */
+window._carregarComRetentativa = async function(render){
+  const ESPERAS = [1500, 4000, 9000];
+  const tentar = async () => {
+    try{ return await loadFromFirestore(); }
+    catch(e){ console.warn('[Avatim] R122: leitura falhou —', e.message); return false; }
+  };
+
+  const ok = await tentar();
+  render();                       // pinta já, com servidor ou sem
+  if(ok) return true;
+
+  console.warn('[Avatim] R122: servidor não respondeu no login — retentando sozinho');
+  for(let i = 0; i < ESPERAS.length; i++){
+    await new Promise(r => setTimeout(r, ESPERAS[i]));
+    if(await tentar()){
+      render();
+      console.log('[Avatim] R122: recuperado na tentativa ' + (i+2));
+      showToast('✅ Dados atualizados do servidor.', 'ok');
+      return true;
+    }
+  }
+  showToast('⚠️ Não foi possível ler o servidor. Os números são desta máquina — use "Dados diferentes? Reler do servidor".', 'warn');
+  return false;
+};
+
 function forcarSincronizacao(){
   showToast("🔄 Sincronizando com Firebase...", "info");
   console.log("[Avatim] forcarSincronizacao: iniciado");
@@ -9439,7 +9576,7 @@ function arquivarVendedora(vid, arquivar){
     const _okAV = await waitForFirebase(8000);
     if(_okAV && window.fsGravar){
       try{
-        await window.fsGravar(JSON.stringify(D));
+        await window.fsGravarComPrazo(JSON.stringify(D));
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
         console.log('[Avatim] arquivarVendedora Firebase OK:', vid, 'ativa=', !arquivar);
@@ -10014,7 +10151,7 @@ function showApp(){
       const _ok = await waitForFirebase(5000);
       if(_ok && window.fsGravar){
         try{
-          await window.fsGravar(_pendingStr);
+          await window.fsGravarComPrazo(_pendingStr);
           localStorage.removeItem("avatim_pending");
           window._pendingLocalData = null;
           showToast("✅ Lançamento pendente sincronizado!","ok");
@@ -10026,17 +10163,16 @@ function showApp(){
 
   // [CRÍTICO] Sincronizar com Firebase ANTES de renderizar qualquer coisa
   console.log("[Avatim] showApp: iniciando carregamento de dados...");
-  loadFromFirestore().then(sincronizado => {
-    console.log("[Avatim] showApp: dados carregados");
+  const _pintarTelas = () => {
     carregarVendsForm();
     preencherSelectVends();
     carregarDash();
-    console.log("[Avatim] showApp: telas renderizadas");
-  }).catch(e => {
+  };
+  // [R122] Honra o retorno de loadFromFirestore: se o servidor não respondeu,
+  // retenta sozinho em vez de deixar a tela zerada esperando o botão manual.
+  window._carregarComRetentativa(_pintarTelas).catch(e => {
     console.error("[Avatim] showApp: erro ao carregar", e.message);
-    carregarVendsForm();
-    preencherSelectVends();
-    carregarDash();
+    _pintarTelas();
   });
   // [DIAGNÓSTICO SIMPLES] Log de carregamento
   console.log("[Avatim] showApp: inicializado para", isAdmin() ? "ADMIN" : lojaId());
@@ -10238,7 +10374,7 @@ function nav(pg){
             if(json){
               const remoto = JSON.parse(json);
               // Atualizar campObjetivos (vem do doc principal)
-              if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+              if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
               // Merge campRealizados desta loja
               if(remoto.campRealizados && remoto.campRealizados.length){
                 if(!D.campRealizados) D.campRealizados=[];
@@ -11393,14 +11529,22 @@ function carregarVendsForm(lidOverride){
   const _dtAtual = document.getElementById('l-data')?.value || '';
   if(window._lancDataRef !== undefined && window._lancDataRef !== _dtAtual){
     window._lancProdutosPorVend = {};
+    // [R124] Trocou a data: o que foi digitado pertence ao dia anterior e não
+    // pode ser devolvido ao formulário do dia novo.
+    window._lancDigitado = {};
     if(typeof window._lancLimparItens === 'function') window._lancLimparItens();
   }
   window._lancDataRef = _dtAtual;
 
   // BUG12: não recriar o DOM se o usuário está digitando no formulário de lançamento
   // Verificar se algum input do formulário de lançamento está em foco
+  // [R124] Esta guarda estava morta: nem 'form-lanc' nem 'lanc-fat' existem
+  // no HTML, então lancForm era sempre null e o formulário podia ser recriado
+  // por baixo de quem estava digitando. O container real é 'vend-lanc-grid'.
+  // A data e a loja ficam FORA dele de propósito — trocar qualquer uma das
+  // duas precisa recarregar o formulário, e é assim que continua.
   const focusedEl = document.activeElement;
-  const lancForm  = document.getElementById('form-lanc') || document.getElementById('lanc-fat');
+  const lancForm  = document.getElementById('vend-lanc-grid');
   if(focusedEl && lancForm && lancForm.contains(focusedEl)){
     console.log("[Avatim] carregarVendsForm: abortado — usuário está digitando");
     return;
@@ -11433,6 +11577,11 @@ function carregarVendsForm(lidOverride){
   const _dataEl = document.getElementById("l-data");
   const hj = (_dataEl?.value && /^\d{4}-\d{2}-\d{2}$/.test(_dataEl.value)) ? _dataEl.value : hoje();
   const vends=vendsAtivas(lid);
+  // [R124] Trocou de loja: o digitado é de outra equipe e não pode reaparecer.
+  if(window._lancLojaRef !== undefined && window._lancLojaRef !== lid){
+    window._lancDigitado = {};
+  }
+  window._lancLojaRef = lid;
   const grid=document.getElementById("vend-lanc-grid");
   if(!grid) return;
 
@@ -11609,18 +11758,18 @@ function carregarVendsForm(lidOverride){
             <input type="text" inputmode="decimal" id="vlanc_${v.id}"
               value="${valFmt}" placeholder="0,00"
               style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 12px;color:var(--texto);font-family:DM Sans,sans-serif;font-size:16px;font-weight:700;outline:none;transition:border .2s;box-sizing:border-box"
-              oninput="atualizarSomaDia();atualizarCardVend('${v.id}',this.value,${metaDia})"
+              oninput="window._lancMarcarDigitado(this);atualizarSomaDia();atualizarCardVend('${v.id}',this.value,${metaDia})"
               onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.2)'">
             <div>
               <div style="font-size:9px;color:var(--muted);margin-bottom:4px;text-align:center">Atend.</div>
               <input type="number" id="vatend_${v.id}" min="0" value="${atendAtual||''}"
-                placeholder="0" oninput="atualizarSomaDia()"
+                placeholder="0" oninput="window._lancMarcarDigitado(this);atualizarSomaDia()"
                 style="width:54px;background:var(--cinza);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:10px 6px;color:var(--azul);font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
             </div>
             <div>
               <div style="font-size:9px;color:var(--muted);margin-bottom:4px;text-align:center">Peças</div>
               <input type="number" id="vitens_${v.id}" min="0" value="${itensAtual||''}"
-                placeholder="0" oninput="atualizarSomaDia()" title="Quantidade de peças vendidas — usado para calcular o PA"
+                placeholder="0" oninput="window._lancMarcarDigitado(this);atualizarSomaDia()" title="Quantidade de peças vendidas — usado para calcular o PA"
                 style="width:54px;background:var(--cinza);border:1px solid rgba(155,89,182,.35);border-radius:8px;padding:10px 6px;color:#b07cd6;font-family:DM Sans,sans-serif;font-size:14px;font-weight:700;text-align:center;outline:none">
             </div>
           </div>
@@ -11633,9 +11782,38 @@ function carregarVendsForm(lidOverride){
       </div>`;
     }).join("")}
   </div>`;
+
+  // [R124] Devolve ao formulário o que o usuário digitou e ainda não salvou.
+  //
+  // A loja sincroniza a cada 60 s e redesenha a página ativa. O redesenho já
+  // era adiado quando o cursor estava num campo — mas basta o vendedor tirar
+  // o foco (rolar a tela, tocar noutro lugar) para o formulário ser recriado
+  // a partir do que está GRAVADO, apagando o número recém-digitado. Ele então
+  // salvava achando que o valor estava lá. Era este o "lançamento sobrescrito".
+  //
+  // Só volta o que a pessoa realmente digitou (registrado no oninput), nunca
+  // o que veio do banco — e a lista é zerada ao trocar de data, de loja ou ao
+  // salvar, para não vazar de um contexto para outro.
+  if(window._lancDigitado && Object.keys(window._lancDigitado).length){
+    let _repostos = 0;
+    Object.entries(window._lancDigitado).forEach(([elId, valor]) => {
+      const el = document.getElementById(elId);
+      if(el && el.value !== valor){ el.value = valor; _repostos++; }
+    });
+    if(_repostos) console.log('[Avatim] R124: ' + _repostos + ' valor(es) digitado(s) preservado(s) no redesenho');
+    if(typeof atualizarSomaDia === 'function') atualizarSomaDia();
+  }
 }
 
-
+/**
+ * [R124] Registra o que foi digitado nos campos de lançamento, para o
+ * redesenho automático não engolir. Chamado pelo oninput de cada campo.
+ */
+window._lancMarcarDigitado = function(el){
+  if(!el || !el.id) return;
+  if(!window._lancDigitado) window._lancDigitado = {};
+  window._lancDigitado[el.id] = el.value;
+};
 
 
 function atualizarCardVend(id, val, meta_dia){
@@ -12039,6 +12217,9 @@ async function salvarLanc(){
     // [R47] itens já gravados no dia — zerar o acumulado para o próximo
     // lançamento não herdar os produtos deste.
     window._lancProdutosPorVend = {};
+    // [R124] Salvou: o que está gravado passa a ser a verdade, e o digitado
+    // não precisa mais ser protegido do redesenho.
+    window._lancDigitado = {};
     carregarDash();
     renderHistoricoLanc();
     renderConsolidadoLanc(lid);
@@ -12057,7 +12238,7 @@ async function salvarLanc(){
         return;
       }
       try{
-        await window.fsGravar(_snapshotParaGravar);
+        await window.fsGravarComPrazo(_snapshotParaGravar);
         window._pendingLocalData   = null;
         window._pendingLocalDataTs = null; // [FIX Bug3]
         localStorage.removeItem("avatim_pending");
@@ -12168,7 +12349,7 @@ async function deletarLanc(lid, data){
   // Gravar exclusão no Firebase
   const _okEx1 = await waitForFirebase(4000);
   if(_okEx1 && window.fsGravar){
-    try{ await window.fsGravar(JSON.stringify(D)); window._pendingLocalData = null; }
+    try{ await window.fsGravarComPrazo(JSON.stringify(D)); window._pendingLocalData = null; }
     catch(eEx){ console.warn("[Avatim] excluirLancDia FB:", eEx.message); }
   }
 }
@@ -12632,6 +12813,13 @@ function toggleFormFluxo(){
   const opening=f.style.display==="none";
   f.style.display=opening?"block":"none";
   if(opening){
+    // [R123] Abrir o formulário para o próximo cliente libera o botão na hora,
+    // sem esperar o temporizador da trava anti-duplicidade.
+    // O carimbo de abertura é o que separa clique repetido de relançamento
+    // deliberado: quem reabriu e redigitou passa; clique enfileirado, não.
+    window._fxAberturaTs = Date.now();
+    const _b=document.getElementById("fx-btn-salvar");
+    if(_b){ _b.disabled=false; _b.textContent="Salvar"; }
     document.getElementById("fx-data").value=hoje();
     document.getElementById("fx-nome").value="";
     document.getElementById("fx-valor").value="";
@@ -13323,7 +13511,13 @@ async function lancarVendaVend(){
   if(!D.vendasVend[id])D.vendasVend[id]={};
   const trans = parseInt(document.getElementById("vl-trans").value)||0;
   const tmV = trans>0 ? parseFloat((val/trans).toFixed(2)) : 0;
-  D.vendasVend[id][data]={val, trans, cli:trans, aniv:0, inativ:0, tm:tmV, ts:Date.now()};
+  // [R124] Faltava _savedAt. TODOS os merges (loadFromFirestore, syncLoja,
+  // syncAdmin, backup) comparam _savedAt para decidir quem vence; sem ele o
+  // lançamento valia timestamp zero e QUALQUER cópia do servidor, mesmo mais
+  // antiga, o substituía. Era perda de dado silenciosa, nos dois sentidos:
+  // não vencia lá, e era sobrescrito aqui.
+  D.vendasVend[id][data]={val, trans, cli:trans, aniv:0, inativ:0, tm:tmV,
+                          ts:Date.now(), _savedAt:Date.now()};
   // [FIX Race Condition] Snapshot antes de gravar
   _persistirLocal();
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
@@ -13335,7 +13529,7 @@ async function lancarVendaVend(){
   const _ok = await waitForFirebase(5000);
   if(_ok && window.fsGravar){
     try{
-      await window.fsGravar(JSON.stringify(D));
+      await window.fsGravarComPrazo(JSON.stringify(D));
       window._pendingLocalData = null;
       console.log("[Avatim] lancarVendaVend: Firebase OK");
     }catch(e){
@@ -13426,7 +13620,7 @@ async function excluirLancVend(vendId, data, btn){
   // Gravar exclusão no Firebase
   const _okEV = await waitForFirebase(4000);
   if(_okEV && window.fsGravar){
-    try{ await window.fsGravar(JSON.stringify(D)); window._pendingLocalData = null; }
+    try{ await window.fsGravarComPrazo(JSON.stringify(D)); window._pendingLocalData = null; }
     catch(eEV){ console.warn("[Avatim] excluirLancVend FB:", eEV.message); }
   }
 }
@@ -13466,7 +13660,7 @@ async function excluirLancDia(lid, data, btn){
   // Gravar exclusão no Firebase
   const _okED = await waitForFirebase(4000);
   if(_okED && window.fsGravar){
-    try{ await window.fsGravar(JSON.stringify(D)); window._pendingLocalData = null; }
+    try{ await window.fsGravarComPrazo(JSON.stringify(D)); window._pendingLocalData = null; }
     catch(eED){ console.warn("[Avatim] excluirLancsData FB:", eED.message); }
   }
 }
@@ -15845,7 +16039,7 @@ async function salvarCampReal(){
   const _okCamp = await waitForFirebase(4000);
   if(_okCamp && window.fsGravar){
     try{
-      await window.fsGravar(JSON.stringify(D));
+      await window.fsGravarComPrazo(JSON.stringify(D));
       window._pendingLocalData = null;
     }catch(eCamp){
       console.warn("[Avatim] salvarCampReal FB:", eCamp.message);
@@ -16590,6 +16784,8 @@ function salvarMetasVendedoras(lid){
   // [FIX] vendsAtivas: mesmo filtro do form de renderização
   // Arquivadas não aparecem no form, não devem ter metas editadas
   const vends=vendsAtivas(lid);
+  // [R123] O mês exibido é a chave dos dias trabalhados: eles variam mês a mês.
+  const _mrSalvar = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
   let n=0, somaMes=0, somaSmes=0;
   vends.forEach(v=>{
     const mesEl=document.getElementById("mv-mes-"+v.id);
@@ -16597,6 +16793,11 @@ function salvarMetasVendedoras(lid){
     const tickEl=document.getElementById("mv-ticket-"+v.id);
     const anivEl=document.getElementById("mv-aniv-"+v.id);
     const inativEl=document.getElementById("mv-inativ-"+v.id);
+    // [R123] Os dias trabalhados eram desenhados na tela, liam a prévia e
+    // alimentavam a redistribuição — mas este salvamento nunca os gravava.
+    // O valor digitado morria no re-render e o campo voltava ao padrão (os
+    // dias de abertura da loja), como se a edição não tivesse acontecido.
+    const diasEl=document.getElementById("mv-dias-"+v.id);
     if(!mesEl) return;
     const mes=parseBR(mesEl.value)||0;
     const smes=parseBR(smesEl?.value)||Math.round(mes*1.255);
@@ -16610,6 +16811,10 @@ function salvarMetasVendedoras(lid){
       D.vendedoras[i].ticketAlvo=ticket;
       D.vendedoras[i].metaAniv=aniv;
       D.vendedoras[i].metaInativ=inativ;
+      // [R123] Campo vazio = "não informado", e setDiasTrabVend apaga a chave
+      // do mês — aí diasTrabVend volta a devolver os dias de abertura da loja.
+      // Isso é intencional: é como se limpa um ajuste, não um bug.
+      if(diasEl) setDiasTrabVend(v.id, _mrSalvar, diasEl.value);
       somaMes+=mes; somaSmes+=smes; n++;
     }
   });
@@ -16621,7 +16826,7 @@ function salvarMetasVendedoras(lid){
   // Se NÃO houver meta de loja salva ainda para o mês, criar com base na soma das vendedoras
   if(somaMes>0){
     if(!D.metasLoja[lid]) D.metasLoja[lid]={};
-    const _mr=_mesMeta||mesAtual();
+    const _mr=_mrSalvar;
     // Só criar/atualizar meta da loja se ela ainda NÃO existe para este mês
     // Se já existe, preservar o valor definido pelo usuário em "Salvar Meta da Loja"
     if(!D.metasLoja[lid][_mr] || !D.metasLoja[lid][_mr].mes){
@@ -16826,7 +17031,7 @@ function renderMetasVendSection(lid){
     <div style="font-size:9px;color:var(--azul);font-weight:700;letter-spacing:1px;margin-bottom:10px">👤 METAS INDIVIDUAIS — ${vends.length} VENDEDOR(ES)</div>
     ${_cabDias}
     ${rows}
-    <button onclick="salvarMetasVendedoras('${lid}')" style="width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(91,141,239,.9),rgba(91,141,239,.7));border:none;border-radius:7px;padding:10px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 Salvar Metas das Vendedor(es)</button>
+    <button onclick="salvarMetasVendedoras('${lid}')" style="width:100%;margin-top:4px;background:linear-gradient(135deg,rgba(91,141,239,.9),rgba(91,141,239,.7));border:none;border-radius:7px;padding:10px;color:#fff;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 Salvar Metas Vendedor(es)</button>
   </div>`;
 }
 function calcAcumVend(vid){
@@ -18402,10 +18607,10 @@ function iniciarAutoRefresh(){
         if(!dadosJSON) return;
         const remoto = JSON.parse(dadosJSON);
         // Atualizar campObjetivos (vem do doc principal — admin gerencia)
-        if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
+        if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
         // [FIX BUG 3] Atualizar D.campanhas (campo legado) junto com campObjetivos
         // Antes: lojas com campo legado não recebiam campanhas criadas pelo admin
-        if(remoto.campanhas) D.campanhas = remoto.campanhas;
+        if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
         // Merge só vendas e vendasVend desta loja
         const lid = lojaId();
         // LOCAL SEMPRE TEM PRIORIDADE — remoto só preenche dias ausentes
@@ -18688,8 +18893,8 @@ async function forceSyncAdmin(){
         });
       }
     }
-    if(remoto.campObjetivos) D.campObjetivos = remoto.campObjetivos;
-    if(remoto.arquivos)      D.arquivos      = remoto.arquivos;
+    if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
+    if(_aceitaRemoto(D.arquivos, remoto.arquivos)) D.arquivos = remoto.arquivos;
     if(remoto.vendas){
       Object.entries(remoto.vendas).forEach(([l,ds])=>{
         if(!D.vendas[l]) D.vendas[l]={};
@@ -18742,7 +18947,7 @@ async function forceSyncAdmin(){
     // [NEW 13/08] excelDados: replace do remoto (admin authoritative)
     if(Array.isArray(remoto.excelDados)){
       D.excelDados = remoto.excelDados;
-      if(remoto._excelImportInfo) D._excelImportInfo = remoto._excelImportInfo;
+      if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
     }
     if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
     _persistirLocal();
@@ -26603,7 +26808,7 @@ window.forcarSyncCompleto = async function(){
 
     console.log('  Enviando snapshot completo...');
     const snap = JSON.stringify(D);
-    await window.fsGravar(snap);
+    await window.fsGravarComPrazo(snap);
     console.log('  ✅ PUSH OK — dados enviados');
 
     // Depois puxar pra confirmar
@@ -26675,7 +26880,7 @@ window.autoSyncDadosPresos = async function(){
     if(precisaPush){
       console.log('[Avatim] autoSyncDadosPresos: detectados dados locais fora do Firebase — enviando...');
       if(window.fsGravar){
-        await window.fsGravar(JSON.stringify(D));
+        await window.fsGravarComPrazo(JSON.stringify(D));
         console.log('[Avatim] ✅ autoSyncDadosPresos: push concluído');
         if(typeof showToast === 'function') showToast('🔄 Dados sincronizados automaticamente.','ok');
       }
@@ -29356,6 +29561,40 @@ function _fxRenderSelecionados(){
 
 // salvarFluxo REESCRITO — grava data aniversário + perfil usado no cálculo
 window.salvarFluxo = function(){
+  // [R123] Um clique = um registro.
+  //
+  // O registro aparecia duplicado, às vezes triplicado. A causa não era o
+  // merge (todos deduplicam por id) nem a renderização (renderFluxo lê
+  // D.fluxo direto): era o clique repetido. `save()` chama _persistirLocal()
+  // de forma síncrona — stringify do D inteiro mais um deep-clone — e trava a
+  // interface por um bom tempo neste volume de dados. Durante a travada o
+  // botão seguia ativo e o formulário aberto; quem clicava de novo achando
+  // que não funcionou enfileirava outro clique, e cada um virava um registro.
+  //
+  // Duas travas, porque uma só não cobre:
+  //  1. Desabilitar o botão AGORA, antes do trabalho pesado. O navegador
+  //     descarta clique enfileirado em botão desabilitado — é o que mata a
+  //     duplicação de fato.
+  //  2. Janela de 1,5 s por tempo, caso a chamada venha de outro caminho
+  //     (console, atalho). É por timestamp, não por flag booleana: não trava
+  //     para sempre se algo estourar no meio do caminho.
+  const _agoraFx = Date.now();
+  if(_agoraFx - (window._fxUltimoSalvar || 0) < 1500){
+    console.warn('[Avatim] R123: clique repetido no fluxo ignorado');
+    return;
+  }
+  window._fxUltimoSalvar = _agoraFx;
+  const _btnFx = document.getElementById('fx-btn-salvar');
+  if(_btnFx){ _btnFx.disabled = true; _btnFx.textContent = 'Salvando...'; }
+  // O botão só volta a valer DEPOIS desta tarefa terminar — reabilitá-lo no
+  // fim dela não adiantaria nada, porque é exatamente aí que o navegador
+  // despacha o clique enfileirado. 1,5 s é a mesma janela da trava por tempo;
+  // reabrir o formulário libera antes disso, então ninguém espera à toa.
+  setTimeout(() => {
+    const b = document.getElementById('fx-btn-salvar');
+    if(b){ b.disabled = false; b.textContent = 'Salvar'; }
+  }, 1500);
+
   const nome=document.getElementById("fx-nome").value.trim();
   const origem=document.getElementById("fx-origem").value;
   const vendId=document.getElementById("fx-vend").value;
@@ -29393,8 +29632,10 @@ window.salvarFluxo = function(){
   // a diferença — valor registrado para conferência de caixa e relatório.
   const diferencaPaga = Math.max(0, Math.round((produtosValor - beneficioValor) * 100) / 100);
 
+  // [R123] Dois registros no mesmo milissegundo compartilhavam o id, e os
+  // merges deduplicam por id — um dos dois sumia ao sincronizar, sem aviso.
   D.fluxo.push({
-    id:"fx"+Date.now(),
+    id:"fx"+Date.now()+"-"+Math.random().toString(36).slice(2,7),
     nome:nomeF, origem, canal, tipoCliente, vendId, loja, valor, data, obs,
     modalidade, modalidadePct, beneficioValor, ticket, produtoEscolhido,
     produtosSel, produtosValor, diferencaPaga,
