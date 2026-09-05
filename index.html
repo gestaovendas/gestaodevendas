@@ -312,9 +312,15 @@ try{
       const isAdm = email === "admin\u0040avatim.com";
 
       if(isAdm){
+        // [R129] O principal era lido DUAS vezes: aqui, no merge preventivo, e
+        // logo abaixo na trava anti-apagamento. Como ele é fatiado, cada leitura
+        // são 2 documentos — 4 idas ao servidor para ver exatamente o mesmo
+        // dado. Guardar a primeira e reaproveitar não muda comportamento nenhum.
+        let _principalRemoto = null, _principalLido = false;
         // Admin: merge preventivo com campRealizados do Firestore
         try {
           const atual = await _lerDocObj(db, doc, getDoc, "principal");
+          _principalRemoto = atual; _principalLido = true;
           if(atual){
             if(atual.campRealizados && atual.campRealizados.length){
               if(!D2.campRealizados) D2.campRealizados = [];
@@ -429,7 +435,8 @@ try{
         try{
           // [R125] a trava precisa enxergar o documento INTEIRO; lendo só o
           // primeiro pedaço ela veria campos vazios e recusaria toda gravação.
-          const _objAntes = await _lerDocObj(db, doc, getDoc, "principal");
+          const _objAntes = _principalLido ? _principalRemoto
+                          : await _lerDocObj(db, doc, getDoc, "principal");
           if(_objAntes){
             const _antes  = _peso(_objAntes);
             const _depois = _peso(D2_principal);
@@ -437,7 +444,10 @@ try{
             if(_sumiu.length){
               const _detalhe = _sumiu.map(k => k + ': ' + _antes[k] + '→0').join(', ');
               console.error('[Avatim] GRAVAÇÃO RECUSADA — esvaziaria o servidor:', _detalhe);
-              if(typeof showToast === 'function'){
+              // [R129] Em sync de FUNDO o balão só assusta: o usuário não pediu
+              // nada e não há ação a tomar. A recusa continua no console e o
+              // chamador decide o que fazer com o dado ruim.
+              if(typeof showToast === 'function' && !window._gravacaoSilenciosa){
                 showToast('🛡️ Gravação BLOQUEADA: esta máquina está sem dados carregados e '
                   + 'apagaria o servidor (' + _detalhe + '). Recarregue a página antes de '
                   + 'salvar qualquer coisa.', 'err');
@@ -465,7 +475,13 @@ try{
             if(v.loja && D2.vendasVend?.[v.id] && Object.keys(D2.vendasVend[v.id]).length) lojasComDados.add(v.loja);
           });
 
-          for(const lidA of lojasComDados){
+          // [R129] As 7 lojas eram gravadas EM FILA: leitura, escrita, próxima
+          // loja. Com uma ida ao servidor de ~400ms isso sozinho passava de 10s,
+          // e somado às leituras do principal estourava o prazo de 12s — daí o
+          // "não confirmou" seguido, no log, de "vendas propagadas para 7 loja(s)".
+          // Cada loja escreve num documento próprio e não depende das outras,
+          // então vão juntas: o tempo passa a ser o da mais lenta, não a soma.
+          await Promise.all([...lojasComDados].map(async (lidA) => {
             const docIdA = "loja_"+lidA;
             let remotoA = {};
             try{
@@ -545,7 +561,7 @@ try{
               ts:     Date.now(),
               por:    email + " (admin)"
             });
-          }
+          }));
           console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
         }catch(eProp){
           console.error("[Avatim] ❌ Admin: falha ao propagar vendas:", eProp.code||eProp.message);
@@ -5026,7 +5042,8 @@ window.AVATIM_RECURSOS = {
   diagnosticoTamanho:    () => typeof window.avatimTamanhos === 'function',
   fluxoExcluidoNaoVolta: () => typeof _fluxoExcluido === 'function',
   limparFluxoDuplicados: () => typeof window.avatimLimparFluxoDuplicados === 'function',
-  pendenteNaoDerruba:    () => typeof _persistirPendente === 'function'
+  pendenteNaoDerruba:    () => typeof _persistirPendente === 'function',
+  prazoPorPerfil:        () => typeof window._prazoGravacao === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -6470,9 +6487,28 @@ window.mergeConfigModalidades = function(remotoCfg){
 // ══════════════════════════════════════════════════════════════════════
 window.GRAVACAO_PRAZO_MS = 12000;
 
+/**
+ * [R129] Prazo por perfil — o admin grava MUITO mais que uma loja.
+ *
+ * Uma loja grava 1 documento. O admin grava o principal (2 pedaços) e ainda
+ * propaga para os 7 docs de loja, cada um com uma leitura antes. Com o volume
+ * atual isso passava dos 12s, o prazo estourava e o código anunciava "não
+ * confirmou" para uma gravação que terminava logo em seguida — o log mostrava
+ * o erro e, abaixo dele, "vendas propagadas para 7 loja(s)".
+ *
+ * Pior que o alarme falso: ele disparava o retry, que refazia as ~25
+ * operações e enchia a fila do Firestore — era daí que vinha o
+ * "Write stream exhausted maximum allowed queued writes".
+ */
+window._prazoGravacao = function(){
+  try{
+    return (window._currentUser?.email === "admin\u0040avatim.com") ? 30000 : window.GRAVACAO_PRAZO_MS;
+  }catch(e){ return window.GRAVACAO_PRAZO_MS; }
+};
+
 window.gravarRemotoComPrazo = async function(json, ms){
   if(typeof window.fsGravar !== 'function') return {ok:false, motivo:'Firebase indisponível'};
-  const prazo = ms || window.GRAVACAO_PRAZO_MS;
+  const prazo = ms || window._prazoGravacao();
   let timer;
   const estouro = new Promise(res => { timer = setTimeout(() => res('__PRAZO__'), prazo); });
   try{
@@ -10400,18 +10436,37 @@ function showApp(){
   // gravar ANTES de carregar do Firebase para não perder o dado
   const _pendingStr = localStorage.getItem("avatim_pending");
   if(_pendingStr){
+    // [R129] Isto é sync de FUNDO: o usuário acabou de entrar e não pediu nada.
+    // Sem balão no começo — ele aparecia em todo login e não dizia nada de útil.
     console.log("[Avatim] showApp: lançamento pendente encontrado — sincronizando...");
-    showToast("🔄 Sincronizando lançamento pendente...","warn");
     (async()=>{
       const _ok = await waitForFirebase(5000);
       if(_ok && window.fsGravar){
+        window._gravacaoSilenciosa = true;   // a trava não deve assustar aqui
         try{
           await window.fsGravarComPrazo(_pendingStr);
           localStorage.removeItem("avatim_pending");
           window._pendingLocalData = null;
           showToast("✅ Lançamento pendente sincronizado!","ok");
           console.log("[Avatim] showApp: pending sincronizado com sucesso");
-        }catch(e){ console.warn("[Avatim] showApp: falha ao sincronizar pending:", e.message); }
+        }catch(e){
+          const _msg = String(e && e.message || '');
+          if(_msg.indexOf('gravacao-recusada') >= 0){
+            // [R129] A trava recusou: este pendente esvaziaria o servidor, ou
+            // seja, ele é PIOR que o que já está lá — sobrou de uma sessão em
+            // que o D ainda não tinha carregado. Guardá-lo só faria a mesma
+            // recusa se repetir em todo login. O servidor tem a versão boa.
+            try{ localStorage.removeItem("avatim_pending"); }catch(e2){}
+            window._pendingLocalData = null;
+            console.warn("[Avatim] R129: pendente antigo descartado — a trava o "
+              + "recusou por esvaziar o servidor (" + _msg + "). Nada foi perdido: "
+              + "o servidor tem a versão completa.");
+          } else {
+            console.warn("[Avatim] showApp: falha ao sincronizar pending:", _msg);
+          }
+        }finally{
+          window._gravacaoSilenciosa = false;
+        }
       }
     })();
   }
