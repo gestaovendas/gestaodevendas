@@ -287,6 +287,34 @@ try{
   // doc "loja_mooca", "loja_leopoldina" etc = vendas de cada loja
   // Ao carregar: admin lê TODOS e faz merge. Loja lê só o dela + principal.
 
+  /**
+   * [R130] A lápide de um dia excluído, agora com hora marcada.
+   *
+   * Uma exclusão vale até alguém relançar aquele dia. Sem saber QUANDO ela
+   * aconteceu, o código só sabia perguntar "existe dado aqui?" — e essa
+   * pergunta erra nos dois sentidos: o dado pode ter voltado por um merge
+   * (aí a exclusão nunca colava) ou ser um relançamento legítimo de outra
+   * máquina (aí o lançamento sumia). Com o carimbo a regra fica exata:
+   * dado gravado DEPOIS da exclusão vence a lápide; dado gravado antes é
+   * o defunto voltando e continua barrado.
+   *
+   * `cont` é o objeto que carrega as lápides — pode ser o D local ou o
+   * `base` montado do servidor, por isso é parâmetro e não fixo.
+   * Lápide sem carimbo (criada antes deste código) barra sempre: é o
+   * comportamento antigo, e só o relançamento explícito a remove.
+   */
+  window._lapideBarra = function(cont, tipo, chave, dt, val){
+    const lista = tipo === 'venda'
+      ? (cont && cont._vendasExcluidas     && cont._vendasExcluidas[chave])
+      : (cont && cont._vendasVendExcluidas && cont._vendasVendExcluidas[chave]);
+    if(!Array.isArray(lista) || !lista.includes(dt)) return false;
+    const mapaTs = tipo === 'venda' ? (cont && cont._vendasExcluidasTs)
+                                    : (cont && cont._vendasVendExcluidasTs);
+    const tsExc = Number((mapaTs && mapaTs[chave + "|" + dt]) || 0);
+    if(!tsExc) return true;
+    return Number((val && val._savedAt) || 0) <= tsExc;
+  };
+
   window.fsGravar = async function(dadosJSON){
     try{
       console.log("[Avatim] fsGravar INICIO | email:", window._currentUser?.email,
@@ -390,6 +418,10 @@ try{
           historicoLojas:D2.historicoLojas|| {},
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
+          // [R130] hora de cada exclusão — sem isto a lápide não sabe se o
+          // dado que chegou é relançamento novo ou o defunto voltando
+          _vendasExcluidasTs:    D2._vendasExcluidasTs     || {},
+          _vendasVendExcluidasTs:D2._vendasVendExcluidasTs || {},
           _campExcluidos:      D2._campExcluidos       || [],
           _vendsExcluidas:     D2._vendsExcluidas      || [],
           // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
@@ -489,7 +521,19 @@ try{
             }catch(eR){ console.warn("[Avatim] admin: leitura de "+docIdA+" falhou:", eR.code||eR.message); }
 
             // vendas consolidadas — dia a dia, o mais RECENTE vence
-            const vendasA = Object.assign({}, remotoA.vendas?.[lidA] || {});
+            //
+            // [R130] O que vem do servidor passa pela lápide ANTES de entrar.
+            // Sem este filtro o admin excluía um dia e, na mesma gravação,
+            // copiava esse dia de volta do doc da loja para dentro do payload
+            // — ele ressuscitava sozinho o que tinha acabado de apagar. Era
+            // por isso que excluir lançamento não colava no perfil admin: o
+            // caminho da loja já filtrava (ver excDias, mais abaixo), o do
+            // admin não.
+            const vendasA = {};
+            Object.entries(remotoA.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
+              if(window._lapideBarra(D2, 'venda', lidA, dt, dados)) return;
+              vendasA[dt] = dados;
+            });
             Object.entries(D2.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
               const tsLocal  = Number(dados?._savedAt||0);
               const tsRemoto = Number(vendasA[dt]?._savedAt||0);
@@ -497,7 +541,15 @@ try{
             });
 
             // vendasVend das vendedoras desta loja — mesma regra
-            const vendVendA = Object.assign({}, remotoA.vendasVend || {});
+            const vendVendA = {};
+            Object.entries(remotoA.vendasVend || {}).forEach(([vid,dias])=>{
+              const manter = {};
+              Object.entries(dias||{}).forEach(([dt,d])=>{
+                if(window._lapideBarra(D2, 'vend', vid, dt, d)) return;
+                manter[dt] = d;
+              });
+              vendVendA[vid] = manter;
+            });
             (D2.vendedoras||[]).filter(v=>v.loja===lidA).forEach(v=>{
               const diasLocais = D2.vendasVend?.[v.id];
               if(!diasLocais) return;
@@ -554,6 +606,33 @@ try{
             if(Array.isArray(D2._lojasArquivadas)){
               payloadA._lojasArquivadas   = D2._lojasArquivadas;
               payloadA._lojasArquivadasTs = D2._lojasArquivadasTs || Date.now();
+            }
+            // [R130] A lápide viaja junto com o dado. Antes o admin excluía um
+            // dia, o doc da loja ficava sem saber, e o próximo login da loja
+            // reinseria o registro no servidor. União com o que já está lá:
+            // apagar lápide alheia traria de volta a exclusão de outra máquina.
+            {
+              const _excRem = remotoA._vendasExcluidas || {};
+              const _excOut = Object.assign({}, _excRem);
+              if(Array.isArray(D2._vendasExcluidas?.[lidA])){
+                const _uni = new Set([].concat(_excRem[lidA]||[], D2._vendasExcluidas[lidA]));
+                _excOut[lidA] = [..._uni];
+              }
+              if(Object.keys(_excOut).length) payloadA._vendasExcluidas = _excOut;
+
+              const _idsLoja = new Set((D2.vendedoras||[]).filter(v=>v.loja===lidA).map(v=>v.id));
+              const _excVOut = Object.assign({}, remotoA._vendasVendExcluidas || {});
+              Object.entries(D2._vendasVendExcluidas || {}).forEach(([vid, datas])=>{
+                if(!_idsLoja.has(vid) || !Array.isArray(datas)) return;
+                const _uniV = new Set([].concat(_excVOut[vid]||[], datas));
+                _excVOut[vid] = [..._uniV];
+              });
+              if(Object.keys(_excVOut).length) payloadA._vendasVendExcluidas = _excVOut;
+
+              payloadA._vendasExcluidasTs = Object.assign({},
+                remotoA._vendasExcluidasTs || {}, D2._vendasExcluidasTs || {});
+              payloadA._vendasVendExcluidasTs = Object.assign({},
+                remotoA._vendasVendExcluidasTs || {}, D2._vendasVendExcluidasTs || {});
             }
             await setDoc(doc(db,"avatim",docIdA), {
               dados:  JSON.stringify(payloadA),
@@ -690,6 +769,8 @@ try{
             _vendsExcluidas:      D2._vendsExcluidas      || [],
             _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
             _vendasVendExcluidas: D2._vendasVendExcluidas  || {},
+            _vendasExcluidasTs:     D2._vendasExcluidasTs     || {},   // [R130]
+            _vendasVendExcluidasTs: D2._vendasVendExcluidasTs || {},   // [R130]
             _campExcluidos:       D2._campExcluidos       || []
         };
         const payload = {
@@ -794,14 +875,36 @@ try{
           if(!pedacoLido){ console.log("[Avatim] Doc loja_"+lid+" não existe ainda"); return; }
           try{
             const pedaco = pedacoLido;
+            // [R130] As lapides do doc da loja entram ANTES do merge de vendas.
+            // Se a loja excluiu um dia e o principal ainda nao sabe, o filtro
+            // logo abaixo rodaria com a lista vazia e o dia voltaria.
+            if(pedaco._vendasExcluidas){
+              if(!base._vendasExcluidas) base._vendasExcluidas={};
+              Object.entries(pedaco._vendasExcluidas).forEach(([_l,_ds])=>{
+                if(!Array.isArray(_ds)) return;
+                if(!base._vendasExcluidas[_l]) base._vendasExcluidas[_l]=[];
+                _ds.forEach(_d=>{ if(!base._vendasExcluidas[_l].includes(_d)) base._vendasExcluidas[_l].push(_d); });
+              });
+            }
+            if(pedaco._vendasVendExcluidas){
+              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
+              Object.entries(pedaco._vendasVendExcluidas).forEach(([_v,_ds])=>{
+                if(!Array.isArray(_ds)) return;
+                if(!base._vendasVendExcluidas[_v]) base._vendasVendExcluidas[_v]=[];
+                _ds.forEach(_d=>{ if(!base._vendasVendExcluidas[_v].includes(_d)) base._vendasVendExcluidas[_v].push(_d); });
+              });
+            }
+            if(pedaco._vendasExcluidasTs)
+              base._vendasExcluidasTs = Object.assign({}, pedaco._vendasExcluidasTs, base._vendasExcluidasTs||{});
+            if(pedaco._vendasVendExcluidasTs)
+              base._vendasVendExcluidasTs = Object.assign({}, pedaco._vendasVendExcluidasTs, base._vendasVendExcluidasTs||{});
             // Merge vendas da loja
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
               if(!base.vendas[l]) base.vendas[l]={};
               // [FIX cross-device] Merge timestamp-aware
-              const _excFSC = base._vendasExcluidas?.[l]||[];
               Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                if(_excFSC.includes(_dt)) return;
+                if(window._lapideBarra(base, 'venda', l, _dt, _val)) return;   // [R130]
                 const _lv = base.vendas[l][_dt];
                 const _lT = (_lv && _lv._savedAt) || 0;
                 const _rT = (_val && _val._savedAt) || 0;
@@ -812,9 +915,8 @@ try{
             Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
               if(!base.vendasVend[vid]) base.vendasVend[vid]={};
               // [FIX cross-device] Merge seguro vendasVend timestamp-aware
-              const _excVVL = base._vendasVendExcluidas?.[vid]||[];
               Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                if(_excVVL.includes(_dt)) return;
+                if(window._lapideBarra(base, 'vend', vid, _dt, _val)) return;  // [R130]
                 const _lvv = base.vendasVend[vid][_dt];
                 const _lTv = (_lvv && _lvv._savedAt) || 0;
                 const _rTv = (_val && _val._savedAt) || 0;
@@ -899,6 +1001,30 @@ try{
                 }
               });
             }
+            // [R130] As lápides de vendas do doc da loja precisam entrar ANTES do
+            // merge de vendas logo abaixo. Estavam sendo mescladas depois (e só
+            // as de vendasVend), então o filtro rodava com a lista vazia: o dia
+            // excluído voltava, e a limpeza adiante concluía que era relançamento.
+            if(pedaco._vendasExcluidas){
+              if(!base._vendasExcluidas) base._vendasExcluidas={};
+              Object.entries(pedaco._vendasExcluidas).forEach(([_l,_ds])=>{
+                if(!Array.isArray(_ds)) return;
+                if(!base._vendasExcluidas[_l]) base._vendasExcluidas[_l]=[];
+                _ds.forEach(_d=>{ if(!base._vendasExcluidas[_l].includes(_d)) base._vendasExcluidas[_l].push(_d); });
+              });
+            }
+            if(pedaco._vendasVendExcluidas){
+              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
+              Object.entries(pedaco._vendasVendExcluidas).forEach(([_v,_ds])=>{
+                if(!Array.isArray(_ds)) return;
+                if(!base._vendasVendExcluidas[_v]) base._vendasVendExcluidas[_v]=[];
+                _ds.forEach(_d=>{ if(!base._vendasVendExcluidas[_v].includes(_d)) base._vendasVendExcluidas[_v].push(_d); });
+              });
+            }
+            if(pedaco._vendasExcluidasTs)
+              base._vendasExcluidasTs = Object.assign({}, pedaco._vendasExcluidasTs, base._vendasExcluidasTs||{});
+            if(pedaco._vendasVendExcluidasTs)
+              base._vendasVendExcluidasTs = Object.assign({}, pedaco._vendasVendExcluidasTs, base._vendasVendExcluidasTs||{});
             // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
             // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
             // Lojas também podem ter exclusões registradas que o admin precisa respeitar
@@ -1024,6 +1150,11 @@ try{
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
                 if(!base.vendas[l]) base.vendas[l]={};
                 Object.entries(dias||{}).forEach(([_dt2,_val2])=>{
+                  // [R130] Aqui NAO havia filtro de lapide nenhum — so vendasVend
+                  // logo abaixo filtrava. Um dia excluido voltava do doc da loja
+                  // em todo carregamento, e a limpeza mais adiante concluia que
+                  // tinha sido relancado e apagava a lapide de vez.
+                  if(window._lapideBarra(base, 'venda', l, _dt2, _val2)) return;
                   // [FIX cross-device] Merge timestamp-aware
                   const _lvL = base.vendas[l][_dt2];
                   const _lTL = (_lvL && _lvL._savedAt) || 0;
@@ -1035,9 +1166,8 @@ try{
               Object.entries(pedaco.vendasVend||{}).forEach(([vid,dias])=>{
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
                 // [FIX cross-device] Merge seguro vendasVend timestamp-aware
-                const _excVV = base._vendasVendExcluidas?.[vid]||[];
                 Object.entries(dias||{}).forEach(([_dt,_val])=>{
-                  if(_excVV.includes(_dt)) return;
+                  if(window._lapideBarra(base, 'vend', vid, _dt, _val)) return; // [R130]
                   const _lvvL = base.vendasVend[vid][_dt];
                   const _lTvL = (_lvvL && _lvvL._savedAt) || 0;
                   const _rTvL = (_val && _val._savedAt) || 0;
@@ -5015,7 +5145,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-08-31';
+window.AVATIM_BUILD = '2026-09-05';
 window.AVATIM_RECURSOS = {
   travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
   gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
@@ -5043,7 +5173,8 @@ window.AVATIM_RECURSOS = {
   fluxoExcluidoNaoVolta: () => typeof _fluxoExcluido === 'function',
   limparFluxoDuplicados: () => typeof window.avatimLimparFluxoDuplicados === 'function',
   pendenteNaoDerruba:    () => typeof _persistirPendente === 'function',
-  prazoPorPerfil:        () => typeof window._prazoGravacao === 'function'
+  prazoPorPerfil:        () => typeof window._prazoGravacao === 'function',
+  lapideComHora:         () => typeof window._lapideBarra === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -9247,9 +9378,8 @@ function _mergeVendasSeguro(remoto){
   if(remoto.vendas){
     Object.entries(remoto.vendas).forEach(([lid2, dias])=>{
       if(!D.vendas[lid2]) D.vendas[lid2] = {};
-      const excl = D._vendasExcluidas?.[lid2] || [];
       Object.entries(dias||{}).forEach(([dt, val])=>{
-        if(excl.includes(dt)) return;
+        if(window._lapideBarra(D, 'venda', lid2, dt, val)) return;   // [R130]
         const localVal = D.vendas[lid2][dt];
         const _lTsV = (localVal && localVal._savedAt) || 0;
         const _rTsV = (val && val._savedAt) || 0;
@@ -9262,9 +9392,8 @@ function _mergeVendasSeguro(remoto){
   if(remoto.vendasVend){
     Object.entries(remoto.vendasVend).forEach(([vid, dias])=>{
       if(!D.vendasVend[vid]) D.vendasVend[vid] = {};
-      const excl = D._vendasVendExcluidas?.[vid] || [];
       Object.entries(dias||{}).forEach(([dt, val])=>{
-        if(excl.includes(dt)) return;
+        if(window._lapideBarra(D, 'vend', vid, dt, val)) return;     // [R130]
         const localValV = D.vendasVend[vid][dt];
         const _lTsVV = (localValV && localValV._savedAt) || 0;
         const _rTsVV = (val && val._savedAt) || 0;
@@ -9466,6 +9595,12 @@ async function loadFromFirestore(){
           datas.forEach(dt=>{ if(!D._vendasVendExcluidas[vid].includes(dt)) D._vendasVendExcluidas[vid].push(dt); });
         });
       }
+      // [R130] Os carimbos vêm junto com as lápides. O local ganha do remoto:
+      // se esta máquina acabou de excluir, é a hora dela que vale.
+      if(remoto._vendasExcluidasTs)
+        D._vendasExcluidasTs = Object.assign({}, remoto._vendasExcluidasTs, D._vendasExcluidasTs||{});
+      if(remoto._vendasVendExcluidasTs)
+        D._vendasVendExcluidasTs = Object.assign({}, remoto._vendasVendExcluidasTs, D._vendasVendExcluidasTs||{});
       // ── VENDAS: estratégia timestamp-aware para cross-device sync ───
       // Bug anterior: !(dt in D.vendas[lid]) bloqueava updates entre máquinas
       // Agora: aceita remoto se mais recente OU se local não existe
@@ -9473,9 +9608,8 @@ async function loadFromFirestore(){
       if(remoto.vendas){
         Object.entries(remoto.vendas).forEach(([lid,dias])=>{
           if(!D.vendas[lid]) D.vendas[lid]={};
-          const excl = D._vendasExcluidas?.[lid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
-            if(excl.includes(dt)) return;
+            if(window._lapideBarra(D, 'venda', lid, dt, val)) return;  // [R130]
             const _lvLF = D.vendas[lid][dt];
             const _lTsLF1 = (_lvLF && _lvLF._savedAt) || 0;
             const _rTsLF1 = (val && val._savedAt) || 0;
@@ -9487,9 +9621,8 @@ async function loadFromFirestore(){
       if(remoto.vendasVend){
         Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
           if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-          const excl = D._vendasVendExcluidas?.[vid] || [];
           Object.entries(dias).forEach(([dt,val])=>{
-            if(excl.includes(dt)) return;
+            if(window._lapideBarra(D, 'vend', vid, dt, val)) return;   // [R130]
             const _lvvLF = D.vendasVend[vid][dt];
             const _lTsLF2 = (_lvvLF && _lvvLF._savedAt) || 0;
             const _rTsLF2 = (val && val._savedAt) || 0;
@@ -9497,35 +9630,56 @@ async function loadFromFirestore(){
           });
         });
       }
-      // [FIX TOMBSTONE] Remover tombstones que já foram substituídos por novos lançamentos
-      // Um tombstone SÓ apaga dados que foram explicitamente excluídos nesta sessão
-      // NÃO deve apagar lançamentos feitos após a exclusão
-      if(D._vendasExcluidas){
-        Object.entries(D._vendasExcluidas).forEach(([lid,datas])=>{
-          if(!D._vendasExcluidas[lid]) return;
-          // Só apagar se não há dado local para este dia (o dado foi realmente excluído)
-          D._vendasExcluidas[lid] = D._vendasExcluidas[lid].filter(dt => {
-            const temDadoLocal = D.vendas?.[lid]?.[dt];
-            if(temDadoLocal){
-              // Dado local existe: tombstone foi sobrescrito por novo lançamento, remover tombstone
+      // [R130] Aposentar a lápide quando o dia foi REALMENTE relançado.
+      //
+      // Antes a pergunta era só "existe dado local neste dia?" — e quem
+      // acabara de repor o dado era o merge logo acima. A limpeza lia isso
+      // como relançamento, apagava a lápide, e a exclusão morria de vez: na
+      // volta seguinte não havia mais nada barrando o registro. Qualquer
+      // falha de filtro em qualquer merge virava perda permanente.
+      //
+      // Agora a pergunta é "o dado é mais novo que a exclusão?". Relançamento
+      // legítimo (inclusive de outra máquina) tem _savedAt posterior e vence;
+      // defunto que voltou por merge tem _savedAt anterior e é removido de
+      // novo. Lápide sem carimbo — criada antes desta versão — mantém a regra
+      // velha, que é o único comportamento definido para ela.
+      const _aposentar = (lista, mapaTs, chave, leDado, apagaDado) => {
+        return lista.filter(dt => {
+          const dado  = leDado(dt);
+          const tsExc = Number(mapaTs?.[chave + "|" + dt] || 0);
+          if(dado){
+            const relancado = !tsExc || Number(dado._savedAt || 0) > tsExc;
+            if(relancado){
+              if(mapaTs) delete mapaTs[chave + "|" + dt];
               return false;
             }
-            if(D.vendas[lid]) delete D.vendas[lid][dt];
+            apagaDado(dt);   // voltou por merge, não por relançamento
             return true;
-          });
+          }
+          apagaDado(dt);
+          return true;
+        });
+      };
+      if(D._vendasExcluidas){
+        if(!D._vendasExcluidasTs) D._vendasExcluidasTs = {};
+        Object.keys(D._vendasExcluidas).forEach(lid=>{
+          if(!Array.isArray(D._vendasExcluidas[lid])) return;
+          D._vendasExcluidas[lid] = _aposentar(
+            D._vendasExcluidas[lid], D._vendasExcluidasTs, lid,
+            dt => D.vendas?.[lid]?.[dt],
+            dt => { if(D.vendas[lid]) delete D.vendas[lid][dt]; }
+          );
         });
       }
       if(D._vendasVendExcluidas){
-        Object.entries(D._vendasVendExcluidas).forEach(([vid,datas])=>{
-          if(!D._vendasVendExcluidas[vid]) return;
-          D._vendasVendExcluidas[vid] = D._vendasVendExcluidas[vid].filter(dt => {
-            const temDadoLocal = D.vendasVend?.[vid]?.[dt];
-            if(temDadoLocal){
-              return false;
-            }
-            if(D.vendasVend[vid]) delete D.vendasVend[vid][dt];
-            return true;
-          });
+        if(!D._vendasVendExcluidasTs) D._vendasVendExcluidasTs = {};
+        Object.keys(D._vendasVendExcluidas).forEach(vid=>{
+          if(!Array.isArray(D._vendasVendExcluidas[vid])) return;
+          D._vendasVendExcluidas[vid] = _aposentar(
+            D._vendasVendExcluidas[vid], D._vendasVendExcluidasTs, vid,
+            dt => D.vendasVend?.[vid]?.[dt],
+            dt => { if(D.vendasVend[vid]) delete D.vendasVend[vid][dt]; }
+          );
         });
       }
       // campRealizados: merge por id (inclui lançamentos de todas as lojas)
@@ -12451,6 +12605,7 @@ async function salvarLanc(){
     // Evita que exclusões anteriores bloqueiem novos lançamentos
     if(D._vendasExcluidas?.[lid]){
       D._vendasExcluidas[lid] = D._vendasExcluidas[lid].filter(dt => dt !== data);
+      if(D._vendasExcluidasTs) delete D._vendasExcluidasTs[lid+"|"+data];   // [R130]
     }
 
     D.vendas[lid][data] = dadosLanc;
@@ -12498,6 +12653,7 @@ async function salvarLanc(){
       // [FIX TOMBSTONE] Remover tombstone desta vendedora/data
       if(D._vendasVendExcluidas?.[v.id]){
         D._vendasVendExcluidas[v.id] = D._vendasVendExcluidas[v.id].filter(dt => dt !== data);
+        if(D._vendasVendExcluidasTs) delete D._vendasVendExcluidasTs[v.id+"|"+data];   // [R130]
       }
     });
     // Atualizar D.vendas[lid] com a SOMA total de todas as vendedoras
@@ -12639,6 +12795,8 @@ async function deletarLanc(lid, data){
   if(!D._vendasExcluidas) D._vendasExcluidas = {};
   if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid] = [];
   if(!D._vendasExcluidas[lid].includes(data)) D._vendasExcluidas[lid].push(data);
+  if(!D._vendasExcluidasTs) D._vendasExcluidasTs = {};
+  D._vendasExcluidasTs[lid+"|"+data] = Date.now();   // [R130] hora da exclusão
   // Remove lançamento da loja
   if(D.vendas[lid]) delete D.vendas[lid][data];
   // Remove vendas de cada vendedora (com tombstone individual)
@@ -12646,6 +12804,8 @@ async function deletarLanc(lid, data){
     if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
     if(!D._vendasVendExcluidas[v.id]) D._vendasVendExcluidas[v.id] = [];
     if(!D._vendasVendExcluidas[v.id].includes(data)) D._vendasVendExcluidas[v.id].push(data);
+    if(!D._vendasVendExcluidasTs) D._vendasVendExcluidasTs = {};
+    D._vendasVendExcluidasTs[v.id+"|"+data] = Date.now();   // [R130]
     if(D.vendasVend[v.id]) delete D.vendasVend[v.id][data];
   });
   // [FIX Race Condition] Exclusão tem prioridade — cancela qualquer save() pendente
@@ -13982,6 +14142,8 @@ async function excluirLancVend(vendId, data, btn){
   if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
   if(!D._vendasVendExcluidas[vendId]) D._vendasVendExcluidas[vendId] = [];
   if(!D._vendasVendExcluidas[vendId].includes(data)) D._vendasVendExcluidas[vendId].push(data);
+  if(!D._vendasVendExcluidasTs) D._vendasVendExcluidasTs = {};
+  D._vendasVendExcluidasTs[vendId+"|"+data] = Date.now();   // [R130]
   if(D.vendasVend[vendId]) delete D.vendasVend[vendId][data];
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
   window._pendingLocalData = null;
@@ -14014,6 +14176,8 @@ async function excluirLancDia(lid, data, btn){
   if(!D._vendasExcluidas) D._vendasExcluidas = {};
   if(!D._vendasExcluidas[lid]) D._vendasExcluidas[lid] = [];
   if(!D._vendasExcluidas[lid].includes(data)) D._vendasExcluidas[lid].push(data);
+  if(!D._vendasExcluidasTs) D._vendasExcluidasTs = {};
+  D._vendasExcluidasTs[lid+"|"+data] = Date.now();   // [R130] hora da exclusão
   // Remove D.vendas do dia
   if(D.vendas[lid]) delete D.vendas[lid][data];
   // Remove vendasVend de todas as vendedoras da loja naquele dia
@@ -14021,6 +14185,8 @@ async function excluirLancDia(lid, data, btn){
     if(!D._vendasVendExcluidas) D._vendasVendExcluidas = {};
     if(!D._vendasVendExcluidas[v.id]) D._vendasVendExcluidas[v.id] = [];
     if(!D._vendasVendExcluidas[v.id].includes(data)) D._vendasVendExcluidas[v.id].push(data);
+    if(!D._vendasVendExcluidasTs) D._vendasVendExcluidasTs = {};
+    D._vendasVendExcluidasTs[v.id+"|"+data] = Date.now();   // [R130]
     if(D.vendasVend[v.id]) delete D.vendasVend[v.id][data];
   });
   // [FIX Race Condition] Exclusão cancela save() pendente anterior
