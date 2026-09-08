@@ -472,6 +472,10 @@ try{
           excelDados:          D2.excelDados           || [],
           _excelImportInfo:    D2._excelImportInfo     || null,
           _excelImportacoes:   D2._excelImportacoes    || [],
+          // [R132] histórico das planilhas de estoque. Precisa subir: é ele
+          // que guarda o "antes" de cada saldo/preço — sem ele no servidor,
+          // desfazer uma importação só funcionaria na máquina que a fez.
+          _estqImportacoes:    D2._estqImportacoes     || [],
           _contatosExcluidos:  D2._contatosExcluidos   || {}
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
@@ -4390,9 +4394,51 @@ body:not(.logado) #appScreen{display:none!important}
   <!-- ABA ESTOQUE & PRODUTOS -->
   <div id="aba-estq-content" style="display:none">
 
-    <!-- Botão novo produto (só admin) -->
-    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+    <!-- [R132] Barra de ações do estoque: subir planilha + novo produto.
+         Até aqui o catálogo só crescia produto a produto, na mão. Uma
+         atualização de saldo do mês inteiro eram centenas de digitações,
+         e o que não fosse digitado ficava mostrando saldo velho. -->
+    <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn-s admin-only" onclick="window.estqAbrirUpload()" id="estq-btn-subir"
+        title="Atualiza saldo e preço do catálogo a partir de uma planilha"
+        style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
+      <input type="file" id="estq-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.estqProcessarUpload(event)">
       <button class="btn-p admin-only" onclick="abrirFormNovoProd()" style="display:none">+ Novo Produto</button>
+    </div>
+
+    <!-- [R132] Formato aceito — só admin, e só quando ele vai importar. -->
+    <div class="sc admin-only" style="margin-bottom:14px;display:none" id="estq-instrucoes">
+      <div style="font-size:12px;color:var(--muted);line-height:1.6">
+        <strong style="color:var(--ouro)">📋 Formato esperado da planilha de estoque</strong>
+        <div style="margin:4px 0 8px;font-size:11px">
+          A <strong>ordem das colunas não importa</strong> — o sistema identifica pelo nome do cabeçalho.
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--verm);font-weight:700">Código *</td>
+              <td style="padding:3px 0;color:var(--muted)">Código · Cód · SKU · Referência · Item — <strong>é o que casa com o catálogo</strong></td></tr>
+          <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--ouro);font-weight:700">Produto</td>
+              <td style="padding:3px 0;color:var(--muted)">Produto · Descrição · Nome — obrigatório só para <strong>criar</strong> produto novo</td></tr>
+          <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--ouro);font-weight:700">Saldo</td>
+              <td style="padding:3px 0;color:var(--muted)">Saldo · Estoque · Quantidade · Disponível</td></tr>
+          <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--ouro);font-weight:700">Preço</td>
+              <td style="padding:3px 0;color:var(--muted)">Preço · Preço Unitário · Valor · Valor Unitário</td></tr>
+          <tr><td style="padding:3px 6px 3px 0;white-space:nowrap;color:var(--muted);font-weight:700">Grupo / Linha</td>
+              <td style="padding:3px 0;color:var(--muted)">Grupo · Família · Linha · Categoria — usados só ao criar produto novo</td></tr>
+        </table>
+        <div style="margin-top:8px;font-size:11px">
+          Sem coluna de código, o casamento é feito pelo <strong>nome do produto</strong> e nada é criado —
+          só atualiza o que já existe no catálogo.
+        </div>
+      </div>
+    </div>
+
+    <!-- [R132] Gestão das importações de estoque — só admin.
+         Mesmo desenho da tela do CRM: cada arquivo é uma linha, e dá para
+         desfazer um sem tocar nos outros. -->
+    <div class="sc admin-only" style="margin-bottom:14px;display:none;border:1px solid rgba(201,168,76,.4)" id="estq-gestao-imports">
+      <div class="st">📥 Planilhas de estoque importadas</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Excluir uma importação <strong>desfaz</strong> o que ela mudou: saldo e preço voltam ao valor anterior e os produtos que ela criou saem do catálogo. O que foi alterado depois por outra importação ou na mão é preservado.</div>
+      <div id="estq-imports-lista"></div>
     </div>
 
     <!-- Form novo produto (admin) -->
@@ -5239,7 +5285,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-06';
+window.AVATIM_BUILD = '2026-09-08';
 window.AVATIM_RECURSOS = {
   travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
   gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
@@ -5269,7 +5315,14 @@ window.AVATIM_RECURSOS = {
   pendenteNaoDerruba:    () => typeof _persistirPendente === 'function',
   prazoPorPerfil:        () => typeof window._prazoGravacao === 'function',
   lapideComHora:         () => typeof window._lapideBarra === 'function',
-  gravacaoSerializada:   () => typeof window._gravFilaEstado === 'function'
+  gravacaoSerializada:   () => typeof window._gravFilaEstado === 'function',
+  // [R132] planilha de estoque: subir e desfazer
+  estoquePlanilha:       () => typeof window.estqAplicarPlanilha === 'function'
+                            && typeof window.estqExcluirImportacao === 'function',
+  // [R133] gravação do CRM em lote — não estoura a fila do SDK
+  crmGravacaoEmLote:     () => typeof window._crmGravarLote === 'function',
+  // [R134] quem ficou sem loja para de sumir em silêncio
+  planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -7722,27 +7775,97 @@ function _crmDocNome(lid, ano, parte){
 }
 
 /** Grava no Firestore os cubos de uma loja/ano. Só admin. */
+// ══════════════════════════════════════════════════════════════════════
+// [R133] GRAVAÇÃO DOS DOCUMENTOS DO CRM EM LOTE
+//
+// Os cubos do CRM são gravados documento a documento: um doc "leve" com o
+// resumo e N pedaços de clientes. Um conjunto grande (a Mooca) passa de
+// dezenas de pedaços, e sincronizar/apagar as 7 lojas eram centenas de
+// setDoc soltos.
+//
+// O SDK do Firestore aceita cerca de 100 gravações PENDENTES na fila de
+// escrita. Com a rede instável nada é confirmado, a fila enche e a próxima
+// gravação morre com "Write stream exhausted maximum allowed queued writes"
+// — que foi exatamente o erro que apareceu ao apagar um conjunto depois de
+// importar a planilha do mês.
+//
+// Um writeBatch conta como UMA unidade nessa fila, não N. E resolve de
+// quebra o problema que o R131 corrigiu no documento principal: a cabeça
+// (que carrega a contagem de partes) era gravada ANTES dos pedaços, então
+// uma leitura no meio juntava cabeça nova com pedaço velho. Dentro de um
+// lote isso não existe — ou entra tudo, ou não entra nada.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Teto por lote. O Firestore aceita 500; a folga evita erro de borda. */
+const CRM_LOTE_MAX = 400;
+
+/**
+ * Grava uma lista de {id, dados} em lotes atômicos, com prazo.
+ *
+ * Sem o prazo a promessa fica pendente para sempre quando o Firestore não
+ * alcança o servidor — o mesmo motivo que criou o gravarRemotoComPrazo.
+ */
+window._crmGravarLote = async function(escritas, ms){
+  if(!escritas || !escritas.length) return {lotes:0, docs:0};
+  const {mod, db} = await _bkFirestore();
+  const {writeBatch, doc, setDoc} = mod;
+  const prazo = ms || (typeof window._prazoGravacao === 'function' ? window._prazoGravacao() : 20000);
+
+  function comPrazo(promessa, oque){
+    let timer;
+    const estouro = new Promise((_, rej) => {
+      timer = setTimeout(() => rej(new Error('o servidor não confirmou ' + oque
+        + ' em ' + Math.round(prazo/1000) + 's')), prazo);
+    });
+    return Promise.race([promessa, estouro]).finally(() => clearTimeout(timer));
+  }
+
+  // Firestore antigo sem writeBatch: cai no caminho de sempre, um a um.
+  // Pior, mas funciona — melhor que quebrar a tela por falta de uma API.
+  if(typeof writeBatch !== 'function'){
+    console.warn('[Avatim] R133: writeBatch indisponível — gravando um a um');
+    for(const e of escritas){
+      await comPrazo(setDoc(doc(db,'avatim',e.id), e.dados), e.id);
+    }
+    return {lotes:0, docs:escritas.length};
+  }
+
+  let lotes = 0;
+  for(let i = 0; i < escritas.length; i += CRM_LOTE_MAX){
+    const bloco = escritas.slice(i, i + CRM_LOTE_MAX);
+    const lote = writeBatch(db);
+    bloco.forEach(e => lote.set(doc(db,'avatim',e.id), e.dados));
+    await comPrazo(lote.commit(), bloco.length + ' documento(s)');
+    lotes++;
+  }
+  return {lotes, docs:escritas.length};
+};
+
 window.crmSincronizarUm = async function(lid, ano){
   const cubo = ((D.crm||{})[lid]||{})[ano];
   if(!cubo) throw new Error('Sem cubo para ' + lid + '/' + ano);
-  const {mod, db} = await _bkFirestore();
-  const {setDoc, doc} = mod;
 
   const pedacos = window.crmFatiarClientes(cubo.clientes || []);
   const leves = Object.assign({}, cubo);
   delete leves.clientes;
   leves._partes = pedacos.length;
+  const ts  = Date.now();
+  const por = window._currentUser?.email || '?';
 
-  await setDoc(doc(db, 'avatim', _crmDocNome(lid, ano)), {
-    dados: JSON.stringify(leves), ts: Date.now(),
-    por: window._currentUser?.email || '?', loja: lid, ano: String(ano)
+  // [R133] Os pedaços vêm primeiro e a cabeça por último — ela é quem
+  // carrega _partes, então publicá-la é o que "fecha" o conjunto. Dentro
+  // de um lote isso é indiferente; passando de CRM_LOTE_MAX viram lotes
+  // separados, e aí a ordem volta a importar.
+  const escritas = pedacos.map((pd, i) => ({
+    id: _crmDocNome(lid, ano, i),
+    dados: {dados: JSON.stringify(pd), ts, por, loja: lid, ano: String(ano), parte: i}
+  }));
+  escritas.push({
+    id: _crmDocNome(lid, ano),
+    dados: {dados: JSON.stringify(leves), ts, por, loja: lid, ano: String(ano)}
   });
-  for(let i = 0; i < pedacos.length; i++){
-    await setDoc(doc(db, 'avatim', _crmDocNome(lid, ano, i)), {
-      dados: JSON.stringify(pedacos[i]), ts: Date.now(),
-      por: window._currentUser?.email || '?', loja: lid, ano: String(ano), parte: i
-    });
-  }
+
+  await window._crmGravarLote(escritas);
   return {partes: pedacos.length, clientes: (cubo.clientes||[]).length};
 };
 
@@ -7849,15 +7972,16 @@ window.crmApagar = async function(lid, ano){
 
   let erro = null;
   try{
-    const {mod, db} = await _bkFirestore();
-    const {setDoc, doc} = mod;
-    // documento vazio marca a exclusão — some no próximo carregamento
-    await setDoc(doc(db,'avatim',docs[0]),
-      {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
+    // [R133] Em lote: eram 1+N gravações soltas na fila do SDK, e com a rede
+    // ruim a fila estourava em "Write stream exhausted". Em lote também é
+    // tudo-ou-nada — antes dava para apagar a cabeça e falhar nos pedaços,
+    // deixando meio conjunto órfão no servidor.
+    const _ts = Date.now(), _por = (window._currentUser?.email||'?');
+    const _escritas = [{id: docs[0], dados:{dados:'', ts:_ts, por:_por, _apagado:true}}];
     for(let i=0;i<partes;i++){
-      await setDoc(doc(db,'avatim',_crmDocNome(lid,ano,i)),
-        {dados:'[]', ts:Date.now(), _apagado:true});
+      _escritas.push({id:_crmDocNome(lid,ano,i), dados:{dados:'[]', ts:_ts, _apagado:true}});
     }
+    await window._crmGravarLote(_escritas);
   }catch(e){
     erro = e.code || e.message || String(e);
     console.error('[crm] apagar remoto falhou:', erro);
@@ -9666,6 +9790,7 @@ async function loadFromFirestore(){
         if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
       }
       if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
+      if(Array.isArray(remoto._estqImportacoes)) D._estqImportacoes = remoto._estqImportacoes;
       if(_aceitaRemoto(D.configCom, remoto.configCom)) D.configCom = remoto.configCom;
       if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
       if(_aceitaRemoto(D.diasAbertosOverride, remoto.diasAbertosOverride)) D.diasAbertosOverride = remoto.diasAbertosOverride;
@@ -15257,6 +15382,8 @@ function trocarAbaEstoque(aba){
     renderEstqCritico();
     renderProdutos(_pfiltro, _plinha);
     atualizarTotalCatalogo();
+    // [R132] o painel de planilhas importadas só existe nesta aba
+    if(typeof _estqRenderImportacoes === 'function') _estqRenderImportacoes();
   }
 }
 
@@ -15378,6 +15505,440 @@ function atualizarSaldoProd(cod){
   renderProdutos(_pfiltro, _plinha);
   buscarProdSaldo(document.getElementById('upd-saldo-busca')?.value||'');
 }
+
+
+// ══════════════════════════════════════════════════════════════════════
+// [R132] IMPORTAÇÃO E EXCLUSÃO DE PLANILHAS DE ESTOQUE
+//
+// Mesmo desenho da importação do CRM Clientes: sobe arquivo, fica
+// registrado numa lista, e o admin pode excluir um sem afetar os outros.
+//
+// A diferença está no que "excluir" significa. No CRM cada linha carrega
+// o _importId da importação que a trouxe: apagar é filtrar. Aqui a
+// planilha não TRAZ linhas — ela ALTERA o catálogo, que já existe. Apagar
+// por filtro deixaria o saldo no valor importado para sempre.
+//
+// Por isso cada importação guarda o retrato do que encontrou ANTES de
+// escrever (`antes`) e o que escreveu (`aplicado`). Excluir é restaurar o
+// `antes` — e só quando o valor atual ainda é o `aplicado`, porque se
+// alguém mexeu depois (outra planilha, ou a mão no "Atualizar Saldo"),
+// quem veio depois vence. Desfazer não pode ressuscitar número velho por
+// cima de correção nova.
+//
+// D._estqImportacoes = [{id, arquivo, importadoEm, linhas, atualizados,
+//                        criados, ignorados, novos:[cod],
+//                        antes:{cod:{s,v}}, aplicado:{cod:{s,v}}}]
+// ══════════════════════════════════════════════════════════════════════
+
+if(!D._estqImportacoes) D._estqImportacoes = [];
+
+/** ID curto e único desta importação de estoque. */
+function _estqImportIdGerar(){
+  return 'estq_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
+}
+
+/** Nome de produto normalizado — o casamento por nome usa isto. */
+function _estqNormNome(n){
+  return String(n||'').trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ');
+}
+
+/**
+ * Código do Excel vira texto sem perder dígito. A planilha devolve
+ * 1020111100 como Number; String() já resolve, mas um float como
+ * 1020111100.0 viraria "1020111100.0" e não casaria com o catálogo.
+ */
+function _estqCod(v){
+  if(v === null || v === undefined) return '';
+  if(typeof v === 'number'){
+    if(!isFinite(v)) return '';
+    if(Number.isInteger(v)) return String(v);
+    return String(v).replace(/\.0+$/,'');
+  }
+  return String(v).trim();
+}
+
+/**
+ * Número em formato brasileiro ou americano. Devolve null quando a
+ * célula está vazia — vazio NÃO é zero: zerar um saldo porque a coluna
+ * veio em branco apagaria estoque que existe.
+ */
+function _estqNum(v){
+  if(v === null || v === undefined) return null;
+  if(typeof v === 'number') return isFinite(v) ? v : null;
+  let t = String(v).trim();
+  if(!t) return null;
+  t = t.replace(/[R$\s]/gi,'');
+  if(!t) return null;
+  // "1.234,56" (BR) → tira o ponto de milhar, vírgula vira ponto.
+  // "1,234.56" (US) → tira a vírgula de milhar.
+  if(t.indexOf(',') >= 0 && t.indexOf('.') >= 0){
+    if(t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g,'').replace(',','.');
+    else t = t.replace(/,/g,'');
+  } else if(t.indexOf(',') >= 0){
+    t = t.replace(',','.');
+  }
+  const n = parseFloat(t);
+  return isNaN(n) ? null : n;
+}
+
+/** Descobre as colunas pelo cabeçalho — a ordem no arquivo não importa. */
+function _estqDetectarColunas(headers){
+  const H = headers.map((h,i) => ({idx:i, norm:_excelNormHeader(h)}));
+  const map = {};
+
+  const codC = H.find(h => /^(codigo|cod|sku|referencia|ref|item|cod_produto|codigo_produto)$/.test(h.norm))
+            || H.find(h => /^(codigo|cod|sku|referencia)/.test(h.norm));
+  if(codC) map.codigo = codC.idx;
+
+  // "descricao"/"produto" — mas nunca a coluna de código já escolhida.
+  const nomeC = H.find(h => h.idx !== map.codigo && /^(produto|descricao|desc|nome|nome_produto|descricao_produto)$/.test(h.norm))
+             || H.find(h => h.idx !== map.codigo && /^(produto|descricao|nome)/.test(h.norm));
+  if(nomeC) map.nome = nomeC.idx;
+
+  const saldoC = H.find(h => /^(saldo|estoque|qtd|qtde|quantidade|disponivel|saldo_atual|saldo_estoque|estoque_atual)$/.test(h.norm))
+              || H.find(h => /^(saldo|estoque)|quantidade|disponivel/.test(h.norm));
+  if(saldoC) map.saldo = saldoC.idx;
+
+  // Preço não pode roubar a coluna de saldo (uma planilha com
+  // "QUANTIDADE" e "VALOR UNITARIO" tem as duas).
+  const precoC = H.find(h => h.idx !== map.saldo && /^(preco|preco_unitario|preco_unit|valor|valor_unitario|valor_unit|preco_venda)$/.test(h.norm))
+              || H.find(h => h.idx !== map.saldo && /^(preco|valor)/.test(h.norm));
+  if(precoC) map.preco = precoC.idx;
+
+  const grupoC = H.find(h => /^(grupo|familia|marca)$/.test(h.norm))
+              || H.find(h => /^(grupo|familia)/.test(h.norm));
+  if(grupoC) map.grupo = grupoC.idx;
+
+  const linhaC = H.find(h => /^(linha|categoria|colecao|departamento)$/.test(h.norm))
+              || H.find(h => /^(linha|categoria|colecao)/.test(h.norm));
+  if(linhaC) map.linha = linhaC.idx;
+
+  return map;
+}
+
+/**
+ * Aplica as linhas da planilha ao catálogo e devolve o registro da
+ * importação. Fica separado do upload para poder ser testado sem
+ * arquivo, sem DOM e sem rede.
+ */
+window.estqAplicarPlanilha = function(linhas, colMap, nomeArquivo){
+  const porCodigo = {};
+  const porNome   = {};
+  PRODUTOS.forEach(p => {
+    if(p.c) porCodigo[String(p.c)] = p;
+    const nn = _estqNormNome(p.n);
+    if(nn && !porNome[nn]) porNome[nn] = p;
+  });
+
+  const imp = {
+    id: _estqImportIdGerar(),
+    arquivo: nomeArquivo || 'planilha',
+    importadoEm: Date.now(),
+    linhas: 0, atualizados: 0, criados: 0, ignorados: 0,
+    novos: [], antes: {}, aplicado: {},
+    colunasDetectadas: Object.keys(colMap)
+  };
+
+  const temCod = colMap.codigo !== undefined;
+
+  linhas.forEach(row => {
+    if(!row || !row.length) return;
+    const cod  = temCod ? _estqCod(row[colMap.codigo]) : '';
+    const nome = colMap.nome !== undefined ? String(row[colMap.nome]||'').trim() : '';
+    if(!cod && !nome) return;              // linha em branco
+    imp.linhas++;
+
+    const saldo = colMap.saldo !== undefined ? _estqNum(row[colMap.saldo]) : null;
+    const preco = colMap.preco !== undefined ? _estqNum(row[colMap.preco]) : null;
+    if(saldo === null && preco === null){ imp.ignorados++; return; }
+
+    let prod = cod ? porCodigo[cod] : null;
+    if(!prod && nome) prod = porNome[_estqNormNome(nome)];
+
+    if(!prod){
+      // Sem código não dá para criar: o código é a identidade do produto
+      // no catálogo, e inventar um faria dois cadastros para o mesmo item.
+      if(!cod || !nome){ imp.ignorados++; return; }
+      const novo = {
+        c: cod,
+        n: nome.toUpperCase(),
+        g: (colMap.grupo !== undefined ? String(row[colMap.grupo]||'').trim().toUpperCase() : ''),
+        l: (colMap.linha !== undefined ? String(row[colMap.linha]||'').trim().toUpperCase() : ''),
+        s: saldo !== null ? Math.max(0, Math.round(saldo)) : 0,
+        v: preco !== null ? Math.max(0, preco) : 0,
+        extra: true
+      };
+      PRODUTOS.push(novo);
+      if(!D.produtosExtras) D.produtosExtras = [];
+      D.produtosExtras.push(novo);
+      porCodigo[cod] = novo;
+      const nn = _estqNormNome(novo.n);
+      if(nn && !porNome[nn]) porNome[nn] = novo;
+      imp.novos.push(cod);
+      imp.criados++;
+      return;
+    }
+
+    // Produto existente: guardar o retrato de antes UMA vez (a mesma
+    // planilha pode repetir o código em várias linhas; o "antes" é o
+    // estado anterior à importação inteira, não à última linha).
+    const c = String(prod.c);
+    if(imp.antes[c] === undefined){
+      imp.antes[c] = {
+        s: (D.saldosOverride && D.saldosOverride[c] !== undefined) ? D.saldosOverride[c] : null,
+        v: (D.precosOverride && D.precosOverride[c] !== undefined) ? D.precosOverride[c] : null,
+        // Valor que estava no catálogo em memória. Quando NÃO havia override,
+        // desfazer apaga a chave — e sem este retrato o array continuaria com o
+        // número importado até alguém dar F5: a tela mostraria um saldo que o
+        // sistema já não considera mais verdadeiro.
+        sMem: prod.s,
+        vMem: prod.v
+      };
+    }
+    if(imp.aplicado[c] === undefined) imp.aplicado[c] = {s:null, v:null};
+
+    let mexeu = false;
+    if(saldo !== null){
+      const sv = Math.max(0, Math.round(saldo));
+      prod.s = sv;
+      if(!D.saldosOverride) D.saldosOverride = {};
+      D.saldosOverride[c] = sv;
+      imp.aplicado[c].s = sv;
+      mexeu = true;
+    }
+    if(preco !== null){
+      const pv = Math.max(0, preco);
+      prod.v = pv;
+      if(!D.precosOverride) D.precosOverride = {};
+      D.precosOverride[c] = pv;
+      imp.aplicado[c].v = pv;
+      mexeu = true;
+    }
+    if(mexeu) imp.atualizados++;
+    else { delete imp.antes[c]; delete imp.aplicado[c]; imp.ignorados++; }
+  });
+
+  return imp;
+};
+
+/** Abre o seletor de arquivo (com o formato à vista). */
+window.estqAbrirUpload = function(){
+  const ins = document.getElementById('estq-instrucoes');
+  if(ins) ins.style.display = '';
+  const inp = document.getElementById('estq-file-input');
+  if(inp){ inp.value = ''; inp.click(); }
+};
+
+window.estqProcessarUpload = function(event){
+  const file = event.target.files?.[0];
+  if(!file) return;
+  if(typeof isAdmin === 'function' && !isAdmin()){
+    showToast('Só o administrador pode importar planilha de estoque.','err');
+    return;
+  }
+
+  // SheetJS sob demanda — mesmo CDN e mesmo padrão do CRM.
+  if(typeof XLSX === 'undefined'){
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload  = () => window.estqProcessarUpload(event);
+    script.onerror = () => showToast('❌ Não foi possível carregar o leitor de Excel (sem internet?).','err');
+    document.head.appendChild(script);
+    showToast('⏳ Carregando leitor de Excel...','ok');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array', cellDates:false});
+      const aba = wb.SheetNames[0];
+      if(!aba){ showToast('Planilha sem abas.','err'); return; }
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[aba], {header:1, defval:''});
+      if(rows.length < 2){ showToast('Planilha sem dados (só cabeçalho ou vazia).','warn'); return; }
+
+      const headers = rows[0];
+      const colMap  = _estqDetectarColunas(headers);
+
+      if(colMap.saldo === undefined && colMap.preco === undefined){
+        console.error('[estq] cabeçalhos do arquivo:', headers);
+        alert('Não encontrei coluna de SALDO nem de PREÇO.\n\n'
+          + 'Cabeçalhos do arquivo:\n' + headers.filter(Boolean).join(' | ') + '\n\n'
+          + 'Para SALDO eu aceito: Saldo, Estoque, Quantidade, Disponível.\n'
+          + 'Para PREÇO: Preço, Preço Unitário, Valor, Valor Unitário.');
+        showToast('❌ Sem coluna de saldo ou preço — nada foi alterado.','err');
+        return;
+      }
+      if(colMap.codigo === undefined && colMap.nome === undefined){
+        console.error('[estq] cabeçalhos do arquivo:', headers);
+        alert('Não encontrei coluna de CÓDIGO nem de PRODUTO.\n\n'
+          + 'Cabeçalhos do arquivo:\n' + headers.filter(Boolean).join(' | ') + '\n\n'
+          + 'Sem uma das duas não há como saber a qual produto cada linha se refere.');
+        showToast('❌ Sem coluna de código ou produto — nada foi alterado.','err');
+        return;
+      }
+      if(colMap.codigo === undefined){
+        if(!confirm('A planilha não tem coluna de código.\n\n'
+          + 'Vou casar pelo NOME do produto e só atualizar o que já existe no catálogo — '
+          + 'nenhum produto novo será criado.\n\nContinuar?')) return;
+      }
+
+      const imp = window.estqAplicarPlanilha(rows.slice(1), colMap, file.name);
+
+      if(!imp.atualizados && !imp.criados){
+        showToast('Nenhum produto do catálogo bateu com a planilha — nada foi alterado.','warn');
+        console.warn('[estq] linhas lidas:', imp.linhas, '| ignoradas:', imp.ignorados);
+        return;
+      }
+
+      D._estqImportacoes = D._estqImportacoes || [];
+      D._estqImportacoes.push(imp);
+      save();
+
+      showToast('✅ ' + imp.atualizados + ' produto(s) atualizado(s)'
+        + (imp.criados ? ' · ' + imp.criados + ' criado(s)' : '')
+        + (imp.ignorados ? ' · ' + imp.ignorados + ' linha(s) sem correspondência' : ''), 'ok');
+
+      atualizarTotalCatalogo();
+      popularFiltroLinhas();
+      renderEstqCritico();
+      renderProdutos(_pfiltro, _plinha);
+      _estqRenderImportacoes();
+    }catch(err){
+      console.error('[estq] falha ao ler a planilha:', err);
+      showToast('❌ Erro ao ler a planilha: ' + err.message,'err');
+    }
+  };
+  reader.onerror = () => showToast('❌ Não foi possível ler o arquivo.','err');
+  reader.readAsArrayBuffer(file);
+};
+
+/**
+ * Desfaz uma importação: restaura saldo e preço anteriores e tira do
+ * catálogo os produtos que ela criou. Campo alterado depois por outra
+ * importação (ou na mão) fica como está — quem veio depois vence.
+ */
+window.estqExcluirImportacao = function(impId){
+  if(typeof isAdmin === 'function' && !isAdmin()){
+    showToast('Só o administrador pode excluir importação de estoque.','err');
+    return;
+  }
+  const lista = D._estqImportacoes || [];
+  const imp = lista.find(i => i.id === impId);
+  if(!imp){ showToast('Importação não encontrada.','err'); return; }
+
+  if(!confirm('Desfazer a importação "' + imp.arquivo + '"?\n\n'
+    + (imp.atualizados ? '• ' + imp.atualizados + ' produto(s) voltam ao saldo/preço anterior\n' : '')
+    + (imp.criados ? '• ' + imp.criados + ' produto(s) criados por ela saem do catálogo\n' : '')
+    + '\nO que foi alterado depois disso é preservado.')) return;
+
+  let revertidos = 0, mantidos = 0, removidos = 0;
+
+  Object.keys(imp.antes || {}).forEach(cod => {
+    const antes = imp.antes[cod] || {};
+    const apl   = (imp.aplicado || {})[cod] || {};
+    const prod  = PRODUTOS.find(p => String(p.c) === cod);
+    let tocou = false;
+
+    if(apl.s !== null && apl.s !== undefined){
+      const atual = (D.saldosOverride || {})[cod];
+      if(atual === apl.s){
+        if(antes.s === null || antes.s === undefined){ if(D.saldosOverride) delete D.saldosOverride[cod]; }
+        else D.saldosOverride[cod] = antes.s;
+        tocou = true;
+      } else mantidos++;
+    }
+    if(apl.v !== null && apl.v !== undefined){
+      const atual = (D.precosOverride || {})[cod];
+      if(atual === apl.v){
+        if(antes.v === null || antes.v === undefined){ if(D.precosOverride) delete D.precosOverride[cod]; }
+        else D.precosOverride[cod] = antes.v;
+        tocou = true;
+      } else mantidos++;
+    }
+    if(tocou){
+      revertidos++;
+      // Só o override foi desfeito; o array em memória ainda tem o valor
+      // importado. Sem isto a tela mostraria o número revertido só no F5.
+      if(prod){
+        const so = (D.saldosOverride || {})[cod];
+        const po = (D.precosOverride || {})[cod];
+        // Com override, vale o override. Sem ele, volta o retrato de memória
+        // (o valor base do catálogo, que a importação tinha sobrescrito).
+        if(so !== undefined) prod.s = so;
+        else if(antes.sMem !== undefined && antes.sMem !== null) prod.s = antes.sMem;
+        if(po !== undefined) prod.v = po;
+        else if(antes.vMem !== undefined && antes.vMem !== null) prod.v = antes.vMem;
+      }
+    }
+  });
+
+  (imp.novos || []).forEach(cod => {
+    const iE = (D.produtosExtras || []).findIndex(p => String(p.c) === cod);
+    if(iE >= 0){ D.produtosExtras.splice(iE,1); removidos++; }
+    const iP = PRODUTOS.findIndex(p => String(p.c) === cod);
+    if(iP >= 0) PRODUTOS.splice(iP,1);
+    if(D.saldosOverride) delete D.saldosOverride[cod];
+    if(D.precosOverride) delete D.precosOverride[cod];
+  });
+
+  D._estqImportacoes = lista.filter(i => i.id !== impId);
+  save();
+
+  showToast('🗑️ Importação desfeita — ' + revertidos + ' produto(s) revertido(s)'
+    + (removidos ? ' · ' + removidos + ' removido(s) do catálogo' : '')
+    + (mantidos ? ' · ' + mantidos + ' campo(s) preservado(s) por alteração posterior' : ''), 'ok');
+
+  atualizarTotalCatalogo();
+  popularFiltroLinhas();
+  renderEstqCritico();
+  renderProdutos(_pfiltro, _plinha);
+  _estqRenderImportacoes();
+};
+
+/** Painel com as planilhas de estoque já importadas — só admin. */
+function _estqRenderImportacoes(){
+  const el   = document.getElementById('estq-imports-lista');
+  const wrap = document.getElementById('estq-gestao-imports');
+  if(!el || !wrap) return;
+  if(!(typeof isAdmin === 'function' && isAdmin())){ wrap.style.display = 'none'; return; }
+  const imps = D._estqImportacoes || [];
+  if(!imps.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+
+  const ordenadas = [...imps].sort((a,b) => (b.importadoEm||0) - (a.importadoEm||0));
+  el.innerHTML = '<div style="overflow-x:auto">'
+    + '<table class="dtable" style="min-width:600px;font-size:11px">'
+    + '<thead><tr>'
+    +   '<th>Arquivo</th>'
+    +   '<th style="text-align:center">Linhas</th>'
+    +   '<th style="text-align:center">Atualizados</th>'
+    +   '<th style="text-align:center">Criados</th>'
+    +   '<th style="text-align:center">Sem match</th>'
+    +   '<th>Importado em</th>'
+    +   '<th style="width:60px;text-align:center">Ação</th>'
+    + '</tr></thead><tbody>'
+    + ordenadas.map(imp => {
+        const dt = imp.importadoEm ? new Date(imp.importadoEm).toLocaleString('pt-BR') : '—';
+        const esc = String(imp.arquivo||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return '<tr>'
+          + '<td><strong>' + esc + '</strong></td>'
+          + '<td style="text-align:center">' + (imp.linhas||0) + '</td>'
+          + '<td style="text-align:center;font-weight:700;color:var(--verde)">' + (imp.atualizados||0) + '</td>'
+          + '<td style="text-align:center;color:var(--ouro);font-weight:600">' + (imp.criados||0) + '</td>'
+          + '<td style="text-align:center;color:' + (imp.ignorados>0?'var(--muted)':'var(--muted)') + '">' + (imp.ignorados||0) + '</td>'
+          + '<td style="color:var(--muted);font-size:10px">' + dt + '</td>'
+          + '<td style="text-align:center">'
+          +   '<button onclick="window.estqExcluirImportacao(\'' + imp.id + '\')" title="Desfazer esta importação"'
+          +   ' style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>'
+          + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+}
+window._estqRenderImportacoes = _estqRenderImportacoes;
 
 // ════════════════════════════════════════════════════════════
 // CAMPANHAS — NOVO SISTEMA (Objetivo Admin + Realizado Loja)
@@ -19617,6 +20178,7 @@ async function forceSyncAdmin(){
       if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
     }
     if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
+    if(Array.isArray(remoto._estqImportacoes)) D._estqImportacoes = remoto._estqImportacoes;
     _persistirLocal();
     const ts = new Date().toLocaleTimeString('pt-BR');
     if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
@@ -28336,10 +28898,47 @@ window.excelProcessarUpload = function(event){
         console.log('[excel] Loja deduzida pela vendedora:', deduzidas, '· ainda sem loja:', semLojaFinal);
         // Se ainda restam linhas sem loja, perguntar loja padrão
         if(semLojaFinal > 0){
+          // [R134] Dizer DE QUEM são as linhas que vão ficar de fora.
+          //
+          // Antes isto era só um número. Quem lia "2146 linhas ficaram sem
+          // loja" não tinha como saber de quem eram, de que período, nem
+          // quanto valiam — e ao deixar o campo vazio essas vendas eram
+          // descartadas em silêncio, sem entrar em loja nenhuma. Pior: desde
+          // o R55 as linhas cruas não são guardadas, então nem depois dava
+          // para recuperar. Decisão desse tamanho precisa ser informada.
+          const _orfas = new Map();
+          let _valorFora = 0;
+          dadosProcessados.forEach(r => {
+            if(r.loja) return;
+            const _k = (r.vendedora || '').trim() || '(sem vendedor(a) na planilha)';
+            if(!_orfas.has(_k)) _orfas.set(_k, {n:0, v:0, ini:'', fim:''});
+            const _o = _orfas.get(_k);
+            _o.n++; _o.v += (Number(r.valor) || 0);
+            if(!_o.ini || r.data < _o.ini) _o.ini = r.data;
+            if(!_o.fim || r.data > _o.fim) _o.fim = r.data;
+            _valorFora += (Number(r.valor) || 0);
+          });
+          const _brl = n => 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+          const _br  = d => d ? d.split('-').reverse().join('/') : '?';
+          const _lista = [..._orfas.entries()]
+            .sort((x,y) => y[1].v - x[1].v)
+            .slice(0, 12)
+            .map(([nome,o]) => '  • ' + nome + ' — ' + o.n + ' linha(s), ' + _brl(o.v)
+                             + '  (' + _br(o.ini) + ' a ' + _br(o.fim) + ')')
+            .join('\n');
+          console.warn('[excel] sem loja, por vendedor(a):',
+            [..._orfas.entries()].map(([n,o]) => n + ': ' + o.n + ' (' + _brl(o.v) + ')').join(' · '));
+
           const _lojasIds = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS).map(l => l.id+' ('+l.nome+')').join('\n');
           const _lojaPadrao = prompt(
-            semLojaFinal+' linha(s) ficaram sem loja identificada.\n\n' +
-            'Digite o ID da loja para aplicar a essas linhas (ou deixe vazio para ignorar):\n\n' + _lojasIds
+            semLojaFinal + ' linha(s) ficaram SEM LOJA — ' + _brl(_valorFora) + ' que não vai entrar\n'
+            + 'no resultado de nenhuma loja se você seguir sem resolver.\n\n'
+            + 'Esses(as) vendedores(as) não foram encontrados(as) no cadastro:\n'
+            + _lista + (_orfas.size > 12 ? '\n  ... e mais ' + (_orfas.size - 12) + ' nome(s)' : '') + '\n\n'
+            + 'Se TODAS essas linhas são da mesma loja, digite o ID dela abaixo.\n'
+            + 'Se são de lojas diferentes, CANCELE, cadastre os nomes em\n'
+            + 'Config → Vendedores (cada um com a sua loja) e importe de novo.\n\n'
+            + 'Vazio = seguir sem essas linhas (as vendas serão descartadas):\n\n' + _lojasIds
           );
           if(_lojaPadrao){
             const _lidVal = String(_lojaPadrao).trim().toLowerCase();
@@ -28453,6 +29052,26 @@ window.excelProcessarUpload = function(event){
       const _ignorados = [];
       if(ignoradosDadosVazios > 0) _ignorados.push(ignoradosDadosVazios+' sem data/valor');
       if(ignoradosNaoVenda > 0)    _ignorados.push(ignoradosNaoVenda+' não-venda');
+
+      // [R134] Linha sem loja é descartada no agrupamento acima
+      // (`if(!r.loja) return`). Isso precisa aparecer na tela: até aqui só
+      // saía um console.log, e a importação terminava com "✅ importado"
+      // como se nada tivesse ficado para trás.
+      const _foraLinhas = dadosProcessados.filter(r => !r.loja);
+      if(_foraLinhas.length){
+        const _foraValor = _foraLinhas.reduce((t,r) => t + (Number(r.valor)||0), 0);
+        const _foraNomes = [...new Set(_foraLinhas.map(r => (r.vendedora||'').trim() || '(sem nome)'))];
+        _ignorados.push(_foraLinhas.length + ' SEM LOJA');
+        console.warn('[crm] descartadas por falta de loja:', _foraLinhas.length,
+                     '| valor:', _foraValor, '| vendedor(es):', _foraNomes.join(', '));
+        setTimeout(() => showToast('⚠️ ' + _foraLinhas.length.toLocaleString('pt-BR')
+          + ' linha(s) ficaram SEM LOJA e NÃO entraram em nenhum resultado — R$ '
+          + _foraValor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})
+          + '. Vendedor(es): ' + _foraNomes.slice(0,4).join(', ')
+          + (_foraNomes.length > 4 ? ' e mais ' + (_foraNomes.length-4) : '')
+          + '. Cadastre-os em Config → Vendedores e reimporte.', 'err'), 2400);
+      }
+
       console.log('[crm] importação agregada:', _diagnostico);
 
       // [R102] O envio ao Firestore era "dispare e esqueça": a tela dizia
@@ -28546,17 +29165,19 @@ window.excelLimparDados = async function(){
   if(pares.length){
     showToast('⏳ Apagando ' + pares.length + ' conjunto(s) no Firebase...','ok');
     try{
-      const {mod, db} = await _bkFirestore();
-      const {setDoc, doc} = mod;
+      // [R133] Mesmo motivo do crmApagar: um conjunto por lote, em vez de
+      // 1+N gravações soltas enchendo a fila do SDK.
       for(const [lid, ano] of pares){
         try{
           const partes = window.crmFatiarClientes((D.crm[lid][ano].clientes)||[]).length;
-          await setDoc(doc(db,'avatim','crm_'+lid+'_'+ano),
-            {dados:'', ts:Date.now(), por:(window._currentUser?.email||'?'), _apagado:true});
+          const _ts = Date.now(), _por = (window._currentUser?.email||'?');
+          const _escritas = [{id:'crm_'+lid+'_'+ano,
+                              dados:{dados:'', ts:_ts, por:_por, _apagado:true}}];
           for(let i=0;i<partes;i++){
-            await setDoc(doc(db,'avatim','crm_'+lid+'_'+ano+'_c'+i),
-              {dados:'[]', ts:Date.now(), _apagado:true});
+            _escritas.push({id:'crm_'+lid+'_'+ano+'_c'+i,
+                            dados:{dados:'[]', ts:_ts, _apagado:true}});
           }
+          await window._crmGravarLote(_escritas);
           apagados++;
         }catch(e){ erros.push(lid+'/'+ano+': '+(e.code||e.message)); }
       }
@@ -29610,6 +30231,177 @@ window.excelExcluirImportacao = function(impId){
   showToast('🗑️ Importação excluída — '+removidas+' linhas removidas.','ok');
   window.excelRender();
 };
+
+// ══════════════════════════════════════════════════════════════════════
+// [R134] DIAGNÓSTICO DE PLANILHA — LÊ E RELATA, NÃO IMPORTA NADA
+//
+// A importação descarta em silêncio toda linha que ficou sem loja:
+//
+//     dadosProcessados.forEach(r => { if(!r.loja) return; ... })
+//
+// Desde o R55 as linhas cruas não são mais guardadas (só os cubos por
+// loja/ano), então essas linhas não vão para D.excelDados e o painel de
+// "vendedor(es) sem loja" não tem o que mostrar. O log dizia "ainda sem
+// loja: 2146" e o rastro parava ali: não dava para saber de quem eram as
+// vendas, de que loja nem de que período.
+//
+// Esta função responde isso lendo o arquivo e RELATANDO — sem gravar em
+// D, sem tocar no Firebase, sem alterar o catálogo. Rodar é seguro.
+//
+//     avatimDiagnosticarPlanilha()
+// ══════════════════════════════════════════════════════════════════════
+window.avatimDiagnosticarPlanilha = function(){
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.xlsx,.xls,.csv';
+  inp.onchange = function(ev){
+    const file = ev.target.files && ev.target.files[0];
+    if(!file) return;
+
+    if(typeof XLSX === 'undefined'){
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      sc.onload  = () => { console.log('[diag] leitor carregado — escolha o arquivo de novo'); inp.click(); };
+      sc.onerror = () => console.error('[diag] não foi possível carregar o leitor de Excel');
+      document.head.appendChild(sc);
+      console.log('[diag] carregando leitor de Excel...');
+      return;
+    }
+
+    const fr = new FileReader();
+    fr.onload = function(e){
+      try{
+        const wb   = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:false});
+        const aba  = wb.SheetNames[0];
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[aba], {header:1, defval:''});
+        if(rows.length < 2){ console.warn('[diag] planilha sem dados'); return; }
+
+        const headers = rows[0];
+        const colMap  = _excelDetectarColunas(headers);
+
+        console.log('%c══ DIAGNÓSTICO DE ' + file.name + ' ══', 'font-weight:bold');
+        console.log('Cabeçalhos:', headers.filter(Boolean).join(' | '));
+        console.log('Colunas reconhecidas:', Object.keys(colMap)
+          .filter(k => k !== 'valorTipo')
+          .map(k => k + ' → "' + headers[colMap[k]] + '"').join(' · ') || '(nenhuma)');
+        console.log('Tem coluna de LOJA?', colMap.loja !== undefined ? 'SIM' : 'NÃO — a loja terá de vir do(a) vendedor(a)');
+
+        // Mesmo mapa que a importação usa para deduzir a loja.
+        const mapaVend = {};
+        (D.vendedoras || []).forEach(v => {
+          const n = _excelNormNome(v.nome);
+          if(n) mapaVend[n] = v.loja;
+        });
+
+        const porOrfa = new Map();   // vendedor(a) sem correspondência
+        const porLoja = new Map();   // linhas que TÊM loja
+        let total = 0, semData = 0, comLoja = 0, semLoja = 0;
+        let iniG = '', fimG = '';
+
+        for(let i = 1; i < rows.length; i++){
+          const row = rows[i];
+          if(!row || !row.length) continue;
+          if(colMap.operacao !== undefined){
+            const op = String(row[colMap.operacao] || '').trim().toUpperCase();
+            if(op && op !== 'VENDA' && op !== 'V') continue;
+          }
+          const dt = _excelParseData(row[colMap.data]);
+          let val  = _excelParseNumero(row[colMap.valor]);
+          if(colMap.valorTipo === 'unitario'){
+            const q = colMap.qtde !== undefined ? (_excelParseNumero(row[colMap.qtde]) || 1) : 1;
+            val = val * q;
+          }
+          if(!dt || val === 0){ semData++; continue; }
+          total++;
+          if(!iniG || dt < iniG) iniG = dt;
+          if(!fimG || dt > fimG) fimG = dt;
+
+          let loja = colMap.loja !== undefined ? _excelResolverLoja(row[colMap.loja]) : '';
+          const vendRaw = String(row[colMap.vendedora] || '').trim();
+          if(!loja && vendRaw){
+            const nv = _excelNormNome(vendRaw);
+            if(mapaVend[nv]) loja = mapaVend[nv];
+          }
+
+          if(loja){
+            comLoja++;
+            if(!porLoja.has(loja)) porLoja.set(loja, {linhas:0, valor:0});
+            const o = porLoja.get(loja); o.linhas++; o.valor += val;
+          } else {
+            semLoja++;
+            const chave = vendRaw || '(célula de vendedor(a) vazia)';
+            if(!porOrfa.has(chave)) porOrfa.set(chave, {linhas:0, valor:0, ini:'', fim:'', lojaCol:new Set()});
+            const o = porOrfa.get(chave);
+            o.linhas++; o.valor += val;
+            if(!o.ini || dt < o.ini) o.ini = dt;
+            if(!o.fim || dt > o.fim) o.fim = dt;
+            if(colMap.loja !== undefined){
+              const bruto = String(row[colMap.loja] || '').trim();
+              if(bruto) o.lojaCol.add(bruto);
+            }
+          }
+        }
+
+        const brl = n => 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+        const br  = d => d ? d.split('-').reverse().join('/') : '—';
+
+        console.log('Linhas válidas:', total, '| ignoradas (sem data ou valor):', semData);
+        console.log('Período do arquivo:', br(iniG), 'até', br(fimG));
+        console.log('Com loja identificada:', comLoja, '| SEM loja:', semLoja);
+
+        if(porLoja.size){
+          console.log('%c── o que ENTRA nos resultados ──', 'font-weight:bold');
+          console.table([...porLoja.entries()]
+            .sort((a,b) => b[1].valor - a[1].valor)
+            .map(([lid,o]) => ({
+              loja: ((typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS)
+                      .find(l => l.id === lid) || {}).nome || lid,
+              linhas: o.linhas, valor: brl(o.valor)
+            })));
+        }
+
+        if(porOrfa.size){
+          console.log('%c── o que fica de FORA (nenhuma loja) ──', 'font-weight:bold;color:#c00');
+          console.table([...porOrfa.entries()]
+            .sort((a,b) => b[1].valor - a[1].valor)
+            .map(([nome,o]) => ({
+              'vendedor(a) na planilha': nome,
+              linhas: o.linhas,
+              valor: brl(o.valor),
+              'de': br(o.ini),
+              'até': br(o.fim),
+              'coluna Loja trazia': o.lojaCol.size ? [...o.lojaCol].join(', ') : '—',
+              'parecido no cadastro': _diagParecido(nome)
+            })));
+          const perdido = [...porOrfa.values()].reduce((s,o) => s + o.valor, 0);
+          console.log('%cTotal fora dos resultados: ' + brl(perdido), 'font-weight:bold;color:#c00');
+          console.log('Cadastre esses nomes em Config → Vendedores (com a loja certa) '
+            + 'e reimporte a planilha: aí as vendas passam a contar.');
+        } else {
+          console.log('%cNenhuma linha ficou sem loja.', 'color:#080');
+        }
+      }catch(err){
+        console.error('[diag] falha ao ler a planilha:', err);
+      }
+    };
+    fr.readAsArrayBuffer(file);
+  };
+  inp.click();
+};
+
+/** Nome mais próximo no cadastro — ajuda a ver erro de grafia. */
+function _diagParecido(nome){
+  const alvo = _excelNormNome(nome);
+  if(!alvo) return '—';
+  const prim = alvo.split(' ')[0];
+  const achados = (D.vendedoras || [])
+    .filter(v => {
+      const n = _excelNormNome(v.nome);
+      return n && (n.split(' ')[0] === prim || n.indexOf(prim) >= 0 || alvo.indexOf(n.split(' ')[0]) >= 0);
+    })
+    .map(v => v.nome + ' (' + v.loja + ')');
+  return achados.length ? achados.slice(0,3).join(' · ') : '— nenhum parecido';
+}
 
 // Render do painel de importações
 function _excelRenderImportacoes(){
