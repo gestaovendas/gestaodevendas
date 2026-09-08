@@ -226,13 +226,26 @@ try{
   async function _gravarDocFatiado(db, doc, setDoc, docId, obj, extras){
     const texto  = JSON.stringify(obj);
     const partes = _fatiarPorBytes(texto, PRINCIPAL_LIMITE_BYTES);
-    const ts = Date.now();
-    await setDoc(doc(db,"avatim",docId),
-      Object.assign({ dados: partes[0], partes: partes.length, ts }, extras||{}));
-    for(let i = 1; i < partes.length; i++){
+    const ts  = Date.now();
+    // [R131] Carimbo desta gravação. O documento fatiado NÃO é atômico: são
+    // N gravações separadas, e entre uma e outra QUALQUER leitura acontece.
+    // A ordem antiga publicava a CABEÇA primeiro (o pedaço 0, que carrega a
+    // contagem) e os demais depois — então uma leitura no meio montava a
+    // cabeça NOVA com o pedaço VELHO e o JSON quebrava exatamente na emenda.
+    // Era o "principal ilegível: Expected ':' ... at position 799129": 799 mil
+    // caracteres é a fronteira dos 800 KB de cada pedaço, não coincidência.
+    //
+    // Agora os pedaços de trás vão PRIMEIRO e a cabeça por ÚLTIMO: publicar a
+    // cabeça passa a ser o "commit" da gravação, e nesse instante o resto já
+    // está lá. O gid fecha a brecha que sobra — pedaço com carimbo diferente
+    // do da cabeça é metade de outra gravação, e a leitura recomeça.
+    const gid = ts.toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    for(let i = partes.length - 1; i >= 1; i--){
       await setDoc(doc(db,"avatim",docId+"_p"+i),
-        Object.assign({ dados: partes[i], ts }, extras||{}));
+        Object.assign({ dados: partes[i], ts, gid }, extras||{}));
     }
+    await setDoc(doc(db,"avatim",docId),
+      Object.assign({ dados: partes[0], partes: partes.length, ts, gid }, extras||{}));
     if(partes.length > 1) console.log("[Avatim] " + docId + " gravado em " + partes.length + " pedaços");
     return partes.length;
   }
@@ -257,7 +270,12 @@ try{
           console.error("[Avatim] " + docId + ": pedaço " + ids[i] + " não encontrado — leitura abortada");
           return null;
         }
-        texto += extras[i].data().dados || "";
+        const _dp = extras[i].data();
+        // [R131] Pedaço de OUTRA gravação não pode ser emendado neste texto.
+        // Documento antigo (gravado sem gid) continua passando: é o
+        // comportamento de sempre, e a próxima gravação já carimba.
+        if(d.gid && _dp.gid && _dp.gid !== d.gid) throw new Error("gravacao-em-curso");
+        texto += _dp.dados || "";
       }
     }
     return texto;
@@ -265,14 +283,31 @@ try{
 
   /** Lê e já faz o parse. Devolve null quando não há dado utilizável. */
   async function _lerDocObj(db, doc, getDoc, docId){
-    try{
-      const texto = await _lerDocTexto(db, doc, getDoc, docId);
-      if(!texto) return null;
-      return JSON.parse(texto);
-    }catch(e){
-      console.error("[Avatim] " + docId + " ilegível:", e.message);
-      return null;
+    // [R131] Emenda inconsistente e JSON quebrado quase sempre são uma
+    // gravação ACONTECENDO neste instante, não corrupção — e devolver null
+    // aqui derruba a tela inteira ("Nenhum dado no Firestore ainda") e ainda
+    // desarma a trava anti-apagamento, que só confere quando consegue ler.
+    // Reler resolve. Só depois de três tentativas o documento é dado como
+    // ilegível de verdade.
+    const _esperas = [0, 300, 900];
+    let _ultimo = null;
+    for(let t = 0; t < _esperas.length; t++){
+      if(_esperas[t]) await new Promise(r => setTimeout(r, _esperas[t]));
+      try{
+        const texto = await _lerDocTexto(db, doc, getDoc, docId);
+        if(!texto) return null;
+        return JSON.parse(texto);
+      }catch(e){
+        _ultimo = e;
+        if(t < _esperas.length - 1){
+          console.warn("[Avatim] " + docId + ": leitura pegou gravação pela metade ("
+            + e.message + ") — relendo");
+        }
+      }
     }
+    console.error("[Avatim] " + docId + " ilegível após 3 tentativas:",
+      _ultimo && _ultimo.message);
+    return null;
   }
   // Expostos para as ferramentas que vivem fora deste módulo (diagnósticos e
   // correções manuais). Elas liam e gravavam o "principal" cru — com o
@@ -315,7 +350,7 @@ try{
     return Number((val && val._savedAt) || 0) <= tsExc;
   };
 
-  window.fsGravar = async function(dadosJSON){
+  async function _fsGravarInterno(dadosJSON){
     try{
       console.log("[Avatim] fsGravar INICIO | email:", window._currentUser?.email,
         "| vendas keys:", Object.keys(JSON.parse(dadosJSON).vendas||{}).join(","),
@@ -634,12 +669,14 @@ try{
               payloadA._vendasVendExcluidasTs = Object.assign({},
                 remotoA._vendasVendExcluidasTs || {}, D2._vendasVendExcluidasTs || {});
             }
-            await setDoc(doc(db,"avatim",docIdA), {
-              dados:  JSON.stringify(payloadA),
-              lojaId: lidA,
-              ts:     Date.now(),
-              por:    email + " (admin)"
-            });
+            // [R131] Fatiado, igual ao caminho da loja. Esta era a única
+            // gravação que ainda ignorava o limite de 1 MiB do Firestore — e
+            // o doc da Mooca, com 70 dias de vendas mais fluxo e contatos,
+            // cresce na direção dele. Estourado, a recusa cai no catch de
+            // "falha ao propagar", que só escreve no console: o lançamento
+            // feito pelo admin nunca chegaria à loja e ninguém saberia.
+            await _gravarDocFatiado(db, doc, setDoc, docIdA, payloadA,
+              { lojaId: lidA, por: email + " (admin)" });
           }));
           console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
         }catch(eProp){
@@ -837,7 +874,64 @@ try{
       console.error("[Avatim] ❌ fsGravar erro:", e.code||"?", e.message);
       throw e; // propaga para o save() mostrar o toast de erro
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // [R131] UMA GRAVAÇÃO POR VEZ
+  //
+  // Duas gravações do admin rodando ao mesmo tempo escrevem os MESMOS
+  // documentos — cada ciclo são 9 (o principal em 2 pedaços mais as 7 lojas).
+  // Intercaladas, a cabeça vinha de uma e o pedaço de trás da outra, e o
+  // documento ficava ilegível ATÉ alguém gravar de novo. O log mostrou
+  // exatamente isso: dois "fsGravar INICIO" seguidos e, logo depois,
+  // "principal ilegível".
+  //
+  // Enfileirar também segura o volume. O SDK do Firestore aceita no máximo
+  // 100 gravações na fila; quatro ciclos do admin com a rede ruim passam
+  // disso e ele derruba tudo com "Write stream exhausted maximum allowed
+  // queued writes". Com uma de cada vez, no máximo 9 esperam.
+  //
+  // Quem pede gravação durante outra NÃO vira uma rodada nova: o pedido mais
+  // recente substitui o anterior na fila. Isso é seguro porque todo chamador
+  // grava o estado INTEIRO (JSON.stringify(D)) — o mais novo contém o mais
+  // velho. Quem estava esperando recebe o resultado dessa rodada, e não um
+  // "salvo" que nunca aconteceu.
+  // ══════════════════════════════════════════════════════════════
+  let _gravEmCurso  = false;
+  let _gravPendente = null;   // {json, aguardando:[{resolve,reject}]}
+
+  function _gravRodar(json, aguardando){
+    _gravEmCurso = true;
+    _fsGravarInterno(json).then(
+      () => aguardando.forEach(a => a.resolve(true)),
+      e  => aguardando.forEach(a => a.reject(e))
+    ).finally(() => {
+      _gravEmCurso = false;
+      const prox = _gravPendente;
+      _gravPendente = null;
+      if(prox) _gravRodar(prox.json, prox.aguardando);
+    });
+  }
+
+  window.fsGravar = function(dadosJSON){
+    return new Promise((resolve, reject) => {
+      if(_gravEmCurso){
+        if(_gravPendente){
+          _gravPendente.json = dadosJSON;                    // o mais novo vence
+          _gravPendente.aguardando.push({resolve, reject});
+        } else {
+          _gravPendente = {json: dadosJSON, aguardando: [{resolve, reject}]};
+        }
+        console.log("[Avatim] R131: gravação em curso — pedido enfileirado ("
+          + _gravPendente.aguardando.length + " esperando)");
+        return;
+      }
+      _gravRodar(dadosJSON, [{resolve, reject}]);
+    });
   };
+
+  /** Estado da fila — usado pelo avatimVerificar() e por diagnóstico. */
+  window._gravFilaEstado = () => ({ emCurso: _gravEmCurso, pendente: !!_gravPendente });
 
   // Carregar do Firestore — merge de todos os docs de loja
   window.fsCarregar = async function(){
@@ -5145,7 +5239,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-05';
+window.AVATIM_BUILD = '2026-09-06';
 window.AVATIM_RECURSOS = {
   travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
   gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
@@ -5174,7 +5268,8 @@ window.AVATIM_RECURSOS = {
   limparFluxoDuplicados: () => typeof window.avatimLimparFluxoDuplicados === 'function',
   pendenteNaoDerruba:    () => typeof _persistirPendente === 'function',
   prazoPorPerfil:        () => typeof window._prazoGravacao === 'function',
-  lapideComHora:         () => typeof window._lapideBarra === 'function'
+  lapideComHora:         () => typeof window._lapideBarra === 'function',
+  gravacaoSerializada:   () => typeof window._gravFilaEstado === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
