@@ -5285,21 +5285,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-08b';
-/**
- * [R135] Corpo de uma função SEM os comentários.
- *
- * As verificações abaixo perguntam "esta função ainda chama X?" lendo o
- * próprio código. Sem tirar os comentários, um comentário que MENCIONA a
- * chamada — inclusive um explicando por que ela foi removida — faz o
- * recurso se declarar ausente. O `[^:]` preserva "https://".
- */
-window._semComentarios = function(f){
-  return String(f || '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-};
-
+window.AVATIM_BUILD = '2026-09-08';
 window.AVATIM_RECURSOS = {
   travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
   gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
@@ -5336,13 +5322,7 @@ window.AVATIM_RECURSOS = {
   // [R133] gravação do CRM em lote — não estoura a fila do SDK
   crmGravacaoEmLote:     () => typeof window._crmGravarLote === 'function',
   // [R134] quem ficou sem loja para de sumir em silêncio
-  planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function',
-  // [R135] apagar CRM não reescreve mais o principal nem os 7 docs de loja
-  crmExclusaoLeve:       () => typeof window.crmApagar === 'function'
-                            && !/\bsave\(\)/.test(window._semComentarios(window.crmApagar))
-                            && /_persistirLocal\(\)/.test(window._semComentarios(window.crmApagar)),
-  // [R135] período coberto por conjunto — denuncia o arquivo que subiu pela metade
-  coberturaImportacao:   () => typeof _crmCobertura === 'function'
+  planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function'
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -7970,9 +7950,8 @@ window.crmApagar = async function(lid, ano){
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
-  // [R135] O cache local é regravado por _persistirLocal() no FIM, depois de
-  // o cubo sair de D.crm. Gravá-lo aqui salvava o estado de ANTES da exclusão
-  // — trabalho jogado fora, e ainda antes de o usuário confirmar.
+  // E propagar a exclusão para o cache local imediatamente.
+  if(typeof window.idbUtilizavel === 'function' && window.idbUtilizavel()) window.crmGravarIdb().catch(()=>{});
   if(!isAdmin()){ showToast('Só o administrador pode apagar.','err'); return; }
   const cubo = ((D.crm||{})[lid]||{})[ano];
   if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
@@ -8022,7 +8001,7 @@ window.crmApagar = async function(lid, ano){
     }
     delete D.crm[lid][ano];
     if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
-    _persistirLocal();   // [R135] ver comentário abaixo: o principal não guarda D.crm
+    save();
     showToast('⚠️ ' + nomeLoja + '/' + ano + ' removido apenas deste navegador — '
       + 'segue no Firebase e voltará ao recarregar.','err');
     if(typeof window.excelRender === 'function') window.excelRender();
@@ -8031,26 +8010,7 @@ window.crmApagar = async function(lid, ano){
 
   delete D.crm[lid][ano];
   if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
-  // ══════════════════════════════════════════════════════════════════
-  // [R135] AQUI NÃO PODE CHAMAR save().
-  //
-  // Os cubos do CRM moram em documentos PRÓPRIOS (crm_<loja>_<ano> e as
-  // partes de clientes) — D.crm NÃO entra no payload do 'principal' nem
-  // nos docs loja_*. A exclusão remota já foi feita no lote acima.
-  //
-  // save() do admin, porém, reescreve o principal (2 pedaços) e propaga
-  // para os 7 documentos de loja: 9 gravações que não têm relação nenhuma
-  // com o que foi apagado. Apagando conjuntos em sequência, isso vira
-  // dezenas de escritas pendentes; com a rede oscilando (o console mostrou
-  // o canal Listen caindo com 404) nada é confirmado, a fila do SDK passa
-  // das ~100 permitidas e a próxima gravação morre com
-  // "Write stream exhausted maximum allowed queued writes" — derrubando
-  // junto o salvamento de quem estivesse lançando naquele momento.
-  //
-  // Persistir local basta: mantém a tela e o cache coerentes sem tocar no
-  // servidor de novo.
-  // ══════════════════════════════════════════════════════════════════
-  _persistirLocal();
+  save();
   showToast('✅ CRM de ' + nomeLoja + '/' + ano + ' apagado — '
     + docs.length + ' documento(s) removidos do Firebase.','ok');
   if(typeof window.excelRender === 'function') window.excelRender();
@@ -32427,42 +32387,6 @@ function _crmRenderCross(v){
 }
 
 /** Conjuntos loja/ano carregados — substitui a Gestão de Importações. */
-/**
- * [R135] Cobertura mensal de um conjunto importado.
- *
- * Um arquivo que subiu pela metade não se denuncia pelo total de linhas —
- * ninguém sabe de cabeça quantas linhas o mês tinha. Ele se denuncia pelo
- * CALENDÁRIO: o cubo guarda a lista de meses que de fato têm venda, então
- * um mês ausente NO MEIO do intervalo é buraco, e o intervalo terminando
- * antes do esperado é arquivo cortado.
- *
- * Só relata o que está no cubo. Não infere, não completa, não corrige.
- */
-function _crmCobertura(c){
-  const meses = [...new Set((c && c.meses) || [])]
-    .filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
-  if(!meses.length) return {texto:'—', faltando:[], meses:[], suspeito:false};
-
-  const t = m => { const [y,mm] = m.split('-').map(Number); return y*12 + (mm-1); };
-  const rot = m => m.split('-').reverse().join('/');
-  const ini = meses[0], fim = meses[meses.length-1];
-
-  const presentes = new Set(meses);
-  const faltando = [];
-  for(let k = t(ini); k <= t(fim); k++){
-    const mr = Math.floor(k/12) + '-' + String((k%12)+1).padStart(2,'0');
-    if(!presentes.has(mr)) faltando.push(mr);
-  }
-
-  return {
-    meses, faltando,
-    suspeito: faltando.length > 0,
-    texto: (ini === fim ? rot(ini) : rot(ini) + ' → ' + rot(fim))
-           + ' · ' + meses.length + (meses.length === 1 ? ' mês' : ' meses'),
-    faltandoTxt: faltando.map(rot).join(', ')
-  };
-}
-
 function _crmRenderConjuntos(){
   const el = document.getElementById('excel-imports-lista');
   if(!el) return;
@@ -32471,14 +32395,9 @@ function _crmRenderConjuntos(){
     Object.keys(D.crm[lid]).sort().reverse().forEach(ano => {
       const c = D.crm[lid][ano];
       const nome = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
-      const cob = _crmCobertura(c);
-      linhas.push('<tr'+(cob.suspeito?' style="background:rgba(220,53,69,.06)"':'')+'>'
+      linhas.push('<tr>'
         + '<td><strong>'+nome+'</strong></td>'
         + '<td style="text-align:center">'+ano+'</td>'
-        + '<td style="font-size:11px">'+cob.texto
-          + (cob.suspeito
-              ? '<div style="color:var(--verm);font-size:9.5px;font-weight:600">⚠️ sem venda em: '+cob.faltandoTxt+'</div>'
-              : '') + '</td>'
         + '<td style="text-align:right">'+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
@@ -32492,12 +32411,7 @@ function _crmRenderConjuntos(){
     });
   });
   el.innerHTML = linhas.length
-    ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Período coberto'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
-      + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5">'
-        + 'O <strong>período coberto</strong> vem dos meses que realmente têm venda no conjunto. '
-        + 'Mês faltando <strong>no meio</strong> do intervalo, ou intervalo terminando antes do esperado, '
-        + 'é sinal de arquivo que subiu incompleto — reimporte esse arquivo por cima; '
-        + 'o conjunto da mesma loja e ano é substituído.</div>'
+    ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
       + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
 }
