@@ -5204,6 +5204,25 @@ service cloud.firestore {
         <div id="hist-loja-por-vend" style="overflow-x:auto"></div>
       </div>
 
+      <!-- [R138] Realizado × Meta — lojas e vendedores(as), cruzando a
+           planilha do CRM com o lançamento, mais o que veio da Origem do Fluxo -->
+      <div class="sc" style="padding:16px 14px;margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px">🎯 Realizado × Meta — Lojas e Vendedores(as)</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn-s" onclick="window.histRealMetaCSV()" style="font-size:11px;padding:6px 12px" title="Baixar em CSV, que o Excel abre direto">⬇️ Excel</button>
+            <button class="btn-s" onclick="window.histRealMetaPDF()" style="font-size:11px;padding:6px 12px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Abrir a janela de impressão do navegador">📄 PDF</button>
+          </div>
+        </div>
+        <div id="hist-realmeta"></div>
+      </div>
+
+      <!-- [R138] Aniversariantes e inativos vindos da Origem do Fluxo -->
+      <div class="sc" style="padding:16px 14px;margin-top:12px">
+        <div style="font-size:12px;font-weight:700;color:#FF69B4;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🎂 Aniversariantes &amp; Inativos — da Origem do Fluxo</div>
+        <div id="hist-anivinat"></div>
+      </div>
+
       <!-- [R81] Conciliação com o CRM Clientes -->
       <div class="sc" style="padding:16px 14px;margin-top:12px">
         <div style="font-size:12px;font-weight:700;color:var(--roxo);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🔗 Conciliação — Lançado × CRM Clientes</div>
@@ -5285,7 +5304,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-09b';
+window.AVATIM_BUILD = '2026-09-10b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5294,6 +5313,74 @@ window.AVATIM_BUILD = '2026-09-09b';
  * chamada — inclusive um explicando por que ela foi removida — faz o
  * recurso se declarar ausente. O `[^:]` preserva "https://".
  */
+/**
+ * [R138] O que o CRM tem, de verdade — SÓ LEITURA.
+ *
+ * "O ano de 2026 não aparece" pode ser três coisas diferentes: o cubo não
+ * está em D.crm, está mas o seletor não o lista, ou está listado e há um
+ * filtro escolhido escondendo tudo. Adivinhar custou uma rodada; esta
+ * função responde em uma linha de console qual das três é.
+ *
+ * Não grava nada, não apaga nada, não chama save(). Pode rodar a qualquer
+ * momento, inclusive com a loja lançando.
+ */
+window.avatimDiagnosticarCrm = function(){
+  console.log('%c[Avatim] Diagnóstico do CRM', 'font-weight:bold;color:#C9A84C');
+  console.log('build declarado:', window.AVATIM_BUILD);
+  console.log('perfil:', isAdmin() ? 'admin' : ('loja ' + lojaId()));
+
+  const linhas = [];
+  Object.keys(D.crm || {}).sort().forEach(lid => {
+    Object.keys(D.crm[lid] || {}).sort().forEach(ano => {
+      const c = D.crm[lid][ano] || {};
+      const meses = (c.meses || []).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+      linhas.push({
+        loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid,
+        ano,
+        meses: meses.length,
+        de: meses[0] || '—',
+        ate: meses[meses.length-1] || '—',
+        linhas: c.linhas || 0,
+        faturamento: fmt(c.faturamento || 0),
+        arquivo: c.arquivo || '—'
+      });
+    });
+  });
+  if(linhas.length) console.table(linhas);
+  else console.warn('D.crm está VAZIO neste aparelho — nenhum cubo carregado.');
+
+  const anosNaBase = [...new Set(linhas.map(l => l.ano))].sort();
+  console.log('anos presentes em D.crm:', anosNaBase.join(', ') || '(nenhum)');
+
+  const sel = document.getElementById('excel-filtro-ano');
+  const opts = sel ? [].map.call(sel.options, o => o.value).filter(Boolean) : [];
+  console.log('anos listados no seletor:', opts.join(', ') || '(nenhum)');
+  console.log('filtros ativos → ano:', (sel && sel.value) || '(todos)',
+    '· mês:', document.getElementById('excel-filtro-mes')?.value || '(todos)',
+    '· loja:', document.getElementById('excel-filtro-loja')?.value || '(todas)',
+    '· vendedor(a):', document.getElementById('excel-filtro-vend')?.value || '(todos)');
+
+  const faltando = anosNaBase.filter(a => opts.indexOf(a) < 0);
+  if(faltando.length){
+    console.error('❌ ANO NA BASE MAS FORA DO SELETOR:', faltando.join(', '),
+      '\n   O seletor congelou. Esta cópia do sistema é anterior ao R137 — publique o index.html novo.');
+  } else if(sel && sel.value && anosNaBase.indexOf(sel.value) > -1){
+    console.warn('⚠️ Há um filtro de ano ativo (' + sel.value + '). Os outros anos ficam ocultos por escolha, não por defeito.');
+  } else {
+    console.log('✅ Todos os anos da base estão no seletor.');
+  }
+
+  try{
+    const v = window.crmVisao();
+    console.log('crmVisao() com os filtros atuais →', {
+      linhas: v.linhas, faturamento: fmt(v.faturamento),
+      meses: (v.meses||[]).length, clientes: v.clientesUnicos
+    });
+  }catch(e){ console.warn('crmVisao() falhou:', e.message); }
+
+  return {anosNaBase, anosNoSeletor: opts, faltando, conjuntos: linhas};
+};
+
 window._semComentarios = function(f){
   return String(f || '')
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -5359,6 +5446,28 @@ window.AVATIM_RECURSOS = {
   crmFiltroAnoAtualiza:  () => typeof _crmPopularFiltros === 'function'
                             && /selA\.dataset\.assinatura/.test(String(_crmPopularFiltros)),
   // [R137] loja escolhida vale antes da deducao: nao cadastrado vira historico
+  // [R138] realizado x meta no historico, cruzando planilha e lancamento
+  histRealizadoMeta:     () => typeof window.renderHistRealMeta === 'function'
+                            && typeof window._histRealMetaLojas === 'function'
+                            && typeof window._histRealMetaVends === 'function',
+  histExportaExcelPdf:   () => typeof window.histRealMetaCSV === 'function'
+                            && typeof window.histRealMetaPDF === 'function',
+  // [R138] aniversariantes e inativos vindos da Origem do Fluxo
+  histAnivInativoFluxo:  () => typeof window._histFluxoAnivInat === 'function'
+                            && !!document.getElementById('hist-anivinat'),
+  // [R138] meta alimentada pelo historico — so onde NAO ha meta
+  metaDoHistorico:       () => typeof window.histAlimentarMetas === 'function'
+                            && typeof window._histMetasFaltando === 'function',
+  // [R138] diagnostico do CRM, so leitura
+  diagnosticoCrm:        () => typeof window.avatimDiagnosticarCrm === 'function',
+  // [R139] sync nao apaga mais os percentuais por perfil
+  modalidadesSobrevivemSync: () => typeof window.mergeConfigModalidades === 'function'
+                            && /porPerfil/.test(String(window.mergeConfigModalidades))
+                            && !/D\.configModalidades = remotoCfg;\s*\n\s*return true;\s*\n\};/.test(String(window.mergeConfigModalidades)),
+  // [R139] seletor que acompanha os dados em vez de congelar
+  seletorAcompanhaDados: () => typeof window._selSincronizar === 'function',
+  // [R139] controles inline de admin voltaram a respeitar o perfil
+  adminInlineRespeitado:  () => document.querySelectorAll('.admin-only-inline').length > 0,
   importLojaMandaPrimeiro: () => {
                               if(typeof window.excelProcessarUpload !== 'function') return false;
                               const f = String(window.excelProcessarUpload);
@@ -6768,10 +6877,44 @@ function _aceitaRemoto(local, remoto){
   return tam(local) === 0;              // ambos vazios: tanto faz
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// [R139] SELETOR QUE ACOMPANHA OS DADOS
+//
+// O padrão espalhado pelo arquivo era `if(sel.options.length <= 1){ ... }`:
+// monta uma vez e nunca mais. Basta a lista mudar depois — um ano novo
+// importado, uma linha de produto que entrou com a planilha de estoque, uma
+// loja arquivada — e o seletor fica preso no passado, mostrando um mundo que
+// já não existe. Foi assim que o ano de 2026 sumiu da aba CRM.
+//
+// Aqui a decisão é pela ASSINATURA da lista: remonta quando ela muda,
+// preserva a escolha do usuário, e devolve a escolha à opção vazia quando o
+// item escolhido deixou de existir — filtro órfão apontando para o que não
+// existe mais é o que faz a tela abrir em branco sem explicação.
+//
+// (Os filtros de ano e loja do CRM fazem o mesmo, inline, desde o R137.)
+// ══════════════════════════════════════════════════════════════════════
+window._selSincronizar = function(sel, itens, opts){
+  if(!sel) return false;
+  opts = opts || {};
+  const val = opts.valor  || (x => String(x));
+  const rot = opts.rotulo || (x => String(x));
+  const lista = Array.isArray(itens) ? itens : [];
+  const ass = lista.map(x => val(x) + '\u0001' + rot(x)).join('\u0002');
+  if(sel.dataset.assinatura === ass) return false;
+  const escolhido = sel.value;
+  sel.innerHTML = (opts.rotuloVazio !== undefined
+      ? '<option value="">' + opts.rotuloVazio + '</option>' : '')
+    + lista.map(x => '<option value="' + val(x) + '">' + rot(x) + '</option>').join('');
+  sel.dataset.assinatura = ass;
+  sel.value = lista.some(x => val(x) === escolhido) ? escolhido : '';
+  return true;
+};
+
 window.mergeConfigModalidades = function(remotoCfg){
-  if(!remotoCfg) return false;
+  if(!remotoCfg || typeof remotoCfg !== 'object') return false;
+  if(!D.configModalidades) D.configModalidades = {};
   const local = D.configModalidades;
-  if(!local || !Object.keys(local).length){ D.configModalidades = remotoCfg; return true; }
+  if(!Object.keys(local).length){ D.configModalidades = remotoCfg; return true; }
 
   // [R88b] Comparar _savedAt entre máquinas não funciona: o carimbo vem do
   // relógio de cada uma. Uma máquina adiantada fazia a edição ANTIGA dela
@@ -6783,15 +6926,66 @@ window.mergeConfigModalidades = function(remotoCfg){
   if(window._cfgModPendente){
     const lTs = local._savedAt   || 0;
     const rTs = remotoCfg._savedAt || 0;
-    if(rTs >= lTs){                      // o servidor já tem a nossa edição
-      window._cfgModPendente = false;
-      D.configModalidades = remotoCfg;
-      return true;
-    }
-    return false;                        // ainda não subiu: não perder o que foi digitado
+    if(rTs < lTs) return false;          // ainda não subiu: não perder o digitado
+    window._cfgModPendente = false;      // o servidor já tem a nossa edição
   }
 
-  D.configModalidades = remotoCfg;
+  // ══════════════════════════════════════════════════════════════════
+  // [R139] FUSÃO CAMPO A CAMPO — trocar o objeto inteiro apagava tudo o
+  // que o remoto não trouxesse.
+  //
+  // `D.configModalidades = remotoCfg` parecia inofensivo porque a config é
+  // do admin e tem fonte única. Só que o remoto nem sempre traz a config
+  // inteira, e nesses três casos a matriz por perfil sumia em silêncio —
+  // os percentuais voltavam ao padrão 15/12/0 e o benefício calculado na
+  // Origem do Fluxo passava a sair errado:
+  //
+  //   1. remoto no formato FLAT antigo (sem porPerfil), vindo de uma
+  //      máquina que ainda roda versão anterior à matriz por perfil;
+  //   2. remoto VAZIO ({}), que em JavaScript é verdadeiro e passava pelo
+  //      `if(remotoCfg)` sem resistência nenhuma — exatamente a armadilha
+  //      que o _aceitaRemoto do R121 existe para barrar;
+  //   3. remoto PARCIAL, trazendo só as faixas de Gift Back.
+  //
+  // Agora cada campo se decide sozinho: o remoto vence no que de fato
+  // carrega, e o que ele não carrega fica como está.
+  // ══════════════════════════════════════════════════════════════════
+  const out = Object.assign({}, local);
+
+  // porPerfil: perfil a perfil, e só os percentuais que vierem numéricos.
+  const rp = remotoCfg.porPerfil;
+  if(rp && typeof rp === 'object' && Object.keys(rp).length){
+    const lp = (local.porPerfil && typeof local.porPerfil === 'object') ? local.porPerfil : {};
+    const juntos = Object.assign({}, lp);
+    Object.keys(rp).forEach(perfil => {
+      const r = rp[perfil];
+      if(!r || typeof r !== 'object') return;
+      const m = Object.assign({}, juntos[perfil] || {});
+      ['giftback','desconto','cashback'].forEach(k => {
+        if(r[k] !== undefined && r[k] !== null && !isNaN(Number(r[k]))) m[k] = Number(r[k]);
+      });
+      juntos[perfil] = m;
+    });
+    out.porPerfil = juntos;
+  }
+  // Remoto SEM porPerfil não mexe em porPerfil: é cópia de uma versão
+  // anterior à matriz e não tem como representar o que está gravado aqui.
+  // Deixá-lo apagar seria perder o que ele nem sabe que existe.
+
+  // Faixas: lista vazia no remoto não apaga a lista local (regra do R121).
+  if(_aceitaRemoto(local.faixasGiftBack, remotoCfg.faixasGiftBack)){
+    out.faixasGiftBack = remotoCfg.faixasGiftBack;
+  }
+
+  // Campos flat legados, para quem ainda os lê.
+  ['giftback','desconto','cashback'].forEach(k => {
+    if(remotoCfg[k] !== undefined && remotoCfg[k] !== null && !isNaN(Number(remotoCfg[k]))){
+      out[k] = Number(remotoCfg[k]);
+    }
+  });
+  if(remotoCfg._savedAt) out._savedAt = remotoCfg._savedAt;
+
+  D.configModalidades = out;
   return true;
 };
 
@@ -9181,11 +9375,10 @@ window.renderPadroesSemana = function(){
 
   // Popular o seletor de loja uma única vez (admin)
   const selLoja = document.getElementById('sem-padroes-loja');
-  if(selLoja && isAdmin() && selLoja.options.length <= 1){
-    const at = selLoja.value;
-    selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>'
-      + LOJAS.map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
-    if(at) selLoja.value = at;
+  // [R139] LOJAS muda quando o admin arquiva uma loja — remontar por assinatura
+  if(selLoja && isAdmin()){
+    window._selSincronizar(selLoja, LOJAS, {rotuloVazio:'🏪 Todas as lojas',
+      valor: l => l.id, rotulo: l => l.nome});
   }
 
   const p = window._calcularPadroesSemana(window._padSpecDaTela());
@@ -10906,6 +11099,15 @@ function showApp(){
   });
   document.querySelectorAll(".admin-item").forEach(e=>{
     e.style.display = adminMode ? "flex" : "none";
+  });
+  // [R139] .admin-only-inline ficou órfã. Quem a tratava era
+  // _excelAjustarPerfil(), chamada só pela versão de excelRender que uma
+  // redefinição posterior deixou inalcançável (ver _excelRenderLegado).
+  // Sem tratador e sem regra de CSS, o filtro de loja do CRM aparecia para
+  // vendedor(a) de loja — controle de admin numa tela que não é dele.
+  // "inline" porque são elementos de linha: display:block os quebraria.
+  document.querySelectorAll(".admin-only-inline").forEach(e=>{
+    e.style.display = adminMode ? "" : "none";
   });
   // loja-only: visível APENAS para lojas (oculto para admin)
   document.querySelectorAll(".loja-only").forEach(e=>{
@@ -22719,8 +22921,578 @@ async function buscarHistoricoLoja(){
     crescEl.innerHTML = calcCrescimento(diasMap, null, _metasPorMes);
   }
 
+  // [R138] Realizado × Meta e o bloco de aniversariantes/inativos.
+  // Em try/catch: se este bloco novo falhar, o resto do Histórico — que
+  // funcionava antes dele — continua na tela.
+  try{
+    window.renderHistRealMeta(de, ate, lid);
+  }catch(e){
+    console.warn('[R138] realizado x meta:', e.message);
+    const _rm = document.getElementById('hist-realmeta');
+    if(_rm) _rm.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">Não foi possível montar o quadro: '+e.message+'</div>';
+  }
+
   document.getElementById('hist-loja-resultado').style.display='';
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// [R138] REALIZADO × META NO HISTÓRICO — LOJA E VENDEDOR(A)
+//
+// A planilha importada no CRM é a fonte mais fiel do que foi FATURADO; o
+// lançamento diário é o que a loja REGISTROU. As duas viviam separadas: o
+// Histórico só mostrava o lançamento, e quem quisesse o número da planilha
+// tinha de abrir a aba CRM e somar na mão — por loja e por vendedora.
+//
+// A regra de qual fonte vale é a MESMA da conciliação, que já estava certa:
+// o CRM só entra quando o período cobre o MÊS INTEIRO. O cubo do CRM é de
+// grão mensal; usá-lo num período que pega meio mês daria o mês todo como
+// se fosse do pedaço, inflando o realizado. Mês parcial vem do lançamento,
+// que é diário. Cada linha diz de onde veio o número.
+//
+// Aniversariantes e inativos não existem no CRM — são marcação de
+// atendimento. Vêm da Origem do Fluxo (D.fluxo) e, só quando ela não tem
+// nada no período, do lançamento por vendedor(a).
+// ══════════════════════════════════════════════════════════════════════
+
+/** Os meses tocados por um período, em ordem. */
+window._histMesesPeriodo = function(de, ate){
+  const out = [];
+  let m = String(de||'').slice(0,7);
+  const fim = String(ate||'').slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(m) || !/^\d{4}-\d{2}$/.test(fim)) return out;
+  while(m <= fim && out.length < 240){
+    out.push(m);
+    const y = Number(m.slice(0,4)), mm = Number(m.slice(5,7));
+    m = (mm === 12 ? y+1 : y) + '-' + String(mm === 12 ? 1 : mm+1).padStart(2,'0');
+  }
+  return out;
+};
+
+/**
+ * Quanto do mês o período cobre, de 0 a 1 — para ratear a meta mensal.
+ * Sem isto, um período de dez dias seria cobrado pela meta do mês inteiro
+ * e toda loja apareceria com 30% da meta.
+ */
+window._histFracaoMes = function(mes, de, ate){
+  const [y, mm] = mes.split('-').map(Number);
+  const ultimo = new Date(y, mm, 0).getDate();
+  const ini = mes + '-01', fim = mes + '-' + String(ultimo).padStart(2,'0');
+  const a = de > ini ? de : ini;
+  const b = ate < fim ? ate : fim;
+  if(a > b) return 0;
+  const dias = (Date.parse(b+'T00:00:00') - Date.parse(a+'T00:00:00'))/86400000 + 1;
+  return Math.max(0, Math.min(1, dias/ultimo));
+};
+
+/**
+ * Lançamento de uma loja num intervalo.
+ * Mesma regra do resto da tela: o detalhe por vendedor(a) manda, e o total
+ * da loja só cobre os dias que ele não alcança. Somar os dois dobraria o
+ * faturamento — foi exatamente o defeito do R93.
+ * Vendedor(a) ARQUIVADO(A) entra: isto é histórico, não escala do mês.
+ */
+window._histLancLoja = function(lid, de, ate){
+  let fat = 0, trans = 0, aniv = 0, inativ = 0;
+  const diasVend = new Set();
+  (D.vendedoras || []).filter(v => v.loja === lid).forEach(v => {
+    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, r]) => {
+      if(d < de || d > ate) return;
+      diasVend.add(d);
+      fat += Number(r.val||0); trans += Number(r.trans||0);
+      aniv += Number(r.aniv||0); inativ += Number(r.inativ||0);
+    });
+  });
+  Object.entries((D.vendas||{})[lid] || {}).forEach(([d, r]) => {
+    if(d < de || d > ate) return;
+    if(diasVend.has(d)) return;
+    fat += Number(r.fat||0); trans += Number(r.trans||0);
+    aniv += Number(r.aniv||0); inativ += Number(r.inativ||0);
+  });
+  return {fat, trans, aniv, inativ};
+};
+
+/** Lançamento de um(a) vendedor(a) num intervalo. */
+window._histLancVend = function(vid, de, ate){
+  let fat = 0, trans = 0, aniv = 0, inativ = 0;
+  Object.entries((D.vendasVend||{})[vid] || {}).forEach(([d, r]) => {
+    if(d < de || d > ate) return;
+    fat += Number(r.val||0); trans += Number(r.trans||0);
+    aniv += Number(r.aniv||0); inativ += Number(r.inativ||0);
+  });
+  return {fat, trans, aniv, inativ};
+};
+
+/** Aniversariantes e inativos do período, direto da Origem do Fluxo. */
+window._histFluxoAnivInat = function(de, ate, lid){
+  const porLoja = new Map(), porVend = new Map();
+  let aniv = 0, inativ = 0, valor = 0;
+  (D.fluxo || []).forEach(f => {
+    if(!f) return;
+    const d = String(f.data || '');
+    if(!d || d < de || d > ate) return;
+    const fl = f.loja || f.lojaId || '';
+    if(lid && fl !== lid) return;
+    const ehAniv = f.origem === 'aniversario' || f.tipoCliente === 'aniversario';
+    const ehInat = f.origem === 'inativo'     || f.tipoCliente === 'inativo';
+    if(!ehAniv && !ehInat) return;
+    const v = Number(f.valor) || 0;
+    if(ehAniv) aniv++; else inativ++;
+    valor += v;
+    const acc = (mapa, chave) => {
+      if(!chave) return;
+      const e = mapa.get(chave) || {aniv:0, inativ:0, valor:0};
+      if(ehAniv) e.aniv++; else e.inativ++;
+      e.valor += v;
+      mapa.set(chave, e);
+    };
+    acc(porLoja, fl);
+    acc(porVend, f.vendId);
+  });
+  return {porLoja, porVend, aniv, inativ, valor, total: aniv + inativ};
+};
+
+/** Uma linha de Realizado × Meta por LOJA. */
+window._histRealMetaLojas = function(de, ate, lid){
+  const lojas = lid ? [lid] : (typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : []);
+  const meses = window._histMesesPeriodo(de, ate);
+  const fluxo = window._histFluxoAnivInat(de, ate, lid);
+
+  return lojas.map(l => {
+    let real = 0, atend = 0, itens = 0, meta = 0;
+    let anivL = 0, inatL = 0;
+    let usouCrm = false, usouLanc = false;
+    meses.forEach(mes => {
+      const inteiro = window._mesInteiroNoPeriodo(mes, de, ate);
+      const crm = inteiro && typeof window.crmDoMes === 'function' ? window.crmDoMes(l, mes) : null;
+      if(crm){
+        usouCrm = true;
+        real += crm.fat; atend += crm.notas || 0; itens += crm.itens || 0;
+      } else {
+        const [y, mm] = mes.split('-').map(Number);
+        const ult = new Date(y, mm, 0).getDate();
+        const a = de > (mes+'-01') ? de : (mes+'-01');
+        const b = ate < (mes+'-'+String(ult).padStart(2,'0')) ? ate : (mes+'-'+String(ult).padStart(2,'0'));
+        const lc = window._histLancLoja(l, a, b);
+        if(lc.fat > 0 || lc.trans > 0) usouLanc = true;
+        real += lc.fat; atend += lc.trans;
+        anivL += lc.aniv; inatL += lc.inativ;
+      }
+      meta += (metaDoMes(l, mes).valor || 0) * window._histFracaoMes(mes, de, ate);
+    });
+    // O fluxo é a fonte pedida; o lançamento só cobre quando ele está vazio.
+    const fx = fluxo.porLoja.get(l) || {aniv:0, inativ:0, valor:0};
+    const usouFluxo = (fx.aniv + fx.inativ) > 0;
+    return {
+      id: l,
+      nome: (typeof LOJAS !== 'undefined' ? (LOJAS.find(x=>x.id===l)?.nome) : '') || l,
+      real, meta, atend, itens,
+      tm: atend > 0 ? real/atend : 0,
+      pa: atend > 0 ? itens/atend : 0,
+      pct: meta > 0 ? (real/meta)*100 : 0,
+      gap: real - meta,
+      aniv:   usouFluxo ? fx.aniv   : anivL,
+      inativ: usouFluxo ? fx.inativ : inatL,
+      anivFonte: usouFluxo ? 'fluxo' : (anivL + inatL > 0 ? 'lancamento' : null),
+      fonte: usouCrm && usouLanc ? 'misto' : usouCrm ? 'crm' : usouLanc ? 'lancamento' : null
+    };
+  }).filter(r => r.real > 0 || r.meta > 0);
+};
+
+/** Uma linha de Realizado × Meta por VENDEDOR(A). */
+window._histRealMetaVends = function(de, ate, lid){
+  const vends = (D.vendedoras || []).filter(v => !lid || v.loja === lid);
+  const meses = window._histMesesPeriodo(de, ate);
+  const fluxo = window._histFluxoAnivInat(de, ate, lid);
+
+  let crmVend = new Map();
+  try{
+    if(typeof window.crmRealizadoPeriodo === 'function'){
+      crmVend = window.crmRealizadoPeriodo(lid || null, de, ate).porVendMes || new Map();
+    }
+  }catch(e){ console.warn('[R138] CRM por vendedor(a):', e.message); }
+
+  return vends.map(v => {
+    const chave = _crmNorm(v.nome);
+    let real = 0, atend = 0, itens = 0, meta = 0;
+    let anivL = 0, inatL = 0;
+    let usouCrm = false, usouLanc = false;
+    meses.forEach(mes => {
+      const inteiro = window._mesInteiroNoPeriodo(mes, de, ate);
+      const c = inteiro ? crmVend.get(chave + '|' + mes) : null;
+      if(c && c.fat > 0){
+        usouCrm = true;
+        real += c.fat; atend += c.notas || 0; itens += c.itens || 0;
+      } else {
+        const [y, mm] = mes.split('-').map(Number);
+        const ult = new Date(y, mm, 0).getDate();
+        const a = de > (mes+'-01') ? de : (mes+'-01');
+        const b = ate < (mes+'-'+String(ult).padStart(2,'0')) ? ate : (mes+'-'+String(ult).padStart(2,'0'));
+        const lc = window._histLancVend(v.id, a, b);
+        if(lc.fat > 0 || lc.trans > 0) usouLanc = true;
+        real += lc.fat; atend += lc.trans;
+        anivL += lc.aniv; inatL += lc.inativ;
+      }
+      // A meta da vendedora é um valor mensal único no cadastro; rateada
+      // pela fatia do mês que o período cobre.
+      meta += (Number(v.metaMes) || 0) * window._histFracaoMes(mes, de, ate);
+    });
+    const fx = fluxo.porVend.get(v.id) || {aniv:0, inativ:0, valor:0};
+    const usouFluxo = (fx.aniv + fx.inativ) > 0;
+    return {
+      id: v.id, nome: v.nome, loja: v.loja,
+      lojaNome: (typeof LOJAS !== 'undefined' ? (LOJAS.find(x=>x.id===v.loja)?.nome) : '') || v.loja,
+      arquivada: v.ativa === false,
+      real, meta, atend, itens,
+      tm: atend > 0 ? real/atend : 0,
+      pct: meta > 0 ? (real/meta)*100 : 0,
+      gap: real - meta,
+      aniv:   usouFluxo ? fx.aniv   : anivL,
+      inativ: usouFluxo ? fx.inativ : inatL,
+      fonte: usouCrm && usouLanc ? 'misto' : usouCrm ? 'crm' : usouLanc ? 'lancamento' : null
+    };
+  }).filter(r => r.real > 0 || r.meta > 0)
+    .sort((a,b) => b.real - a.real);
+};
+
+/** Etiqueta da fonte do número, para a linha não mentir sobre a origem. */
+window._histFonteTag = function(f){
+  if(f === 'crm')        return '<span style="font-size:9px;color:var(--azul);border:1px solid rgba(91,141,239,.4);border-radius:4px;padding:1px 5px" title="Faturamento da planilha importada no CRM">PLANILHA</span>';
+  if(f === 'lancamento') return '<span style="font-size:9px;color:var(--verde);border:1px solid rgba(46,204,135,.4);border-radius:4px;padding:1px 5px" title="Lançamento diário registrado pela loja">LANÇAMENTO</span>';
+  if(f === 'misto')      return '<span style="font-size:9px;color:var(--ouro);border:1px solid rgba(201,168,76,.45);border-radius:4px;padding:1px 5px" title="Meses fechados vieram da planilha; os parciais, do lançamento">MISTO</span>';
+  return '<span style="font-size:9px;color:var(--muted)">—</span>';
+};
+
+window._histRealMetaDados = null;   // guardado para a exportação
+
+window.renderHistRealMeta = function(de, ate, lid){
+  const el = document.getElementById('hist-realmeta');
+  const elAI = document.getElementById('hist-anivinat');
+  if(!el) return;
+
+  const lojas = window._histRealMetaLojas(de, ate, lid);
+  const vends = window._histRealMetaVends(de, ate, lid);
+  const fluxo = window._histFluxoAnivInat(de, ate, lid);
+  window._histRealMetaDados = {de, ate, lid, lojas, vends, fluxo, geradoEm: Date.now()};
+
+  const corPct = p => p >= 100 ? 'var(--verde)' : p >= 80 ? 'var(--ouro)' : p > 0 ? 'var(--verm)' : 'var(--muted)';
+  const sinal  = g => (g >= 0 ? '+' : '−') + fmt(Math.abs(g));
+
+  if(!lojas.length && !vends.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'Sem realizado nem meta neste período.</div>';
+  } else {
+    const tLojaReal = lojas.reduce((a,r)=>a+r.real,0);
+    const tLojaMeta = lojas.reduce((a,r)=>a+r.meta,0);
+    const tVendReal = vends.reduce((a,r)=>a+r.real,0);
+    const tVendMeta = vends.reduce((a,r)=>a+r.meta,0);
+
+    const linhasL = lojas.map(r => '<tr>'
+      + '<td><strong>'+r.nome+'</strong> '+window._histFonteTag(r.fonte)+'</td>'
+      + '<td style="color:var(--verde);font-weight:600">'+fmt(r.real)+'</td>'
+      + '<td>'+(r.meta > 0 ? fmt(r.meta) : '<span style="color:var(--muted)">sem meta</span>')+'</td>'
+      + '<td style="color:'+(r.gap>=0?'var(--verde)':'var(--verm)')+';font-weight:600">'+(r.meta>0?sinal(r.gap):'—')+'</td>'
+      + '<td style="color:'+corPct(r.pct)+';font-weight:700">'+(r.meta>0?r.pct.toFixed(1)+'%':'—')+'</td>'
+      + '<td>'+(r.atend>0?r.atend.toLocaleString('pt-BR'):'—')+'</td>'
+      + '<td style="color:var(--azul)">'+(r.tm>0?fmt(r.tm):'—')+'</td>'
+      + '<td>'+r.aniv+'</td><td>'+r.inativ+'</td>'
+      + '</tr>').join('');
+
+    const linhasV = vends.map((r,i) => '<tr>'
+      + '<td style="text-align:center">'+(['🥇','🥈','🥉'][i] || (i+1))+'</td>'
+      + '<td><strong>'+r.nome+'</strong>'+(r.arquivada?' <span style="font-size:9px;color:var(--muted)">arquivada</span>':'')
+        + '<br><small style="color:var(--muted)">'+r.lojaNome+'</small> '+window._histFonteTag(r.fonte)+'</td>'
+      + '<td style="color:var(--verde);font-weight:600">'+fmt(r.real)+'</td>'
+      + '<td>'+(r.meta > 0 ? fmt(r.meta) : '<span style="color:var(--muted)">sem meta</span>')+'</td>'
+      + '<td style="color:'+(r.gap>=0?'var(--verde)':'var(--verm)')+';font-weight:600">'+(r.meta>0?sinal(r.gap):'—')+'</td>'
+      + '<td style="color:'+corPct(r.pct)+';font-weight:700">'+(r.meta>0?r.pct.toFixed(1)+'%':'—')+'</td>'
+      + '<td>'+(r.atend>0?r.atend.toLocaleString('pt-BR'):'—')+'</td>'
+      + '<td style="color:var(--azul)">'+(r.tm>0?fmt(r.tm):'—')+'</td>'
+      + '<td>'+r.aniv+'</td><td>'+r.inativ+'</td>'
+      + '</tr>').join('');
+
+    const rodape = (real, meta) => '<tr style="border-top:2px solid var(--borda);font-weight:700">'
+      + '<td>TOTAL</td><td style="color:var(--verde)">'+fmt(real)+'</td>'
+      + '<td>'+(meta>0?fmt(meta):'—')+'</td>'
+      + '<td style="color:'+((real-meta)>=0?'var(--verde)':'var(--verm)')+'">'+(meta>0?sinal(real-meta):'—')+'</td>'
+      + '<td style="color:'+corPct(meta>0?(real/meta)*100:0)+'">'+(meta>0?((real/meta)*100).toFixed(1)+'%':'—')+'</td>'
+      + '<td colspan="4"></td></tr>';
+
+    el.innerHTML =
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'
+        + 'Mês fechado dentro do período vem da <strong>planilha do CRM</strong>; mês parcial vem do '
+        + '<strong>lançamento diário</strong>. A etiqueta de cada linha diz qual foi. '
+        + 'A meta do período é a meta do mês rateada pelos dias do mês que o período cobre.</div>'
+      + '<div style="font-size:11px;font-weight:700;color:var(--ouro);letter-spacing:.5px;margin:10px 0 6px">POR LOJA</div>'
+      + (lojas.length
+          ? '<div style="overflow-x:auto"><table class="dtable" style="font-size:12px"><thead><tr>'
+            + '<th>Loja</th><th>Realizado</th><th>Meta do período</th><th>Δ</th><th>% Meta</th>'
+            + '<th>Atend.</th><th>TM</th><th>Aniv.</th><th>Inativos</th></tr></thead><tbody>'
+            + linhasL + rodape(tLojaReal, tLojaMeta) + '</tbody></table></div>'
+          : '<div style="color:var(--muted);font-size:12px;padding:10px">Nenhuma loja com realizado ou meta.</div>')
+      + '<div style="font-size:11px;font-weight:700;color:var(--azul);letter-spacing:.5px;margin:16px 0 6px">POR VENDEDOR(A)</div>'
+      + (vends.length
+          ? '<div style="overflow-x:auto"><table class="dtable" style="font-size:12px"><thead><tr>'
+            + '<th>#</th><th>Vendedor(a)</th><th>Realizado</th><th>Meta do período</th><th>Δ</th><th>% Meta</th>'
+            + '<th>Atend.</th><th>TM</th><th>Aniv.</th><th>Inativos</th></tr></thead><tbody>'
+            + linhasV
+            + '<tr style="border-top:2px solid var(--borda);font-weight:700"><td></td><td>TOTAL</td>'
+            + '<td style="color:var(--verde)">'+fmt(tVendReal)+'</td>'
+            + '<td>'+(tVendMeta>0?fmt(tVendMeta):'—')+'</td>'
+            + '<td style="color:'+((tVendReal-tVendMeta)>=0?'var(--verde)':'var(--verm)')+'">'+(tVendMeta>0?sinal(tVendReal-tVendMeta):'—')+'</td>'
+            + '<td style="color:'+corPct(tVendMeta>0?(tVendReal/tVendMeta)*100:0)+'">'+(tVendMeta>0?((tVendReal/tVendMeta)*100).toFixed(1)+'%':'—')+'</td>'
+            + '<td colspan="4"></td></tr>'
+            + '</tbody></table></div>'
+          : '<div style="color:var(--muted);font-size:12px;padding:10px">Nenhum(a) vendedor(a) com realizado ou meta.</div>')
+      + (isAdmin() ? window._histMetasSugestaoHtml(de, ate, lid) : '');
+  }
+
+  // ── Aniversariantes e inativos, da Origem do Fluxo ────────────────
+  if(elAI){
+    if(!fluxo.total){
+      elAI.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">'
+        + 'Nenhum atendimento de aniversariante ou inativo registrado na '
+        + '<strong>Origem do Fluxo</strong> neste período.</div>';
+    } else {
+      const porV = vends.filter(v => v.aniv > 0 || v.inativ > 0)
+        .sort((a,b) => (b.aniv+b.inativ) - (a.aniv+a.inativ));
+      elAI.innerHTML =
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">'
+        + kpiCard('🎂 Aniversariantes', fluxo.aniv.toLocaleString('pt-BR'), '#FF69B4')
+        + kpiCard('😴 Inativos', fluxo.inativ.toLocaleString('pt-BR'), 'var(--laranja)')
+        + kpiCard('Total de contatos', fluxo.total.toLocaleString('pt-BR'), 'var(--texto)')
+        + kpiCard('Valor gerado', fmt(fluxo.valor), 'var(--verde)', 'somado da Origem do Fluxo')
+        + '</div>'
+        + (porV.length
+            ? '<div style="overflow-x:auto"><table class="dtable" style="font-size:12px"><thead><tr>'
+              + '<th>Vendedor(a)</th><th>Loja</th><th>🎂 Aniv.</th><th>😴 Inativos</th><th>Total</th>'
+              + '</tr></thead><tbody>'
+              + porV.map(v => '<tr><td><strong>'+v.nome+'</strong></td><td style="color:var(--muted)">'+v.lojaNome+'</td>'
+                  + '<td>'+v.aniv+'</td><td>'+v.inativ+'</td><td style="font-weight:700">'+(v.aniv+v.inativ)+'</td></tr>').join('')
+              + '</tbody></table></div>'
+            : '<div style="color:var(--muted);font-size:12px;padding:10px">'
+              + 'Os registros do período não têm vendedor(a) vinculado(a).</div>')
+        + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5">'
+          + 'Origem: registros da aba <strong>Origem do Fluxo</strong> com perfil 🎂 Aniversariante ou 😴 Inativo '
+          + 'no período. Não vêm da planilha do CRM — a planilha traz venda, não o motivo do atendimento.</div>';
+    }
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R138] ALIMENTAR A META A PARTIR DO HISTÓRICO
+//
+// A meta da aba Meta pode nascer do que já foi realizado, em vez de ser
+// digitada do zero todo mês. O que este bloco faz é PROPOR: mostra o
+// realizado do período e a meta que sairia dele, mês a mês.
+//
+// E só grava onde NÃO HÁ META. Meta já definida é decisão de gestão, não
+// palpite de cálculo — sobrescrever apagaria um número que alguém escolheu,
+// e não há como saber depois qual era. Quem quiser trocar uma meta que já
+// existe faz isso na aba Meta, onde a mudança é consciente.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Meses do período em que a loja já tem meta e em que não tem. */
+window._histMetasFaltando = function(de, ate, lid){
+  const lojas = lid ? [lid] : (typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : []);
+  const meses = window._histMesesPeriodo(de, ate);
+  const faltando = [], jaTem = [];
+  lojas.forEach(l => {
+    meses.forEach(mes => {
+      // Só mês INTEIRO dentro do período vira meta: a meta é mensal, e um
+      // pedaço de mês não diz quanto a loja fatura no mês.
+      if(!window._mesInteiroNoPeriodo(mes, de, ate)) return;
+      const temMeta = Number((D.metasLoja?.[l]?.[mes] || {}).mes || 0) > 0;
+      const crm = typeof window.crmDoMes === 'function' ? window.crmDoMes(l, mes) : null;
+      const lc  = window._histLancLoja(l, mes+'-01', mes+'-31');
+      const real = crm ? crm.fat : lc.fat;
+      if(real <= 0) return;
+      const alvo = { lid: l, nome: (LOJAS.find(x=>x.id===l)?.nome)||l, mes, real,
+                     fonte: crm ? 'crm' : 'lancamento',
+                     atual: Number((D.metasLoja?.[l]?.[mes] || {}).mes || 0) };
+      (temMeta ? jaTem : faltando).push(alvo);
+    });
+  });
+  return {faltando, jaTem};
+};
+
+window._histMetasSugestaoHtml = function(de, ate, lid){
+  const r = window._histMetasFaltando(de, ate, lid);
+  if(!r.faltando.length && !r.jaTem.length) return '';
+  const total = r.faltando.reduce((a,x) => a + x.real, 0);
+  return '<div style="margin-top:16px;padding:12px 14px;background:rgba(201,168,76,.06);border-left:3px solid var(--ouro);border-radius:4px">'
+    + '<div style="font-size:11px;font-weight:700;color:var(--ouro);letter-spacing:.5px;margin-bottom:6px">ALIMENTAR A META PELO HISTÓRICO</div>'
+    + '<div style="font-size:11px;color:var(--texto);line-height:1.6">'
+      + (r.faltando.length
+          ? '<strong>' + r.faltando.length + '</strong> mês(es) de loja com realizado e <strong>sem meta</strong> '
+            + '(' + fmt(total) + ' realizado). Posso gravar a meta desses meses com o realizado do próprio mês.'
+          : 'Todos os meses fechados do período já têm meta definida.')
+      + (r.jaTem.length
+          ? '<br><span style="color:var(--muted)">' + r.jaTem.length + ' mês(es) já têm meta e <strong>não serão tocados</strong> — '
+            + 'meta definida é decisão de gestão, e sobrescrever apagaria um número escolhido por alguém.</span>'
+          : '')
+    + '</div>'
+    + (r.faltando.length
+        ? '<div style="margin-top:10px"><button class="btn-s" onclick="window.histAlimentarMetas()" style="font-size:11px">'
+          + '🎯 Gravar meta dos ' + r.faltando.length + ' mês(es) sem meta</button></div>'
+        : '')
+    + '</div>';
+};
+
+window.histAlimentarMetas = async function(){
+  if(!isAdmin()){ showToast('Só o administrador define metas.','err'); return; }
+  const d = window._histRealMetaDados;
+  if(!d){ showToast('Faça uma busca antes.','err'); return; }
+  const r = window._histMetasFaltando(d.de, d.ate, d.lid);
+  if(!r.faltando.length){ showToast('Não há mês sem meta para preencher.','warn'); return; }
+
+  const lista = r.faltando.slice(0, 20)
+    .map(x => '  • ' + x.nome + ' ' + x.mes.split('-').reverse().join('/') + ' → ' + fmt(x.real)
+              + ' (' + (x.fonte === 'crm' ? 'planilha' : 'lançamento') + ')').join('\n');
+  const ok = confirm(
+    'Gravar a meta de ' + r.faltando.length + ' mês(es) de loja que hoje estão SEM META,\n'
+    + 'usando o realizado do próprio mês:\n\n' + lista
+    + (r.faltando.length > 20 ? '\n  ... e mais ' + (r.faltando.length - 20) + ' mês(es)' : '')
+    + '\n\nNENHUMA meta existente será alterada.\n\nConfirmar?');
+  if(!ok) return;
+
+  let n = 0;
+  r.faltando.forEach(x => {
+    // Trava de segurança: reconferir na hora da gravação. Entre montar a
+    // lista e confirmar, um sync de fundo pode ter trazido a meta do
+    // servidor — e aí gravar por cima seria justamente o que prometemos
+    // não fazer.
+    if(Number((D.metasLoja?.[x.lid]?.[x.mes] || {}).mes || 0) > 0) return;
+    if(!D.metasLoja) D.metasLoja = {};
+    if(!D.metasLoja[x.lid]) D.metasLoja[x.lid] = {};
+    const ticket = Number((D.metasLoja[x.lid][x.mes] || {}).ticket) || 350;
+    D.metasLoja[x.lid][x.mes] = calcMetasAuto(Math.round(x.real), ticket, undefined, x.lid);
+    n++;
+  });
+  if(!n){ showToast('Nada a gravar: as metas já existem.','warn'); return; }
+
+  _persistirLocal();
+  try{
+    await save();
+    showToast('✅ ' + n + ' meta(s) gravada(s) a partir do histórico.','ok');
+  }catch(e){
+    console.error('[R138] gravar metas:', e);
+    showToast('Metas salvas neste aparelho, mas o envio ao servidor falhou: ' + (e.message||e),'err');
+  }
+  window.renderHistRealMeta(d.de, d.ate, d.lid);
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R138] EXPORTAÇÃO — Excel (CSV) e PDF do bloco Realizado × Meta
+// ══════════════════════════════════════════════════════════════════════
+
+window.histRealMetaCSV = function(){
+  const d = window._histRealMetaDados;
+  if(!d || (!d.lojas.length && !d.vends.length)){
+    showToast('Faça uma busca antes de exportar.','err'); return;
+  }
+  // Ponto e vírgula + vírgula decimal: é o que o Excel em português abre
+  // sem perguntar nada. Vírgula como separador quebraria em toda célula
+  // com valor em reais.
+  const n2 = v => (Number(v)||0).toFixed(2).replace('.', ',');
+  const asp = s => '"' + String(s == null ? '' : s).replace(/"/g,'""') + '"';
+  const per = d.de.split('-').reverse().join('/') + ' a ' + d.ate.split('-').reverse().join('/');
+  const fonteTxt = f => f === 'crm' ? 'Planilha (CRM)' : f === 'lancamento' ? 'Lançamento' : f === 'misto' ? 'Misto' : '';
+
+  const L = [];
+  L.push('REALIZADO x META — AVATIM / MonAris');
+  L.push('Período;' + per);
+  L.push('Loja;' + (d.lid ? ((LOJAS.find(l=>l.id===d.lid)?.nome)||d.lid) : 'Todas as lojas'));
+  L.push('Gerado em;' + new Date(d.geradoEm).toLocaleString('pt-BR'));
+  L.push('');
+  L.push('POR LOJA');
+  L.push('Loja;Fonte;Realizado;Meta do período;Diferença;% Meta;Atendimentos;Ticket médio;Aniversariantes;Inativos');
+  d.lojas.forEach(r => L.push([asp(r.nome), asp(fonteTxt(r.fonte)), n2(r.real), n2(r.meta),
+    n2(r.gap), n2(r.pct), r.atend, n2(r.tm), r.aniv, r.inativ].join(';')));
+  L.push('');
+  L.push('POR VENDEDOR(A)');
+  L.push('Vendedor(a);Loja;Fonte;Realizado;Meta do período;Diferença;% Meta;Atendimentos;Ticket médio;Aniversariantes;Inativos');
+  d.vends.forEach(r => L.push([asp(r.nome), asp(r.lojaNome), asp(fonteTxt(r.fonte)), n2(r.real), n2(r.meta),
+    n2(r.gap), n2(r.pct), r.atend, n2(r.tm), r.aniv, r.inativ].join(';')));
+  L.push('');
+  L.push('ANIVERSARIANTES E INATIVOS (Origem do Fluxo)');
+  L.push('Aniversariantes;' + d.fluxo.aniv);
+  L.push('Inativos;' + d.fluxo.inativ);
+  L.push('Valor gerado;' + n2(d.fluxo.valor));
+
+  // BOM: sem ele o Excel no Windows lê os acentos errado.
+  downloadCSV('\uFEFF' + L.join('\r\n'), 'realizado-x-meta-' + d.de + '_' + d.ate + '.csv');
+  showToast('CSV exportado — o Excel abre direto.','ok');
+};
+
+window.histRealMetaPDF = function(){
+  const d = window._histRealMetaDados;
+  if(!d || (!d.lojas.length && !d.vends.length)){
+    showToast('Faça uma busca antes de exportar.','err'); return;
+  }
+  const per = d.de.split('-').reverse().join('/') + ' a ' + d.ate.split('-').reverse().join('/');
+  const nomeLoja = d.lid ? ((LOJAS.find(l=>l.id===d.lid)?.nome)||d.lid) : 'Todas as lojas';
+  const fonteTxt = f => f === 'crm' ? 'Planilha' : f === 'lancamento' ? 'Lançamento' : f === 'misto' ? 'Misto' : '—';
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const pctTxt = r => r.meta > 0 ? r.pct.toFixed(1) + '%' : '—';
+  const gapTxt = r => r.meta > 0 ? ((r.gap>=0?'+':'−') + fmt(Math.abs(r.gap))) : '—';
+
+  const linhasL = d.lojas.map(r => '<tr><td>'+esc(r.nome)+'</td><td>'+fonteTxt(r.fonte)+'</td>'
+    + '<td class="n">'+fmt(r.real)+'</td><td class="n">'+(r.meta>0?fmt(r.meta):'—')+'</td>'
+    + '<td class="n">'+gapTxt(r)+'</td><td class="n">'+pctTxt(r)+'</td>'
+    + '<td class="n">'+(r.atend||'—')+'</td><td class="n">'+(r.tm>0?fmt(r.tm):'—')+'</td>'
+    + '<td class="n">'+r.aniv+'</td><td class="n">'+r.inativ+'</td></tr>').join('');
+
+  const linhasV = d.vends.map((r,i) => '<tr><td class="n">'+(i+1)+'</td><td>'+esc(r.nome)+'</td>'
+    + '<td>'+esc(r.lojaNome)+'</td><td>'+fonteTxt(r.fonte)+'</td>'
+    + '<td class="n">'+fmt(r.real)+'</td><td class="n">'+(r.meta>0?fmt(r.meta):'—')+'</td>'
+    + '<td class="n">'+gapTxt(r)+'</td><td class="n">'+pctTxt(r)+'</td>'
+    + '<td class="n">'+(r.atend||'—')+'</td><td class="n">'+(r.tm>0?fmt(r.tm):'—')+'</td>'
+    + '<td class="n">'+r.aniv+'</td><td class="n">'+r.inativ+'</td></tr>').join('');
+
+  const win = window.open('', '_blank', 'width=1000,height=720');
+  if(!win){ showToast('O navegador bloqueou a janela. Libere pop-ups para este site.','err'); return; }
+  win.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    + '<title>Avatim — Realizado x Meta</title><style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:26px;font-size:11px;line-height:1.4}'
+    + '.logo{font-size:20px;font-weight:900;letter-spacing:1px}.logo span{color:#C9A84C}'
+    + '.sub{font-size:11px;color:#666}'
+    + '.periodo{font-size:11px;color:#555;border-bottom:2px solid #C9A84C;padding-bottom:8px;margin:6px 0 16px;font-weight:600}'
+    + 'h2{font-size:11px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:1px;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #eee}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:10px}'
+    + 'th{background:#f5f3ea;color:#444;font-weight:700;padding:6px 7px;text-align:left;border-bottom:2px solid #ddd;font-size:9.5px;text-transform:uppercase}'
+    + 'td{padding:5px 7px;border-bottom:1px solid #f0f0f0}.n{text-align:right}'
+    + 'tr:nth-child(even) td{background:#fafaf7}'
+    + '.nota{font-size:9.5px;color:#888;margin-top:6px;line-height:1.5}'
+    + '.footer{margin-top:20px;font-size:9px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:8px}'
+    + '@media print{button{display:none!important}body{padding:10px}}'
+    + '</style></head><body>'
+    + '<div class="logo">Mon<span>Aris</span></div>'
+    + '<div class="sub">Realizado × Meta — lojas e vendedores(as)</div>'
+    + '<div class="periodo">' + esc(nomeLoja) + ' • ' + per + '</div>'
+    + '<h2>Por loja</h2>'
+    + '<table><thead><tr><th>Loja</th><th>Fonte</th><th class="n">Realizado</th><th class="n">Meta do período</th>'
+    + '<th class="n">Δ</th><th class="n">% Meta</th><th class="n">Atend.</th><th class="n">TM</th>'
+    + '<th class="n">Aniv.</th><th class="n">Inativos</th></tr></thead><tbody>'
+    + (linhasL || '<tr><td colspan="10">Sem dados.</td></tr>') + '</tbody></table>'
+    + '<h2>Por vendedor(a)</h2>'
+    + '<table><thead><tr><th class="n">#</th><th>Vendedor(a)</th><th>Loja</th><th>Fonte</th>'
+    + '<th class="n">Realizado</th><th class="n">Meta do período</th><th class="n">Δ</th><th class="n">% Meta</th>'
+    + '<th class="n">Atend.</th><th class="n">TM</th><th class="n">Aniv.</th><th class="n">Inativos</th></tr></thead><tbody>'
+    + (linhasV || '<tr><td colspan="12">Sem dados.</td></tr>') + '</tbody></table>'
+    + '<h2>Aniversariantes e inativos — Origem do Fluxo</h2>'
+    + '<table><tbody><tr><td>Aniversariantes</td><td class="n">' + d.fluxo.aniv + '</td></tr>'
+    + '<tr><td>Inativos</td><td class="n">' + d.fluxo.inativ + '</td></tr>'
+    + '<tr><td>Valor gerado</td><td class="n">' + fmt(d.fluxo.valor) + '</td></tr></tbody></table>'
+    + '<div class="nota">Fonte do realizado: mês fechado dentro do período vem da planilha importada no CRM; '
+    + 'mês parcial vem do lançamento diário. A meta do período é a meta do mês rateada pelos dias do mês '
+    + 'que o período cobre.</div>'
+    + '<div class="footer">Avatim / MonAris Sales Control — gerado em '
+    + new Date(d.geradoEm).toLocaleString('pt-BR') + '</div>'
+    + '<script>setTimeout(function(){window.print();},350);<\/script>'
+    + '</body></html>');
+  win.document.close();
+};
 
 async function buscarHistoricoVend(){
   const vendId = document.getElementById('hist-pg-sel-vend')?.value;
@@ -25365,9 +26137,15 @@ function renderRelatorios(){
   if(!el) return;
   // Popula o select de loja (só admin)
   const sel = document.getElementById('rel-loja-sel');
-  if(sel && (sel.options?.length || 0) <= 1 && isAdmin()){
-    sel.innerHTML = '<option value="">🌐 Rede toda</option>' +
-      LOJAS.map(l=>`<option value="${l.id}" ${window._relLojaSel===l.id?'selected':''}>🏪 ${l.nome}</option>`).join('');
+  // [R139] antes montava uma vez só: loja arquivada continuava na lista
+  if(sel && isAdmin()){
+    if(window._selSincronizar(sel, LOJAS, {rotuloVazio:'🌐 Rede toda',
+        valor: l => l.id, rotulo: l => '🏪 ' + l.nome})){
+      // A escolha vive em _relLojaSel; se a loja sumiu, volta à rede toda.
+      const aindaExiste = LOJAS.some(l => l.id === window._relLojaSel);
+      if(!aindaExiste) window._relLojaSel = '';
+      sel.value = window._relLojaSel || '';
+    }
   }
   if(sel && !isAdmin() && sel.parentElement && sel.parentElement.style){
     sel.parentElement.style.display = 'none';
@@ -27390,9 +28168,10 @@ function renderContatos(){
 
   // Popular selects
   const selLoja = document.getElementById('ct-filtro-loja');
-  if(selLoja && isAdmin() && (selLoja.options?.length || 0) <= 1){
-    selLoja.innerHTML = '<option value="">🏪 Todas as lojas</option>' +
-      LOJAS.map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+  // [R139] remonta quando LOJAS muda, em vez de congelar na 1ª montagem
+  if(selLoja && isAdmin()){
+    window._selSincronizar(selLoja, LOJAS, {rotuloVazio:'🏪 Todas as lojas',
+      valor: l => l.id, rotulo: l => l.nome});
   }
   const selVend = document.getElementById('ct-filtro-vend');
   if(selVend){
@@ -29600,7 +30379,20 @@ function _excelFiltrar(){
 }
 
 // ── RENDER PRINCIPAL ──────────────────────────────────────────────
-window.excelRender = function(){
+// ══════════════════════════════════════════════════════════════════════
+// [R139] VERSÃO LEGADA — NÃO ESTÁ LIGADA A NADA.
+//
+// Esta função se chamava window.excelRender e era SOMBREADA: mais abaixo no
+// mesmo arquivo há outra atribuição a window.excelRender, e a última vence.
+// Este corpo nunca rodou — mas lia como se rodasse, e quem viesse consertar
+// a aba CRM podia editar aqui sem ver efeito nenhum.
+//
+// Trabalha com D.excelDados (as linhas cruas), que o R55 aposentou em favor
+// dos cubos agregados. Fica guardada porque é a única cópia de
+// _excelRededuzirOrfas / _excelRenderOrfas / _excelRenderImportacoes, que
+// podem voltar a ser úteis. Renomeada para parar de sombrear.
+// ══════════════════════════════════════════════════════════════════════
+window._excelRenderLegado = function(){
   if(!D.excelDados) D.excelDados = [];
 
   // [NEW R39] Ajustar visibilidade por perfil (loja fixa quando não é admin)
@@ -31095,11 +31887,11 @@ window._campSugerirPorValor = function(){
   if(!lista) return;
 
   // Popular filtro de linhas uma única vez
-  const selLinha = document.getElementById('camp-sug-linha');
-  if(selLinha && selLinha.options.length <= 1){
-    selLinha.innerHTML = '<option value="">Todas as linhas</option>'
-      + window._linhasCatalogo().map(l => '<option value="'+l+'">'+l+'</option>').join('');
-  }
+  // [R139] O catálogo muda quando sobe planilha de estoque. Congelado na
+  // primeira montagem, o filtro seguia oferecendo as linhas antigas e
+  // escondendo as novas.
+  window._selSincronizar(document.getElementById('camp-sug-linha'),
+    window._linhasCatalogo(), {rotuloVazio:'Todas as linhas'});
 
   const valor = parseFloat(String(document.getElementById('camp-sug-valor')?.value||'').replace(',','.')) || 0;
   if(valor <= 0){
@@ -31248,11 +32040,11 @@ window._fxRenderProdutos = function(){
   }
 
   // Popular o filtro de linha uma única vez
+  // [R139] mesma armadilha do filtro de campanhas: o catálogo cresce com a
+  // planilha de estoque e a lista ficava presa nas linhas de antes.
   const selLinha = document.getElementById("fx-prod-linha");
-  if(selLinha && selLinha.options.length <= 1){
-    selLinha.innerHTML = '<option value="">Todas as linhas</option>'
-      + window._linhasCatalogo().map(l => '<option value="'+l+'">'+l+'</option>').join('');
-    selLinha.value = linha;
+  if(window._selSincronizar(selLinha, window._linhasCatalogo(), {rotuloVazio:'Todas as linhas'})){
+    if(window._linhasCatalogo().indexOf(linha) > -1) selLinha.value = linha;
   }
 
   if(!res.itens.length){
