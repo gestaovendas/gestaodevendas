@@ -5285,7 +5285,21 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-08';
+window.AVATIM_BUILD = '2026-09-09b';
+/**
+ * [R135] Corpo de uma função SEM os comentários.
+ *
+ * As verificações abaixo perguntam "esta função ainda chama X?" lendo o
+ * próprio código. Sem tirar os comentários, um comentário que MENCIONA a
+ * chamada — inclusive um explicando por que ela foi removida — faz o
+ * recurso se declarar ausente. O `[^:]` preserva "https://".
+ */
+window._semComentarios = function(f){
+  return String(f || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+};
+
 window.AVATIM_RECURSOS = {
   travaAntiApagamento:   () => /GRAVAÇÃO RECUSADA/.test(document.documentElement.innerHTML),
   gravacaoComPrazo:      () => typeof window.gravarRemotoComPrazo === 'function',
@@ -5322,7 +5336,36 @@ window.AVATIM_RECURSOS = {
   // [R133] gravação do CRM em lote — não estoura a fila do SDK
   crmGravacaoEmLote:     () => typeof window._crmGravarLote === 'function',
   // [R134] quem ficou sem loja para de sumir em silêncio
-  planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function'
+  planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function',
+  // [R135] apagar CRM não reescreve mais o principal nem os 7 docs de loja
+  crmExclusaoLeve:       () => typeof window.crmApagar === 'function'
+                            && !/\bsave\(\)/.test(window._semComentarios(window.crmApagar))
+                            && /_persistirLocal\(\)/.test(window._semComentarios(window.crmApagar)),
+  // [R135] período coberto por conjunto — denuncia o arquivo que subiu pela metade
+  coberturaImportacao:   () => typeof _crmCobertura === 'function',
+  // [R136] importar manda só o conjunto importado, e fila cheia vira espera
+  envioSoDoImportado:    () => typeof window.crmSincronizar === 'function'
+                            && /paresOpt/.test(String(window.crmSincronizar)),
+  filaCheiaAguarda:      () => typeof window._crmGravarLote === 'function'
+                            && /resource-exhausted/.test(String(window._crmGravarLote)),
+  // [R137] o ano inteiro mes a mes, com melhor e pior mes
+  relAnoMesAMes:         () => typeof _relAnoMesAMes === 'function'
+                            && typeof _relAnoPainel === 'function',
+  relMelhorPiorMes:      () => typeof _relAnoDestaques === 'function',
+  // [R137] anos e meses saem dos dados — planilhas importadas inclusive
+  relAnosDasPlanilhas:   () => typeof _relAnosOfertados === 'function'
+                            && typeof _relMesesComDado === 'function',
+  // [R137] o filtro de ano do CRM volta a se atualizar depois de importar
+  crmFiltroAnoAtualiza:  () => typeof _crmPopularFiltros === 'function'
+                            && /selA\.dataset\.assinatura/.test(String(_crmPopularFiltros)),
+  // [R137] loja escolhida vale antes da deducao: nao cadastrado vira historico
+  importLojaMandaPrimeiro: () => {
+                              if(typeof window.excelProcessarUpload !== 'function') return false;
+                              const f = String(window.excelProcessarUpload);
+                              const a = f.indexOf('excel-loja-import');
+                              const b = f.indexOf('_mapaVendLoja');
+                              return a > -1 && b > -1 && a < b;   // -1 nao pode passar por "veio antes"
+                            }
 };
 /**
  * [R124] Diagnóstico da duplicidade na Origem do Fluxo.
@@ -7830,13 +7873,43 @@ window._crmGravarLote = async function(escritas, ms){
     return {lotes:0, docs:escritas.length};
   }
 
+  // [R136] "Write stream exhausted maximum allowed queued writes" não é falha
+  // de gravação: é o SDK dizendo que a fila dele está cheia e pedindo espera.
+  // Desistir na primeira vez transformava um pedido de espera em erro na cara
+  // do usuário, com a importação inteira dada como não enviada. Aqui a espera
+  // é atendida — e só depois de três tentativas o erro é propagado de verdade.
+  const _filaCheia = e => {
+    const t = String((e && (e.code || e.message)) || '');
+    return /resource-exhausted|exhausted/i.test(t);
+  };
+  const _dormir = ms2 => new Promise(r => setTimeout(r, ms2));
+
   let lotes = 0;
   for(let i = 0; i < escritas.length; i += CRM_LOTE_MAX){
     const bloco = escritas.slice(i, i + CRM_LOTE_MAX);
-    const lote = writeBatch(db);
-    bloco.forEach(e => lote.set(doc(db,'avatim',e.id), e.dados));
-    await comPrazo(lote.commit(), bloco.length + ' documento(s)');
+    const esperas = [0, 4000, 12000];
+    let ultimo = null, gravado = false;
+    for(let t = 0; t < esperas.length && !gravado; t++){
+      if(esperas[t]) await _dormir(esperas[t]);
+      try{
+        const lote = writeBatch(db);
+        bloco.forEach(e => lote.set(doc(db,'avatim',e.id), e.dados));
+        await comPrazo(lote.commit(), bloco.length + ' documento(s)');
+        gravado = true;
+      }catch(e){
+        ultimo = e;
+        // Só a fila cheia justifica esperar. Erro de permissão ou de dado
+        // não melhora com o tempo — insistir só atrasaria o aviso ao usuário.
+        if(!_filaCheia(e)) throw e;
+        console.warn('[Avatim] R136: fila do Firestore cheia — aguardando '
+          + ((esperas[t+1]||0)/1000) + 's para tentar de novo ('
+          + (t+1) + '/' + esperas.length + ')');
+      }
+    }
+    if(!gravado) throw (ultimo || new Error('não foi possível gravar o lote'));
     lotes++;
+    // Respiro entre lotes: enfileirar um atrás do outro é o que enche a fila.
+    if(i + CRM_LOTE_MAX < escritas.length) await _dormir(400);
   }
   return {lotes, docs:escritas.length};
 };
@@ -7870,10 +7943,28 @@ window.crmSincronizarUm = async function(lid, ano){
 };
 
 /** Sobe todos os cubos que estiverem em memória. */
-window.crmSincronizar = async function(){
+/**
+ * Sobe os cubos do CRM ao Firestore.
+ *
+ * [R136] `paresOpt` limita o envio ao que de fato mudou. Sem ele a função
+ * reenvia a base INTEIRA — que é o certo para o botão "Reenviar ao Firebase",
+ * e era um desastre na importação: subir a planilha de uma loja remandava
+ * todos os conjuntos de todas as lojas e anos, cada um com a cabeça mais os
+ * pedaços de clientes. Importando as planilhas do mês uma atrás da outra,
+ * isso reenviava a base inteira a cada arquivo; com a rede oscilando nada
+ * era confirmado, a fila do SDK estourava e o commit morria em
+ * "Write stream exhausted maximum allowed queued writes".
+ */
+window.crmSincronizar = async function(paresOpt){
   if(!isAdmin()){ showToast('Só o administrador sincroniza o CRM.','err'); return; }
-  const pares = [];
-  Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
+  let pares;
+  if(Array.isArray(paresOpt) && paresOpt.length){
+    // só o que existe de fato em D.crm — par inválido viraria erro no envio
+    pares = paresOpt.filter(x => Array.isArray(x) && ((D.crm||{})[x[0]]||{})[x[1]]);
+  } else {
+    pares = [];
+    Object.keys(D.crm||{}).forEach(lid => Object.keys(D.crm[lid]||{}).forEach(ano => pares.push([lid,ano])));
+  }
   if(!pares.length){ showToast('Nenhum dado de CRM para sincronizar.','warn'); return; }
 
   showToast('⏳ Enviando ' + pares.length + ' conjunto(s) de CRM...','ok');
@@ -7950,8 +8041,9 @@ window.crmApagar = async function(lid, ano){
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
-  // E propagar a exclusão para o cache local imediatamente.
-  if(typeof window.idbUtilizavel === 'function' && window.idbUtilizavel()) window.crmGravarIdb().catch(()=>{});
+  // [R135] O cache local é regravado por _persistirLocal() no FIM, depois de
+  // o cubo sair de D.crm. Gravá-lo aqui salvava o estado de ANTES da exclusão
+  // — trabalho jogado fora, e ainda antes de o usuário confirmar.
   if(!isAdmin()){ showToast('Só o administrador pode apagar.','err'); return; }
   const cubo = ((D.crm||{})[lid]||{})[ano];
   if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
@@ -8001,7 +8093,7 @@ window.crmApagar = async function(lid, ano){
     }
     delete D.crm[lid][ano];
     if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
-    save();
+    _persistirLocal();   // [R135] ver comentário abaixo: o principal não guarda D.crm
     showToast('⚠️ ' + nomeLoja + '/' + ano + ' removido apenas deste navegador — '
       + 'segue no Firebase e voltará ao recarregar.','err');
     if(typeof window.excelRender === 'function') window.excelRender();
@@ -8010,7 +8102,26 @@ window.crmApagar = async function(lid, ano){
 
   delete D.crm[lid][ano];
   if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
-  save();
+  // ══════════════════════════════════════════════════════════════════
+  // [R135] AQUI NÃO PODE CHAMAR save().
+  //
+  // Os cubos do CRM moram em documentos PRÓPRIOS (crm_<loja>_<ano> e as
+  // partes de clientes) — D.crm NÃO entra no payload do 'principal' nem
+  // nos docs loja_*. A exclusão remota já foi feita no lote acima.
+  //
+  // save() do admin, porém, reescreve o principal (2 pedaços) e propaga
+  // para os 7 documentos de loja: 9 gravações que não têm relação nenhuma
+  // com o que foi apagado. Apagando conjuntos em sequência, isso vira
+  // dezenas de escritas pendentes; com a rede oscilando (o console mostrou
+  // o canal Listen caindo com 404) nada é confirmado, a fila do SDK passa
+  // das ~100 permitidas e a próxima gravação morre com
+  // "Write stream exhausted maximum allowed queued writes" — derrubando
+  // junto o salvamento de quem estivesse lançando naquele momento.
+  //
+  // Persistir local basta: mantém a tela e o cache coerentes sem tocar no
+  // servidor de novo.
+  // ══════════════════════════════════════════════════════════════════
+  _persistirLocal();
   showToast('✅ CRM de ' + nomeLoja + '/' + ano + ' apagado — '
     + docs.length + ' documento(s) removidos do Firebase.','ok');
   if(typeof window.excelRender === 'function') window.excelRender();
@@ -25084,10 +25195,25 @@ function _relEstado(aba){
   if(!window._relFiltro[aba]) window._relFiltro[aba] = {ref:'', comp:'auto'};
   return window._relFiltro[aba];
 }
-/** Mês analisado por este relatório (padrão: mês corrente). */
+/**
+ * Mês analisado por este relatório.
+ * [R137] O padrão deixou de ser o mês do calendário e passou a ser o mês
+ * mais recente que TEM dado. Fixo em hoje(), o relatório abria vazio sempre
+ * que a planilha do mês ainda não tinha subido — e o usuário via zero sem
+ * saber que era só a data padrão. Sem dado nenhum, cai no mês corrente,
+ * exatamente como antes.
+ */
 function _relRef(aba){
   const m = _relEstado(aba).ref;
-  return /^\d{4}-\d{2}$/.test(m||'') ? m : hoje().slice(0,7);
+  if(/^\d{4}-\d{2}$/.test(m||'')) return m;
+  return _relMesesComDado()[0] || hoje().slice(0,7);
+}
+
+/** [R137] Ano analisado (padrão: o ano do mês de referência). */
+function _relAnoRef(aba){
+  const a = _relEstado(aba).ano;
+  if(/^\d{4}$/.test(String(a||''))) return String(a);
+  return _relRef(aba).slice(0,4);
 }
 /** Contra o que este relatório compara. 'auto' usa o padrão do tipo. */
 function _relComp(aba, base, modo){
@@ -25134,14 +25260,41 @@ function _relBarra(aba, opts){
     + compHtml
     + '</div></div>';
 }
+/**
+ * [R137] Meses que têm dado DE VERDADE — nada inventado.
+ *
+ * mesesDisponiveis() e _relMesesOfertados() acrescentam o mês corrente e o
+ * anterior mesmo quando ninguém lançou nada neles, para o seletor nunca
+ * ficar vazio. Isso serve à tela, mas não serve para decidir o que analisar:
+ * um mês em branco no topo da lista faz o relatório abrir zerado, como se a
+ * rede não tivesse vendido. Aqui entra só o que existe — inclusive os meses
+ * das planilhas importadas, que é onde mora a maior parte do histórico.
+ */
+function _relMesesComDado(){
+  const set = new Set();
+  Object.values(D.historicoMeses || {}).forEach(meses =>
+    Object.keys(meses || {}).forEach(k => { if(/^\d{4}-\d{2}$/.test(k)) set.add(k); }));
+  Object.values(D.vendas || {}).forEach(dias =>
+    Object.keys(dias || {}).forEach(d => { if(/^\d{4}-\d{2}-\d{2}$/.test(d)) set.add(d.slice(0,7)); }));
+  Object.values(D.vendasVend || {}).forEach(dias =>
+    Object.keys(dias || {}).forEach(d => { if(/^\d{4}-\d{2}-\d{2}$/.test(d)) set.add(d.slice(0,7)); }));
+  Object.values(D.crm || {}).forEach(anos =>
+    Object.values(anos || {}).forEach(cubo =>
+      (cubo.meses || []).forEach(m => { if(/^\d{4}-\d{2}$/.test(m)) set.add(m); })));
+  return [...set].sort().reverse();
+}
+
+/** [R137] Anos que aparecem nos dados — os das planilhas inclusive. */
+function _relAnosOfertados(){
+  const set = new Set(_relMesesComDado().map(m => m.slice(0,4)));
+  set.add(hoje().slice(0,4));   // o ano corrente sempre pode ser escolhido
+  return [...set].sort().reverse();
+}
+
 /** Meses que têm dado em alguma fonte, inclusive o CRM. */
 function _relMesesOfertados(){
   const set = new Set(mesesDisponiveis());
-  Object.entries(D.crm || {}).forEach(([lid, anos]) => {
-    Object.values(anos || {}).forEach(cubo => {
-      (cubo.meses || []).forEach(m => { if(/^\d{4}-\d{2}$/.test(m)) set.add(m); });
-    });
-  });
+  _relMesesComDado().forEach(m => set.add(m));
   set.add(hoje().slice(0,7));
   return [...set].sort().reverse();
 }
@@ -25387,6 +25540,155 @@ function _relMensal(){
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// [R137] O ANO INTEIRO, MÊS A MÊS
+//
+// O Comparativo Anual olhava um mês só (YoY) e o acumulado até ele (YTD).
+// Quem sobe a planilha de um ano inteiro quer ver o ano: os doze meses
+// lado a lado com os mesmos meses do ano anterior, e onde estão o melhor e
+// o pior mês. É isto que este painel faz — ele SOMA ao que já existia,
+// não substitui: o YoY do mês e o YTD continuam acima, intactos.
+//
+// O ano analisado não é o do calendário: sai de _relAnosOfertados(), que
+// lista os anos que realmente têm dado — os das planilhas importadas
+// inclusive. Ano de planilha antiga fica a um clique de distância.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Os doze meses do ano, agregados nas lojas visíveis, contra o ano anterior. */
+function _relAnoMesAMes(lojas, ano){
+  const y = parseInt(ano);
+  const linhas = [];
+  for(let mm = 1; mm <= 12; mm++){
+    const mr  = y     + '-' + String(mm).padStart(2,'0');
+    const mrB = (y-1) + '-' + String(mm).padStart(2,'0');
+    const A = _relAgregar(lojas, mr);
+    const B = _relAgregar(lojas, mrB);
+    linhas.push({
+      mm, mr, mrB,
+      real: A.real, atend: A.atend, tm: A.tm, meta: A.meta, fonte: A.fonte,
+      realAnt: B.real,
+      delta: _relDelta(A.real, B.real)
+    });
+  }
+  return linhas;
+}
+
+/**
+ * Melhor e pior mês do ano.
+ * Mês SEM faturamento não concorre a pior: ausência de dado não é queda de
+ * venda, e apontar janeiro como "pior mês" só porque a planilha ainda não
+ * subiu seria mentir com número.
+ */
+function _relAnoDestaques(linhas){
+  const comDado = linhas.filter(l => l.real > 0);
+  if(!comDado.length) return { melhor:null, pior:null, total:0, media:0, meses:0 };
+  let melhor = comDado[0], pior = comDado[0];
+  comDado.forEach(l => {
+    if(l.real > melhor.real) melhor = l;
+    if(l.real < pior.real)   pior   = l;
+  });
+  const total = comDado.reduce((a,l) => a + l.real, 0);
+  return { melhor, pior, total, media: total/comDado.length, meses: comDado.length };
+}
+
+function _relAnoPainel(aba){
+  const lojas  = _relLojasVisiveis();
+  const ano    = _relAnoRef(aba);
+  const anos   = _relAnosOfertados();
+  const lista  = anos.includes(ano) ? anos : [ano].concat(anos);
+  const linhas = _relAnoMesAMes(lojas, ano);
+  const d      = _relAnoDestaques(linhas);
+
+  const totalAnt = linhas.reduce((a,l) => a + l.realAnt, 0);
+  const totalAtd = linhas.reduce((a,l) => a + l.atend, 0);
+  const totalMet = linhas.reduce((a,l) => a + l.meta, 0);
+  const dTotal   = _relDelta(d.total, totalAnt);
+
+  const selAno = '<select onchange="window._relSetFiltro(\'' + aba + '\',\'ano\',this.value)" '
+    + 'style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">'
+    + lista.map(a => '<option value="'+a+'"'+(a===ano?' selected':'')+'>'+a+'</option>').join('')
+    + '</select>';
+
+  // Com um único mês faturado não existe "pior": seria o mesmo do melhor,
+  // e a tela diria duas vezes a mesma coisa como se fossem dois achados.
+  const semDado = d.meses === 1 ? 'só um mês com faturamento' : 'sem mês com faturamento';
+  const cardMes = (rot, l, cor) => l
+    ? '<div class="rel-kpi"><div class="rel-kpi-l">'+rot+'</div>'
+      + '<div class="rel-kpi-v" style="color:'+cor+'">'+_relMesLabel(l.mr)+'</div>'
+      + '<div class="rel-kpi-s">'+fmt(l.real)+'</div></div>'
+    : '<div class="rel-kpi"><div class="rel-kpi-l">'+rot+'</div>'
+      + '<div class="rel-kpi-v" style="color:var(--muted)">—</div>'
+      + '<div class="rel-kpi-s">'+semDado+'</div></div>';
+
+  const corpo = linhas.map(l => {
+    const ehMelhor = d.melhor && l.mr === d.melhor.mr;
+    const ehPior   = d.pior   && l.mr === d.pior.mr && d.meses > 1;
+    const fundo = ehMelhor ? 'background:rgba(46,204,135,.08)'
+                : ehPior   ? 'background:rgba(220,53,69,.07)' : '';
+    const marca = ehMelhor ? ' <span title="melhor mês do ano">🏆</span>'
+                : ehPior   ? ' <span title="pior mês do ano">🔻</span>' : '';
+    const pctMeta = l.meta > 0 ? (l.real/l.meta)*100 : 0;
+    return '<tr style="'+fundo+'">'
+      + '<td><strong>'+_relMesLabel(l.mr)+'</strong>'+marca+'</td>'
+      + '<td class="num">'+(l.real > 0 ? fmt(l.real) : '--')+'</td>'
+      + '<td class="num" style="color:var(--muted)">'+(l.realAnt > 0 ? fmt(l.realAnt) : '—')+'</td>'
+      + '<td class="num"><span class="'+l.delta.cls+'">'+l.delta.txt+'</span></td>'
+      + '<td class="num">'+(l.atend > 0 ? l.atend.toLocaleString('pt-BR') : '--')+'</td>'
+      + '<td class="num">'+(l.tm > 0 ? fmt(l.tm) : '--')+'</td>'
+      + '<td class="num" style="color:var(--muted)">'+(l.meta > 0 ? fmt(l.meta) : '—')+'</td>'
+      + '<td class="num">'+(pctMeta > 0 ? pctMeta.toFixed(1)+'%' : '—')+'</td>'
+      + '</tr>';
+  }).join('');
+
+  const rodape = '<tr style="border-top:2px solid var(--borda);font-weight:700">'
+    + '<td>TOTAL ' + ano + '</td>'
+    + '<td class="num">'+(d.total > 0 ? fmt(d.total) : '--')+'</td>'
+    + '<td class="num" style="color:var(--muted)">'+(totalAnt > 0 ? fmt(totalAnt) : '—')+'</td>'
+    + '<td class="num"><span class="'+dTotal.cls+'">'+dTotal.txt+'</span></td>'
+    + '<td class="num">'+(totalAtd > 0 ? totalAtd.toLocaleString('pt-BR') : '--')+'</td>'
+    + '<td class="num">'+(totalAtd > 0 ? fmt(d.total/totalAtd) : '--')+'</td>'
+    + '<td class="num" style="color:var(--muted)">'+(totalMet > 0 ? fmt(totalMet) : '—')+'</td>'
+    + '<td class="num">'+(totalMet > 0 ? ((d.total/totalMet)*100).toFixed(1)+'%' : '—')+'</td>'
+    + '</tr>';
+
+  return '<div class="sc" style="margin-top:14px">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between">'
+      + '<div class="st" style="margin:0">🗓️ O ano de ' + ano + ', mês a mês</div>'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<label style="font-size:11px;color:var(--muted)">Ano</label>' + selAno + '</div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:6px">'
+      + 'Cada mês de ' + ano + ' contra o mesmo mês de ' + (parseInt(ano)-1) + '. '
+      + 'Os anos oferecidos são os que têm dado — planilhas importadas inclusive.</div>'
+    + '<div class="gr4" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px">'
+      + '<div class="rel-kpi"><div class="rel-kpi-l">Faturamento do ano</div>'
+        + '<div class="rel-kpi-v">'+(d.total > 0 ? fmt(d.total) : '--')+'</div>'
+        + '<div class="rel-kpi-s"><span class="'+dTotal.cls+'">'+dTotal.txt+'</span> vs '+(parseInt(ano)-1)+'</div></div>'
+      + '<div class="rel-kpi"><div class="rel-kpi-l">Média por mês</div>'
+        + '<div class="rel-kpi-v">'+(d.media > 0 ? fmt(d.media) : '--')+'</div>'
+        + '<div class="rel-kpi-s">'+d.meses+' '+(d.meses === 1 ? 'mês com dado' : 'meses com dado')+'</div></div>'
+      + cardMes('Melhor mês', d.melhor, 'var(--verde)')
+      + cardMes('Pior mês',  (d.meses > 1 ? d.pior : null), 'var(--verm)')
+    + '</div>'
+    + '<div style="overflow-x:auto;margin-top:12px">'
+      + '<table class="rel-tabela"><thead><tr>'
+        + '<th>MÊS</th>'
+        + '<th class="num">' + ano + '</th>'
+        + '<th class="num">' + (parseInt(ano)-1) + '</th>'
+        + '<th class="num">Δ</th>'
+        + '<th class="num">ATENDIMENTOS</th>'
+        + '<th class="num">TICKET MÉDIO</th>'
+        + '<th class="num">META</th>'
+        + '<th class="num">% META</th>'
+      + '</tr></thead><tbody>' + corpo + rodape + '</tbody></table>'
+    + '</div>'
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5">'
+      + 'Mês sem faturamento aparece como <strong>--</strong> e <strong>não concorre a pior mês</strong> — '
+      + 'planilha que ainda não subiu não é queda de venda. Se um mês do meio do ano está vazio, '
+      + 'confira o período coberto do conjunto na aba CRM.</div>'
+    + '</div>';
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // 3. COMPARATIVO ANUAL — YoY do mês atual e YTD acumulado
 // ══════════════════════════════════════════════════════════════════════
 function _relAnual(){
@@ -25442,7 +25744,7 @@ function _relAnual(){
         </table>
       </div>
     </div>
-  `;
+  ` + _relAnoPainel('anual');
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -28875,6 +29177,50 @@ window.excelProcessarUpload = function(event){
         return;
       }
 
+      // ══════════════════════════════════════════════════════════════
+      // [R137] A LOJA ESCOLHIDA MANDA — E MANDA PRIMEIRO.
+      //
+      // O seletor de loja já existia, mas era aplicado DEPOIS da dedução
+      // pelo cadastro e depois do aviso de "linhas sem loja". Quem escolhia
+      // a loja ainda levava o susto de "3.183 linhas ficaram SEM LOJA" e
+      // podia cancelar a importação achando que ia perder as vendas — que
+      // no fim entrariam, porque o seletor sobrescrevia tudo logo adiante.
+      // Aplicando aqui, escolher a loja resolve o arquivo inteiro e nenhum
+      // aviso aparece, porque não há mais linha órfã.
+      //
+      // Consequência direta e desejada: VENDEDOR(A) NÃO CADASTRADO(A) DEIXA
+      // DE SER MOTIVO DE DESCARTE. O nome vai para o cubo como veio na
+      // planilha e as vendas entram na BASE HISTÓRICA da loja escolhida.
+      // O cadastro serve para meta e ranking; não é condição para existir
+      // histórico. Antes, uma vendedora fora do cadastro fazia sumir toda a
+      // venda dela — e desde o R55 as linhas cruas não são guardadas, então
+      // o dado não voltava nem depois.
+      // ══════════════════════════════════════════════════════════════
+      const _lojaEscolhida = document.getElementById('excel-loja-import')?.value || '';
+      if(_lojaEscolhida){
+        dadosProcessados.forEach(r => { r.loja = _lojaEscolhida; });
+        const _nomesCad = new Set((D.vendedoras || [])
+          .map(v => _excelNormNome(v.nome)).filter(Boolean));
+        const _foraDoCadastro = new Map();
+        dadosProcessados.forEach(r => {
+          const _nv = _excelNormNome(r.vendedora || '');
+          if(!_nv || _nomesCad.has(_nv)) return;
+          const e = _foraDoCadastro.get(r.vendedora) || {n:0, v:0};
+          e.n++; e.v += (Number(r.valor) || 0);
+          _foraDoCadastro.set(r.vendedora, e);
+        });
+        if(_foraDoCadastro.size){
+          console.log('[excel] R137: ' + _foraDoCadastro.size + ' vendedor(es) fora do cadastro'
+            + ' — as vendas entram como base histórica de '
+            + ((LOJAS.find(l=>l.id===_lojaEscolhida)?.nome) || _lojaEscolhida) + ':',
+            [..._foraDoCadastro.entries()]
+              .sort((a,b) => b[1].v - a[1].v)
+              .map(([n,e]) => n + ': ' + e.n + ' linha(s), R$ '
+                + e.v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}))
+              .join(' · '));
+        }
+      }
+
       // [FIX 13/08] Se não veio Loja da planilha, deduzir pela vendedora
       // (bate nome normalizado com D.vendedoras cadastradas)
       const _semLoja = dadosProcessados.filter(r => !r.loja).length;
@@ -28938,6 +29284,9 @@ window.excelProcessarUpload = function(event){
             + 'Se TODAS essas linhas são da mesma loja, digite o ID dela abaixo.\n'
             + 'Se são de lojas diferentes, CANCELE, cadastre os nomes em\n'
             + 'Config → Vendedores (cada um com a sua loja) e importe de novo.\n\n'
+            + '[R137] Não é preciso cadastrar ninguém para o arquivo entrar: escolha\n'
+            + 'a loja no seletor ao lado do botão de subir planilha e importe de novo.\n'
+            + 'Vendedor(a) fora do cadastro entra como base histórica da loja.\n\n'
             + 'Vazio = seguir sem essas linhas (as vendas serão descartadas):\n\n' + _lojasIds
           );
           if(_lojaPadrao){
@@ -28958,11 +29307,8 @@ window.excelProcessarUpload = function(event){
       // 9x o localStorage e 42x o limite de um documento do Firestore.
       // Guardamos os cubos agregados por loja/ano — o que as telas usam.
       // ══════════════════════════════════════════════════════════════
-      const _lojaEscolhida = document.getElementById('excel-loja-import')?.value || '';
-      if(_lojaEscolhida){
-        // Admin escolheu a loja do arquivo: ela manda sobre o que veio na planilha
-        dadosProcessados.forEach(r => { r.loja = _lojaEscolhida; });
-      }
+      // [R137] O seletor de loja já foi aplicado lá em cima, antes da
+      // dedução e do aviso — não se aplica de novo aqui.
 
       const _semLojaAgora = dadosProcessados.filter(r => !r.loja).length;
       if(_semLojaAgora === dadosProcessados.length){
@@ -28981,9 +29327,11 @@ window.excelProcessarUpload = function(event){
       });
 
       const _diagnostico = [];
+      const _paresImportados = [];   // [R136] só estes vão ao servidor
       let _totalPedacos = 0;
       _grupos.forEach((linhas, k) => {
         const [lid, ano] = k.split('|');
+        _paresImportados.push([lid, ano]);
         const cubo = window.crmAgregar(linhas);
         cubo.arquivo = file.name;
         const dg = window.crmGuardar(lid, ano, cubo);
@@ -29083,7 +29431,7 @@ window.excelProcessarUpload = function(event){
       let _envio = null;
       if(typeof window.crmSincronizar === 'function'){
         showToast('⏳ ' + _msgLocal + ' — enviando ao servidor...', 'ok');
-        try{ _envio = await window.crmSincronizar(); }
+        try{ _envio = await window.crmSincronizar(_paresImportados); }
         catch(e){ _envio = {ok:0, total:1, erros:[e.code||e.message]}; }
       }
       if(_envio && _envio.erros && _envio.erros.length){
@@ -32157,23 +32505,50 @@ window.excelRender = function(){
 };
 
 function _crmPopularFiltros(){
+  // ══════════════════════════════════════════════════════════════════
+  // [R137] ANO E LOJA VOLTARAM A SE ATUALIZAR.
+  //
+  // Estes dois seletores só eram montados enquanto tivessem uma opção
+  // ("Todos os..."). Depois da primeira montagem o guard `options.length<=1`
+  // nunca mais deixava passar: quem já tinha 2024 e 2025 na tela importava
+  // 2026 e o ano NÃO aparecia na lista. O dado estava em D.crm o tempo todo
+  // — ficava inalcançável pelo filtro, e com um ano antigo selecionado a
+  // aba inteira mostrava só o ano velho, como se 2026 não existisse.
+  //
+  // A vendedora já tinha sido consertada assim no R80 (assinatura da lista);
+  // ano e loja ficaram para trás. Agora os três seguem a mesma regra:
+  // remontar quando a lista muda, preservando a escolha do usuário.
+  // ══════════════════════════════════════════════════════════════════
   // Ano
   const anos = new Set();
   Object.values(D.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
   (D.excelDados||[]).forEach(r => { if(r.data) anos.add(r.data.slice(0,4)); });
   const selA = document.getElementById('excel-filtro-ano');
-  if(selA && selA.options.length <= 1 && anos.size){
-    const at = selA.value;
-    selA.innerHTML = '<option value="">📅 Todos os anos</option>'
-      + [...anos].sort().reverse().map(a => '<option value="'+a+'">'+a+'</option>').join('');
-    if(at) selA.value = at;
+  if(selA && anos.size){
+    const listaA = [...anos].sort().reverse();
+    const assA = listaA.join('|');
+    if(selA.dataset.assinatura !== assA){
+      const at = selA.value;
+      selA.innerHTML = '<option value="">📅 Todos os anos</option>'
+        + listaA.map(a => '<option value="'+a+'">'+a+'</option>').join('');
+      selA.dataset.assinatura = assA;
+      // Só devolve a escolha se o ano ainda existe; senão volta a "todos",
+      // que mostra tudo — nunca uma tela vazia por filtro órfão.
+      selA.value = (at && anos.has(at)) ? at : '';
+    }
   }
   // Loja — só admin escolhe
   const selL = document.getElementById('excel-filtro-loja');
-  if(selL && selL.options.length <= 1){
+  if(selL){
     const lojas = window.crmLojasVisiveis();
-    selL.innerHTML = '<option value="">🏪 Todas as lojas</option>'
-      + lojas.map(l => '<option value="'+l+'">'+((LOJAS.find(x=>x.id===l)?.nome)||l)+'</option>').join('');
+    const assL = lojas.join('|');
+    if(selL.dataset.assinatura !== assL){
+      const at = selL.value;
+      selL.innerHTML = '<option value="">🏪 Todas as lojas</option>'
+        + lojas.map(l => '<option value="'+l+'">'+((LOJAS.find(x=>x.id===l)?.nome)||l)+'</option>').join('');
+      selL.dataset.assinatura = assL;
+      selL.value = (at && lojas.includes(at)) ? at : '';
+    }
   }
   // [FIX R80] Vendedoras: só as que atuam(ram) NA LOJA selecionada.
   // Antes listava a rede inteira — o usuário via nomes de outras lojas e
@@ -32387,6 +32762,42 @@ function _crmRenderCross(v){
 }
 
 /** Conjuntos loja/ano carregados — substitui a Gestão de Importações. */
+/**
+ * [R135] Cobertura mensal de um conjunto importado.
+ *
+ * Um arquivo que subiu pela metade não se denuncia pelo total de linhas —
+ * ninguém sabe de cabeça quantas linhas o mês tinha. Ele se denuncia pelo
+ * CALENDÁRIO: o cubo guarda a lista de meses que de fato têm venda, então
+ * um mês ausente NO MEIO do intervalo é buraco, e o intervalo terminando
+ * antes do esperado é arquivo cortado.
+ *
+ * Só relata o que está no cubo. Não infere, não completa, não corrige.
+ */
+function _crmCobertura(c){
+  const meses = [...new Set((c && c.meses) || [])]
+    .filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+  if(!meses.length) return {texto:'—', faltando:[], meses:[], suspeito:false};
+
+  const t = m => { const [y,mm] = m.split('-').map(Number); return y*12 + (mm-1); };
+  const rot = m => m.split('-').reverse().join('/');
+  const ini = meses[0], fim = meses[meses.length-1];
+
+  const presentes = new Set(meses);
+  const faltando = [];
+  for(let k = t(ini); k <= t(fim); k++){
+    const mr = Math.floor(k/12) + '-' + String((k%12)+1).padStart(2,'0');
+    if(!presentes.has(mr)) faltando.push(mr);
+  }
+
+  return {
+    meses, faltando,
+    suspeito: faltando.length > 0,
+    texto: (ini === fim ? rot(ini) : rot(ini) + ' → ' + rot(fim))
+           + ' · ' + meses.length + (meses.length === 1 ? ' mês' : ' meses'),
+    faltandoTxt: faltando.map(rot).join(', ')
+  };
+}
+
 function _crmRenderConjuntos(){
   const el = document.getElementById('excel-imports-lista');
   if(!el) return;
@@ -32395,9 +32806,14 @@ function _crmRenderConjuntos(){
     Object.keys(D.crm[lid]).sort().reverse().forEach(ano => {
       const c = D.crm[lid][ano];
       const nome = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
-      linhas.push('<tr>'
+      const cob = _crmCobertura(c);
+      linhas.push('<tr'+(cob.suspeito?' style="background:rgba(220,53,69,.06)"':'')+'>'
         + '<td><strong>'+nome+'</strong></td>'
         + '<td style="text-align:center">'+ano+'</td>'
+        + '<td style="font-size:11px">'+cob.texto
+          + (cob.suspeito
+              ? '<div style="color:var(--verm);font-size:9.5px;font-weight:600">⚠️ sem venda em: '+cob.faltandoTxt+'</div>'
+              : '') + '</td>'
         + '<td style="text-align:right">'+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
@@ -32411,7 +32827,12 @@ function _crmRenderConjuntos(){
     });
   });
   el.innerHTML = linhas.length
-    ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
+    ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Período coberto'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
+      + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5">'
+        + 'O <strong>período coberto</strong> vem dos meses que realmente têm venda no conjunto. '
+        + 'Mês faltando <strong>no meio</strong> do intervalo, ou intervalo terminando antes do esperado, '
+        + 'é sinal de arquivo que subiu incompleto — reimporte esse arquivo por cima; '
+        + 'o conjunto da mesma loja e ano é substituído.</div>'
       + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
 }
