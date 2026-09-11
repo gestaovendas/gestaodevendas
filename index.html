@@ -268,7 +268,12 @@ try{
       for(let i = 0; i < extras.length; i++){
         if(!extras[i].exists()){
           console.error("[Avatim] " + docId + ": pedaço " + ids[i] + " não encontrado — leitura abortada");
-          return null;
+          // [R140] Era `return null` — e null, aqui, significa "o documento não
+          // existe". São coisas diferentes que levam a decisões opostas: doc
+          // inexistente manda gravar do zero; doc existente e ilegível manda
+          // PARAR e não escrever por cima. Confundir as duas é como o servidor
+          // é apagado por engano.
+          throw new Error("pedaco-faltando");
         }
         const _dp = extras[i].data();
         // [R131] Pedaço de OUTRA gravação não pode ser emendado neste texto.
@@ -281,7 +286,12 @@ try{
     return texto;
   }
 
-  /** Lê e já faz o parse. Devolve null quando não há dado utilizável. */
+  /**
+   * Lê e já faz o parse.
+   *   objeto  → leitura boa
+   *   null    → o documento NÃO existe no servidor
+   *   lança   → o documento existe mas não pôde ser remontado
+   */
   async function _lerDocObj(db, doc, getDoc, docId){
     // [R131] Emenda inconsistente e JSON quebrado quase sempre são uma
     // gravação ACONTECENDO neste instante, não corrupção — e devolver null
@@ -305,15 +315,48 @@ try{
         }
       }
     }
-    console.error("[Avatim] " + docId + " ilegível após 3 tentativas:",
-      _ultimo && _ultimo.message);
-    return null;
+    // ══════════════════════════════════════════════════════════════
+    // [R140] POR QUE NÃO HÁ UMA QUARTA TENTATIVA "PELO CONTEÚDO".
+    //
+    // Carimbo trocado pode ser permanente: se uma gravação morre depois de
+    // publicar os pedaços de trás e antes da cabeça (aba fechada, rede
+    // caindo), os gids ficam diferentes PARA SEMPRE e toda leitura falha.
+    // A saída tentadora é remontar ignorando o gid e aceitar se o JSON
+    // abrir — afinal foi um parse quebrado que denunciou o bug do R131.
+    //
+    // É ARMADILHA, e o R131 já tinha provado: pedaços do meio de um mesmo
+    // texto têm a MESMA FORMA, então a emenda de duas gerações faz parse
+    // limpo e devolve um texto que é metade de cada. Medido: 400 caracteres
+    // misturando as duas gravações, sem um único erro. Esse objeto entraria
+    // em D e seria gravado de volta — corrupção silenciosa e definitiva do
+    // servidor, que é pior do que tela vazia.
+    //
+    // Então o documento é declarado ILEGÍVEL. Quem conserta é a gravação:
+    // qualquer máquina com a cópia local completa republica todos os
+    // pedaços com um gid novo e normaliza o documento. Por isso o que
+    // importa é o que vem depois daqui — quem chama NÃO pode confundir
+    // "ilegível" com "servidor vazio".
+    // ══════════════════════════════════════════════════════════════
+    console.error("[Avatim] " + docId + " ILEGÍVEL — o documento existe no servidor "
+      + "mas não pôde ser remontado (" + (_ultimo && _ultimo.message) + "). "
+      + "NÃO trate isto como servidor vazio. Para normalizar: salve a partir de "
+      + "uma máquina que esteja com os dados na tela — a gravação republica "
+      + "todos os pedaços com um carimbo novo.");
+    const _err = new Error("documento-ilegivel");
+    _err.docId = docId;
+    _err.causa = _ultimo && _ultimo.message;
+    throw _err;
   }
   // Expostos para as ferramentas que vivem fora deste módulo (diagnósticos e
   // correções manuais). Elas liam e gravavam o "principal" cru — com o
   // documento fatiado leriam JSON pela metade e, pior, gravariam de volta SEM
   // a contagem de pedaços, deixando os demais órfãos e o documento ilegível.
-  window._avatimLerDoc    = (docId) => _lerDocObj(db, doc, getDoc, docId);
+  // [R140] _lerDocObj passou a LANÇAR quando o documento existe e está
+  // ilegível. As ferramentas de diagnóstico esperam null nesse caso — elas só
+  // relatam, não gravam nada — então o contrato antigo fica aqui.
+  window._avatimLerDoc    = (docId) => _lerDocObj(db, doc, getDoc, docId)
+                                        .catch(e => { console.warn("[Avatim] _avatimLerDoc "
+                                          + docId + ":", e.message); return null; });
   window._avatimGravarDoc = (docId, obj, extras) => _gravarDocFatiado(db, doc, setDoc, docId, obj, extras);
 
   // Gravar no Firestore — garante auth antes
@@ -528,7 +571,35 @@ try{
           }
         }catch(eGuarda){
           if(eGuarda && eGuarda.message === 'gravacao-recusada-esvaziaria-servidor') throw eGuarda;
-          console.warn('[Avatim] trava anti-apagamento não pôde conferir o remoto:', eGuarda.code||eGuarda.message);
+          // ══════════════════════════════════════════════════════════════
+          // [R140] TRAVA DE PISO — quando não dá para comparar com o remoto.
+          //
+          // A trava do R107 é COMPARATIVA: lê o servidor e recusa o que
+          // esvaziaria. Se a leitura falha, ela não compara — e, até aqui,
+          // deixava passar. Ou seja: exatamente no momento em que o servidor
+          // está ilegível (o pior momento possível), a proteção sumia e uma
+          // máquina com D vazio podia gravar por cima do que ainda existia lá.
+          //
+          // Sem poder comparar, resta o critério absoluto: um payload de admin
+          // com vendedores, campanhas, metas, fluxo e contatos TODOS vazios não
+          // é um estado real da rede — é D que não carregou. Isso é recusado.
+          // Payload com conteúdo continua passando, senão o sistema travaria
+          // justamente quando precisa que alguém grave para normalizar.
+          // ══════════════════════════════════════════════════════════════
+          const _pesoAgora = _peso(D2_principal);
+          const _vazio = Object.keys(_pesoAgora).every(k => _pesoAgora[k] === 0);
+          if(_vazio){
+            console.error('[Avatim] GRAVAÇÃO RECUSADA — o remoto está ilegível ('
+              + (eGuarda.code||eGuarda.message) + ') e esta máquina não tem dado nenhum '
+              + 'para gravar. Escrever agora apagaria o servidor às cegas.');
+            if(typeof showToast === 'function' && !window._gravacaoSilenciosa){
+              showToast('🛡️ Gravação BLOQUEADA: não foi possível ler o servidor e esta '
+                + 'máquina está sem dados carregados. Recarregue a página antes de salvar.', 'err');
+            }
+            throw new Error('gravacao-recusada-remoto-ilegivel');
+          }
+          console.warn('[Avatim] trava anti-apagamento não pôde conferir o remoto ('
+            + (eGuarda.code||eGuarda.message) + '); o payload tem conteúdo, então a gravação segue.');
         }
 
         // [R125] fatiado — este documento passou de 1 MiB e a gravação
@@ -557,7 +628,18 @@ try{
             let remotoA = {};
             try{
               remotoA = (await _lerDocObj(db, doc, getDoc, docIdA)) || {};
-            }catch(eR){ console.warn("[Avatim] admin: leitura de "+docIdA+" falhou:", eR.code||eR.message); }
+            }catch(eR){
+              // [R140] O payload desta loja é montado MESCLANDO o que está no
+              // servidor com o que o admin tem. Sem conseguir ler o servidor, o
+              // merge não acontece e a gravação sairia só com a parte do admin —
+              // apagando os dias que existem apenas no documento da loja.
+              // Pular esta loja perde a propagação de um lançamento; gravar
+              // perderia o histórico dela. Pular é o lado certo de errar.
+              console.error("[Avatim] admin: " + docIdA + " ilegível ("
+                + (eR.code||eR.message) + ") — propagação PULADA para não gravar "
+                + "por cima do que já está lá.");
+              return;
+            }
 
             // vendas consolidadas — dia a dia, o mais RECENTE vence
             //
@@ -952,7 +1034,23 @@ try{
       const isAdm = email === "admin\u0040avatim.com";
 
       // Sempre lê o doc principal (tem metas, vendedoras, campanhas)
-      let base = await _lerDocObj(db, doc, getDoc, "principal");
+      // [R140] Documento ilegível NÃO é servidor vazio. Dizer "Nenhum dado no
+      // Firestore ainda" para um documento que existe manda a pessoa procurar
+      // o problema no lugar errado — e o sistema abre em branco sem explicar.
+      let base;
+      try{
+        base = await _lerDocObj(db, doc, getDoc, "principal");
+      }catch(ePrinc){
+        console.error("[Avatim] principal ILEGÍVEL — os dados existem no servidor, "
+          + "mas não foi possível remontá-los agora. A tela usa a cópia local desta "
+          + "máquina; NADA será apagado no servidor.");
+        if(typeof showToast === 'function'){
+          showToast('⚠️ Não foi possível ler o servidor agora (documento em gravação ou '
+            + 'incompleto). Você está vendo a cópia desta máquina — não lance nada em '
+            + 'duplicidade e tente de novo em instantes.', 'err');
+        }
+        return null;
+      }
 
       if(!base){
         console.log("[Avatim] Nenhum dado no Firestore ainda");
@@ -5304,7 +5402,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-10b';
+window.AVATIM_BUILD = '2026-09-10c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5468,6 +5566,24 @@ window.AVATIM_RECURSOS = {
   seletorAcompanhaDados: () => typeof window._selSincronizar === 'function',
   // [R139] controles inline de admin voltaram a respeitar o perfil
   adminInlineRespeitado:  () => document.querySelectorAll('.admin-only-inline').length > 0,
+  // [R140] documento ilegível deixa de se passar por servidor vazio.
+  // As agulhas são montadas por concatenação: escritas inteiras, elas
+  // existiriam AQUI e o recurso se encontraria a si mesmo — foi assim que o
+  // R135 se enganou.
+  leituraIlegivelNaoEhVazio: () => {
+    const h = document.documentElement.innerHTML;
+    return h.indexOf('documento-' + 'ilegivel') > -1
+        && h.indexOf('pedaco-' + 'faltando') > -1
+        && h.indexOf('ignorar' + 'Gid') === -1;   // emenda de gerações NUNCA é aceita
+  },
+  travaDePisoRemotoIlegivel: () =>
+    document.documentElement.innerHTML.indexOf('gravacao-recusada-remoto-' + 'ilegivel') > -1,
+  // [R140] o bloco de crescimento passa a enxergar a planilha do CRM
+  crescimentoLeCrm: () => typeof window._crescLinhasLoja === 'function'
+                       && typeof window._crescLinhasVend === 'function',
+  crescimentoMetaCruzada: () => typeof buscarHistoricoLoja === 'function'
+                       && /metaDoMes\(/.test(String(buscarHistoricoLoja))
+                       && /_crescLinhasLoja/.test(String(buscarHistoricoLoja)),
   importLojaMandaPrimeiro: () => {
                               if(typeof window.excelProcessarUpload !== 'function') return false;
                               const f = String(window.excelProcessarUpload);
@@ -22551,10 +22667,197 @@ function _preencherSelHistPg(){
 
 
 // ── calcCrescimento: função global (extraída de buscarHistoricoLoja)
-function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
+// ══════════════════════════════════════════════════════════════════════
+// [R140] AS LINHAS MENSAIS DO BLOCO "CRESCIMENTO / EVOLUÇÃO MÊS A MÊS"
+//
+// Dois defeitos que se somavam neste bloco:
+//
+//  1. Os meses saíam das CHAVES do mapa de dias — que só tem lançamento
+//     diário e Origem do Fluxo. Mês cujo faturamento veio da planilha do CRM
+//     não gerava chave nenhuma: sumia da tabela, ou aparecia zerado quando
+//     havia algum registro de fluxo no mês. A loja via a série cair a zero
+//     num mês em que vendeu.
+//
+//  2. A meta era lida só de D.metasLoja. metaDoMes() cruza três origens
+//     (cadastro, base histórica e lançamento por período); meta que veio das
+//     duas últimas valia zero aqui, e a coluna "% Meta" mostrava "—" mesmo
+//     com meta definida.
+//
+// A regra de fonte é a MESMA do resto do Histórico e da conciliação: o cubo
+// do CRM tem grão mensal, então só vale quando o período cobre o mês; mês
+// recortado vem do lançamento, que é diário. Cada linha diz de onde veio.
+// ══════════════════════════════════════════════════════════════════════
+
+/**
+ * O período cobre este mês por inteiro? O mês corrente conta como coberto
+ * quando o período vai até hoje — ele ainda não acabou, e marcá-lo de
+ * "parcial" todo dia seria ruído, não informação.
+ */
+window._crescMesCoberto = function(mes, de, ate){
+  const [y, m] = mes.split('-').map(Number);
+  const ultimo = new Date(y, m, 0).getDate();
+  const fimMes = mes + '-' + String(ultimo).padStart(2,'0');
+  const hj = hoje();
+  const fimUtil = fimMes > hj ? hj : fimMes;
+  return de <= (mes + '-01') && ate >= fimUtil;
+};
+
+/** Um mês para trás, em aritmética de string (fuso não interfere). */
+function _crescMesAnterior(mes){
+  const [y, m] = mes.split('-').map(Number);
+  return (m === 1 ? y-1 : y) + '-' + String(m === 1 ? 12 : m-1).padStart(2,'0');
+}
+
+function _crescNomeMes(mes){
+  // dia 15: 'AAAA-MM-01' é lido como UTC e, em fuso negativo, cai no mês anterior
+  return new Date(mes + '-15').toLocaleDateString('pt-BR', {month:'short', year:'2-digit'});
+}
+
+/**
+ * Linhas mensais de uma loja (ou da rede, com lid null).
+ *
+ * Mês coberto pelo período sai do historicoConsolidado, que já conhece a
+ * ordem das fontes (CRM → lançamento → base histórica → fluxo). Mês
+ * RECORTADO não pode sair dali: o cubo do CRM tem grão mensal e traria o
+ * mês inteiro para dentro de um recorte de dez dias — o bloco passaria a
+ * discordar dos KPIs logo acima, na mesma tela. Nesse caso vale o
+ * lançamento, que é diário e dá para cortar, com a meta rateada.
+ */
+window._crescLinhasLoja = function(lid, de, ate){
+  const deMesOrig = de.slice(0,7), ateMes = ate.slice(0,7);
+  let deMes = deMesOrig;
+  // Um mês só não é evolução: puxa o anterior para haver com o que comparar.
+  if(deMes === ateMes) deMes = _crescMesAnterior(deMes);
+  // O mês puxado entra INTEIRO — ele não faz parte do recorte do usuário, e
+  // cortá-lo no mesmo dia viraria uma queda que não existiu.
+  const deEf = (deMes !== deMesOrig) ? (deMes + '-01') : de;
+
+  const lojas = lid ? [lid] : LOJAS.map(l => l.id);
+
+  return window.historicoConsolidado(lid, deMes, ateMes).map(l => {
+    const coberto = window._crescMesCoberto(l.mes, deEf, ate);
+    let fat = l.fat, trans = l.atend, aniv = l.aniv, inativ = l.inativ,
+        meta = l.meta, fonte = l.fonte;
+
+    if(!coberto){
+      const [y, m] = l.mes.split('-').map(Number);
+      const ini = l.mes + '-01';
+      const fim = l.mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
+      const a = deEf > ini ? deEf : ini;
+      const b = ate  < fim ? ate  : fim;
+      let f2 = 0, t2 = 0, a2 = 0, i2 = 0;
+      lojas.forEach(x => {
+        const lc = window._histLancLoja(x, a, b);
+        f2 += lc.fat; t2 += lc.trans; a2 += lc.aniv; i2 += lc.inativ;
+      });
+      // Aniversariante e inativo são marcação de atendimento: a Origem do
+      // Fluxo manda, e o lançamento cobre quando ela está vazia.
+      try{
+        const fx = window._histFluxoAnivInat(a, b, lid || null);
+        if(fx.aniv || fx.inativ){ a2 = fx.aniv; i2 = fx.inativ; }
+      }catch(e){}
+      fat = f2; trans = t2; aniv = a2; inativ = i2;
+      fonte = (f2 > 0 || t2 > 0) ? 'lancamento' : null;
+      // A meta é mensal: cobrar o mês inteiro de dez dias faria toda loja
+      // aparecer com 30%. Mesmo rateio do bloco Realizado × Meta.
+      meta = meta * window._histFracaoMes(l.mes, deEf, ate);
+    }
+
+    return {
+      mes: l.mes, nome: _crescNomeMes(l.mes), fat, trans, aniv, inativ,
+      tm: trans > 0 ? fat/trans : 0,
+      meta,
+      pctMeta: meta > 0 ? (fat / meta * 100) : null,
+      fonte, parcial: !coberto
+    };
+  }).filter(l => l.fat > 0 || l.meta > 0);
+};
+
+/** Linhas mensais de um(a) vendedor(a) — CRM quando cobre o mês, senão lançamento. */
+window._crescLinhasVend = function(vendId, de, ate){
+  const v = (D.vendedoras || []).find(x => x.id === vendId);
+  if(!v) return [];
+  const deMesOrig = de.slice(0,7), ateMes = ate.slice(0,7);
+  let deMes = deMesOrig;
+  if(deMes === ateMes) deMes = _crescMesAnterior(deMes);
+  // Mês puxado para comparação entra inteiro; o do usuário respeita o recorte.
+  const deEf = (deMes !== deMesOrig) ? (deMes + '-01') : de;
+
+  const meses = window._histMesesPeriodo(deEf, ate);
+
+  let crmVend = new Map();
+  try{
+    crmVend = (window.crmRealizadoPeriodo(v.loja || null,
+                 deMes + '-01', ateMes + '-31').porVendMes) || new Map();
+  }catch(e){ console.warn('[R140] CRM por vendedor(a):', e.message); }
+  const chave = _crmNorm(v.nome);
+
+  const metaMes = Number(v.metaMes) || 0;
+
+  return meses.map(mes => {
+    const [y, m] = mes.split('-').map(Number);
+    const ini = mes + '-01';
+    const fim = mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
+    const coberto = window._crescMesCoberto(mes, deEf, ate);
+    // Mês recortado é lido dia a dia; mês coberto vale do primeiro ao último.
+    const a = deEf > ini ? deEf : ini;
+    const b = ate  < fim ? ate  : fim;
+
+    const c = coberto ? crmVend.get(chave + '|' + mes) : null;
+    const lc = window._histLancVend(vendId, a, b);
+
+    let fat, trans, fonte;
+    if(c && c.fat > 0){ fat = c.fat; trans = c.notas || 0; fonte = 'crm'; }
+    else { fat = lc.fat; trans = lc.trans; fonte = (lc.fat > 0 || lc.trans > 0) ? 'lancamento' : null; }
+
+    // Aniversariante e inativo não existem no CRM — são marcação de
+    // atendimento. Vêm da Origem do Fluxo e, na falta dela, do lançamento.
+    let aniv = 0, inativ = 0;
+    try{
+      const fx = window._histFluxoAnivInat(a, b, v.loja || null).porVend.get(vendId);
+      if(fx && (fx.aniv || fx.inativ)){ aniv = fx.aniv; inativ = fx.inativ; }
+      else { aniv = lc.aniv; inativ = lc.inativ; }
+    }catch(e){ aniv = lc.aniv; inativ = lc.inativ; }
+
+    // Meta mensal rateada no mês recortado, pelo mesmo motivo da loja.
+    const metaEf = coberto ? metaMes
+                 : metaMes * window._histFracaoMes(mes, deEf, ate);
+    return {
+      mes, nome: _crescNomeMes(mes), fat, trans, aniv, inativ,
+      tm: trans > 0 ? fat/trans : 0,
+      meta: metaEf,
+      pctMeta: metaEf > 0 ? (fat / metaEf * 100) : null,
+      fonte, parcial: !coberto
+    };
+  }).filter(l => l.fat > 0 || l.meta > 0);
+};
+
+function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes, linhasPre){
+  // [R140] Com `linhasPre`, os meses e a meta já vêm apurados pela mesma
+  // regra do resto do Histórico (CRM no mês coberto, lançamento no parcial,
+  // meta por metaDoMes). Sem ele, vale o caminho antigo — que é a rede de
+  // segurança se a apuração nova falhar, e o que a tela de vendedor(a) usava.
+  const _usaLinhas = Array.isArray(linhasPre) && linhasPre.length > 0;
+  const _tagMes = m2 => {
+    if(!_usaLinhas) return '';
+    const et = (cor, borda, txt, tit) =>
+      '<span title="' + tit + '" style="font-size:8.5px;color:' + cor
+      + ';border:1px solid ' + borda + ';border-radius:3px;padding:0 4px;margin-left:5px">' + txt + '</span>';
+    const f = m2.fonte === 'crm'        ? et('var(--azul)','rgba(91,141,239,.4)','PLANILHA','Faturamento da planilha importada no CRM')
+            : m2.fonte === 'lancamento' ? et('var(--verde)','rgba(46,204,135,.4)','LANÇAMENTO','Lançamento diário registrado pela loja')
+            : m2.fonte === 'historico'  ? et('var(--muted)','var(--borda)','HISTÓRICO','Base histórica, anterior ao CRM')
+            : m2.fonte === 'fluxo'      ? et('var(--roxo)','rgba(139,92,246,.4)','FLUXO','Registros da Origem do Fluxo')
+            : '';
+    const p = m2.parcial
+      ? '<div style="font-size:8.5px;color:var(--laranja)" title="O período escolhido não cobre este mês inteiro — a comparação com os demais é aproximada">parcial</div>'
+      : '';
+    return f + p;
+  };
   const mesesSet = new Set(Object.keys(diasMapInput).map(d=>d.slice(0,7)));
   const mesesOrd = [...mesesSet].sort();
-  const porMes = mesesOrd.map(mes=>{
+  const porMes = _usaLinhas
+    ? linhasPre.slice().sort((a,b) => String(a.mes).localeCompare(String(b.mes)))
+    : mesesOrd.map(mes=>{
     let fat=0,trans=0,aniv=0,inativ=0;
     Object.entries(diasMapInput).forEach(([d,r])=>{
       if(d.startsWith(mes)){
@@ -22571,12 +22874,22 @@ function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
     return {mes,fat,trans,aniv,inativ,tm,nome,meta,pctMeta};
   });
   const porAno={};
-  Object.entries(diasMapInput).forEach(([d,r])=>{
-    const ano=d.slice(0,4);
-    if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
-    const vals=getFatTransFn?getFatTransFn(d,r):{fat:r.fat||0,trans:r.trans||0};
-    porAno[ano].fat+=vals.fat; porAno[ano].trans+=vals.trans;
-  });
+  if(_usaLinhas){
+    // O ano a ano sai das MESMAS linhas do mês a mês — senão as duas tabelas
+    // da mesma tela mostrariam totais diferentes para o mesmo período.
+    porMes.forEach(l=>{
+      const ano=String(l.mes).slice(0,4);
+      if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
+      porAno[ano].fat+=(l.fat||0); porAno[ano].trans+=(l.trans||0);
+    });
+  } else {
+    Object.entries(diasMapInput).forEach(([d,r])=>{
+      const ano=d.slice(0,4);
+      if(!porAno[ano]) porAno[ano]={fat:0,trans:0};
+      const vals=getFatTransFn?getFatTransFn(d,r):{fat:r.fat||0,trans:r.trans||0};
+      porAno[ano].fat+=vals.fat; porAno[ano].trans+=vals.trans;
+    });
+  }
   const anosOrd=Object.keys(porAno).sort().map(ano=>({ano,...porAno[ano],tm:porAno[ano].trans>0?porAno[ano].fat/porAno[ano].trans:porAno[ano].fat}));
   const corV=v=>v===null?'#888':v>=0?'var(--verde)':'var(--verm)';
   const fmtV=v=>v===null?'—':(v>=0?'+':'')+v.toFixed(1)+'%';
@@ -22588,7 +22901,7 @@ function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes){
     const corMeta=m2.pctMeta===null?'#888':m2.pctMeta>=100?'var(--verde)':m2.pctMeta>=70?'var(--ouro)':'var(--verm)';
     const metaStr=m2.pctMeta!==null?`<span style="color:${corMeta};font-weight:700">${m2.pctMeta.toFixed(0)}%</span>${m2.meta>0?'<br><span style="font-size:9px;color:#888">meta: '+fmt(m2.meta)+'</span>':''}`:'—';
     return `<tr>
-      <td><strong>${m2.nome}</strong></td>
+      <td><strong>${m2.nome}</strong>${_tagMes(m2)}</td>
       <td style="color:var(--ouro);font-weight:600">${fmt(m2.fat)}</td>
       <td>${metaStr}</td>
       <td style="color:${corV(vF)};font-size:10px">${fmtV(vF)}</td>
@@ -22911,14 +23224,24 @@ async function buscarHistoricoLoja(){
         if(f.origem==='inativo'||f.tipoCliente==='inativo') diasMap[f.data].inativ++;
       });
     }
-    // Passar metas por mês para exibir % atingido
+    // [R140] Metas do caminho de reserva: por metaDoMes(), não direto de
+    // D.metasLoja. metaDoMes cruza cadastro, base histórica e lançamento por
+    // período — ler só o cadastro fazia "% Meta" ficar vazio para quem
+    // cadastrou a meta pelas outras duas vias.
     const _metasPorMes = {};
-    (lid ? [lid] : LOJAS.map(l=>l.id)).forEach(lidRef3=>{
-      Object.entries(D.metasLoja[lidRef3]||{}).forEach(([mr,m])=>{
-        _metasPorMes[mr] = (_metasPorMes[mr]||0) + (m.mes||0);
-      });
+    const _lojasMeta = lid ? [lid] : LOJAS.map(l=>l.id);
+    new Set(Object.keys(diasMap).map(d => d.slice(0,7))).forEach(mr => {
+      _metasPorMes[mr] = _lojasMeta.reduce((s2,l) => s2 + (metaDoMes(l, mr).valor || 0), 0);
     });
-    crescEl.innerHTML = calcCrescimento(diasMap, null, _metasPorMes);
+
+    // [R140] A série mensal vem apurada com a mesma regra do resto da tela
+    // (planilha do CRM no mês coberto, lançamento no parcial). Em try/catch:
+    // se a apuração nova falhar, o bloco cai no caminho antigo em vez de
+    // sumir da tela.
+    let _linhasCresc = null;
+    try{ _linhasCresc = window._crescLinhasLoja(lid, de, ate); }
+    catch(e){ console.warn('[R140] linhas de crescimento (loja):', e.message); }
+    crescEl.innerHTML = calcCrescimento(diasMap, null, _metasPorMes, _linhasCresc);
   }
 
   // [R138] Realizado × Meta e o bloco de aniversariantes/inativos.
@@ -23618,7 +23941,12 @@ async function buscarHistoricoVend(){
   if(crescEl2){
     const mapVend={};
     dias.forEach(d=>{ mapVend[d]={fat:Number(vd[d].val||0),trans:Number(vd[d].trans||0)}; });
-    crescEl2.innerHTML = calcCrescimento(mapVend);
+    // [R140] Aqui nem meta era passada: a coluna "% Meta" desta aba mostrava
+    // "—" em toda linha, para qualquer vendedor(a), sempre.
+    let _linhasCrescV = null;
+    try{ _linhasCrescV = window._crescLinhasVend(vendId, de, ate); }
+    catch(e){ console.warn('[R140] linhas de crescimento (vendedor(a)):', e.message); }
+    crescEl2.innerHTML = calcCrescimento(mapVend, null, null, _linhasCrescV);
   }
 
   document.getElementById('hist-pg-resultado').style.display='';
