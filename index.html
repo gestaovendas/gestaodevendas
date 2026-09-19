@@ -5427,7 +5427,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-19a';
+window.AVATIM_BUILD = '2026-09-19b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -6784,16 +6784,40 @@ window._conferirMetasDivergentes = function(mesRef){
   window._metasDivergentes = out;
   return out;
 };
-(function(){
+/**
+ * Aviso de boot. Não usa fmt(): ele é `const`, declarado MUITO adiante
+ * neste mesmo bloco, e chamá-lo daqui cai na zona morta temporal —
+ * ReferenceError que mata o resto do bloco inteiro. Formata na mão.
+ */
+window._avisarMetasDivergentes = function(){
   const d = window._conferirMetasDivergentes();
   const ids = Object.keys(d);
-  if(ids.length){
-    console.warn('[Avatim] metas individuais não somam a meta da loja em: '
-      + ids.map(l => l + ' (loja ' + fmt(d[l].metaLoja) + ' × soma '
-        + fmt(d[l].soma) + ')').join(' · ')
-      + ' — NADA foi alterado. Use "Redistribuir" em Metas por Loja se quiser igualar.');
-  }
-})();
+  if(!ids.length) return 0;
+  const _rs = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',
+                     {minimumFractionDigits:2, maximumFractionDigits:2});
+  console.warn('[Avatim] metas individuais não somam a meta da loja em: '
+    + ids.map(l => l + ' (loja ' + _rs(d[l].metaLoja) + ' × soma '
+      + _rs(d[l].soma) + ')').join(' · ')
+    + ' — NADA foi alterado. Use "Redistribuir" em Metas por Loja se quiser igualar.');
+  return ids.length;
+};
+// ══════════════════════════════════════════════════════════════════════
+// [R145] DIAGNÓSTICO NÃO PODE DERRUBAR O SISTEMA.
+//
+// A versão anterior deste aviso rodava solta no nível do módulo e chamava
+// fmt(), declarado com `const` dez mil linhas abaixo. Zona morta temporal:
+// ReferenceError, e TUDO que vinha depois neste bloco <script> deixava de
+// ser definido — 38 recursos ausentes, o sistema em pedaços.
+//
+// Pior: só quebrava QUANDO HAVIA DIVERGÊNCIA. Com D.metasLoja vazio, como
+// nasce em toda máquina de teste, o trecho do fmt nunca era alcançado e a
+// suíte inteira passava. Quebrou só na máquina do usuário, com dados reais.
+//
+// A lição não é "não chamar fmt aqui" — é que código de boot que existe só
+// para AVISAR jamais pode ter poder de matar o que veio depois dele.
+// ══════════════════════════════════════════════════════════════════════
+try{ window._avisarMetasDivergentes(); }
+catch(e){ console.warn('[Avatim] aviso de metas divergentes falhou (ignorado):', e && e.message); }
 if(!D.vendasVend) D.vendasVend={};
 if(!D.campanhas)  D.campanhas=[];
 if(!D.campObjetivos)  D.campObjetivos=[];
