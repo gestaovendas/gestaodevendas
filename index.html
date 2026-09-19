@@ -5427,7 +5427,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-19b';
+window.AVATIM_BUILD = '2026-09-19e';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5518,6 +5518,64 @@ window.avatimDiagnosticarCrm = function(){
  * Esta função vai ao Firestore e lê só as CABEÇAS dos cubos (crm_<loja>_<ano>),
  * que são pequenas. Não grava nada, não apaga nada, não altera D.
  */
+/**
+ * [R146] TODAS as metas, mês a mês, com a ORIGEM de cada uma.
+ *
+ * A tela de Metas por Loja lê só D.metasLoja, em modo estrito: mês sem
+ * registro ali aparece em branco, mesmo quando metaDoMes() encontra o
+ * valor na base histórica ou num período de "Lançamento por Loja". Daí a
+ * impressão de que as metas antigas sumiram — elas podem estar em outra
+ * gaveta, e é ela que os cruzamentos usam.
+ *
+ * Só leitura: não grava, não apaga, não altera D.
+ */
+window.avatimMetasPorMes = function(deMes, ateMes){
+  const hj = hoje();
+  ateMes = ateMes || hj.slice(0,7);
+  deMes  = deMes  || (Number(ateMes.slice(0,4)) + '-01');
+  console.log('%c[Avatim] Metas por mês e origem', 'font-weight:bold;color:#C9A84C');
+  console.log('período:', deMes, 'a', ateMes);
+
+  const lojas = (typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : []);
+  const meses = window._histMesesPeriodo(deMes + '-01', ateMes + '-01');
+  const linhas = [], semMeta = [];
+
+  meses.forEach(mes => {
+    lojas.forEach(lid => {
+      const m = metaDoMes(lid, mes);
+      const cad = ((D.metasLoja||{})[lid]||{})[mes];
+      linhas.push({
+        mes, loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid,
+        meta: m.valor || 0,
+        origem: m.origem || '— nenhuma —',
+        naTelaDeMetas: (cad && Number(cad.mes||0) > 0) ? 'sim' : 'NÃO',
+        realizado: (window.fatDoMes ? (window.fatDoMes(lid, mes).valor || 0) : 0)
+      });
+      if(!(m.valor > 0)) semMeta.push(lid + '/' + mes);
+    });
+  });
+
+  if(linhas.length) console.table(linhas);
+  const porOrigem = {};
+  linhas.forEach(l => { porOrigem[l.origem] = (porOrigem[l.origem]||0) + 1; });
+  console.log('metas por origem:', porOrigem);
+
+  const foraDaTela = linhas.filter(l => l.meta > 0 && l.naTelaDeMetas === 'NÃO');
+  if(foraDaTela.length){
+    console.warn('⚠️ ' + foraDaTela.length + ' meta(s) existem e são usadas nos '
+      + 'cruzamentos, mas NÃO estão em Metas por Loja (vieram da base histórica ou '
+      + 'de um período de Lançamento por Loja): '
+      + foraDaTela.map(l => l.loja + '/' + l.mes + ' (' + l.origem + ')').join(' · '));
+  }
+  if(semMeta.length){
+    console.warn('⚠️ sem meta em nenhuma origem: ' + semMeta.join(' · '));
+  }
+  if(!foraDaTela.length && !semMeta.length){
+    console.log('✅ toda meta do período está cadastrada em Metas por Loja.');
+  }
+  return {linhas, porOrigem, foraDaTela, semMeta};
+};
+
 window.avatimCrmNoServidor = async function(){
   console.log('%c[Avatim] Cubos do CRM no servidor', 'font-weight:bold;color:#C9A84C');
   let db, mod;
@@ -5668,6 +5726,23 @@ window.AVATIM_RECURSOS = {
   // [R138] diagnostico do CRM, so leitura
   diagnosticoCrm:        () => typeof window.avatimDiagnosticarCrm === 'function',
   crmConfereServidor:    () => typeof window.avatimCrmNoServidor === 'function',
+  // [R146] onde está cada meta, mês a mês, e de que origem
+  diagnosticoMetasMes:   () => typeof window.avatimMetasPorMes === 'function',
+  // [R146] meta que vem de outra origem deixa de aparecer em branco
+  metaDeOutraOrigemVisivel: () => typeof renderMetasLojas === 'function'
+                            && /vinda da/.test(window._semComentarios(renderMetasLojas)),
+  // [R146] herança de meta olha o mês pedido, não o mês de hoje
+  // [R147] lançamento individual soma e preserva, em vez de apagar o dia.
+  // Conferir "aniv: 0" não serve: o objeto-padrão de um dia SEM registro
+  // legitimamente tem aniv:0. O que importa é a gravação partir do
+  // registro existente (Object.assign sobre _reg) e somar.
+  lancIndividualSoma:    () => typeof lancarVendaVend === 'function'
+                            && /_antesVal \+ val/.test(window._semComentarios(lancarVendaVend))
+                            && /Object\.assign\(\{\}, _reg/.test(window._semComentarios(lancarVendaVend)),
+  metaHerdaDoMesPedido:  () => typeof _mesAnteriorDe === 'function'
+                            && _mesAnteriorDe('2026-03') === '2026-02'
+                            && _mesAnteriorDe('2026-01') === '2025-12'
+                            && /_mesAnteriorDe\(mesRef\)/.test(window._semComentarios(getMetas)),
   // [R142] cubo que existe só nesta máquina para de passar em silêncio
   crmAvisaSoLocal:       () => typeof window.crmCarregar === 'function'
                             && /_soLocal/.test(String(window.crmCarregar))
@@ -5685,8 +5760,10 @@ window.AVATIM_RECURSOS = {
   benchVendsExporta:     () => typeof window.relBenchVendsCSV === 'function'
                             && typeof window.relBenchVendsPDF === 'function',
   // [R144] mês em curso manda no lançamento; mês fechado, na planilha
-  benchFontePorMes:      () => typeof window._relBenchApurar === 'function'
-                            && /mesCorrente/.test(String(window._relBenchApurar)),
+  // [R146] a planilha do CRM manda sempre que existir
+  benchPlanilhaManda:    () => typeof window._relBenchApurar === 'function'
+                            && /const usaCrm = !!\(c && c\.fat > 0\)/
+                                 .test(window._semComentarios(window._relBenchApurar)),
   // [R144] a meta do ranking é a do mês escolhido, não a do cadastro de hoje
   benchMetaDoMesEscolhido: () => typeof window._relBenchApurar === 'function'
                             && /metaVendPorDias/.test(String(window._relBenchApurar)),
@@ -5711,6 +5788,11 @@ window.AVATIM_RECURSOS = {
   // [R143] calendário para escolher mês fora da lista de meses com dado
   relCalendarioMes:      () => typeof _relBarra === 'function'
                             && /type="month"/.test(String(_relBarra)),
+  // [R146] o ano fica visível e escolhível, sem abrir o calendário nativo
+  relAnoVisivel:         () => typeof _relBarra === 'function'
+                            && /_relSetAno/.test(String(_relBarra))
+                            && typeof window._relSetAno === 'function'
+                            && /'\/' \+ y;/.test(window._semComentarios(_relMesLabel)),
   // [R143] projeção deixa de chamar de "otimista" um número abaixo da meta
   // A conferência é no CABEÇALHO gerado, não no texto do arquivo: a palavra
   // "otimista" continua no código, na nota que explica por que ela saiu.
@@ -5743,6 +5825,9 @@ window.AVATIM_RECURSOS = {
   // [R140] o bloco de crescimento passa a enxergar a planilha do CRM
   crescimentoLeCrm: () => typeof window._crescLinhasLoja === 'function'
                        && typeof window._crescLinhasVend === 'function',
+  // [R146] mês recortado também vem da planilha, marcado como mês inteiro
+  crescimentoMesInteiro: () => typeof window._crescLinhasLoja === 'function'
+                       && /mesInteiro/.test(window._semComentarios(window._crescLinhasLoja)),
   crescimentoMetaCruzada: () => typeof buscarHistoricoLoja === 'function'
                        && /metaDoMes\(/.test(String(buscarHistoricoLoja))
                        && /_crescLinhasLoja/.test(String(buscarHistoricoLoja)),
@@ -10709,6 +10794,16 @@ function mesAnterior(){
   const h=new Date(new Date().getFullYear(), new Date().getMonth()-1, 1);
   return h.getFullYear()+"-"+String(h.getMonth()+1).padStart(2,"0");
 }
+/**
+ * [R146] O mês anterior A UM MÊS DADO — não ao de hoje.
+ * Aritmética de string: 'AAAA-MM-01' num Date é lido como UTC e, em fuso
+ * negativo, cai no mês anterior (a armadilha do R93).
+ */
+function _mesAnteriorDe(mesRef){
+  if(!/^\d{4}-\d{2}$/.test(String(mesRef||''))) return mesAnterior();
+  const y = Number(mesRef.slice(0,4)), m = Number(mesRef.slice(5,7));
+  return (m === 1 ? y-1 : y) + '-' + String(m === 1 ? 12 : m-1).padStart(2,'0');
+}
 // Meta diária PROGRESSIVA — como na planilha MASTER
 // (meta_mensal - acumulado_até_ontem) ÷ dias_restantes_incluindo_hoje
 function metaDiaProgressiva(metaMes, vendId, dataRef){
@@ -11244,10 +11339,22 @@ function getMetas(lid, mesRef, strictMode){
   // mas retorna {} vazio (não zeros) para que o input use placeholder
   if(lm[mesRef]) return lm[mesRef];
   if(strictMode) return {}; // retorna vazio — sem herança, campos mostram placeholder
-  const ant = mesAnterior();
+  // ══════════════════════════════════════════════════════════════════
+  // [R146] HERDAR DO MÊS ANTERIOR AO PEDIDO, NÃO AO DE HOJE.
+  //
+  // mesAnterior() é calculada a partir de new Date(): devolve sempre o mês
+  // anterior a HOJE, ignorando o mesRef que se pediu. Perguntar a meta de
+  // março e receber a de agosto não é herança, é outro mês — e o mesmo
+  // valia para o "último mês com meta", que pegava o mais recente de
+  // todos, inclusive posterior ao solicitado. Quem consulta um mês
+  // passado (o calendário do lançamento, o PDF geral) via a meta errada e
+  // não tinha como perceber: o objeto volta com _herdado, mas o _de que
+  // explicava a origem apontava para um mês à frente.
+  // ══════════════════════════════════════════════════════════════════
+  const ant = _mesAnteriorDe(mesRef);
   if(lm[ant])   return {...lm[ant], _herdado:true, _de:ant};
-  // último mês com meta definida
-  const ultMes = Object.keys(lm).sort().reverse()[0];
+  // último mês com meta ANTES do pedido — herdar do futuro não é herdar
+  const ultMes = Object.keys(lm).filter(k => k < mesRef).sort().reverse()[0];
   if(ultMes)    return {...lm[ultMes], _herdado:true, _de:ultMes};
   // Fallback: calcular com base na soma das metas das vendedoras
   const vends = vendsReais(lid);
@@ -14998,19 +15105,55 @@ async function lancarVendaVend(){
   const id=document.getElementById("vl-vend").value,data=document.getElementById("vl-data").value,val=parseBR(document.getElementById("vl-val").value)||0;
   if(!id||!data||val===0){showToast("Preencha todos os campos!","err");return;}
   if(!D.vendasVend[id])D.vendasVend[id]={};
+  // ══════════════════════════════════════════════════════════════════
+  // [R147] ESTE LANÇAMENTO APAGAVA O DIA.
+  //
+  // A gravação era `D.vendasVend[id][data] = {val, trans, cli, aniv:0,
+  // inativ:0, tm}` — o objeto inteiro, do zero. Duas perdas por vez:
+  //
+  //   1) aniv e inativ iam a ZERO, e itens/produtos sumiam por não serem
+  //      recopiados. São dados de outro formulário; este aqui não os
+  //      coleta e não tinha por que destruí-los. Eram os "valores que
+  //      desaparecem no Histórico".
+  //
+  //   2) val e trans SUBSTITUÍAM. No Painel do Dia substituir é correto,
+  //      porque lá o campo já vem preenchido com o que está gravado
+  //      (somar dobraria o dia). Aqui o campo nasce VAZIO: quem tinha
+  //      1.000 lançados e lançava mais 500 ficava com 500, e os 1.000
+  //      sumiam sem aviso.
+  //
+  // Agora soma e preserva. E o aviso diz quanto o dia passou a ter, para
+  // um clique repetido aparecer na hora em vez de virar número silencioso.
+  // ══════════════════════════════════════════════════════════════════
   const trans = parseInt(document.getElementById("vl-trans").value)||0;
-  const tmV = trans>0 ? parseFloat((val/trans).toFixed(2)) : 0;
+  const _reg  = D.vendasVend[id][data]
+             || {val:0, trans:0, cli:0, aniv:0, inativ:0, itens:0, produtos:[]};
+  const _antesVal = Number(_reg.val)||0;
+  const novoVal   = _antesVal + val;
+  const novoTrans = (Number(_reg.trans)||0) + trans;
+  const novoItens = Number(_reg.itens)||0;   // este formulário não informa itens
+  const tmV = novoTrans>0 ? parseFloat((novoVal/novoTrans).toFixed(2)) : 0;
   // [R124] Faltava _savedAt. TODOS os merges (loadFromFirestore, syncLoja,
   // syncAdmin, backup) comparam _savedAt para decidir quem vence; sem ele o
   // lançamento valia timestamp zero e QUALQUER cópia do servidor, mesmo mais
   // antiga, o substituía. Era perda de dado silenciosa, nos dois sentidos:
   // não vencia lá, e era sobrescrito aqui.
-  D.vendasVend[id][data]={val, trans, cli:trans, aniv:0, inativ:0, tm:tmV,
-                          ts:Date.now(), _savedAt:Date.now()};
+  D.vendasVend[id][data] = Object.assign({}, _reg, {
+    val: novoVal, trans: novoTrans, cli: novoTrans,
+    itens: novoItens,
+    pa: novoTrans>0 ? parseFloat((novoItens/novoTrans).toFixed(2)) : 0,
+    aniv:   Number(_reg.aniv)||0,
+    inativ: Number(_reg.inativ)||0,
+    produtos: _reg.produtos || [],
+    tm: tmV, ts:Date.now(), _savedAt:Date.now()
+  });
   // [FIX Race Condition] Snapshot antes de gravar
   _persistirLocal();
+  const _nomeV = ((D.vendedoras||[]).find(x=>x.id===id)||{}).nome || '';
   window._pendingLocalData = JSON.parse(JSON.stringify(D));
-  showToast("\u2705 Venda lan\u00e7ada!");
+  showToast('\u2705 Venda lan\u00e7ada. ' + (_nomeV ? _nomeV + ': ' : '')
+    + 'o dia ' + data.split('-').reverse().join('/') + ' passou de '
+    + fmt(_antesVal) + ' para ' + fmt(novoVal) + '.');
   renderVendRanking(_tabVend);
   renderTabelaVend();
   if(document.getElementById('page-lanc')?.classList.contains('active')) renderPainelDia();
@@ -18599,6 +18742,24 @@ function renderMetasLojas(){
           <div style="font-size:13px;font-weight:700">${loja.nome}</div>
           <div style="font-size:9px;color:var(--muted)">${loja.cnpj} &middot; ${nv} vendedor(es)</div>
           ${m._herdado?`<div style="font-size:9px;color:var(--ouro);margin-top:2px">⚠️ Sem meta para ${nomeMes(_mesMeta)} — herdando de ${nomeMes(m._de)}</div>`:''}
+          ${(() => {
+            // [R146] Meta que EXISTE noutra origem não pode aparecer em
+            // branco. getMetas em modo estrito só olha D.metasLoja, mas os
+            // cruzamentos usam metaDoMes(), que também aceita base
+            // histórica e período de Lançamento por Loja. Sem este aviso, o
+            // admin conclui que a meta sumiu e cadastra outra por cima.
+            if(m && Number(m.mes||0) > 0) return '';
+            let _o = {valor:0, origem:null};
+            try{ _o = metaDoMes(loja.id, _mesMeta); }catch(e){}
+            if(!(_o.valor > 0)) return '';
+            const _de = _o.origem === 'historico' ? 'base histórica'
+                      : _o.origem === 'periodo'   ? 'Lançamento por Loja'
+                      : _o.origem;
+            return '<div style="font-size:9px;color:var(--azul);margin-top:2px">'
+              + '📌 Há meta de ' + fmt(_o.valor) + ' para ' + nomeMes(_mesMeta)
+              + ' vinda da <strong>' + _de + '</strong> — já usada nos cruzamentos. '
+              + 'O campo acima está vazio porque ela não foi cadastrada aqui.</div>';
+          })()}
           ${!ehMesAtual?`<div style="font-size:9px;color:var(--azul);margin-top:2px">📅 Editando ${nomeMes(_mesMeta)}</div>`:''}
         </div>
         <div style="text-align:right">
@@ -21026,7 +21187,12 @@ function navMesMeta(delta){
 }
 function irParaMes(){
   const mes = document.getElementById("sel-mes-meta")?.value||"01";
-  const ano = document.getElementById("sel-ano-meta")?.value||new Date().getFullYear();
+  // [R146] O <select> de ano nasce SEM opções — quem as cria é
+  // sincSelects(), de dentro de renderMetasLojas. Enquanto está vazio,
+  // .value é '' e o ano caía silenciosamente no corrente. Cair no ano do
+  // mês que já estava em tela é o comportamento previsível.
+  const ano = document.getElementById("sel-ano-meta")?.value
+            || (_mesMeta || mesAtual()).slice(0,4);
   _mesMeta = ano+"-"+mes;
   _metaNavAtiva = (_mesMeta !== mesAtual()); // só é "navAtiva" se não for o mês atual
   renderMetasLojas();
@@ -23062,7 +23228,23 @@ window._crescLinhasLoja = function(lid, de, ate, opts){
     let fat = l.fat, trans = l.atend, aniv = l.aniv, inativ = l.inativ,
         meta = l.meta, fonte = l.fonte;
 
-    if(!coberto){
+    // ══════════════════════════════════════════════════════════════
+    // [R146] MÊS RECORTADO: A PLANILHA AINDA MANDA, E A TELA AVISA.
+    //
+    // O R140 fazia o mês cortado pelo período cair no lançamento, para
+    // que dez dias escolhidos não trouxessem o mês inteiro. Era coerente,
+    // mas escondia a planilha justamente de quem a importou; o pedido
+    // agora é que o CRM seja sempre a fonte.
+    //
+    // Então o mês recortado que EXISTE na planilha entra inteiro — com
+    // faturamento, atendimentos e meta todos do mês cheio, porque
+    // faturamento de mês inteiro contra meta rateada daria um percentual
+    // sem sentido — e a linha é marcada "mês inteiro", para ninguém somar
+    // isto com o recorte que pediu. Só o mês que a planilha NÃO tem cai
+    // no lançamento, que é diário e dá para cortar.
+    // ══════════════════════════════════════════════════════════════
+    const _temCrm = l.fonte === 'crm' && l.fat > 0;
+    if(!coberto && !_temCrm){
       const [y, m] = l.mes.split('-').map(Number);
       const ini = l.mes + '-01';
       const fim = l.mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
@@ -23091,7 +23273,11 @@ window._crescLinhasLoja = function(lid, de, ate, opts){
       tm: trans > 0 ? fat/trans : 0,
       meta,
       pctMeta: meta > 0 ? (fat / meta * 100) : null,
-      fonte, parcial: !coberto
+      fonte,
+      parcial: !coberto,
+      // [R146] "mês inteiro": o período corta este mês, mas o número veio
+      // da planilha, que é mensal — logo cobre mais dias do que se pediu.
+      mesInteiro: !coberto && _temCrm
     };
   }).filter(l => l.fat > 0 || l.meta > 0);
 };
@@ -23124,15 +23310,17 @@ window._crescLinhasVend = function(vendId, de, ate, opts){
     const ini = mes + '-01';
     const fim = mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
     const coberto = window._crescMesCoberto(mes, deEf, ate);
-    // Mês recortado é lido dia a dia; mês coberto vale do primeiro ao último.
-    const a = deEf > ini ? deEf : ini;
-    const b = ate  < fim ? ate  : fim;
-
-    const c = coberto ? crmVend.get(chave + '|' + mes) : null;
+    // [R146] Mesma regra da loja: a planilha manda mesmo no mês recortado,
+    // e a linha avisa que o número cobre o mês inteiro. Só o mês que ela
+    // não tem é lido dia a dia do lançamento.
+    const c = crmVend.get(chave + '|' + mes);
+    const _crmVale = !!(c && c.fat > 0);
+    const a = (coberto || _crmVale) ? ini : (deEf > ini ? deEf : ini);
+    const b = (coberto || _crmVale) ? fim : (ate  < fim ? ate  : fim);
     const lc = window._histLancVend(vendId, a, b);
 
     let fat, trans, fonte;
-    if(c && c.fat > 0){ fat = c.fat; trans = c.notas || 0; fonte = 'crm'; }
+    if(_crmVale){ fat = c.fat; trans = c.notas || 0; fonte = 'crm'; }
     else { fat = lc.fat; trans = lc.trans; fonte = (lc.fat > 0 || lc.trans > 0) ? 'lancamento' : null; }
 
     // Aniversariante e inativo não existem no CRM — são marcação de
@@ -23144,15 +23332,18 @@ window._crescLinhasVend = function(vendId, de, ate, opts){
       else { aniv = lc.aniv; inativ = lc.inativ; }
     }catch(e){ aniv = lc.aniv; inativ = lc.inativ; }
 
-    // Meta mensal rateada no mês recortado, pelo mesmo motivo da loja.
-    const metaEf = coberto ? metaMes
+    // [R146] Mês que veio da planilha vale inteiro, e a meta acompanha —
+    // faturamento cheio contra meta rateada daria percentual sem sentido.
+    const metaEf = (coberto || _crmVale) ? metaMes
                  : metaMes * window._histFracaoMes(mes, deEf, ate);
     return {
       mes, nome: _crescNomeMes(mes), fat, trans, aniv, inativ,
       tm: trans > 0 ? fat/trans : 0,
       meta: metaEf,
       pctMeta: metaEf > 0 ? (fat / metaEf * 100) : null,
-      fonte, parcial: !coberto
+      fonte,
+      parcial: !coberto,
+      mesInteiro: !coberto && _crmVale
     };
   }).filter(l => l.fat > 0 || l.meta > 0);
 };
@@ -23173,7 +23364,9 @@ function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes, linhasPre){
             : m2.fonte === 'historico'  ? et('var(--muted)','var(--borda)','HISTÓRICO','Base histórica, anterior ao CRM')
             : m2.fonte === 'fluxo'      ? et('var(--roxo)','rgba(139,92,246,.4)','FLUXO','Registros da Origem do Fluxo')
             : '';
-    const p = m2.parcial
+    const p = m2.mesInteiro
+      ? '<div style="font-size:8.5px;color:var(--azul)" title="O período escolhido corta este mês, mas o número veio da planilha do CRM, que é mensal — ele cobre o mês inteiro">mês inteiro</div>'
+      : m2.parcial
       ? '<div style="font-size:8.5px;color:var(--laranja)" title="O período escolhido não cobre este mês inteiro — a comparação com os demais é aproximada">parcial</div>'
       : '';
     return f + p;
@@ -26650,9 +26843,11 @@ function _relDelta(atual, ant){
   return { pct, txt:s, cls };
 }
 function _relMesLabel(mesRef){
+  // [R146] Ano com quatro dígitos: "Set/26" ao lado de "Set/25" se lê mal
+  // numa lista, e o usuário não tinha como ver de que ano era o período.
   const nomes = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   const [y,m] = mesRef.split('-');
-  return nomes[parseInt(m)] + '/' + y.slice(2);
+  return nomes[parseInt(m)] + '/' + y;
 }
 function _relMesAnterior(mesRef){
   const [y,m] = mesRef.split('-').map(Number);
@@ -26708,6 +26903,18 @@ function _relComp(aba, base, modo){
   if(/^\d{4}-\d{2}$/.test(esc||'')) return esc;
   return modo === 'anoant' ? _relMesAnoAnt(base) : _relMesAnterior(base);
 }
+/**
+ * [R146] Troca só o ANO, preservando o mês que já estava escolhido.
+ * Sem isto, mudar de ano obrigaria a reescolher o mês na lista.
+ */
+window._relSetAno = function(aba, campo, ano){
+  if(!/^\d{4}$/.test(String(ano||''))) return;
+  const atual = campo === 'comp' ? _relEstado(aba).comp : _relRef(aba);
+  const mes = /^\d{4}-\d{2}$/.test(String(atual||'')) ? String(atual).slice(5,7)
+            : hoje().slice(5,7);
+  window._relSetFiltro(aba, campo, ano + '-' + mes);
+};
+
 window._relSetFiltro = function(aba, campo, valor){
   // [R143] O calendário devolve '' quando o usuário limpa o campo. Em 'ref'
   // isso volta ao padrão (mês mais recente com dado); em 'comp', ao
@@ -26745,9 +26952,22 @@ function _relBarra(aba, opts){
   const _est = 'background:var(--cinza);border:1px solid var(--borda);border-radius:8px;'
              + 'padding:7px 11px;color:var(--texto);font-size:12px';
   const _cal = (campo, valor) =>
-    '<input type="month" value="' + (valor||'') + '" title="Escolher qualquer mês no calendário" '
+    '<input type="month" value="' + (valor||'') + '" title="Escolher qualquer mês e ano" '
     + 'onchange="window._relSetFiltro(\''+aba+'\',\''+campo+'\',this.value)" '
     + 'style="' + _est + ';color-scheme:dark">';
+
+  // [R146] Seletor de ANO ao lado do mês. O <input type="month"> mostra o
+  // ano só depois de abrir o calendário nativo, e a lista de meses vinha
+  // com ano de dois dígitos — não dava para ver em que ano se estava sem
+  // abrir nada. Trocar o ano aqui mantém o mês escolhido.
+  const _anos = (typeof _relAnosOfertados === 'function' ? _relAnosOfertados() : [])
+                  .slice();
+  if(!_anos.includes(ref.slice(0,4))) _anos.push(ref.slice(0,4));
+  _anos.sort().reverse();
+  const _selAno = '<label style="font-size:11px;color:var(--muted)">Ano</label>'
+    + '<select onchange="window._relSetAno(\''+aba+'\',\'ref\',this.value)" style="'+_est+'">'
+    + _anos.map(a => '<option value="'+a+'"'+(a===ref.slice(0,4)?' selected':'')+'>'+a+'</option>').join('')
+    + '</select>';
 
   let compHtml = '';
   if(opts.comparacao){
@@ -26767,6 +26987,7 @@ function _relBarra(aba, opts){
     + '<select onchange="window._relSetFiltro(\''+aba+'\',\'ref\',this.value)" style="'+_est+'">'
     + opcoesRef + '</select>'
     + _cal('ref', ref)
+    + _selAno
     + compHtml
     + '</div></div>';
 }
@@ -27369,7 +27590,6 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
   });
   const meses = window._histMesesPeriodo(mesIni+'-01', mesFim+'-01');
 
-  const mesCorrente = hoje().slice(0,7);
 
   // ══════════════════════════════════════════════════════════════════
   // [R144] A META DO MÊS, PESSOA A PESSOA.
@@ -27411,17 +27631,19 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
       const c   = crmV.get(chave + '|' + mes);
 
       // ══════════════════════════════════════════════════════════════
-      // [R144] DURANTE O MÊS, O LANÇAMENTO; DEPOIS, A PLANILHA.
+      // [R146] A PLANILHA MANDA SEMPRE QUE EXISTIR.
       //
-      // Era o inverso: a planilha vencia sempre que existisse. No mês em
-      // curso isso congelava o ranking no que a última importação trouxe
-      // — quem vendeu hoje só aparecia na virada. A regra agora é a mesma
-      // que as lojas já usam em crmDoMesPreferido: mês em curso pertence
-      // ao lançamento, que é o dado vivo; mês fechado pertence à planilha,
-      // que é o faturamento conferido.
+      // O R144 tinha invertido isto a pedido: mês em curso pelo
+      // lançamento, mês fechado pela planilha. O pedido agora é o
+      // oposto — a planilha do CRM é a fonte do benchmark, e o
+      // lançamento só cobre o mês que ela ainda não trouxe.
+      //
+      // Consequência a conhecer: no mês em curso o ranking reflete a
+      // ÚLTIMA IMPORTAÇÃO, não as vendas de hoje. Quem vendeu depois do
+      // arquivo subir só aparece na próxima importação. É o preço de ter
+      // o faturamento conferido como base, e está dito na tela.
       // ══════════════════════════════════════════════════════════════
-      const usaCrm = (c && c.fat > 0)
-                  && (mes < mesCorrente || !(lc.fat > 0 || lc.trans > 0));
+      const usaCrm = !!(c && c.fat > 0);
 
       if(usaCrm){
         real += c.fat; atend += c.notas || 0; itens += c.itens || 0; nCrm++;
@@ -27615,9 +27837,10 @@ function _relBenchVends(){
         </div>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
-        <strong>Mês em curso</strong>: lançamento diário, que é o dado vivo.
-        <strong>Mês fechado</strong>: planilha importada no CRM, que é o faturamento
-        conferido — e o lançamento cobre o mês que a planilha não trouxe.
+        Realizado <strong>sempre da planilha importada no CRM</strong>; o lançamento
+        diário só cobre o mês que a planilha ainda não trouxe. No mês em curso isso
+        significa que o ranking reflete a <strong>última importação</strong> — quem
+        vendeu depois do arquivo subir aparece na próxima.
         Meta sempre a do mês escolhido, cadastrada pelo administrador.
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">${podioHtml}</div>
