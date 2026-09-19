@@ -5402,7 +5402,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-10c';
+window.AVATIM_BUILD = '2026-09-18a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5476,7 +5476,91 @@ window.avatimDiagnosticarCrm = function(){
     });
   }catch(e){ console.warn('crmVisao() falhou:', e.message); }
 
+  console.log('Para saber se o que falta aqui existe NO SERVIDOR, rode: '
+    + 'await avatimCrmNoServidor()');
   return {anosNaBase, anosNoSeletor: opts, faltando, conjuntos: linhas};
+};
+
+/**
+ * [R141] O que existe NO SERVIDOR, loja por loja e ano por ano.
+ *
+ * O seletor de ano lista o que está em D.crm, e D.crm é o que esta máquina
+ * conseguiu carregar. Quando um ano aparece numa máquina e não em outra,
+ * há duas explicações opostas — o conjunto nunca subiu (existe só onde foi
+ * importado) ou subiu e esta máquina não leu — e o diagnóstico de cima não
+ * distingue as duas, porque só enxerga a memória local.
+ *
+ * Esta função vai ao Firestore e lê só as CABEÇAS dos cubos (crm_<loja>_<ano>),
+ * que são pequenas. Não grava nada, não apaga nada, não altera D.
+ */
+window.avatimCrmNoServidor = async function(){
+  console.log('%c[Avatim] Cubos do CRM no servidor', 'font-weight:bold;color:#C9A84C');
+  let db, mod;
+  try{ ({mod, db} = await _bkFirestore()); }
+  catch(e){ console.error('Firestore indisponível:', e.message); return null; }
+  const {getDoc, doc} = mod;
+
+  const lojas = isAdmin()
+    ? (typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : [])
+    : [lojaId()].filter(Boolean);
+  // Janela mais larga que a do carregamento, de propósito: se um cubo foi
+  // gravado fora da janela que crmCarregar varre, é isso que precisa aparecer.
+  const anoAtual = Number(hoje().slice(0,4));
+  const anos = [];
+  for(let a = anoAtual + 1; a >= anoAtual - 6; a--) anos.push(String(a));
+
+  const achados = [], soNoServidor = [], soLocal = [];
+  for(const lid of lojas){
+    for(const ano of anos){
+      let snap;
+      try{ snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano))); }
+      catch(e){ console.warn('[crm] falha lendo', lid, ano, e.code||e.message); continue; }
+      if(!snap.exists()) continue;
+      const raw = snap.data() || {};
+      let leves = {};
+      try{ leves = JSON.parse(raw.dados || '{}'); }catch(e){}
+      const local = ((D.crm||{})[lid]||{})[ano];
+      const estado = raw._apagado ? 'LÁPIDE (apagado)'
+                   : !raw.dados   ? 'VAZIO (sem dados)'
+                   : !leves.linhas? 'CABEÇA SEM LINHAS'
+                   : 'ok';
+      achados.push({
+        loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid,
+        ano, estado,
+        linhas: leves.linhas || 0,
+        partes: Number(leves._partes) || 0,
+        gravadoEm: raw.ts ? new Date(raw.ts).toLocaleString('pt-BR') : '—',
+        por: raw.por || '—',
+        naMemoriaLocal: local ? 'sim' : 'NÃO'
+      });
+      if(estado === 'ok' && !local) soNoServidor.push(lid + '/' + ano);
+    }
+  }
+  if(achados.length) console.table(achados);
+  else console.warn('Nenhum cubo do CRM encontrado no servidor para este perfil.');
+
+  const anosServidor = [...new Set(achados.filter(a => a.estado === 'ok').map(a => a.ano))].sort();
+  console.log('anos com cubo no SERVIDOR:', anosServidor.join(', ') || '(nenhum)');
+
+  Object.keys(D.crm || {}).forEach(lid => Object.keys(D.crm[lid] || {}).forEach(ano => {
+    const noServidor = achados.some(a => a.ano === ano && a.estado === 'ok'
+      && a.loja === ((LOJAS.find(l=>l.id===lid)?.nome) || lid));
+    if(!noServidor) soLocal.push(lid + '/' + ano);
+  }));
+
+  if(soLocal.length){
+    console.error('❌ SÓ NESTA MÁQUINA, não está no servidor:', soLocal.join(', ')
+      + '\n   É por isso que as outras máquinas não veem esse ano. O envio não'
+      + ' completou. Nesta máquina, aba CRM → "Reenviar ao Firebase".');
+  }
+  if(soNoServidor.length){
+    console.error('❌ NO SERVIDOR mas não carregado aqui:', soNoServidor.join(', ')
+      + '\n   O dado existe; esta cópia não o leu. Recarregue; se persistir, é defeito de leitura.');
+  }
+  if(!soLocal.length && !soNoServidor.length){
+    console.log('✅ Servidor e memória desta máquina batem.');
+  }
+  return {anosServidor, soLocal, soNoServidor, conjuntos: achados};
 };
 
 window._semComentarios = function(f){
@@ -5558,6 +5642,35 @@ window.AVATIM_RECURSOS = {
                             && typeof window._histMetasFaltando === 'function',
   // [R138] diagnostico do CRM, so leitura
   diagnosticoCrm:        () => typeof window.avatimDiagnosticarCrm === 'function',
+  crmConfereServidor:    () => typeof window.avatimCrmNoServidor === 'function',
+  // [R142] cubo que existe só nesta máquina para de passar em silêncio
+  crmAvisaSoLocal:       () => typeof window.crmCarregar === 'function'
+                            && /_soLocal/.test(String(window.crmCarregar))
+                            && /_crmSoLocal/.test(String(window.crmCarregar)),
+  // [R143] o recorte na tela do CRM deixa de ser descrito pelo cubo inteiro
+  crmRecorteHonesto:     () => typeof window.crmFiltrar === 'function'
+                            && /linhasNoRecorte/.test(String(window.crmFiltrar)),
+  // [R143] benchmark de vendedor(es) lê a planilha e exporta
+  benchVendsLeCrm:       () => typeof window._relBenchApurar === 'function'
+                            && typeof window._relBenchSemanal === 'function',
+  benchVendsRankings:    () => typeof _relBenchVends === 'function'
+                            && /_relBenchApurar/.test(String(_relBenchVends))
+                            && /Ranking semanal/.test(String(_relBenchVends)),
+  benchVendsInativos:    () => typeof window._relBenchToggleInativos === 'function',
+  benchVendsExporta:     () => typeof window.relBenchVendsCSV === 'function'
+                            && typeof window.relBenchVendsPDF === 'function',
+  // [R143] calendário para escolher mês fora da lista de meses com dado
+  relCalendarioMes:      () => typeof _relBarra === 'function'
+                            && /type="month"/.test(String(_relBarra)),
+  // [R143] projeção deixa de chamar de "otimista" um número abaixo da meta
+  // A conferência é no CABEÇALHO gerado, não no texto do arquivo: a palavra
+  // "otimista" continua no código, na nota que explica por que ela saiu.
+  projecaoStatusHonesto: () => typeof _relProjecao === 'function'
+                            && /<th[^>]*>STATUS PROJETADO</.test(String(_relProjecao))
+                            && !/<th[^>]*>(OTIMISTA|CONSERVADOR)</.test(String(_relProjecao)),
+  // [R143] KPIs do histórico enxergam a planilha do CRM
+  histKpiLeCrm:          () => typeof buscarHistoricoLoja === 'function'
+                            && /_crescLinhasLoja\(lid, de, ate, \{semExtra:true\}\)/.test(String(buscarHistoricoLoja)),
   // [R139] sync nao apaga mais os percentuais por perfil
   modalidadesSobrevivemSync: () => typeof window.mergeConfigModalidades === 'function'
                             && /porPerfil/.test(String(window.mergeConfigModalidades))
@@ -8099,6 +8212,24 @@ window.crmFiltrar = function(cubo, f){
     prodsTabela: cubo.prods || [],
     vendsTabela: cubo.vends || [],
     linhas: cubo.linhas || 0,
+    // ══════════════════════════════════════════════════════════════
+    // [R143] `linhas` e `periodo` são do CUBO, que já vem recortado por
+    // ano e loja — mas NÃO por mês nem por vendedor(a). Faturamento,
+    // clientes e meses aqui embaixo são; misturar os dois na mesma frase
+    // produz "22.012 linhas analisadas · 01/01 a 31/01", em que o número
+    // é do ano inteiro e o período é de janeiro. Os dois campos abaixo
+    // dizem o que vale para o RECORTE, e valem null quando não dá para
+    // saber: o cubo conta linhas por ano, não por mês.
+    // ══════════════════════════════════════════════════════════════
+    linhasNoRecorte: (f.mes || f.vend) ? null : (cubo.linhas || 0),
+    periodoRecorte: (function(){
+      const ms = [...porMes.keys()].sort();
+      if(!ms.length) return {};
+      const ult = ms[ms.length-1];
+      const [y2, m2] = ult.split('-').map(Number);
+      return {ini: ms[0] + '-01',
+              fim: ult + '-' + String(new Date(y2, m2, 0).getDate()).padStart(2,'0')};
+    })(),
     periodo: cubo.periodo || {}
   };
 };
@@ -8315,16 +8446,44 @@ window.crmCarregar = async function(){
 
   if(!D.crm) D.crm = {};
   let carregados = 0;
+  // ══════════════════════════════════════════════════════════════════
+  // [R142] CONJUNTO QUE SÓ EXISTE NESTA MÁQUINA NÃO PODE PASSAR CALADO.
+  //
+  // Conjunto apagado no servidor deixa lápide, e a lápide era pulada em
+  // silêncio. Quem já tinha o cubo em memória continuava a vê-lo para
+  // sempre — o cache local só cresce, nunca é podado —, e quem não tinha
+  // nunca o via. Foi assim que seis conjuntos de 2026 sumiram do Firebase
+  // e passaram três dias sem ninguém notar: numa máquina o ano estava lá,
+  // na outra não, e nenhuma das duas dizia por quê.
+  //
+  // O que NÃO se faz aqui: apagar o local (esta cópia pode ser a última
+  // que restou do dado) nem regravar sozinho (desfaria uma exclusão
+  // legítima). Só se diz a verdade, e em voz alta.
+  // ══════════════════════════════════════════════════════════════════
+  const _soLocal = [];
   for(const lid of lojas){
     for(const ano of anos){
       try{
         const snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano)));
-        if(!snap.exists()) continue;
+        const _temLocal = !!((D.crm[lid]||{})[ano]);
+        if(!snap.exists()){
+          if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
+          continue;
+        }
         const raw = snap.data();
         // conjunto apagado deixa um documento vazio como lápide
-        if(raw._apagado || !raw.dados) continue;
+        if(raw._apagado || !raw.dados){
+          if(_temLocal) _soLocal.push({lid, ano,
+            motivo: raw._apagado ? 'APAGADO no servidor' : 'vazio no servidor',
+            quando: raw.ts, por: raw.por});
+          continue;
+        }
         const leves = JSON.parse(raw.dados || '{}');
-        if(!leves.linhas) continue;
+        if(!leves.linhas){
+          if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
+            quando: raw.ts, por: raw.por});
+          continue;
+        }
         const partes = Number(leves._partes) || 0;
         const clientes = [];
         for(let i = 0; i < partes; i++){
@@ -8342,6 +8501,22 @@ window.crmCarregar = async function(){
     }
   }
   if(carregados) console.log('[crm] carregados', carregados, 'conjunto(s) loja/ano');
+
+  window._crmSoLocal = _soLocal;
+  if(_soLocal.length){
+    const _quando = x => x.quando ? ' em ' + new Date(x.quando).toLocaleString('pt-BR') : '';
+    const _por    = x => x.por ? ', por ' + x.por : '';
+    console.warn('[crm] ⚠️ SÓ NESTA MÁQUINA — existe(m) aqui e não no servidor: '
+      + _soLocal.map(x => x.lid + '/' + x.ano + ' (' + x.motivo + _quando(x) + _por(x) + ')').join(' · '));
+    console.warn('[crm] Esta cópia pode ser a ÚNICA que ainda tem esse dado. Nada foi '
+      + 'apagado aqui. Para devolvê-lo ao servidor, desta máquina:\n'
+      + '  await crmSincronizar([' + _soLocal.map(x => "['" + x.lid + "','" + x.ano + "']").join(',') + '])');
+    if(isAdmin() && !window._crmAvisouSoLocal && typeof showToast === 'function'){
+      window._crmAvisouSoLocal = true;
+      showToast('⚠️ ' + _soLocal.length + ' conjunto(s) do CRM existem só neste '
+        + 'navegador e não no Firebase. Veja o console — pode ser a última cópia.', 'err');
+    }
+  }
   return carregados;
 };
 
@@ -22723,11 +22898,14 @@ function _crescNomeMes(mes){
  * discordar dos KPIs logo acima, na mesma tela. Nesse caso vale o
  * lançamento, que é diário e dá para cortar, com a meta rateada.
  */
-window._crescLinhasLoja = function(lid, de, ate){
+window._crescLinhasLoja = function(lid, de, ate, opts){
+  opts = opts || {};
   const deMesOrig = de.slice(0,7), ateMes = ate.slice(0,7);
   let deMes = deMesOrig;
   // Um mês só não é evolução: puxa o anterior para haver com o que comparar.
-  if(deMes === ateMes) deMes = _crescMesAnterior(deMes);
+  // [R143] Quem soma totais do período NÃO pode receber esse mês extra —
+  // ele não foi pedido pelo usuário e inflaria o faturamento da tela.
+  if(deMes === ateMes && !opts.semExtra) deMes = _crescMesAnterior(deMes);
   // O mês puxado entra INTEIRO — ele não faz parte do recorte do usuário, e
   // cortá-lo no mesmo dia viraria uma queda que não existiu.
   const deEf = (deMes !== deMesOrig) ? (deMes + '-01') : de;
@@ -22774,12 +22952,14 @@ window._crescLinhasLoja = function(lid, de, ate){
 };
 
 /** Linhas mensais de um(a) vendedor(a) — CRM quando cobre o mês, senão lançamento. */
-window._crescLinhasVend = function(vendId, de, ate){
+window._crescLinhasVend = function(vendId, de, ate, opts){
+  opts = opts || {};
   const v = (D.vendedoras || []).find(x => x.id === vendId);
   if(!v) return [];
   const deMesOrig = de.slice(0,7), ateMes = ate.slice(0,7);
   let deMes = deMesOrig;
-  if(deMes === ateMes) deMes = _crescMesAnterior(deMes);
+  // [R143] ver _crescLinhasLoja: somar totais não pode levar o mês extra.
+  if(deMes === ateMes && !opts.semExtra) deMes = _crescMesAnterior(deMes);
   // Mês puxado para comparação entra inteiro; o do usuário respeita o recorte.
   const deEf = (deMes !== deMesOrig) ? (deMes + '-01') : de;
 
@@ -23042,6 +23222,35 @@ async function buscarHistoricoLoja(){
     anivTotal  += diasMap[d].aniv;
     inativTotal+= diasMap[d].inativ;
   });
+  // ══════════════════════════════════════════════════════════════════
+  // [R143] OS KPIs PASSAM A ENXERGAR A PLANILHA DO CRM.
+  //
+  // fatTotal e transTotal vinham só de diasMap, que é lançamento diário.
+  // Mês cujo faturamento veio da planilha importada aparecia como ZERO no
+  // topo da tela, enquanto o quadro Realizado × Meta logo abaixo — que já
+  // lê o CRM desde o R138 — mostrava o número certo. Dois totais
+  // diferentes para o mesmo período, na mesma tela.
+  //
+  // A apuração é a mesma do bloco de Crescimento (R140): CRM no mês
+  // coberto, lançamento no mês recortado, meta por metaDoMes. Falhou,
+  // vale o caminho antigo — a tela nunca fica pior do que estava.
+  // ══════════════════════════════════════════════════════════════════
+  let _origemKpi = 'lancamento', _metaLinhas = 0;
+  try{
+    const _lk = window._crescLinhasLoja(lid, de, ate, {semExtra:true});
+    if(_lk && _lk.length){
+      const _fat = _lk.reduce((s2,x) => s2 + (x.fat   || 0), 0);
+      const _tr  = _lk.reduce((s2,x) => s2 + (x.trans || 0), 0);
+      _metaLinhas = _lk.reduce((s2,x) => s2 + (x.meta || 0), 0);
+      if(_fat > 0){
+        fatTotal   = _fat;
+        transTotal = _tr;
+        _origemKpi = _lk.every(x => x.fonte === 'crm') ? 'crm'
+                   : _lk.some(x => x.fonte === 'crm')  ? 'misto' : 'lancamento';
+      }
+    }
+  }catch(e){ console.warn('[R143] KPIs do histórico pelo CRM:', e.message); }
+
   const tmMedio = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
   const m = getMetas(lid)||{};
   const metaRef = m.mes||0;
@@ -23051,11 +23260,20 @@ async function buscarHistoricoLoja(){
   const kpis = document.getElementById('hist-loja-kpis');
   // % da meta: usar meta do mês × nº de meses únicos no período
   const _nMesesL = new Set(dias.map(d=>d.slice(0,7))).size;
-  const _metaL = _nMesesL>0 ? metaRef * _nMesesL : metaRef;
+  // [R143] A meta apurada mês a mês (cadastro, base histórica ou período,
+  // rateada no mês recortado) vence a conta antiga de meta × nº de meses,
+  // que só via D.metasLoja e contava apenas os meses COM lançamento.
+  const _metaL = _metaLinhas > 0 ? _metaLinhas
+               : (_nMesesL>0 ? metaRef * _nMesesL : metaRef);
   const _pctL  = _metaL>0 ? fatTotal/_metaL*100 : 0;
   const _corL  = _pctL>=100?'var(--verde)':_pctL>=70?'var(--ouro)':_pctL>0?'var(--verm)':'var(--muted)';
+  const _selo = _origemKpi === 'crm'
+      ? '<div style="font-size:8.5px;color:var(--azul);margin-top:3px">PLANILHA CRM</div>'
+    : _origemKpi === 'misto'
+      ? '<div style="font-size:8.5px;color:var(--ouro);margin-top:3px">PLANILHA + LANÇAMENTO</div>'
+      : '';
   if(kpis) kpis.innerHTML = [
-    {l:'Faturamento Total', v:fmt(fatTotal),   c:'var(--ouro)'},
+    {l:'Faturamento Total', v:fmt(fatTotal),   c:'var(--ouro)', extra:_selo},
     {l:'% da Meta',         v:_metaL>0?_pctL.toFixed(0)+'%':'—', c:_corL},
     {l:'Dias lançados',     v:dias.length,      c:'var(--verde)'},
     {l:'TM Médio',          v:fmt(tmMedio),     c:'var(--azul)'},
@@ -23064,7 +23282,7 @@ async function buscarHistoricoLoja(){
     {l:'Inativos recup.',  v:inativTotal,       c:'var(--laranja)'},
   ].map(k=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
     <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${k.l}</div>
-    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>
+    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>${k.extra||''}
   </div>`).join('');
 
   // Tabela dia a dia
@@ -23861,12 +24079,36 @@ async function buscarHistoricoVend(){
     anivTotal   += Number(vd[d].aniv  ||0);
     inativTotal += Number(vd[d].inativ||0);
   });
+  // [R143] Mesma correção dos KPIs da loja: quem faturou no mês importado
+  // aparecia com zero aqui em cima. O CRM guarda o nome como veio na
+  // planilha, então o casamento é por nome normalizado — é o que
+  // _crescLinhasVend já faz. Sem correspondência, nada muda.
+  let _origemKpiV = 'lancamento';
+  try{
+    const _lv = window._crescLinhasVend(vendId, de, ate, {semExtra:true});
+    if(_lv && _lv.length){
+      const _f = _lv.reduce((s2,x) => s2 + (x.fat   || 0), 0);
+      const _t = _lv.reduce((s2,x) => s2 + (x.trans || 0), 0);
+      if(_f > 0){
+        fatTotal   = _f;
+        transTotal = _t;
+        _origemKpiV = _lv.every(x => x.fonte === 'crm') ? 'crm'
+                    : _lv.some(x => x.fonte === 'crm')  ? 'misto' : 'lancamento';
+      }
+    }
+  }catch(e){ console.warn('[R143] KPIs do histórico (vendedor(a)) pelo CRM:', e.message); }
+
   const tmMedio = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
 
   // KPIs
   const kpis = document.getElementById('hist-pg-kpis');
+  const _seloV = _origemKpiV === 'crm'
+      ? '<div style="font-size:8.5px;color:var(--azul);margin-top:3px">PLANILHA CRM</div>'
+    : _origemKpiV === 'misto'
+      ? '<div style="font-size:8.5px;color:var(--ouro);margin-top:3px">PLANILHA + LANÇAMENTO</div>'
+      : '';
   if(kpis) kpis.innerHTML = [
-    {l:'Faturamento',      v:fmt(fatTotal),  c:'var(--ouro)'},
+    {l:'Faturamento',      v:fmt(fatTotal),  c:'var(--ouro)', extra:_seloV},
     {l:'TM Médio',         v:fmt(tmMedio),   c:'var(--azul)'},
     {l:'Atend. total',     v:transTotal,      c:'var(--verde)'},
     {l:'Dias trabalhados', v:dias.length,     c:'var(--muted)'},
@@ -23874,7 +24116,7 @@ async function buscarHistoricoVend(){
     {l:'Inativos recup.',  v:inativTotal,     c:'var(--laranja)'},
   ].map(k=>`<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px;text-align:center">
     <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${k.l}</div>
-    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>
+    <div style="font-size:18px;font-weight:700;color:${k.c}">${k.v}</div>${k.extra||''}
   </div>`).join('');
 
   // Tabela
@@ -26322,6 +26564,10 @@ function _relComp(aba, base, modo){
   return modo === 'anoant' ? _relMesAnoAnt(base) : _relMesAnterior(base);
 }
 window._relSetFiltro = function(aba, campo, valor){
+  // [R143] O calendário devolve '' quando o usuário limpa o campo. Em 'ref'
+  // isso volta ao padrão (mês mais recente com dado); em 'comp', ao
+  // automático — nunca a um filtro vazio, que zeraria o relatório.
+  if(valor === '' && campo === 'comp') valor = 'auto';
   _relEstado(aba)[campo] = valor;
   renderRelatorios();
 };
@@ -26340,23 +26586,42 @@ function _relBarra(aba, opts){
   const opcoesRef = lista.map(m =>
     '<option value="'+m+'"'+(m===ref?' selected':'')+'>'+_relMesLabel(m)+'</option>').join('');
 
+  // ══════════════════════════════════════════════════════════════════
+  // [R143] CALENDÁRIO AO LADO DA LISTA.
+  //
+  // A lista só oferece meses que TÊM dado — é o que impede o relatório de
+  // abrir zerado (R137). Mas ela também impedia escolher qualquer outro:
+  // um mês sem planilha importada, ou um mês antigo fora da janela, era
+  // inalcançável. O <input type="month"> usa o calendário nativo do
+  // sistema e aceita qualquer mês; a lista continua ali como atalho para
+  // o que tem dado. Os dois escrevem no MESMO estado, então mexer num
+  // atualiza o outro no próximo render.
+  // ══════════════════════════════════════════════════════════════════
+  const _est = 'background:var(--cinza);border:1px solid var(--borda);border-radius:8px;'
+             + 'padding:7px 11px;color:var(--texto);font-size:12px';
+  const _cal = (campo, valor) =>
+    '<input type="month" value="' + (valor||'') + '" title="Escolher qualquer mês no calendário" '
+    + 'onchange="window._relSetFiltro(\''+aba+'\',\''+campo+'\',this.value)" '
+    + 'style="' + _est + ';color-scheme:dark">';
+
   let compHtml = '';
   if(opts.comparacao){
     const rotuloAuto = opts.rotuloAuto || 'mês anterior';
+    const compEhMes = /^\d{4}-\d{2}$/.test(est.comp||'');
     const opcoesComp = '<option value="auto"'+(est.comp==='auto'?' selected':'')+'>⟲ Automático ('+rotuloAuto+')</option>'
       + lista.map(m => '<option value="'+m+'"'+(est.comp===m?' selected':'')+'>'+_relMesLabel(m)+'</option>').join('');
     compHtml = '<label style="font-size:11px;color:var(--muted)">Comparar com</label>'
-      + '<select onchange="window._relSetFiltro(\''+aba+'\',\'comp\',this.value)" '
-      + 'style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 11px;color:var(--texto);font-size:12px">'
-      + opcoesComp + '</select>';
+      + '<select onchange="window._relSetFiltro(\''+aba+'\',\'comp\',this.value)" style="'+_est+'">'
+      + opcoesComp + '</select>'
+      + _cal('comp', compEhMes ? est.comp : '');
   }
 
   return '<div class="sc" style="margin-bottom:12px;padding:12px 14px">'
     + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
     + '<label style="font-size:11px;color:var(--muted)">'+(opts.rotuloRef||'Período')+'</label>'
-    + '<select onchange="window._relSetFiltro(\''+aba+'\',\'ref\',this.value)" '
-    + 'style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 11px;color:var(--texto);font-size:12px">'
+    + '<select onchange="window._relSetFiltro(\''+aba+'\',\'ref\',this.value)" style="'+_est+'">'
     + opcoesRef + '</select>'
+    + _cal('ref', ref)
     + compHtml
     + '</div></div>';
 }
@@ -26917,73 +27182,410 @@ function _relBenchLojas(){
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// 5. BENCHMARK ENTRE VENDEDORAS — top 15 da rede/loja
+// 5. BENCHMARK DE VENDEDOR(ES) — pódio, rankings e exportação
 // ══════════════════════════════════════════════════════════════════════
+// [R143] BENCHMARK DE VENDEDOR(ES) — realizado da planilha, meta do admin
+//
+// O bloco lia calcVendPer() e D.vendasVend, isto é, só o lançamento
+// diário. Vendedor(a) cujo faturamento veio da planilha importada
+// aparecia com zero — ou nem aparecia, porque a lista era filtrada por
+// `real > 0`. A loja inteira batia meta no relatório de cima e o ranking
+// de pessoas ficava vazio.
+//
+// O cubo do CRM guarda o nome como veio na planilha, então o casamento é
+// por nome normalizado (_crmNorm), o mesmo critério da conciliação do
+// Histórico. Meta NUNCA sai da planilha: é sempre a cadastrada pelo
+// administrador (v.metaMes).
+// ══════════════════════════════════════════════════════════════════════
+
+/** Itens lançados por uma pessoa num intervalo — o CRM não traz item por dia. */
+function _relItensLanc(vid, de, ate){
+  let itens = 0;
+  Object.entries((D.vendasVend||{})[vid] || {}).forEach(([d, r]) => {
+    if(d < de || d > ate) return;
+    itens += Number(r.itens || 0);
+  });
+  return itens;
+}
+
+/**
+ * Apura um intervalo de MESES por vendedor(a).
+ * Mês que está na planilha sai dela; os demais, do lançamento.
+ * Uma leitura do cubo por loja — não por pessoa, que relia o mesmo cubo
+ * vinte e quatro vezes.
+ */
+window._relBenchApurar = function(vends, mesIni, mesFim){
+  const crmPorLoja = new Map();
+  [...new Set(vends.map(v => v.loja).filter(Boolean))].forEach(lid => {
+    let m = new Map();
+    try{ m = window.crmRealizadoPeriodo(lid, mesIni+'-01', mesFim+'-31').porVendMes || new Map(); }
+    catch(e){ console.warn('[R143] CRM de', lid, e.message); }
+    crmPorLoja.set(lid, m);
+  });
+  const meses = window._histMesesPeriodo(mesIni+'-01', mesFim+'-01');
+
+  return vends.map(v => {
+    const chave = _crmNorm(v.nome);
+    const crmV  = crmPorLoja.get(v.loja) || new Map();
+    let real = 0, atend = 0, itens = 0, nCrm = 0, nLanc = 0;
+
+    meses.forEach(mes => {
+      const c = crmV.get(chave + '|' + mes);
+      if(c && c.fat > 0){
+        real += c.fat; atend += c.notas || 0; itens += c.itens || 0; nCrm++;
+        return;
+      }
+      const [y, m] = mes.split('-').map(Number);
+      const ini = mes + '-01';
+      const fim = mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
+      const lc = window._histLancVend(v.id, ini, fim);
+      if(lc.fat > 0 || lc.trans > 0) nLanc++;
+      real += lc.fat; atend += lc.trans; itens += _relItensLanc(v.id, ini, fim);
+    });
+
+    const meta = (Number(v.metaMes) || 0) * meses.length;
+    return {
+      id: v.id, nome: v.nome, loja: v.loja,
+      lojaNome: (LOJAS.find(l => l.id === v.loja)?.nome) || v.loja,
+      ativa: v.ativa !== false,
+      real, atend, itens, meta,
+      tm:  atend > 0 ? real/atend : 0,
+      pa:  atend > 0 ? itens/atend : 0,
+      pct: meta > 0 ? (real/meta)*100 : 0,
+      fonte: nCrm && nLanc ? 'misto' : nCrm ? 'crm' : nLanc ? 'lancamento' : null
+    };
+  }).filter(d => d.real > 0).sort((a,b) => b.real - a.real);
+};
+
+/**
+ * A semana. O cubo do CRM tem grão MENSAL — não há semana nele —, então
+ * este recorte vem do lançamento diário, e o bloco diz isso na tela para
+ * ninguém comparar com os rankings que saem da planilha.
+ * Mês corrente: de segunda até hoje. Mês fechado: a última semana dele.
+ */
+window._relBenchSemana = function(mesRef){
+  const hj = hoje();
+  let de, ate;
+  if(mesRef === hj.slice(0,7)){
+    const d = new Date(hj + 'T12:00:00');
+    const seg = new Date(d); seg.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const p = x => String(x).padStart(2,'0');
+    de  = seg.getFullYear() + '-' + p(seg.getMonth()+1) + '-' + p(seg.getDate());
+    ate = hj;
+  } else {
+    const [y, m] = mesRef.split('-').map(Number);
+    const ult = new Date(y, m, 0).getDate();
+    ate = mesRef + '-' + String(ult).padStart(2,'0');
+    de  = mesRef + '-' + String(Math.max(1, ult - 6)).padStart(2,'0');
+  }
+  return {de, ate};
+};
+
+window._relBenchSemanal = function(vends, de, ate){
+  return vends.map(v => {
+    const lc = window._histLancVend(v.id, de, ate);
+    const itens = _relItensLanc(v.id, de, ate);
+    return {
+      id: v.id, nome: v.nome, loja: v.loja,
+      lojaNome: (LOJAS.find(l => l.id === v.loja)?.nome) || v.loja,
+      real: lc.fat, atend: lc.trans, itens,
+      tm: lc.trans > 0 ? lc.fat/lc.trans : 0,
+      pa: lc.trans > 0 ? itens/lc.trans : 0
+    };
+  }).filter(d => d.real > 0).sort((a,b) => b.real - a.real);
+};
+
+window._relBenchInativos = window._relBenchInativos || false;
+window._relBenchToggleInativos = function(){
+  if(!isAdmin()){ showToast('Só o administrador vê inativos no ranking.','err'); return; }
+  window._relBenchInativos = !window._relBenchInativos;
+  renderRelatorios();
+};
+
 function _relBenchVends(){
-  const lojas = _relLojasVisiveis();
+  const lojas    = _relLojasVisiveis();
   const mesAtual = _relRef('benchvends');
-  const lojaIds = new Set(lojas.map(l=>l.id));
+  const ano      = mesAtual.slice(0,4);
+  const lojaIds  = new Set(lojas.map(l => l.id));
+  const verInativos = isAdmin() && window._relBenchInativos;
 
   const vends = (D.vendedoras || []).filter(v =>
-    lojaIds.has(v.loja) && v.ativa !== false && v.cargo !== 'VRLL'
+    lojaIds.has(v.loja) && v.cargo !== 'VRLL'
+    && (verInativos || v.ativa !== false)
   );
 
-  const dados = vends.map(v=>{
-    const real = calcVendPer(v.id, mesAtual);
-    let itens = 0, atend = 0;
-    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd])=>{
-      if(d.startsWith(mesAtual)){
-        itens += Number(vd.itens || 0);
-        const t = Number(vd.trans || 0);
-        atend += t > 0 ? t : ((Number(vd.val)||0) > 0 ? 1 : 0);
-      }
-    });
-    const tm = atend > 0 ? real/atend : 0;
-    const pa = atend > 0 ? itens/atend : 0;
-    const meta = Number(v.metaMes) || 0;
-    const pct = meta > 0 ? (real/meta)*100 : 0;
-    const lojaNome = LOJAS.find(l=>l.id===v.loja)?.nome || v.loja;
-    return { ...v, real, atend, tm, pa, meta, pct, lojaNome };
-  }).filter(d=>d.real > 0)
-    .sort((a,b)=>b.real - a.real)
-    .slice(0, 15);
+  const mensal  = window._relBenchApurar(vends, mesAtual, mesAtual);
+  const anual   = window._relBenchApurar(vends, ano + '-01', mesAtual);
+  const sem     = window._relBenchSemana(mesAtual);
+  const semanal = window._relBenchSemanal(vends, sem.de, sem.ate);
 
+  window._relBenchDados = {mesAtual, ano, mensal, anual, semanal,
+    semDe: sem.de, semAte: sem.ate, verInativos,
+    lojaNome: window._relLojaSel
+      ? ((LOJAS.find(l => l.id === window._relLojaSel)?.nome) || window._relLojaSel)
+      : 'Rede toda',
+    geradoEm: Date.now()};
+
+  const _esc = s => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const _pos = n => n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n + 'º';
+  const _corPct = p => p >= 100 ? 'var(--verde)' : p >= 70 ? 'var(--ouro)' : 'var(--verm)';
+  const _selo = f => f === 'crm' ? '<span title="Faturamento da planilha importada no CRM" style="font-size:8.5px;color:var(--azul);border:1px solid rgba(91,141,239,.4);border-radius:3px;padding:0 4px;margin-left:5px">PLANILHA</span>'
+    : f === 'lancamento' ? '<span title="Lançamento diário da loja" style="font-size:8.5px;color:var(--verde);border:1px solid rgba(46,204,135,.4);border-radius:3px;padding:0 4px;margin-left:5px">LANÇAMENTO</span>'
+    : f === 'misto' ? '<span title="Parte da planilha, parte do lançamento" style="font-size:8.5px;color:var(--ouro);border:1px solid rgba(201,168,76,.4);border-radius:3px;padding:0 4px;margin-left:5px">MISTO</span>'
+    : '';
+  const _inat = d => d.ativa === false
+    ? '<span style="font-size:8.5px;color:var(--laranja);margin-left:5px">INATIVO(A)</span>' : '';
 
-  const linhasHtml = dados.map((v,i)=>`
-    <tr>
-      <td>${_pos(i+1)}</td>
-      <td><strong>${v.nome}</strong><br><small style="color:var(--muted)">${v.lojaNome}</small></td>
-      <td class="num">${fmt(v.real)}</td>
-      <td class="num">${v.meta > 0 ? fmt(v.meta) : '--'}</td>
-      <td class="num" style="color:${v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)'};font-weight:600">${v.meta > 0 ? v.pct.toFixed(0)+'%' : '--'}</td>
-      <td class="num">${v.tm > 0 ? fmt(v.tm) : '--'}</td>
-      <td class="num">${v.pa > 0 ? fmtPA(v.pa) : '--'}</td>
-      <td class="num" style="color:var(--muted)">${v.atend > 0 ? v.atend.toLocaleString('pt-BR') : '--'}</td>
-    </tr>`).join('');
+  // ── Top 3 para divulgação ─────────────────────────────────────────
+  const podio = mensal.slice(0,3);
+  const cores = ['var(--ouro)','#B8B8C0','#C08457'];
+  const podioHtml = podio.length ? podio.map((v,i) => `
+    <div style="flex:1;min-width:190px;background:var(--card2);border:1px solid ${cores[i]};
+                border-radius:12px;padding:16px;text-align:center">
+      <div style="font-size:30px;line-height:1">${_pos(i+1)}</div>
+      <div style="font-size:15px;font-weight:700;margin-top:6px">${_esc(v.nome)}</div>
+      <div style="font-size:10.5px;color:var(--muted)">${_esc(v.lojaNome)}</div>
+      <div style="font-size:19px;font-weight:800;color:${cores[i]};margin-top:8px">${fmt(v.real)}</div>
+      ${v.meta > 0
+        ? `<div style="font-size:11px;color:${_corPct(v.pct)};font-weight:600">${v.pct.toFixed(0)}% da meta</div>`
+        : '<div style="font-size:11px;color:var(--muted)">sem meta cadastrada</div>'}
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">
+        ${v.atend > 0 ? v.atend.toLocaleString('pt-BR') + ' atend. · TM ' + fmt(v.tm) : '—'}</div>
+    </div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px;padding:16px">Ninguém com faturamento neste mês.</div>';
+
+  // ── Tabelas ───────────────────────────────────────────────────────
+  const tabelaMeta = (dados, vazio) => dados.length ? `
+    <div style="overflow-x:auto;margin-top:10px">
+      <table class="rel-tabela">
+        <thead><tr>
+          <th>POS.</th><th>VENDEDOR(A)</th><th class="num">REALIZADO</th>
+          <th class="num">META</th><th class="num">% META</th>
+          <th class="num">TICKET MÉDIO</th><th class="num">P.A.</th><th class="num">ATEND.</th>
+        </tr></thead>
+        <tbody>${dados.map((v,i) => `
+          <tr>
+            <td>${_pos(i+1)}</td>
+            <td><strong>${_esc(v.nome)}</strong>${_selo(v.fonte)}${_inat(v)}
+                <br><small style="color:var(--muted)">${_esc(v.lojaNome)}</small></td>
+            <td class="num">${fmt(v.real)}</td>
+            <td class="num">${v.meta > 0 ? fmt(v.meta) : '--'}</td>
+            <td class="num" style="color:${_corPct(v.pct)};font-weight:600">${v.meta > 0 ? v.pct.toFixed(0)+'%' : '--'}</td>
+            <td class="num">${v.tm > 0 ? fmt(v.tm) : '--'}</td>
+            <td class="num">${v.pa > 0 ? fmtPA(v.pa) : '--'}</td>
+            <td class="num" style="color:var(--muted)">${v.atend > 0 ? v.atend.toLocaleString('pt-BR') : '--'}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>`
+    : `<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">${vazio}</div>`;
+
+  const tabelaSemana = semanal.length ? `
+    <div style="overflow-x:auto;margin-top:10px">
+      <table class="rel-tabela">
+        <thead><tr>
+          <th>POS.</th><th>VENDEDOR(A)</th><th class="num">REALIZADO</th>
+          <th class="num">TICKET MÉDIO</th><th class="num">P.A.</th><th class="num">ATEND.</th>
+        </tr></thead>
+        <tbody>${semanal.map((v,i) => `
+          <tr>
+            <td>${_pos(i+1)}</td>
+            <td><strong>${_esc(v.nome)}</strong>
+                <br><small style="color:var(--muted)">${_esc(v.lojaNome)}</small></td>
+            <td class="num">${fmt(v.real)}</td>
+            <td class="num">${v.tm > 0 ? fmt(v.tm) : '--'}</td>
+            <td class="num">${v.pa > 0 ? fmtPA(v.pa) : '--'}</td>
+            <td class="num" style="color:var(--muted)">${v.atend > 0 ? v.atend.toLocaleString('pt-BR') : '--'}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>`
+    : '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'Nenhum lançamento diário nesta semana.</div>';
+
+  const btn = 'background:var(--cinza);border:1px solid var(--borda);border-radius:8px;'
+            + 'padding:7px 12px;color:var(--texto);font-size:11.5px;cursor:pointer';
+  const botaoInativos = isAdmin()
+    ? `<button onclick="window._relBenchToggleInativos()" style="${btn}${
+        verInativos ? ';border-color:var(--laranja);color:var(--laranja)' : ''}">
+         ${verInativos ? '☑' : '☐'} Incluir inativos(as)</button>`
+    : '';
+  const _dt = x => x.split('-').reverse().join('/');
 
   return _relBarra('benchvends', {}) + `
     <div class="sc">
-      <div class="st">👥 Benchmark entre Vendedor(es) — Top 15 de ${_relMesLabel(mesAtual)}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">Ordenado por faturamento no mês. Só vendedor(es) com lançamentos.</div>
-      <div style="overflow-x:auto;margin-top:12px">
-        <table class="rel-tabela">
-          <thead><tr>
-            <th>POS.</th>
-            <th>VENDEDOR(A)</th>
-            <th class="num">REALIZADO</th>
-            <th class="num">META</th>
-            <th class="num">% META</th>
-            <th class="num">TICKET MÉDIO</th>
-            <th class="num">P.A.</th>
-            <th class="num">ATEND.</th>
-          </tr></thead>
-          <tbody>${linhasHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Nenhum(a) vendedor(a) com lançamentos neste mês.</td></tr>'}</tbody>
-        </table>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+        <div class="st">🏆 Top 3 para divulgação — ${_relMesLabel(mesAtual)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${botaoInativos}
+          <button onclick="window.relBenchVendsCSV()" style="${btn}">📊 Excel</button>
+          <button onclick="window.relBenchVendsPDF()" style="${btn}">📄 PDF</button>
+        </div>
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Realizado das planilhas importadas no CRM quando o mês está lá; lançamento diário
+        quando não. Metas sempre as cadastradas pelo administrador.
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">${podioHtml}</div>
+    </div>
+
+    <div class="sc" style="margin-top:12px">
+      <div class="st">📅 Ranking mensal — ${_relMesLabel(mesAtual)}</div>
+      ${tabelaMeta(mensal, 'Ninguém com faturamento neste mês.')}
+    </div>
+
+    <div class="sc" style="margin-top:12px">
+      <div class="st">🗓️ Ranking anual — ${ano} (jan até ${_relMesLabel(mesAtual)})</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Meta do ano = meta mensal cadastrada × nº de meses do período.</div>
+      ${tabelaMeta(anual, 'Ninguém com faturamento neste ano.')}
+    </div>
+
+    <div class="sc" style="margin-top:12px">
+      <div class="st">📆 Ranking semanal — ${_dt(sem.de)} a ${_dt(sem.ate)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        <strong>Só lançamento diário.</strong> A planilha do CRM é mensal — não existe
+        semana nela —, então este recorte não pode vir dali e não é comparável com os
+        rankings acima quando o mês veio da planilha. Sem meta: a meta cadastrada é
+        mensal, e rateá-la por semana seria um número inventado.
+      </div>
+      ${tabelaSemana}
     </div>
   `;
 }
+
+// ── Exportações do benchmark de vendedor(es) ──────────────────────────
+function _relBenchPronto(){
+  const d = window._relBenchDados;
+  if(!d || (!d.mensal.length && !d.anual.length && !d.semanal.length)){
+    showToast('Abra o benchmark antes de exportar.','err');
+    return null;
+  }
+  return d;
+}
+
+window.relBenchVendsCSV = function(){
+  const d = _relBenchPronto(); if(!d) return;
+  // Ponto e vírgula + vírgula decimal: é o que o Excel em português abre
+  // sem perguntar nada.
+  const n2  = v => (Number(v)||0).toFixed(2).replace('.', ',');
+  const asp = s => '"' + String(s == null ? '' : s).replace(/"/g,'""') + '"';
+  const fon = f => f === 'crm' ? 'Planilha (CRM)' : f === 'lancamento' ? 'Lançamento'
+            : f === 'misto' ? 'Misto' : '';
+  const L = [];
+  L.push('BENCHMARK DE VENDEDOR(ES) — AVATIM / MonAris');
+  L.push('Mês;' + _relMesLabel(d.mesAtual));
+  L.push('Loja;' + d.lojaNome);
+  L.push('Inativos(as);' + (d.verInativos ? 'incluídos' : 'fora'));
+  L.push('Gerado em;' + new Date(d.geradoEm).toLocaleString('pt-BR'));
+  L.push('');
+  L.push('TOP 3 PARA DIVULGAÇÃO');
+  L.push('Posição;Vendedor(a);Loja;Realizado;% Meta');
+  d.mensal.slice(0,3).forEach((v,i) => L.push([i+1, asp(v.nome), asp(v.lojaNome),
+    n2(v.real), v.meta > 0 ? n2(v.pct) : ''].join(';')));
+
+  const bloco = (titulo, dados, comMeta) => {
+    L.push('');
+    L.push(titulo);
+    L.push(comMeta
+      ? 'Posição;Vendedor(a);Loja;Situação;Fonte;Realizado;Meta;% Meta;Ticket médio;P.A.;Atendimentos'
+      : 'Posição;Vendedor(a);Loja;Realizado;Ticket médio;P.A.;Atendimentos');
+    dados.forEach((v,i) => L.push(comMeta
+      ? [i+1, asp(v.nome), asp(v.lojaNome), v.ativa === false ? 'Inativo(a)' : 'Ativo(a)',
+         asp(fon(v.fonte)), n2(v.real), n2(v.meta), v.meta > 0 ? n2(v.pct) : '',
+         n2(v.tm), n2(v.pa), v.atend].join(';')
+      : [i+1, asp(v.nome), asp(v.lojaNome), n2(v.real), n2(v.tm), n2(v.pa), v.atend].join(';')));
+  };
+  bloco('RANKING MENSAL — ' + _relMesLabel(d.mesAtual), d.mensal, true);
+  bloco('RANKING ANUAL — ' + d.ano + ' (jan a ' + _relMesLabel(d.mesAtual) + ')', d.anual, true);
+  bloco('RANKING SEMANAL — ' + d.semDe.split('-').reverse().join('/') + ' a '
+        + d.semAte.split('-').reverse().join('/') + ' (só lançamento diário)', d.semanal, false);
+
+  // BOM: sem ele o Excel no Windows lê os acentos errado.
+  downloadCSV('﻿' + L.join('\r\n'), 'benchmark-vendedores-' + d.mesAtual + '.csv');
+  showToast('CSV exportado — o Excel abre direto.','ok');
+};
+
+window.relBenchVendsPDF = function(){
+  const d = _relBenchPronto(); if(!d) return;
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const fon = f => f === 'crm' ? 'Planilha' : f === 'lancamento' ? 'Lançamento'
+            : f === 'misto' ? 'Misto' : '—';
+  const pos = n => n + 'º';
+
+  const linhasMeta = dados => dados.map((v,i) =>
+    '<tr><td class="n">'+pos(i+1)+'</td><td>'+esc(v.nome)
+    + (v.ativa === false ? ' <em>(inativo(a))</em>' : '') + '</td>'
+    + '<td>'+esc(v.lojaNome)+'</td><td>'+fon(v.fonte)+'</td>'
+    + '<td class="n">'+fmt(v.real)+'</td>'
+    + '<td class="n">'+(v.meta>0?fmt(v.meta):'—')+'</td>'
+    + '<td class="n">'+(v.meta>0?v.pct.toFixed(1)+'%':'—')+'</td>'
+    + '<td class="n">'+(v.tm>0?fmt(v.tm):'—')+'</td>'
+    + '<td class="n">'+(v.atend||'—')+'</td></tr>').join('');
+
+  const linhasSem = d.semanal.map((v,i) =>
+    '<tr><td class="n">'+pos(i+1)+'</td><td>'+esc(v.nome)+'</td>'
+    + '<td>'+esc(v.lojaNome)+'</td>'
+    + '<td class="n">'+fmt(v.real)+'</td>'
+    + '<td class="n">'+(v.tm>0?fmt(v.tm):'—')+'</td>'
+    + '<td class="n">'+(v.atend||'—')+'</td></tr>').join('');
+
+  const podio = d.mensal.slice(0,3).map((v,i) =>
+    '<div class="p"><div class="pn">'+pos(i+1)+'</div><div class="pv">'+esc(v.nome)+'</div>'
+    + '<div class="pl">'+esc(v.lojaNome)+'</div><div class="pf">'+fmt(v.real)+'</div>'
+    + '<div class="pm">'+(v.meta>0?v.pct.toFixed(0)+'% da meta':'sem meta cadastrada')+'</div></div>').join('');
+
+  const win = window.open('', '_blank', 'width=1000,height=720');
+  if(!win){ showToast('O navegador bloqueou a janela. Libere pop-ups para este site.','err'); return; }
+  const cab = '<tr><th>Pos.</th><th>Vendedor(a)</th><th>Loja</th><th>Fonte</th>'
+            + '<th class="n">Realizado</th><th class="n">Meta</th><th class="n">% Meta</th>'
+            + '<th class="n">Ticket médio</th><th class="n">Atend.</th></tr>';
+  win.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    + '<title>Avatim — Benchmark de Vendedor(es)</title><style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:26px;font-size:11px;line-height:1.4}'
+    + '.logo{font-size:20px;font-weight:900;letter-spacing:1px}.logo span{color:#C9A84C}'
+    + '.sub{font-size:11px;color:#666}'
+    + '.periodo{font-size:11px;color:#555;border-bottom:2px solid #C9A84C;padding-bottom:8px;margin:6px 0 16px;font-weight:600}'
+    + 'h2{font-size:11px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:1px;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #eee}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:10px}'
+    + 'th{background:#f5f3ea;color:#444;font-weight:700;padding:6px 7px;text-align:left;border-bottom:2px solid #ddd;font-size:9.5px;text-transform:uppercase}'
+    + 'td{padding:5px 7px;border-bottom:1px solid #f0f0f0}.n{text-align:right}'
+    + 'tr:nth-child(even) td{background:#fafaf7}'
+    + '.podio{display:flex;gap:10px;margin:10px 0 4px}'
+    + '.p{flex:1;border:1px solid #C9A84C;border-radius:8px;padding:12px;text-align:center}'
+    + '.pn{font-size:16px;font-weight:900;color:#C9A84C}.pv{font-size:13px;font-weight:700;margin-top:3px}'
+    + '.pl{font-size:10px;color:#777}.pf{font-size:15px;font-weight:800;margin-top:5px}'
+    + '.pm{font-size:10px;color:#555}'
+    + '.nota{font-size:9.5px;color:#888;margin-top:6px;line-height:1.5}'
+    + '.footer{margin-top:20px;font-size:9px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:8px}'
+    + '@media print{body{padding:12px}}'
+    + '</style></head><body>'
+    + '<div class="logo">AVATIM<span> / MonAris</span></div>'
+    + '<div class="sub">Benchmark de Vendedor(es)</div>'
+    + '<div class="periodo">' + esc(d.lojaNome) + ' · ' + _relMesLabel(d.mesAtual)
+    + ' · inativos(as) ' + (d.verInativos ? 'incluídos' : 'fora') + '</div>'
+    + '<h2>Top 3 para divulgação</h2><div class="podio">' + (podio || '<div class="p">—</div>') + '</div>'
+    + '<h2>Ranking mensal — ' + _relMesLabel(d.mesAtual) + '</h2>'
+    + '<table><thead>' + cab + '</thead><tbody>' + (linhasMeta(d.mensal)
+        || '<tr><td colspan="9">Ninguém com faturamento neste mês.</td></tr>') + '</tbody></table>'
+    + '<h2>Ranking anual — ' + d.ano + '</h2>'
+    + '<table><thead>' + cab + '</thead><tbody>' + (linhasMeta(d.anual)
+        || '<tr><td colspan="9">Ninguém com faturamento neste ano.</td></tr>') + '</tbody></table>'
+    + '<h2>Ranking semanal — ' + d.semDe.split('-').reverse().join('/') + ' a '
+        + d.semAte.split('-').reverse().join('/') + '</h2>'
+    + '<table><thead><tr><th>Pos.</th><th>Vendedor(a)</th><th>Loja</th>'
+        + '<th class="n">Realizado</th><th class="n">Ticket médio</th><th class="n">Atend.</th>'
+        + '</tr></thead><tbody>' + (linhasSem
+        || '<tr><td colspan="6">Nenhum lançamento diário nesta semana.</td></tr>') + '</tbody></table>'
+    + '<div class="nota">Realizado das planilhas importadas no CRM quando o mês está lá; '
+    + 'lançamento diário quando não. Metas sempre as cadastradas pelo administrador. '
+    + 'O ranking semanal sai apenas do lançamento diário — a planilha do CRM é mensal.</div>'
+    + '<div class="footer">Gerado em ' + new Date(d.geradoEm).toLocaleString('pt-BR') + '</div>'
+    + '</body></html>');
+  win.document.close();
+  setTimeout(() => { try{ win.focus(); win.print(); }catch(e){} }, 400);
+};
 
 // ══════════════════════════════════════════════════════════════════════
 // 6. ÍNDICE GERAL DE PERFORMANCE (IGP) — score composto 0-100
@@ -27148,51 +27750,72 @@ function _relProjecao(){
     // Ritmo atual
     const mediaAtual = dp > 0 ? real / dp : 0;
     const projAtu    = real + (mediaAtual * dr);
-    // Cenário conservador: 90% do ritmo atual
-    const projConservador = real + (mediaAtual * 0.9 * dr);
-    // Cenário otimista: 115% do ritmo (esforço extra)
-    const projOtimista    = real + (mediaAtual * 1.15 * dr);
+    // [R143] "Otimista" era o nome de um CENÁRIO, e virava rótulo de
+    // resultado: uma loja projetada a 72% da meta aparecia sob a coluna
+    // OTIMISTA, como se 72% fosse uma boa notícia. O cenário de 90% do
+    // ritmo saiu — dizia pouco e ocupava a linha toda. Ficam o ritmo
+    // mantido e o ritmo acelerado, com o status dito por extenso.
+    const projAcelerada   = real + (mediaAtual * 1.15 * dr);
     // Necessário/dia para bater meta
     const necessario = dr > 0 ? Math.max(0, meta - real) / dr : 0;
-    // % da meta em cada cenário
-    const pctAtu = meta > 0 ? (projAtu/meta)*100 : 0;
-    const pctCons= meta > 0 ? (projConservador/meta)*100 : 0;
-    const pctOtim= meta > 0 ? (projOtimista/meta)*100 : 0;
-    return { loja:l.nome, meta, real, dp, dr, du, mediaAtual, projAtu, projConservador, projOtimista, necessario, pctAtu, pctCons, pctOtim };
+    const pctAtu  = meta > 0 ? (projAtu/meta)*100 : 0;
+    const pctAcel = meta > 0 ? (projAcelerada/meta)*100 : 0;
+    return { loja:l.nome, meta, real, dp, dr, du, mediaAtual, projAtu, projAcelerada,
+             necessario, pctAtu, pctAcel, origem: _relReal(l.id, mesAtual).origem };
   });
 
   const _corPct = p => p >= 100 ? 'var(--verde)' : p >= 90 ? 'var(--ouro)' : 'var(--verm)';
 
-  const linhasHtml = linhas.map(r=>`
+  /**
+   * [R143] O status diz o que vai acontecer, em palavras.
+   * Sem meta não há status: escrever "abaixo" quando ninguém definiu alvo
+   * seria inventar uma cobrança.
+   */
+  const _status = r => {
+    if(!(r.meta > 0))     return {txt:'Sem meta definida', cor:'var(--muted)'};
+    if(r.pctAtu >= 100)   return {txt:'Atinge a meta',     cor:'var(--verde)'};
+    if(r.pctAcel >= 100)  return {txt:'Atinge só acelerando', cor:'var(--ouro)'};
+    if(r.pctAtu >= 90)    return {txt:'Fica perto da meta', cor:'var(--ouro)'};
+    return {txt:'Fica abaixo da meta', cor:'var(--verm)'};
+  };
+
+  const linhasHtml = linhas.map(r=>{
+    const st = _status(r);
+    return `
     <tr>
-      <td><strong>${r.loja}</strong></td>
+      <td><strong>${r.loja}</strong>${r.origem === 'crm'
+        ? '<br><small style="color:var(--azul);font-size:9px">planilha CRM</small>' : ''}</td>
       <td class="num">${r.meta > 0 ? fmt(r.meta) : '--'}</td>
-      <td class="num">${r.real > 0 ? fmt(r.real) : '--'} <small style="color:var(--muted)">(${r.dp}d)</small></td>
-      <td class="num">${fmt(r.necessario)}<br><small style="color:var(--muted)">${r.dr} dias</small></td>
-      <td class="num" style="color:var(--verm)">${fmt(r.projConservador)}<br><small style="color:${_corPct(r.pctCons)}">${r.pctCons.toFixed(0)}%</small></td>
-      <td class="num" style="color:var(--azul)">${fmt(r.projAtu)}<br><small style="color:${_corPct(r.pctAtu)}">${r.pctAtu.toFixed(0)}%</small></td>
-      <td class="num" style="color:var(--verde)">${fmt(r.projOtimista)}<br><small style="color:${_corPct(r.pctOtim)}">${r.pctOtim.toFixed(0)}%</small></td>
-    </tr>`).join('');
+      <td class="num" style="color:var(--azul)">${fmt(r.projAtu)}
+        <br><small style="color:${_corPct(r.pctAtu)}">${r.meta > 0 ? r.pctAtu.toFixed(0)+'% da meta' : '—'}</small>
+        <br><small style="color:var(--muted)">${fmt(r.real)} em ${r.dp}d</small></td>
+      <td style="color:${st.cor};font-weight:600">${st.txt}
+        ${r.meta > 0 && r.dr > 0 && r.necessario > 0
+          ? '<br><small style="color:var(--muted);font-weight:400">faltam '
+            + fmt(r.necessario) + '/dia em ' + r.dr + ' dias</small>' : ''}</td>
+      <td class="num" style="color:var(--verde)">${fmt(r.projAcelerada)}
+        <br><small style="color:${_corPct(r.pctAcel)}">${r.meta > 0 ? r.pctAcel.toFixed(0)+'% da meta' : '—'}</small></td>
+    </tr>`;
+  }).join('');
 
   return _relBarra('projecao', {}) + `
     <div class="sc">
       <div class="st">🎯 Projeção de Metas — ${_relMesLabel(mesAtual)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
-        Três cenários baseados no ritmo atual: <span style="color:var(--verm)">Conservador</span> (90% do ritmo),
-        <span style="color:var(--azul)">Atual</span> (ritmo mantido),
-        <span style="color:var(--verde)">Otimista</span> (115% do ritmo).
-        <strong>Necessário/dia</strong> é o quanto falta dividido pelos dias úteis restantes.
+        <strong>Projeção de Ritmo</strong>: onde a loja chega mantendo a média diária até aqui.
+        <strong>Projeção com Aceleração</strong>: o mesmo ritmo 15% mais forte no que resta do mês.
+        O <strong>status</strong> é o desfecho da projeção de ritmo — nenhuma coluna chama de
+        otimista um número que fica abaixo da meta. Realizado das planilhas do CRM quando o mês
+        está importado; metas sempre as cadastradas pelo administrador.
       </div>
       <div style="overflow-x:auto;margin-top:12px">
         <table class="rel-tabela">
           <thead><tr>
             <th>LOJA</th>
             <th class="num">META</th>
-            <th class="num">REALIZADO</th>
-            <th class="num">NECESSÁRIO/DIA</th>
-            <th class="num">CONSERVADOR</th>
-            <th class="num">ATUAL</th>
-            <th class="num">OTIMISTA</th>
+            <th class="num">PROJEÇÃO DE RITMO</th>
+            <th>STATUS PROJETADO</th>
+            <th class="num">PROJEÇÃO COM ACELERAÇÃO</th>
           </tr></thead>
           <tbody>${linhasHtml}</tbody>
         </table>
@@ -33616,11 +34239,20 @@ window.excelRender = function(){
 
   const sub = document.getElementById('excel-subtitulo');
   if(sub){
-    sub.textContent = v.linhas
-      ? v.linhas.toLocaleString('pt-BR') + ' linhas analisadas · '
-        + (v.periodo.ini ? v.periodo.ini.split('-').reverse().join('/') : '?') + ' a '
-        + (v.periodo.fim ? v.periodo.fim.split('-').reverse().join('/') : '?')
-      : 'Análise da base de clientes por vendedora, produto e recência';
+    // [R143] A frase tem de descrever o RECORTE na tela, não o cubo.
+    // Com mês ou vendedor(a) filtrados não há contagem de linhas confiável
+    // (o cubo conta por ano), então mostra-se o que de fato foi apurado.
+    const _per = (v.periodoRecorte && v.periodoRecorte.ini) ? v.periodoRecorte : (v.periodo||{});
+    const _dt  = x => x ? x.split('-').reverse().join('/') : '?';
+    const _faixa = _dt(_per.ini) + ' a ' + _dt(_per.fim);
+    if(v.linhasNoRecorte){
+      sub.textContent = v.linhasNoRecorte.toLocaleString('pt-BR') + ' linhas analisadas · ' + _faixa;
+    } else if(v.faturamento > 0 || v.cupons > 0){
+      sub.textContent = (v.cupons||0).toLocaleString('pt-BR') + ' atendimentos · '
+        + fmt(v.faturamento||0) + ' · ' + _faixa;
+    } else {
+      sub.textContent = 'Análise da base de clientes por vendedora, produto e recência';
+    }
   }
 };
 
