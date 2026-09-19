@@ -5427,7 +5427,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-19e';
+window.AVATIM_BUILD = '2026-09-19h';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5748,6 +5748,10 @@ window.AVATIM_RECURSOS = {
                             && /_soLocal/.test(String(window.crmCarregar))
                             && /_crmSoLocal/.test(String(window.crmCarregar)),
   // [R143] o recorte na tela do CRM deixa de ser descrito pelo cubo inteiro
+  // [R149] inativos olham a base inteira, não o ano selecionado
+  crmInativosTodosAnos:  () => typeof window.crmClientesTodosAnos === 'function'
+                            && typeof _crmRenderInativos === 'function'
+                            && /crmClientesTodosAnos/.test(window._semComentarios(_crmRenderInativos)),
   crmRecorteHonesto:     () => typeof window.crmFiltrar === 'function'
                             && /linhasNoRecorte/.test(String(window.crmFiltrar)),
   // [R143] benchmark de vendedor(es) lê a planilha e exporta
@@ -5766,7 +5770,11 @@ window.AVATIM_RECURSOS = {
                                  .test(window._semComentarios(window._relBenchApurar)),
   // [R144] a meta do ranking é a do mês escolhido, não a do cadastro de hoje
   benchMetaDoMesEscolhido: () => typeof window._relBenchApurar === 'function'
-                            && /metaVendPorDias/.test(String(window._relBenchApurar)),
+                            && /metaVendDoMes/.test(String(window._relBenchApurar)),
+  // [R148] meta de vendedor(a) passa a ter mês
+  metaVendPorMes:        () => typeof window.metaVendDoMes === 'function'
+                            && typeof window.setMetaVendDoMes === 'function'
+                            && typeof window.vendsDoMesMeta === 'function',
   // [R144] arquivar não apaga o realizado
   // Comentário explica por que vendsAtivas saiu daqui — por isso a
   // conferência é no CÓDIGO sem comentários, não no texto do arquivo.
@@ -5781,10 +5789,24 @@ window.AVATIM_RECURSOS = {
                             && /_metasEditadasAqui/.test(String(window.mergeMetasLoja))
                             && typeof window._marcarMetaEditada === 'function',
   // [R144] sem acesso ou sem rede não é documento corrompido
-  leituraSemAcessoNaoAlarma: () => typeof window.fsCarregar === 'function'
-                            && /permission-denied/.test(window._semComentarios(window.fsCarregar))
-                            && window._semComentarios(window.fsCarregar).indexOf('_semAcesso')
-                               < window._semComentarios(window.fsCarregar).indexOf('documento em grava'),
+  // [R150] NÃO inspecionar window.fsCarregar: quando o Firebase não carrega,
+  // o catch do boot a substitui por `async ()=>null`, e a conferência passa a
+  // examinar um coto. Era uma CORRIDA — passava ou falhava conforme o import
+  // demorasse mais ou menos que o teste, e falha intermitente ensina a
+  // ignorar o resultado. O texto do <script> não é trocado em tempo de
+  // execução. Agulhas concatenadas para não casar com o próprio harness
+  // injetado neste mesmo documento (a armadilha do R135).
+  leituraSemAcessoNaoAlarma: () => {
+    const h = document.documentElement.innerHTML;
+    const iAcesso = h.indexOf('_sem' + 'Acesso');
+    // Agulha exclusiva da LINHA EXECUTÁVEL: "documento em gravação ou"
+    // aparece também no comentário logo acima dela, e o comentário vem
+    // primeiro — comparar posições com ele daria sempre falso.
+    const iAlerta = h.indexOf('servidor agora (documento' + ' em grava');
+    return h.indexOf('permission-' + 'denied') > -1
+        && h.indexOf('_des' + 'logado') > -1
+        && iAcesso > -1 && iAlerta > iAcesso;
+  },
   // [R143] calendário para escolher mês fora da lista de meses com dado
   relCalendarioMes:      () => typeof _relBarra === 'function'
                             && /type="month"/.test(String(_relBarra)),
@@ -11141,6 +11163,80 @@ function metaDiaLojaBase(lid, mesRef){
   return dias > 0 ? metaMes / dias : 0;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// [R148] META DE VENDEDOR(A) POR MÊS.
+//
+// v.metaMes é um campo ÚNICO — não tem dimensão de mês. Gravado em 5
+// lugares, lido em 68. Quem navegava até março, digitava as metas da
+// equipe e salvava, escrevia no MESMO campo que setembro usa: ao voltar,
+// encontrava as metas de março. Cada mês sobrescrevia todos os outros, em
+// silêncio, e o histórico de metas por pessoa nunca existiu de verdade.
+//
+// A meta da LOJA sempre foi por mês (D.metasLoja[loja][mês]) e está
+// correta; era só a individual que faltava.
+//
+// v.metasMes = { 'AAAA-MM': {mes, superMes} }. O campo antigo continua
+// existindo e valendo para o MÊS CORRENTE — é o que mantém os 68
+// leitores funcionando sem tocar em nenhum deles.
+// ══════════════════════════════════════════════════════════════════════
+window.metaVendDoMes = function(vendId, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return 0;
+  mesRef = mesRef || (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const pm = v.metasMes && v.metasMes[mesRef];
+  if(pm && Number(pm.mes) > 0) return Number(pm.mes);
+  // Legado: o campo único não sabe de que mês é. Só pode responder pelo
+  // corrente; para os demais, "não cadastrado" é a resposta honesta.
+  if(mesRef === mesAtual()) return Number(v.metaMes) || 0;
+  return 0;
+};
+window.superMetaVendDoMes = function(vendId, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vendId);
+  if(!v) return 0;
+  mesRef = mesRef || (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const pm = v.metasMes && v.metasMes[mesRef];
+  if(pm && Number(pm.superMes) > 0) return Number(pm.superMes);
+  if(mesRef === mesAtual()) return Number(v.superMetaMes) || 0;
+  return 0;
+};
+/** Grava a meta do mês. Só espelha no campo antigo quando é o mês corrente. */
+window.setMetaVendDoMes = function(vendId, mesRef, valor, superValor){
+  const i = (D.vendedoras||[]).findIndex(x => x.id === vendId);
+  if(i < 0 || !/^\d{4}-\d{2}$/.test(String(mesRef||''))) return false;
+  const v = D.vendedoras[i];
+  if(!v.metasMes || typeof v.metasMes !== 'object') v.metasMes = {};
+  const mes = Number(valor) || 0;
+  const sup = Number(superValor) || Math.round(mes * 1.255);
+  if(mes > 0) v.metasMes[mesRef] = {mes, superMes: sup};
+  else delete v.metasMes[mesRef];   // campo limpo = não cadastrado
+  if(mesRef === mesAtual()){ v.metaMes = mes; v.superMetaMes = sup; }
+  v._savedAt = Date.now();
+  return true;
+};
+
+/**
+ * [R148] Quem deve aparecer na tela de metas de um mês.
+ *
+ * Mês corrente: só os ativos — arquivar continua valendo para o dia a dia.
+ * Mês passado: quem importava NAQUELE mês — tem meta registrada nele, ou
+ * vendeu nele — mesmo estando arquivado(a) hoje. Sem isto, cadastrar a
+ * meta de janeiro exigiria desarquivar a equipe de janeiro e rearquivar
+ * depois, em sete lojas, com risco de deixar alguém solto no ranking atual.
+ */
+window.vendsDoMesMeta = function(lid, mesRef){
+  mesRef = mesRef || mesAtual();
+  const reais = (typeof vendsReais === 'function' ? vendsReais(lid) : [])
+                  .filter(v => v.cargo !== 'VRLL');
+  if(mesRef === mesAtual()) return reais.filter(v => v.ativa !== false);
+  return reais.filter(v => {
+    if(v.ativa !== false) return true;                       // ativo hoje
+    if(v.metasMes && Number((v.metasMes[mesRef]||{}).mes) > 0) return true;
+    const dias = (D.vendasVend||{})[v.id] || {};
+    return Object.keys(dias).some(d => d.startsWith(mesRef)
+             && ((Number(dias[d].val)||0) > 0 || (Number(dias[d].trans)||0) > 0));
+  });
+};
+
 /** Meta individual proporcional aos dias trabalhados. */
 function metaVendPorDias(vendId, mesRef){
   const v = (D.vendedoras||[]).find(x => x.id === vendId);
@@ -15067,14 +15163,20 @@ function salvarVend(){
   const metaMesAuto = metaLoja.mes>0 ? parseFloat((metaLoja.mes/novoTotal).toFixed(2)) : 0;
   const superMetaMesAuto = metaLoja.superMes>0 ? parseFloat((metaLoja.superMes/novoTotal).toFixed(2)) : parseFloat((metaMesAuto*1.255).toFixed(2));
   // Redistribuir entre as existentes
+  // [R148] Cadastrar alguém redistribui a meta DO MÊS CORRENTE. Mexer nos
+  // meses passados aqui reescreveria história por causa de uma contratação.
+  const _mrNovo = mesAtual();
   if(metaMesAuto>0){
     vendsAtual.forEach(v=>{
-      const i=D.vendedoras.findIndex(x=>x.id===v.id);
-      if(i!==-1){D.vendedoras[i].metaMes=metaMesAuto;D.vendedoras[i].superMetaMes=superMetaMesAuto;}
+      window.setMetaVendDoMes(v.id, _mrNovo, metaMesAuto, superMetaMesAuto);
     });
   }
   // Cadastrar nova vendedora já com a meta proporcional
-  D.vendedoras.push({id:"v"+Date.now(),nome,loja:lid,metaMes:metaMesAuto,superMetaMes:superMetaMesAuto,cargo});
+  const _idNovo = "v"+Date.now();
+  D.vendedoras.push({id:_idNovo,nome,loja:lid,metaMes:metaMesAuto,
+                     superMetaMes:superMetaMesAuto,cargo,
+                     metasMes: metaMesAuto>0
+                       ? {[_mrNovo]:{mes:metaMesAuto, superMes:superMetaMesAuto}} : {}});
   save();
   const msg=metaMesAuto>0
     ? "✅ "+nome+" cadastrada! Meta: "+fmt(metaMesAuto)+" ("+novoTotal+"x vendedoras)"
@@ -18893,11 +18995,15 @@ function calcPrevLoja(lid){
 }
 function salvarMetasVendedoras(lid){
   console.log("[salvarMetasVendedoras] INICIO", {lid});
-  // [FIX] vendsAtivas: mesmo filtro do form de renderização
-  // Arquivadas não aparecem no form, não devem ter metas editadas
-  const vends=vendsAtivas(lid);
   // [R123] O mês exibido é a chave dos dias trabalhados: eles variam mês a mês.
   const _mrSalvar = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  // [R148] Ler os MESMOS vendedores que o formulário desenhou: num mês
+  // passado ele lista também quem estava ativo então, inclusive arquivados.
+  // Ler menos do que se mostra é perder em silêncio o que o admin digitou.
+  // A declaração de _mrSalvar vem ANTES desta linha de propósito: `const`
+  // usada acima da própria declaração é zona morta temporal, e um
+  // ReferenceError aqui mataria o resto do bloco (foi o defeito do R145).
+  const vends=window.vendsDoMesMeta(lid, _mrSalvar);
   let n=0, somaMes=0, somaSmes=0;
   vends.forEach(v=>{
     const mesEl=document.getElementById("mv-mes-"+v.id);
@@ -18918,8 +19024,10 @@ function salvarMetasVendedoras(lid){
     const inativ=parseInt(inativEl?.value)||0;
     const i=D.vendedoras.findIndex(x=>x.id===v.id);
     if(i!==-1){
-      D.vendedoras[i].metaMes=mes;
-      D.vendedoras[i].superMetaMes=smes;
+      // [R148] Grava no MÊS exibido. setMetaVendDoMes espelha no campo
+      // antigo só quando o mês é o corrente — é isso que impede março de
+      // sobrescrever setembro.
+      window.setMetaVendDoMes(v.id, _mrSalvar, mes, smes);
       D.vendedoras[i].ticketAlvo=ticket;
       D.vendedoras[i].metaAniv=aniv;
       D.vendedoras[i].metaInativ=inativ;
@@ -19059,9 +19167,13 @@ window.redistribuirPorDiasTrab = function(lid){
 };
 
 function renderMetasVendSection(lid){
-  // [FIX] vendsAtivas exclui vendedoras arquivadas (ativa===false)
-  // Arquivadas não devem aparecer para receber novas metas
-  const vends=vendsAtivas(lid);
+  // [R148] vendsDoMesMeta: no mês corrente só os ativos; num mês passado,
+  // também quem tinha meta ou vendeu NAQUELE mês, ainda que arquivado(a)
+  // hoje. Sem isto, cadastrar janeiro exigiria desarquivar a equipe de
+  // janeiro e rearquivar depois, loja por loja — em sete lojas.
+
+  const _mrForm = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const vends = window.vendsDoMesMeta(lid, _mrForm);
   if(!vends.length) return "";
   // [R118] Base do rateio, visível: sem ver a meta diária da loja o usuário
   // não tem como conferir se a meta individual saiu certa.
@@ -19094,7 +19206,10 @@ function renderMetasVendSection(lid){
     <div style="background:var(--card2);border:1px solid var(--borda);border-radius:8px;padding:10px 12px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div>
-          <div style="font-size:12px;font-weight:700;color:var(--texto)">${v.nome}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--texto)">${v.nome}${
+            v.ativa === false
+              ? '<span style="font-size:8.5px;color:var(--laranja);margin-left:6px" title="Arquivado(a) hoje, mas aparece aqui porque teve meta ou venda neste mês — edite sem precisar desarquivar">ARQUIVADO(A)</span>'
+              : ''}</div>
           <div style="font-size:9px;color:var(--muted)">Acumulado: ${fmt(calcAcumVend(v.id))}</div>
         </div>
         <div style="font-size:10px;color:var(--muted);background:var(--cinza);padding:3px 8px;border-radius:10px">${v.cargo||'ESP'}</div>
@@ -19110,7 +19225,7 @@ function renderMetasVendSection(lid){
         </div>
         <div>
           <div style="font-size:8px;color:var(--ouro);font-weight:600;margin-bottom:3px">META MÊS (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${v.metaMes||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
+          <input type="text" inputmode="decimal" id="mv-mes-${v.id}" value="${window.metaVendDoMes(v.id, _mrDias)||''}" oninput="this.dataset.manual='1'" placeholder="Ex: 48000"
             style="width:100%;background:var(--cinza);border:1px solid rgba(201,168,76,.3);border-radius:5px;padding:6px 8px;color:var(--texto);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--ouro)'" onblur="this.style.borderColor='rgba(201,168,76,.3)'">
         </div>
@@ -19210,7 +19325,8 @@ function salvarMetaLoja(lid){
   // ── Salvar metas individuais das vendedoras ─────────────────
   // [FIX] vendsAtivas: arquivadas não aparecem no form, não devem receber metas
   // (mantém histórico mas não recebe distribuição nova)
-  const vends=vendsAtivas(lid);
+  // [R148] mesmos vendedores que o formulário mostra para este mês
+  const vends=window.vendsDoMesMeta(lid, _mr);
   let somaMes=0, somaSmes=0, nVend=0;
   const temCamposVend = vends.some(v=>document.getElementById("mv-mes-"+v.id));
   if(temCamposVend){
@@ -19234,8 +19350,8 @@ function salvarMetaLoja(lid){
         // [R118] dias trabalhados do mês, junto da meta
         const _elD = document.getElementById('mv-dias-'+v.id);
         if(_elD) setDiasTrabVend(v.id, _mesMeta||mesAtual(), _elD.value);
-        D.vendedoras[idx].metaMes       = mv;
-        D.vendedoras[idx].superMetaMes  = smv;
+        // [R148] por mês — ver setMetaVendDoMes
+        window.setMetaVendDoMes(v.id, _mr, mv, smv);
         D.vendedoras[idx].ticketAlvo    = tick;
         D.vendedoras[idx].metaAniv      = aniv;
         D.vendedoras[idx].metaInativ    = inat;
@@ -19267,8 +19383,8 @@ function salvarMetaLoja(lid){
         const _dias = diasTrabVend(v.id, _mrD);
         const mv  = parseFloat((_metaDiaL  * _dias).toFixed(2));
         const smv = parseFloat((_superDiaL * _dias).toFixed(2));
-        D.vendedoras[i].metaMes = mv;
-        D.vendedoras[i].superMetaMes = smv;
+        // [R148] por mês — ver setMetaVendDoMes
+        window.setMetaVendDoMes(v.id, _mrD, mv, smv);
         D.vendedoras[i]._savedAt = _tsB; // timestamp para sync cross-device
         somaMes += mv;
         somaSmes += smv;
@@ -19357,7 +19473,7 @@ function salvarTodasMetas(){
       autoMetas._savedAt = Date.now(); // timestamp para sync cross-device
       D.metasLoja[loja.id][_mr] = autoMetas;
       // [FIX] Distribuir só entre ativas — arquivadas não recebem nova meta
-      const vends=vendsAtivas(loja.id);
+      const vends=window.vendsDoMesMeta(loja.id, _mr);   // [R148]
       if(vends.length){
         const mv=Math.round(mes/vends.length);
         const smv=Math.round(smes/vends.length);
@@ -19365,9 +19481,9 @@ function salvarTodasMetas(){
         vends.forEach(v=>{
           const i=D.vendedoras.findIndex(x=>x.id===v.id);
           if(i!==-1){
-            D.vendedoras[i].metaMes=mv;
-            D.vendedoras[i].superMetaMes=smv;
-            D.vendedoras[i]._savedAt=_ts; // timestamp para sync
+            // [R148] por mês — setMetaVendDoMes grava meta e supermeta e
+            // espelha no campo antigo apenas quando _mr é o mês corrente.
+            window.setMetaVendDoMes(v.id, _mr, mv, smv);
           }
         });
       }
@@ -27591,32 +27707,6 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
   const meses = window._histMesesPeriodo(mesIni+'-01', mesFim+'-01');
 
 
-  // ══════════════════════════════════════════════════════════════════
-  // [R144] A META DO MÊS, PESSOA A PESSOA.
-  //
-  // Duas fontes cadastradas pelo admin, e cada uma sabe metade:
-  //   · D.metasLoja[loja][mês] é por MÊS, mas é da loja inteira;
-  //   · v.metaMes é por PESSOA, mas é um campo único, sobrescrito a cada
-  //     salvamento — escolher maio mostrava a meta de hoje.
-  // Juntando: a meta da loja NAQUELE mês, repartida na proporção que o
-  // admin definiu entre as pessoas. Sem metas individuais, parte igual.
-  //
-  // metaVendPorDias() não serve aqui: diasTrabVend devolve o mês inteiro
-  // quando não foi informado, e a conta então entrega a meta INTEIRA da
-  // loja para cada vendedor(a).
-  // ══════════════════════════════════════════════════════════════════
-  const _propLoja = new Map();
-  [...new Set(vends.map(v => v.loja).filter(Boolean))].forEach(lid => {
-    const ativos = (typeof vendsAtivas === 'function' ? vendsAtivas(lid) : [])
-                     .filter(x => x.cargo !== 'VRLL');
-    const soma = ativos.reduce((s2, x) => s2 + (Number(x.metaMes) || 0), 0);
-    _propLoja.set(lid, {soma, n: ativos.length});
-  });
-  const _fatiaDe = v => {
-    const p = _propLoja.get(v.loja) || {soma:0, n:0};
-    if(p.soma > 0) return (Number(v.metaMes) || 0) / p.soma;
-    return p.n > 0 ? 1/p.n : 0;
-  };
 
   return vends.map(v => {
     const chave = _crmNorm(v.nome);
@@ -27652,11 +27742,16 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
         real += lc.fat; atend += lc.trans; itens += _relItensLanc(v.id, ini, fim);
       }
 
-      // Mês sem meta de loja cadastrada soma zero — é o certo para os anos
-      // anteriores, que existem na planilha e nunca tiveram meta.
-      const _metaLojaMes = (typeof metaDoMes === 'function'
-                            ? (metaDoMes(v.loja, mes).valor || 0) : 0);
-      meta += _metaLojaMes * _fatiaDe(v);
+      // ══════════════════════════════════════════════════════════════
+      // [R148] A meta individual agora É por mês. Enquanto não havia, o
+      // recurso era ratear a meta da loja pela proporção entre as pessoas
+      // — mas isso atribui meta a quem talvez nem trabalhasse ali naquele
+      // mês, que é justamente a distorção a evitar. Com metaVendDoMes, o
+      // mês sem cadastro soma ZERO e a coluna aparece vazia: ausência de
+      // meta é informação, não um número a inventar.
+      // ══════════════════════════════════════════════════════════════
+      meta += (typeof window.metaVendDoMes === 'function'
+                 ? (window.metaVendDoMes(v.id, mes) || 0) : 0);
     });
     return {
       id: v.id, nome: v.nome, loja: v.loja,
@@ -34790,11 +34885,77 @@ function _crmRenderMelhores(v){
   }
 }
 
+/**
+ * [R149] A BASE DE CLIENTES DE TODOS OS ANOS.
+ *
+ * crmVisao() recorta os clientes pelo ano escolhido — e o recorte é pela
+ * ÚLTIMA COMPRA (`if(f.ano && u.slice(0,4) !== f.ano) return false`). Para
+ * quase toda a tela isso é o certo. Para o painel de inativos é fatal:
+ * com 2026 selecionado, só sobra quem comprou em 2026, ou seja, exatamente
+ * quem NÃO está inativo há muito tempo. Quem parou em 2025 — o caso que a
+ * régua de 180 dias existe para achar — desaparecia.
+ *
+ * Havia ainda uma segunda camada: o cubo é carregado por ano, então quem
+ * só existe em 2025 nem chegava à base.
+ *
+ * Aqui a base vem de crmCombinar(lojas, null), que percorre TODOS os anos
+ * e já consolida o mesmo cliente entre eles pelo documento, guardando a
+ * última compra verdadeira. Loja e vendedor(a) continuam filtrando; ano e
+ * mês não, por definição — "sem comprar há N dias" é pergunta sobre hoje.
+ */
+window.crmClientesTodosAnos = function(){
+  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
+  const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+  let lojas = window.crmLojasVisiveis();
+  if(fLoja) lojas = lojas.filter(l => l === fLoja);
+  if(!lojas.length) return [];
+
+  let cubo;
+  try{ cubo = window.crmCombinar(lojas, null); }   // null = todos os anos
+  catch(e){ console.warn('[R149] base de clientes:', e.message); return []; }
+
+  let cl = (cubo.clientes || []).map(c => ({
+    nome: c.n, documento: c.doc || '', telefone: c.tel || '',
+    vendedora: (cubo.vends||[])[c.v] || '',
+    primeira: c.pri, ultima: c.ult,
+    compras: c.compras || 0, total: c.total || 0, itens: c.itens || 0
+  }));
+
+  // [R115] A Origem do Fluxo também atualiza a última compra: cliente
+  // contatada que voltou e comprou sai da régua sem esperar a próxima
+  // importação. Só lançamento com valor > 0 — atendimento sem compra não
+  // reativa ninguém.
+  const _nrm = x => String(x||'').trim().toLowerCase()
+                      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  const _compraFluxo = new Map();
+  (D.fluxo||[]).forEach(f => {
+    if(!f || !(Number(f.valor) > 0)) return;
+    const k = _nrm(f.nome); if(!k) return;
+    const d = String(f.data||''); if(!d) return;
+    if(!_compraFluxo.has(k) || d > _compraFluxo.get(k)) _compraFluxo.set(k, d);
+  });
+  if(_compraFluxo.size){
+    cl.forEach(c => {
+      const d = _compraFluxo.get(_nrm(c.nome));
+      if(d && d > String(c.ultima||'')){ c.ultima = d; c.compraNoFluxo = true; }
+    });
+  }
+
+  cl = cl.filter(c => !window._crmAnonimo(c.nome, c.documento));
+  if(fVend) cl = cl.filter(c => c.vendedora === fVend);
+  return cl;
+};
+
 function _crmRenderInativos(v){
   const el = document.getElementById('excel-inativos');
   if(!el) return;
   const dias = parseInt(document.getElementById('excel-inativo-dias')?.value || '60', 10);
-  const inativos = v.clientes
+  // [R149] Base de TODOS os anos — ver crmClientesTodosAnos. Se falhar,
+  // cai no recorte de sempre: pior, mas nunca uma tela quebrada.
+  let base = [];
+  try{ base = window.crmClientesTodosAnos(); }catch(e){}
+  if(!base.length) base = v.clientes || [];
+  const inativos = base
     .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
     .filter(c => c.dias !== null && c.dias > dias)
     .sort((a,b) => b.total - a.total);
@@ -34811,6 +34972,14 @@ function _crmRenderInativos(v){
     '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
       + inativos.length.toLocaleString('pt-BR') + ' cliente(s) sem comprar há mais de ' + dias + ' dias · '
       + fmt(inativos.reduce((s,c)=>s+c.total,0)) + ' em histórico</div>'
+    // [R149] Dito na tela porque é uma exceção deliberada: com um ano
+    // selecionado, este bloco continua olhando a base inteira. Sem o
+    // aviso, os números não batem com o recorte e parecem defeito.
+    + '<div style="font-size:10px;color:var(--azul);margin-bottom:8px">'
+      + 'Este bloco ignora o filtro de ano e mês de propósito: considera a '
+      + 'base inteira das planilhas e a última compra real de cada cliente. '
+      + 'Filtrar por ano esconderia justamente quem parou de comprar antes dele.'
+      + '</div>'
     + _crmTabela([{t:'Cliente'},{t:'Vendedor(a)'},{t:'Sem comprar',dir:'center'},{t:'Já gastou',dir:'right'},{t:'Notas',dir:'center'},{t:'Telefone'}],
         linhas, 'Nenhum cliente inativo nesse prazo.')
     + (inativos.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+inativos.length.toLocaleString('pt-BR')+'</div>':'');
