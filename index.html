@@ -2716,6 +2716,48 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
   </div>
 
+  <!-- [R153] EDITAR CADASTRO DE VENDEDOR(A) -->
+  <div id="vend-edit-modal" style="display:none;position:fixed;inset:0;z-index:9000;
+       background:rgba(0,0,0,.6);align-items:center;justify-content:center;padding:16px">
+    <div style="background:var(--fundo,#15171c);border:1px solid var(--borda);border-radius:14px;
+         padding:20px;max-width:440px;width:100%;box-shadow:0 18px 50px rgba(0,0,0,.5)">
+      <div class="st" style="margin:0 0 4px">✏️ Editar cadastro</div>
+      <div id="vend-edit-quem" style="font-size:10.5px;color:var(--muted);margin-bottom:14px"></div>
+      <input type="hidden" id="vend-edit-id">
+      <div class="ig" style="margin-bottom:10px">
+        <label>Nome</label>
+        <input type="text" id="vend-edit-nome" placeholder="Nome completo">
+        <div style="font-size:9.5px;color:var(--muted);margin-top:3px">
+          Escreva como aparece na planilha do CRM — é o nome que casa as vendas importadas
+          com o cadastro.</div>
+      </div>
+      <div class="ig" style="margin-bottom:10px">
+        <label>Cargo</label>
+        <select id="vend-edit-cargo">
+          <option value="VRLL">VR Líder Loja (VRLL)</option>
+          <option value="VR">VR / Lider (3.5% base)</option>
+          <option value="ESP">Especialista (3.0% base)</option>
+          <option value="VP">Vend Pleno (1.5% base)</option>
+          <option value="VS">Vend Senior (2.0% base)</option>
+          <option value="VD">Vend Junior (1.5% base)</option>
+        </select>
+      </div>
+      <div class="ig admin-item" id="vend-edit-loja-wrap" style="display:none;margin-bottom:10px">
+        <label>Loja</label>
+        <select id="vend-edit-loja"></select>
+      </div>
+      <div id="vend-edit-aviso" style="font-size:10.5px;line-height:1.5;margin-bottom:12px"></div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        As metas continuam em <strong>Metas &amp; KPIs → Metas Individuais da Equipe</strong>,
+        que trata mês a mês. Aqui não se mexe em meta nem em venda lançada.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-s" onclick="window.fecharEdicaoVend()">Cancelar</button>
+        <button class="btn-p" onclick="window.salvarEdicaoVend()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MEU HISTÓRICO (aba vendedor(a) / admin) -->
   <div id="vend-hist-bloco" style="display:none">
     <div class="sc">
@@ -3503,9 +3545,9 @@ body:not(.logado) #appScreen{display:none!important}
            uma escolha explícita, com o padrão da Avatim (cada linha = 1 item). -->
       <select id="excel-modo-valor" class="admin-only" style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:12px"
         title="Como o valor de cada linha da planilha deve ser lido">
-        <option value="somar" selected>Σ Cada linha é um item — somar</option>
+        <option value="auto" selected>🔎 Detectar sozinho (recomendado)</option>
+        <option value="somar">Σ Cada linha é um item — somar</option>
         <option value="nota">1 Coluna traz o total da nota — não somar</option>
-        <option value="auto">? Detectar pelo cabeçalho</option>
       </select>
       <button class="btn-s admin-only" onclick="window.excelAbrirUpload()" id="excel-btn-subir" style="background:rgba(122,199,79,.15);border-color:rgba(122,199,79,.5);color:#7ac74f;font-size:12px;padding:8px 14px;display:none">📤 Subir planilha</button>
       <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window.excelProcessarUpload(event)">
@@ -5482,7 +5524,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-20b';
+window.AVATIM_BUILD = '2026-09-20c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -9057,6 +9099,39 @@ window.crmAnonimosNaBase = function(){
   return [...vistos.entries()].map(([nome,v]) => ({nome, ...v})).sort((a,b)=>b.fat-a.fat);
 };
 
+
+/**
+ * [R153] A coluna de valor traz o item ou o TOTAL DA NOTA?
+ *
+ * Cabeçalho é palpite — "VALOR NF" pode ser o valor do item numa nota, e
+ * "VALOR" pode ser o total dela. O que não mente é a repetição: numa
+ * planilha com uma linha por produto, dois produtos diferentes da mesma
+ * nota dificilmente custam exatamente igual. Quando quase TODA nota de
+ * várias linhas traz o mesmo valor repetido, aquela coluna é o total da
+ * nota, e somar linha a linha multiplica o faturamento pelo número de
+ * itens.
+ *
+ * Exige amostra: 20 notas de várias linhas, para não acusar coincidência
+ * numa planilha pequena onde poucas notas por acaso batem.
+ */
+window._excelProvaValorNota = function(linhas){
+  const porNf = new Map();
+  (linhas||[]).forEach(r => {
+    const nf = String(r && r.cupom || '').trim(); if(!nf) return;
+    const k = (r.data||'') + '|' + nf;
+    let a = porNf.get(k);
+    if(!a){ a = {n:0, vals:new Set()}; porNf.set(k, a); }
+    a.n++; a.vals.add(Math.round((Number(r.valor)||0) * 100));
+  });
+  let multi = 0, iguais = 0;
+  porNf.forEach(a => { if(a.n > 1){ multi++; if(a.vals.size === 1) iguais++; } });
+  const fracao = multi > 0 ? iguais / multi : 0;
+  return {
+    notas: porNf.size, multi, iguais, fracao,
+    porNota: porNf.size > 0 ? (linhas||[]).length / porNf.size : 1,
+    suspeito: multi >= 20 && fracao >= 0.7
+  };
+};
 
 window.crmAgregar = function(linhas, opts){
   opts = opts || {};
@@ -15502,6 +15577,113 @@ function salvarVend(){
   toggleFormVend();renderTabelaVend();renderVendRanking(_tabVend);carregarVendsForm();preencherSelectVends();
   if(isAdmin()) renderMetasLojas();
 }
+// ══════════════════════════════════════════════════════════════════════
+// [R153] EDITAR O CADASTRO DE UM(A) VENDEDOR(A)
+//
+// A tabela só tinha arquivar e excluir. Corrigir um nome escrito errado
+// exigia excluir e recadastrar — e o recadastro gera id novo, que
+// desliga a pessoa de todo o histórico em D.vendasVend e das metas por
+// mês. Na prática ninguém corrigia, e a divergência entre o nome do
+// cadastro e o nome da planilha deixava o benchmark por vendedor(a)
+// vazio: seis vendedoras da Mooca, R$ 5,4 mi em vendas, fora do
+// cruzamento por causa de grafia.
+//
+// Só nome, cargo e loja. Meta é mês a mês desde o R148 e tem tela
+// própria; mexer nela aqui reescreveria história.
+// ══════════════════════════════════════════════════════════════════════
+window.editarVend = function(id){
+  const v = (D.vendedoras||[]).find(x => x.id === id);
+  if(!v){ showToast('Vendedor(a) não encontrado(a).','err'); return; }
+  if(!isAdmin() && v.loja !== lojaId()){
+    showToast('Você só edita quem é da sua loja.','err'); return;
+  }
+  const el = n => document.getElementById(n);
+  el('vend-edit-id').value    = v.id;
+  el('vend-edit-nome').value  = v.nome || '';
+  el('vend-edit-cargo').value = v.cargo || 'ESP';
+
+  const wrap = el('vend-edit-loja-wrap');
+  const selL = el('vend-edit-loja');
+  if(isAdmin()){
+    const lojas = (typeof LOJAS_TODAS !== 'undefined' ? LOJAS_TODAS : LOJAS);
+    selL.innerHTML = lojas.map(l => '<option value="'+l.id+'">'+l.nome+'</option>').join('');
+    selL.value = v.loja || '';
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+  }
+
+  const nVendas = Object.keys((D.vendasVend||{})[v.id] || {}).length;
+  el('vend-edit-quem').textContent = (v.nome || '(sem nome)')
+    + ' · ' + ((LOJAS.find(l => l.id === v.loja)||{}).nome || v.loja)
+    + (nVendas ? ' · ' + nVendas + ' dia(s) de venda lançados' : ' · sem venda lançada');
+  el('vend-edit-aviso').innerHTML = '';
+  el('vend-edit-modal').style.display = 'flex';
+  setTimeout(() => el('vend-edit-nome').focus(), 30);
+};
+
+window.fecharEdicaoVend = function(){
+  const m = document.getElementById('vend-edit-modal');
+  if(m) m.style.display = 'none';
+};
+
+window.salvarEdicaoVend = function(){
+  const el = n => document.getElementById(n);
+  const id = el('vend-edit-id').value;
+  const v  = (D.vendedoras||[]).find(x => x.id === id);
+  if(!v){ showToast('Vendedor(a) não encontrado(a).','err'); return; }
+
+  const nome = el('vend-edit-nome').value.trim();
+  if(!nome){ showToast('O nome não pode ficar em branco.','err'); return; }
+
+  const cargo = el('vend-edit-cargo').value || 'ESP';
+  const loja  = isAdmin() ? (el('vend-edit-loja').value || v.loja) : v.loja;
+
+  // Outra pessoa já com este nome na mesma loja vira duas linhas que o CRM
+  // não sabe separar — o cruzamento por nome passaria a ser ambíguo.
+  const _nrm = x => String(x||'').trim().toLowerCase()
+                      .normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ');
+  const choque = (D.vendedoras||[]).find(x =>
+    x.id !== id && x.loja === loja && _nrm(x.nome) === _nrm(nome));
+  if(choque && !confirm('Já existe "' + choque.nome + '" nessa loja com o mesmo nome.\n\n'
+      + 'Dois cadastros com o nome igual deixam o cruzamento com a planilha ambíguo — '
+      + 'as vendas podem cair na pessoa errada.\n\nSalvar mesmo assim?')) return;
+
+  const mudouLoja = loja !== v.loja;
+  const nVendas   = Object.keys((D.vendasVend||{})[id] || {}).length;
+  if(mudouLoja && nVendas > 0){
+    const de = (LOJAS.find(l => l.id === v.loja)||{}).nome || v.loja;
+    const pa = (LOJAS.find(l => l.id === loja)||{}).nome || loja;
+    if(!confirm('Mover ' + v.nome + ' de ' + de + ' para ' + pa + '?\n\n'
+      + 'Os ' + nVendas + ' dia(s) de venda já lançados vão junto, e passam a contar '
+      + 'no resultado de ' + pa + ' — inclusive em meses fechados.\n\n'
+      + 'As metas das duas lojas NÃO são redistribuídas automaticamente; '
+      + 'revise em Metas & KPIs depois.')) return;
+  }
+
+  const antes = {nome: v.nome, cargo: v.cargo, loja: v.loja};
+  v.nome  = nome;
+  v.cargo = cargo;
+  v.loja  = loja;
+
+  save();
+  window.fecharEdicaoVend();
+
+  const mudancas = [];
+  if(antes.nome  !== nome)  mudancas.push('nome: "' + antes.nome + '" → "' + nome + '"');
+  if(antes.cargo !== cargo) mudancas.push('cargo: ' + (antes.cargo||'ESP') + ' → ' + cargo);
+  if(mudouLoja) mudancas.push('loja: ' + ((LOJAS.find(l=>l.id===antes.loja)||{}).nome || antes.loja)
+                              + ' → ' + ((LOJAS.find(l=>l.id===loja)||{}).nome || loja));
+  showToast(mudancas.length ? '✅ ' + nome + ' atualizada — ' + mudancas.join(' · ')
+                            : 'Nada mudou no cadastro.', mudancas.length ? 'ok' : 'warn');
+
+  renderTabelaVend();
+  renderVendRanking(_tabVend);
+  carregarVendsForm();
+  preencherSelectVends();
+  if(isAdmin() && typeof renderMetasLojas === 'function') renderMetasLojas();
+};
+
 function excluirVend(id){
   if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedor(es).','err');return;}
   const vObj = D.vendedoras.find(v=>v.id===id);
@@ -16013,6 +16195,9 @@ function renderTabelaVend(){
     const vHj = D.vendasVend[v.id]?.[hoje()]?.val||0;
     const pctDia = metaDia>0 ? vHj/metaDia*100 : 0;
     const corDia = pctDia>=100?'var(--verde)':pctDia>=70?'var(--ouro)':'var(--verm)';
+    // [R153] Sem isto, corrigir um nome exigia excluir e recadastrar — e o
+    // recadastro gera id novo, que desliga a pessoa do histórico dela.
+    const btnEditar = `<button onclick="editarVend('${v.id}')" title="Editar nome, cargo e loja" style="background:none;border:1px solid rgba(90,160,255,.35);color:var(--azul);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;margin-right:4px">✏️</button>`;
     const btnArquivar = `<button onclick="arquivarVendedora('${v.id}',true)" title="Arquivar (preserva histórico)" style="background:none;border:1px solid rgba(201,168,76,.3);color:var(--ouro);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;margin-right:4px">📦</button>`;
     const btnExcluir = isAdmin() ? `<button onclick="excluirVend('${v.id}')" title="Excluir permanente" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer">✕</button>` : '';
     return `<tr>
@@ -16025,7 +16210,7 @@ function renderTabelaVend(){
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
-      <td style="white-space:nowrap">${btnArquivar}${btnExcluir}</td>
+      <td style="white-space:nowrap">${btnEditar}${btnArquivar}${btnExcluir}</td>
     </tr>`;
   }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Nenhum(a) vendedor(a) encontrado(a).</td></tr>";
 }
@@ -31833,8 +32018,20 @@ window.excelProcessarUpload = function(event){
         return;
       }
 
-      const _modoValor = document.getElementById('excel-modo-valor')?.value || 'somar';
+      const _modoValor = document.getElementById('excel-modo-valor')?.value || 'auto';
       console.log('[excel] modo de valor:', _modoValor, '| detectado pelo cabeçalho:', colMap.valorTipo);
+      // [R153] Os cabeçalhos só apareciam quando a detecção FALHAVA. Quando
+      // ela acerta a coluna errada — havia uma de valor por item com nome
+      // que eu não conheço, e sobrou a do total da nota — não havia como
+      // descobrir sem abrir o arquivo.
+      console.log('[excel] colunas do arquivo:', headers.filter(Boolean).join(' | '));
+      console.log('[excel] coluna de VALOR escolhida:', '"' + headers[colMap.valor] + '"',
+                  '(tipo:', colMap.valorTipo + ')',
+                  '| candidatas ignoradas:',
+                  headers.map((h,i) => ({h:String(h||''), i}))
+                         .filter(x => x.i !== colMap.valor
+                                   && /valor|vlr|^vl_|preco|total|price/i.test(x.h))
+                         .map(x => '"' + x.h + '"').join(', ') || '(nenhuma)');
 
       const dadosProcessados = [];
       let ignoradosDadosVazios = 0;
@@ -31879,6 +32076,50 @@ window.excelProcessarUpload = function(event){
       if(!dadosProcessados.length){
         showToast('Nenhuma linha válida encontrada.','warn');
         return;
+      }
+
+      // ══════════════════════════════════════════════════════════════
+      // [R153] A PROVA ESTÁ NOS DADOS, NÃO NO CABEÇALHO
+      //
+      // O seletor de modo vinha com "somar" por padrão, e "somar" força
+      // _valorNF:false — anulando em silêncio a detecção que o próprio
+      // sistema tinha feito pelo cabeçalho. Uma planilha com o TOTAL DA
+      // NOTA repetido em cada linha de item entrou somando linha a
+      // linha: 22 mil linhas de 2026 renderam R$ 5,45 mi contra os
+      // R$ 1,5 mi reais, e o erro só apareceu porque o faturamento
+      // ficou 3,7x o do lançamento manual.
+      //
+      // Cabeçalho é palpite; a repetição do mesmo valor dentro da mesma
+      // nota é prova. Se em quase toda nota de várias linhas o valor se
+      // repete idêntico, aquela coluna é o total da nota — não importa
+      // como ela se chame.
+      // ══════════════════════════════════════════════════════════════
+      const _provaNota = window._excelProvaValorNota(dadosProcessados);
+      const _jaTrataComoNota = dadosProcessados[0] && dadosProcessados[0]._valorNF === true;
+      console.log('[excel] prova de valor por nota:', _provaNota);
+      if(!_jaTrataComoNota && _provaNota.suspeito){
+        const _pct = Math.round(_provaNota.fracao * 100);
+        const _fator = _provaNota.porNota;
+        const _corrigir = confirm(
+          'Esta planilha parece trazer o TOTAL DA NOTA repetido em cada linha de item.\n\n'
+          + 'Em ' + _provaNota.iguais.toLocaleString('pt-BR') + ' de '
+          + _provaNota.multi.toLocaleString('pt-BR') + ' notas com mais de uma linha ('
+          + _pct + '%), todas as linhas têm exatamente o MESMO valor.\n'
+          + 'A média é de ' + _fator.toFixed(1).replace('.',',') + ' linhas por nota.\n\n'
+          + 'Somando linha a linha, o faturamento sairia cerca de '
+          + _fator.toFixed(1).replace('.',',') + 'x MAIOR que o real.\n\n'
+          + 'OK = contar o valor uma vez por nota (recomendado)\n'
+          + 'Cancelar = somar linha a linha mesmo assim');
+        if(_corrigir){
+          dadosProcessados.forEach(r => { r._valorNF = true; });
+          console.log('[excel] R153: valor tratado como TOTAL DA NOTA —',
+                      _pct + '% das notas multi-linha repetem o mesmo valor');
+          showToast('✅ Valor tratado como total da nota — o faturamento não será multiplicado '
+                    + 'pelo número de itens.', 'ok');
+        } else {
+          console.warn('[excel] R153: o usuário optou por somar linha a linha apesar da prova '
+                       + 'de valor por nota (' + _pct + '% das notas multi-linha repetem o valor)');
+        }
       }
 
       // ══════════════════════════════════════════════════════════════
