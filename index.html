@@ -3620,6 +3620,13 @@ body:not(.logado) #appScreen{display:none!important}
 
   <!-- KPIs -->
   <div id="excel-kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
+  <!-- [R152] por que a tela está zerada -->
+  <style>
+    .aviso-crm{border-radius:8px;padding:9px 12px;font-size:11.5px;line-height:1.55;margin-bottom:10px}
+    .aviso-crm.warn{background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35)}
+    .aviso-crm.info{background:rgba(59,130,246,.09);border:1px solid rgba(59,130,246,.30)}
+  </style>
+  <div id="excel-aviso-recorte"></div>
 
   <!-- 3 painéis: Melhores Clientes, Inativos, Produtos -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:14px" id="excel-graficos-wrap">
@@ -5227,6 +5234,13 @@ service cloud.firestore {
     <!-- KPIs ANUAIS TOPO -->
     <div id="gestao-anual-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px"></div>
 
+    <!-- [R152] ACOMPANHAMENTO DA META ANUAL -->
+    <div class="sc" style="margin-bottom:14px">
+      <div class="st" style="margin:0 0 4px">🎯 Acompanhamento da Meta Anual</div>
+      <div id="gestao-meta-anual-fonte" style="font-size:10px;color:var(--muted);margin-bottom:12px"></div>
+      <div id="gestao-meta-anual"></div>
+    </div>
+
     <!-- GRÁFICO BARRAS: REALIZADO vs META MÊS A MÊS -->
     <div class="sc" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -5468,7 +5482,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-20a';
+window.AVATIM_BUILD = '2026-09-20b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -8438,13 +8452,45 @@ window.crmFiltrar = function(cubo, f){
   clientes = clientes.filter(c => !window._crmAnonimo(c.nome, c.documento));
 
   if(f.vend) clientes = clientes.filter(c => c.vendedora === f.vend);
-  if(f.ano || f.mes){
+
+  // ══════════════════════════════════════════════════════════════
+  // [R152] O recorte por MÊS sai da dimensão mês × cliente, não da data
+  // da última compra. Pela última compra, quem comprou em julho e voltou
+  // em agosto desaparecia de julho — e o bloco "Melhores Clientes" de um
+  // mês fechado vinha vazio, que foi como o defeito chegou. Cubos
+  // importados antes desta dimensão existir não a têm: nesses o recorte
+  // antigo continua, MARCADO como aproximado, em vez de uma lista errada
+  // passando por certa.
+  // ══════════════════════════════════════════════════════════════
+  let clientesRecorteAproximado = false;
+  const _temMesCli = Array.isArray(cubo.mesCli) && cubo.mesCli.length > 0
+                     && Array.isArray(cubo.clis) && cubo.clis.length > 0;
+  if(f.mes && _temMesCli){
+    const _acc = new Map();
+    cubo.mesCli.forEach(([mi,ci,compras,total,itens]) => {
+      if(!mesOk(mi)) return;
+      const k = cubo.clis[ci]; if(!k) return;
+      const a = _acc.get(k) || {compras:0, total:0, itens:0};
+      a.compras += compras||0; a.total += total||0; a.itens += itens||0;
+      _acc.set(k, a);
+    });
+    // Casar com a lista já filtrada: quem não está nela (anônimo, ou de
+    // outra vendedor(a)) fica de fora sem precisar refiltrar.
+    const _porChave = new Map();
+    clientes.forEach(c => _porChave.set(window._crmChaveCli(c.nome, c.documento), c));
+    clientes = [..._acc.entries()]
+      .filter(([k]) => _porChave.has(k))
+      .map(([k,a]) => Object.assign({}, _porChave.get(k), {
+        compras: a.compras, total: Math.round(a.total*100)/100, itens: a.itens
+      }));
+  } else if(f.ano || f.mes){
     clientes = clientes.filter(c => {
       const u = String(c.ultima||'');
       if(f.ano && u.slice(0,4) !== f.ano) return false;
       if(f.mes && u.slice(5,7) !== f.mes) return false;
       return true;
     });
+    if(f.mes) clientesRecorteAproximado = true;
   }
 
   const porVend = new Map();
@@ -8472,6 +8518,11 @@ window.crmFiltrar = function(cubo, f){
     mesesCount: mesesUsados.size,
     produtos,
     produtosSemDimensaoVend,
+    clientesRecorteAproximado,   // [R152] lista de clientes do mês veio da última compra
+    // [R152] meses que o cubo REALMENTE tem, antes do filtro de mês. É o
+    // que permite dizer "não há julho na base" em vez de mostrar zeros e
+    // deixar quem olha achando que a loja não vendeu.
+    mesesDisponiveis: window.crmMesesDoCubo(cubo),
     anonimoListas,
     clientes: clientes.sort((a,b)=>b.total-a.total),
     vendedoras: [...porVend.values()].sort((a,b)=>b.fat-a.fat),
@@ -8975,6 +9026,16 @@ window._crmAnonimo = function(nome, doc){
   return false;
 };
 
+/**
+ * [R152] Chave de consolidação de um cliente. Documento manda; nome
+ * normalizado é o último recurso. Estava escrita inline em três lugares
+ * e precisa ser a MESMA nos três, senão o recorte mensal não casa com a
+ * lista de clientes.
+ */
+window._crmChaveCli = function(nome, doc){
+  return String(doc||'').replace(/\D/g,'') || String(nome||'').trim().toLowerCase();
+};
+
 /** Nomes tratados como "sem cliente identificado" na base atual — para conferência. */
 window.crmAnonimosNaBase = function(){
   const vistos = new Map();
@@ -9028,6 +9089,16 @@ window.crmAgregar = function(linhas, opts){
   const nfCliente=new Map();    // NF -> chave do cliente (uma nota, um dono)
   const nfValor=new Map();      // NF -> valor consolidado da nota
   const cliProd=new Map();      // nomeNorm -> Set(prodIdx)
+  // [R152] Recorte MENSAL do cliente. O cubo de clientes é anual (guarda
+  // primeira e última compra), então filtrar a lista por mês entregava
+  // "quem PAROU de comprar naquele mês", não "quem comprou naquele mês":
+  // a cliente de julho que voltou em agosto sumia do recorte de julho, e
+  // o bloco Melhores Clientes aparecia vazio. Guardar mês × cliente
+  // inteiro custaria meses × clientes; o TOPO de cada mês é o que a tela
+  // usa, e cabe folgado.
+  const TOP_CLI_MES = opts.topCliMes || 200;
+  const mesCli=new Map();       // mes|chave -> {t,i,c}
+  const nfMes=new Map();        // NF -> indice do mes
   let fatTotal=0, dtMin=null, dtMax=null;
 
   const norm=s=>String(s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
@@ -9093,6 +9164,10 @@ window.crmAgregar = function(linhas, opts){
       // quando a planilha traz o nome grafado de formas diferentes.
       if(!nfCliente.has(cup)) nfCliente.set(cup, cn);
       nfValor.set(cup, (nfValor.get(cup)||0) + val);
+      nfMes.set(cup, mi);
+      let mc=mesCli.get(mi+'|'+cn);
+      if(!mc){ mc={t:0,i:0,c:0}; mesCli.set(mi+'|'+cn, mc); }
+      mc.i += qt;
 
       let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
     } else {
@@ -9105,6 +9180,12 @@ window.crmAgregar = function(linhas, opts){
     const dono = nfCliente.get(nf);
     const d = dono && cliente.get(dono);
     if(d) d.t += v;
+    // [R152] a mesma nota, no mês dela — total e contagem de compras
+    const _mi = nfMes.get(nf);
+    if(dono && _mi !== undefined){
+      const mc = mesCli.get(_mi+'|'+dono);
+      if(mc){ mc.t += v; mc.c += 1; }
+    }
   });
 
   const r2=n=>Math.round(n*100)/100;
@@ -9146,6 +9227,24 @@ window.crmAgregar = function(linhas, opts){
     .map(c=>[c.n,c.v,iMes.get(c.pri.slice(0,7)), c.ult, c.cupons.size, r2(c.t), c.i, c.doc||'', c.tel||''])
     .sort((a,b)=>b[5]-a[5]);
 
+  // [R152] topo de clientes de cada mês. A chave gravada é a do
+  // _crmChaveCli calculada sobre o cliente JÁ consolidado — é ela que
+  // casa esta dimensão com o cubo de clientes lá em cima.
+  const tCli=[], iCli=new Map();
+  const _porMesCli=new Map();
+  mesCli.forEach((v,k)=>{
+    const _c = k.indexOf('|');
+    const mi = Number(k.slice(0,_c)), cn = k.slice(_c+1);
+    const d = cliente.get(cn); if(!d) return;
+    if(!_porMesCli.has(mi)) _porMesCli.set(mi,[]);
+    _porMesCli.get(mi).push([window._crmChaveCli(d.n, d.doc), v.c, r2(v.t), v.i]);
+  });
+  const cuboMesCli=[];
+  _porMesCli.forEach((arr,mi)=>{
+    arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_CLI_MES)
+       .forEach(a=>cuboMesCli.push([mi, idx(tCli,iCli,a[0]), a[1], a[2], a[3]]));
+  });
+
   // cruzamento: pares de produtos comprados pelo mesmo cliente
   const par=new Map();
   cliProd.forEach(set=>{
@@ -9165,8 +9264,9 @@ window.crmAgregar = function(linhas, opts){
                           semNF:opts._dedup.semNF||0} : null,
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
     anonimo:{notas:anonNotas.size, fat:r2(anonFat)},   // [R90] o que ficou fora das listas
-    meses:tMes, vends:tVend, prods:tProd,
+    meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend:cuboMesVend, mesProd:cuboMesProd, vendProd:cuboVendProd, prodTotal:cuboProdTot,
+    mesCli:cuboMesCli,
     clientes:cuboClientes, cross:cuboCross
   };
 };
@@ -9200,6 +9300,168 @@ window.crmFatiarClientes = function(clientes){
   const out = [];
   for(let i = 0; i < clientes.length; i += porPedaco) out.push(clientes.slice(i, i + porPedaco));
   return out;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R152] FUSÃO DE CUBOS — importar um mês deixou de apagar o ano
+//
+// `crmGuardar` sempre fez `D.crm[lid][ano] = cubo`: substituição do ANO
+// INTEIRO. Quem recebe uma planilha por mês — que é como a operação
+// trabalha — perdia em silêncio tudo o que já tinha daquele ano. O
+// sintoma chegou por três caminhos antes de a causa aparecer: os
+// relatórios caíam no lançamento manual nos meses fechados (não havia
+// planilha para eles), a aba CRM mostrava "MESES 1", e
+// crmDoMes(loja,'2026-07') devolvia nulo nas sete lojas com 24
+// conjuntos carregados.
+//
+// Meses distintos não se sobrepõem em NENHUMA dimensão que tenha mês na
+// chave: o cupom carrega a data, e mesVend/mesProd são indexados por
+// mês. Nessas, fundir é concatenar, sem aproximação alguma. As
+// dimensões sem mês (prodTotal, cross, clientes) somam — exatamente a
+// aproximação que crmCombinar já faz entre anos desde o R53.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Meses de fato cobertos por um cubo, em ordem. */
+window.crmMesesDoCubo = function(cubo){
+  if(!cubo) return [];
+  const tab = cubo.meses || [];
+  const vistos = new Set();
+  // A tabela `meses` é só o rótulo. Vale o mês que tem lançamento em
+  // mesVend — um índice órfão contaria um mês que não existe.
+  (cubo.mesVend||[]).forEach(r => { const m = tab[r[0]]; if(m) vistos.add(m); });
+  if(!vistos.size) tab.forEach(m => { if(m) vistos.add(m); });
+  return [...vistos].sort();
+};
+
+/**
+ * Funde dois cubos loja/ano num só, no mesmo formato do crmAgregar.
+ * Espera meses DISJUNTOS: quem chama decide o que fazer quando colidem,
+ * porque somar o mesmo mês duas vezes dobraria o faturamento.
+ */
+window.crmFundirCubos = function(a, b){
+  if(!a) return b;
+  if(!b) return a;
+  const tMes=[], iMes=new Map(), tVend=[], iVend=new Map(), tProd=[], iProd=new Map();
+  const idx=(t,m,v)=>{ if(v===undefined||v===null) v=''; let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
+
+  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), prodTot=new Map(), cross=new Map();
+  const cli=new Map();
+  const tCli=[], iCli=new Map(), mesCli=new Map();
+  let linhas=0, fat=0, ini=null, fim=null, anonNotas=0, anonFat=0, temDedup=false;
+  const dd={duplicadas:0, nfsCorrigidas:0, valorRemovido:0, notas:0, semNF:0};
+
+  [a,b].forEach(c => {
+    linhas += c.linhas||0;
+    fat    += c.faturamento||0;
+    if(c.periodo){
+      if(c.periodo.ini && (!ini || c.periodo.ini < ini)) ini = c.periodo.ini;
+      if(c.periodo.fim && (!fim || c.periodo.fim > fim)) fim = c.periodo.fim;
+    }
+    if(c.anonimo){ anonNotas += c.anonimo.notas||0; anonFat += c.anonimo.fat||0; }
+    if(c.dedup){
+      temDedup = true;
+      dd.duplicadas    += c.dedup.duplicadas||0;
+      dd.nfsCorrigidas += c.dedup.nfsCorrigidas||0;
+      dd.valorRemovido += c.dedup.valorRemovido||0;
+      dd.notas         += c.dedup.notas||0;
+      dd.semNF         += c.dedup.semNF||0;
+    }
+    const mM=(c.meses||[]).map(v=>idx(tMes,iMes,v));
+    const mV=(c.vends||[]).map(v=>idx(tVend,iVend,v));
+    const mP=(c.prods||[]).map(v=>idx(tProd,iProd,v));
+    const mC=(c.clis ||[]).map(v=>idx(tCli, iCli, v));
+
+    (c.mesCli||[]).forEach(([mi,ci,compras,total,itens])=>{
+      const k=mM[mi]+'|'+mC[ci], o=mesCli.get(k)||{c:0,t:0,i:0};
+      o.c+=compras||0; o.t+=total||0; o.i+=itens||0; mesCli.set(k,o);
+    });
+    (c.mesVend||[]).forEach(([mi,vi,f,cup,it,ncli])=>{
+      const k=mM[mi]+'|'+mV[vi], o=mesVend.get(k)||{f:0,c:0,i:0,cl:0};
+      o.f+=f||0; o.c+=cup||0; o.i+=it||0; o.cl+=ncli||0; mesVend.set(k,o);
+    });
+    (c.mesProd||[]).forEach(([mi,pi,q,f])=>{
+      const k=mM[mi]+'|'+mP[pi], o=mesProd.get(k)||{q:0,f:0};
+      o.q+=q||0; o.f+=f||0; mesProd.set(k,o);
+    });
+    (c.vendProd||[]).forEach(([vi,pi,q,f])=>{
+      const k=mV[vi]+'|'+mP[pi], o=vendProd.get(k)||{q:0,f:0};
+      o.q+=q||0; o.f+=f||0; vendProd.set(k,o);
+    });
+    (c.prodTotal||[]).forEach(([pi,q,f,ncli])=>{
+      const k=mP[pi], o=prodTot.get(k)||{q:0,f:0,cl:0};
+      o.q+=q||0; o.f+=f||0; o.cl+=ncli||0; prodTot.set(k,o);
+    });
+    (c.cross||[]).forEach(([x,y,n])=>{
+      const k=mP[x]+'|'+mP[y]; cross.set(k,(cross.get(k)||0)+(n||0));
+    });
+    (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
+      // [R67] documento manda; nome normalizado é último recurso
+      const k = window._crmChaveCli(nome, doc);
+      const priMes = (c.meses||[])[priMi] || '';
+      const e = cli.get(k);
+      if(!e){
+        cli.set(k, {n:nome, v:mV[vi]||0, pri:priMes, ult:ult||'',
+                    compras:compras||0, total:total||0, itens:itens||0,
+                    doc:doc||'', tel:tel||''});
+      } else {
+        if(!e.tel && tel) e.tel = tel;
+        if(!e.doc && doc) e.doc = doc;
+        if((ult||'') > e.ult){ e.ult = ult; e.v = mV[vi]||0; }   // vendedor(a) da compra mais recente
+        if(priMes && (!e.pri || priMes < e.pri)) e.pri = priMes;
+        e.compras += compras||0; e.total += total||0; e.itens += itens||0;
+      }
+    });
+  });
+
+  const r2 = n => Math.round(n*100)/100;
+  const par = k => k.split('|').map(Number);
+
+  // Os cortes de topo do crmAgregar valem para o cubo fundido também —
+  // sem eles ele cresce a cada importação até estourar o documento.
+  const TOPO_PROD = 120, TOPO_CROSS = 150;
+
+  const porVend = new Map();
+  [...vendProd.entries()].forEach(([k,v])=>{ const [vi,pi]=par(k);
+    if(!porVend.has(vi)) porVend.set(vi,[]); porVend.get(vi).push([pi,v.q,r2(v.f)]); });
+  const outVendProd=[];
+  porVend.forEach((arr,vi)=>{ arr.sort((x,y)=>y[2]-x[2]).slice(0,TOPO_PROD)
+    .forEach(x=>outVendProd.push([vi,x[0],x[1],x[2]])); });
+
+  const porMes = new Map();
+  [...mesProd.entries()].forEach(([k,v])=>{ const [mi,pi]=par(k);
+    if(!porMes.has(mi)) porMes.set(mi,[]); porMes.get(mi).push([pi,v.q,r2(v.f)]); });
+  const outMesProd=[];
+  porMes.forEach((arr,mi)=>{ arr.sort((x,y)=>y[2]-x[2]).slice(0,TOPO_PROD)
+    .forEach(x=>outMesProd.push([mi,x[0],x[1],x[2]])); });
+
+  const outClientes = [...cli.values()].map(c=>{
+    const pm = c.pri || String(c.ult||'').slice(0,7);
+    const pi = iMes.has(pm) ? iMes.get(pm) : idx(tMes,iMes,pm);
+    return [c.n, c.v, pi, c.ult, c.compras, r2(c.total), c.itens, c.doc, c.tel];
+  }).sort((x,y)=>y[5]-x[5]);
+
+  return {
+    ts: Date.now(),
+    linhas, faturamento: r2(fat),
+    dedup: temDedup ? {duplicadas:dd.duplicadas, nfsCorrigidas:dd.nfsCorrigidas,
+                       valorRemovido:r2(dd.valorRemovido), notas:dd.notas, semNF:dd.semNF} : null,
+    periodo:{ini, fim},
+    clientesUnicos: cli.size,
+    anonimo:{notas:anonNotas, fat:r2(anonFat)},
+    arquivo: b.arquivo || a.arquivo || '',
+    // [R152] de qual arquivo veio cada mês — a Gestão de Importações
+    // precisa disso para explicar um ano montado de vários arquivos.
+    fontes: Object.assign({}, a.fontes||{}, b.fontes||{}),
+    meses:tMes, vends:tVend, prods:tProd, clis:tCli,
+    mesVend: [...mesVend.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,r2(v.f),v.c,v.i,v.cl];}),
+    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,v.c,r2(v.t),v.i];}),
+    mesProd: outMesProd,
+    vendProd: outVendProd,
+    prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,r2(v.f),v.cl]).sort((x,y)=>y[2]-x[2]),
+    clientes: outClientes,
+    cross: [...cross.entries()].map(([k,n])=>{const[x,y]=par(k);return [x,y,n];})
+           .sort((x,y)=>y[2]-x[2]).slice(0,TOPO_CROSS)
+  };
 };
 
 /** Guarda o cubo de uma loja/ano em D.crm e devolve um diagnóstico. */
@@ -9246,6 +9508,7 @@ window.crmCombinar = function(lojas, anos){
 
   const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), prodTot=new Map(), cross=new Map();
   const clientes=new Map();
+  const tCli=[], iCli=new Map(), mesCli=new Map();   // [R152] recorte mês × cliente
   let linhas=0, faturamento=0, ini=null, fim=null;
 
   (lojas||[]).forEach(lid => {
@@ -9261,7 +9524,13 @@ window.crmCombinar = function(lojas, anos){
       const mM = (c.meses||[]).map(v => idx(tMes,iMes,v));
       const mV = (c.vends||[]).map(v => idx(tVend,iVend,v));
       const mP = (c.prods||[]).map(v => idx(tProd,iProd,v));
+      const mC = (c.clis ||[]).map(v => idx(tCli, iCli, v));
 
+      (c.mesCli||[]).forEach(([mi,ci,compras,total,itens])=>{
+        const k = mM[mi]+'|'+mC[ci];
+        const a = mesCli.get(k) || {c:0,t:0,i:0};
+        a.c+=compras||0; a.t+=total||0; a.i+=itens||0; mesCli.set(k,a);
+      });
       (c.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
         const k = mM[mi]+'|'+mV[vi];
         const a = mesVend.get(k) || {f:0,c:0,i:0,cl:0};
@@ -9288,7 +9557,7 @@ window.crmCombinar = function(lojas, anos){
       });
       (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
         // [R67] agrupar por documento quando houver — nome é fallback
-        const k = String(doc||'').replace(/\D/g,'') || String(nome).trim().toLowerCase();
+        const k = window._crmChaveCli(nome, doc);
         const e = clientes.get(k);
         if(!e){
           clientes.set(k, {n:nome, doc:doc||'', tel:tel||'', v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
@@ -9308,8 +9577,9 @@ window.crmCombinar = function(lojas, anos){
   return {
     linhas, faturamento: Math.round(faturamento*100)/100,
     periodo:{ini, fim},
-    meses:tMes, vends:tVend, prods:tProd,
+    meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
+    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.c,Math.round(v.t*100)/100,v.i];}),
     mesProd: [...mesProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
     vendProd: [...vendProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
     prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]),
@@ -19883,19 +20153,18 @@ async function tabRankPer(per, el, ctx) {
 
 // ── Cálculo Anual ─────────────────────────────────────────────
 function calcAno(lid){
-  // Soma faturamento do ano corrente via vendasVend
+  // ══════════════════════════════════════════════════════════════════
+  // [R152] Faturamento do ano pela MESMA regra do resto do sistema
+  // (R99): mês fechado vale a planilha do CRM, mês corrente vale o
+  // lançamento da loja. Antes somava D.vendasVend do ano inteiro e
+  // ignorava as planilhas importadas — o Painel e os Relatórios
+  // mostravam números diferentes para o mesmo ano, e o do Painel era o
+  // que a planilha vinha justamente corrigir.
+  // ══════════════════════════════════════════════════════════════════
   const ano = hoje().slice(0,4);
-  const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
   let t = 0;
-  vends.forEach(v=>{
-    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
-      if(d.startsWith(ano)) t += Number(vd.val||0);
-    });
-  });
-  if(t===0 && vends.length===0){
-    Object.entries(D.vendas[lid]||{}).forEach(([d,vd])=>{
-      if(d.startsWith(ano)) t += Number(vd.fat||0);
-    });
+  for(let m = 1; m <= 12; m++){
+    t += Number(window.fatDoMes(lid, ano + '-' + String(m).padStart(2,'0')).valor || 0);
   }
   return t;
 }
@@ -19909,15 +20178,13 @@ function calcVendAno(vid){
 }
 
 function calcNAtendAno(lid){
+  // [R152] mesma fonte do calcAno — senão o ticket médio anual divide
+  // o faturamento da planilha pelo atendimento do lançamento
   const ano = hoje().slice(0,4);
-  const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
   let n = 0;
-  vends.forEach(v=>{
-    Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
-      if(!d.startsWith(ano)) return;
-      n += vd.trans>0 ? vd.trans : ((vd.val||0)>0?1:0);
-    });
-  });
+  for(let m = 1; m <= 12; m++){
+    n += Number(window.itensAtendDoMes(lid, ano + '-' + String(m).padStart(2,'0')).atend || 0);
+  }
   return n;
 }
 
@@ -21842,29 +22109,31 @@ function renderGestaoAnual(){
   // ── Calcular dados anuais de cada loja ──────────────────────
   const lojasDados = LOJAS.map(lid=>{
     const l = lid;
-    const fat  = calcAno(l.id);
-    const meta = metaAno(l.id);
-    const pct  = meta>0 ? fat/meta*100 : 0;
-    const tm   = calcTMAno(l.id);
-    const nat  = calcNAtendAno(l.id);
-    // Fat por mês
+    // ══════════════════════════════════════════════════════════════
+    // [R152] O realizado do ano passa a sair da MESMA regra que o
+    // resto do sistema usa (R99): mês fechado vale a planilha do CRM,
+    // mês corrente vale o lançamento da loja. Este painel era a única
+    // tela que ignorava as planilhas importadas — lia D.vendasVend
+    // direto e mostrava o ano inteiro pelo que as lojas digitaram, que
+    // é justamente o número que a planilha vem corrigir.
+    // ══════════════════════════════════════════════════════════════
     const porMes = [];
+    let fat = 0, nat = 0, itens = 0, mesesCrm = 0, mesesLanc = 0;
     for(let m=1;m<=12;m++){
       const mr = ano+'-'+String(m).padStart(2,'0');
-      let mFat = 0;
-      vendsReais(l.id).forEach(v=>{
-        Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
-          if(d.startsWith(mr)) mFat+=Number(vd.val||0);
-        });
-      });
-      if(mFat===0){
-        const vd=D.vendas[l.id]||{};
-        Object.entries(vd).forEach(([d,vdd])=>{ if(d.startsWith(mr)) mFat+=Number(vdd.fat||0); });
-      }
+      const f  = window.fatDoMes(l.id, mr);
+      const ia = window.itensAtendDoMes(l.id, mr);
+      const mFat = f.valor || 0;
+      if(mFat > 0){ if(f.origem === 'crm') mesesCrm++; else mesesLanc++; }
+      fat += mFat; nat += ia.atend || 0; itens += ia.itens || 0;
       const metaMr = (D.metasLoja[l.id]||{})[mr]?.mes || 0;
-      porMes.push({m, mr, fat:mFat, meta:metaMr});
+      porMes.push({m, mr, fat:mFat, meta:metaMr, atend:ia.atend||0, itens:ia.itens||0, fonte:f.origem});
     }
-    return {id:l.id, nome:l.nome, fat, meta, pct, tm, nat, porMes};
+    const meta = metaAno(l.id);
+    const pct  = meta>0 ? fat/meta*100 : 0;
+    const tm   = nat>0 ? fat/nat : 0;      // TM = realizado ÷ vendas
+    const pa   = nat>0 ? itens/nat : 0;    // P.A. = itens ÷ vendas
+    return {id:l.id, nome:l.nome, fat, meta, pct, tm, pa, nat, itens, mesesCrm, mesesLanc, porMes};
   });
 
   const totalFat  = lojasDados.reduce((s,l)=>s+l.fat,0);
@@ -21892,6 +22161,114 @@ function renderGestaoAnual(){
         <div style="font-size:22px;font-weight:900;font-family:Playfair Display,serif;color:${k.cor||'var(--texto)'}">${k.val}</div>
         <div style="font-size:9px;color:var(--muted);margin-top:4px">${k.sub}</div>
       </div>`).join('');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // [R152] ACOMPANHAMENTO DA META ANUAL
+  //
+  // A meta anual sozinha não diz se o ano está de pé: um grupo com 60%
+  // da meta em agosto está bem; em novembro, não. O que responde é a
+  // meta ACUMULADA até o mês corrente — e a projeção do fechamento no
+  // ritmo atual, com o quanto falta por mês para virar o ano.
+  // ══════════════════════════════════════════════════════════════
+  const metaEl = document.getElementById('gestao-meta-anual');
+  if(metaEl){
+    // Meses fechados = até o anterior ao corrente. O mês em curso entra
+    // à parte: comparar meio mês com a meta cheia acusaria um atraso
+    // que não existe.
+    const fechados   = mesAtualNum - 1;
+    const somaAte = (campo, ateMes) => lojasDados.reduce((s,l) =>
+      s + l.porMes.slice(0, ateMes).reduce((x,p) => x + (p[campo]||0), 0), 0);
+
+    const realFech   = somaAte('fat',  fechados);
+    const metaFech   = somaAte('meta', fechados);
+    const realCorr   = somaAte('fat',  mesAtualNum) - realFech;
+    const metaCorr   = somaAte('meta', mesAtualNum) - metaFech;
+    const metaAnoTot = totalMeta;
+    const realAno    = totalFat;
+    const saldo      = realFech - metaFech;              // sobra/falta dos fechados
+    const falta      = Math.max(0, metaAnoTot - realAno);
+    const mesesRest  = Math.max(0, 12 - fechados);       // conta o mês corrente
+    const porMesFalta= mesesRest > 0 ? falta / mesesRest : 0;
+    // Projeção pelo ritmo dos meses FECHADOS — o corrente está pela metade
+    const ritmo      = fechados > 0 ? realFech / fechados : 0;
+    const projecao   = realFech + ritmo * (12 - fechados);
+    const pctProj    = metaAnoTot > 0 ? projecao/metaAnoTot*100 : 0;
+    const pctFech    = metaFech > 0 ? realFech/metaFech*100 : 0;
+
+    const _cor = p => p>=100 ? 'var(--verde)' : p>=90 ? 'var(--ouro)' : 'var(--verm)';
+    const _bloco = (lab, val, sub, cor) =>
+      '<div style="background:var(--cinza);border:1px solid var(--borda);border-radius:10px;padding:11px 13px">'
+      + '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">'+lab+'</div>'
+      + '<div style="font-size:18px;font-weight:800;color:'+(cor||'var(--texto)')+'">'+val+'</div>'
+      + '<div style="font-size:9.5px;color:var(--muted);margin-top:3px">'+sub+'</div></div>';
+
+    const pctBarra = metaAnoTot > 0 ? Math.min(100, realAno/metaAnoTot*100) : 0;
+    const pctAlvo  = metaAnoTot > 0 ? Math.min(100, somaAte('meta', mesAtualNum)/metaAnoTot*100) : 0;
+
+    metaEl.innerHTML =
+      '<div style="position:relative;height:26px;background:var(--cinza);border:1px solid var(--borda);'
+      + 'border-radius:13px;overflow:hidden;margin-bottom:6px">'
+      + '<div style="height:100%;width:'+pctBarra.toFixed(1)+'%;background:linear-gradient(90deg,var(--ouro),#e6b800)"></div>'
+      + '<div style="position:absolute;top:0;bottom:0;left:'+pctAlvo.toFixed(1)+'%;width:2px;background:var(--verde)" '
+      + 'title="onde deveríamos estar em ' + meses[mesAtualNum-1] + '"></div>'
+      + '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+      + 'font-size:11px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,.6)">'
+      + fmt(realAno) + ' de ' + fmt(metaAnoTot) + ' · ' + totalPct.toFixed(1) + '%</div></div>'
+      + '<div style="font-size:9.5px;color:var(--muted);margin-bottom:12px">'
+      + '▏A marca verde é a meta acumulada até ' + meses[mesAtualNum-1] + '.</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px">'
+      + _bloco('Meses fechados (Jan–' + (fechados>0?meses[fechados-1]:'—') + ')',
+               fmt(realFech), 'meta ' + fmt(metaFech) + ' · ' + pctFech.toFixed(1) + '%', _cor(pctFech))
+      + _bloco(saldo >= 0 ? 'Sobra acumulada' : 'Défice acumulado',
+               fmt(Math.abs(saldo)),
+               saldo >= 0 ? 'acima da meta dos meses fechados' : 'a recuperar nos meses que faltam',
+               saldo >= 0 ? 'var(--verde)' : 'var(--verm)')
+      + _bloco(meses[mesAtualNum-1] + ' (em curso)', fmt(realCorr),
+               'meta do mês ' + fmt(metaCorr), 'var(--azul)')
+      + _bloco('Falta para a meta anual', fmt(falta),
+               mesesRest > 0 ? fmt(porMesFalta) + '/mês em ' + mesesRest + ' mês(es)' : 'ano encerrado',
+               falta > 0 ? 'var(--ouro)' : 'var(--verde)')
+      + _bloco('Projeção de fechamento', fmt(projecao),
+               pctProj.toFixed(1) + '% da meta · ritmo dos meses fechados', _cor(pctProj))
+      + '</div>'
+      // Por loja: quem chega e quem não chega no ritmo atual
+      + '<div style="margin-top:14px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:560px">'
+      + '<thead><tr style="color:var(--muted);font-size:9.5px;text-transform:uppercase">'
+      + '<th style="text-align:left;padding:5px 6px">Loja</th>'
+      + '<th style="text-align:right;padding:5px 6px">Realizado</th>'
+      + '<th style="text-align:right;padding:5px 6px">Meta ano</th>'
+      + '<th style="text-align:right;padding:5px 6px">%</th>'
+      + '<th style="text-align:right;padding:5px 6px">Falta</th>'
+      + '<th style="text-align:right;padding:5px 6px">Projeção</th></tr></thead><tbody>'
+      + lojasDados.slice().sort((a,b)=>b.pct-a.pct).map(l => {
+          const lf = l.porMes.slice(0, fechados).reduce((x,p)=>x+p.fat, 0);
+          const lr = fechados > 0 ? lf/fechados : 0;
+          const lp = lf + lr * (12 - fechados);
+          const lpc = l.meta > 0 ? lp/l.meta*100 : 0;
+          return '<tr style="border-top:1px solid var(--borda)">'
+            + '<td style="padding:6px">'+l.nome+'</td>'
+            + '<td style="text-align:right;padding:6px">'+fmt(l.fat)+'</td>'
+            + '<td style="text-align:right;padding:6px;color:var(--muted)">'+fmt(l.meta)+'</td>'
+            + '<td style="text-align:right;padding:6px;font-weight:700;color:'+_cor(l.pct)+'">'+l.pct.toFixed(1)+'%</td>'
+            + '<td style="text-align:right;padding:6px">'+fmt(Math.max(0, l.meta - l.fat))+'</td>'
+            + '<td style="text-align:right;padding:6px;color:'+_cor(lpc)+'">'+fmt(lp)+' ('+lpc.toFixed(0)+'%)</td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  }
+
+  // [R152] De onde veio cada número — planilha ou lançamento.
+  const fonteEl = document.getElementById('gestao-meta-anual-fonte');
+  if(fonteEl){
+    const nCrm  = lojasDados.reduce((s,l)=>s+l.mesesCrm, 0);
+    const nLanc = lojasDados.reduce((s,l)=>s+l.mesesLanc, 0);
+    fonteEl.innerHTML = 'Ano ' + ano + '. Realizado por mês: <strong>' + nCrm
+      + '</strong> vindo(s) da planilha do CRM e <strong>' + nLanc
+      + '</strong> do lançamento manual (loja × mês com valor). '
+      + 'Mês fechado vale a planilha; o mês em curso vale o lançamento.'
+      + (nLanc > 0 && nCrm > 0
+          ? ' <span style="color:var(--ouro)">Meses fechados ainda no lançamento manual são meses sem planilha importada.</span>'
+          : '');
   }
 
   // ── Gráfico de barras: Realizado vs Meta por mês ─────────────
@@ -27234,15 +27611,37 @@ function _relAgregar(lojas, mesRef){
       atend += crm.notas;
       itens += crm.itens;
     } else {
+      // ══════════════════════════════════════════════════════════
+      // [R152] O total de ITENS era RECONSTRUÍDO: paDoMes × vendasDoMes.
+      // Duas funções com precedências DIFERENTES — paDoMes divide pelo
+      // atendimento de _itensAtendDoMes(), e vendasDoMes tem cadeia de
+      // fallback própria (diário → histórico → período). Quando as duas
+      // discordavam, o total de itens saía escalado pela razão entre
+      // elas, e o arredondamento do P.A. a duas casas entrava
+      // multiplicado pelo número de vendas. Era esse round-trip que
+      // deixava P.A. e ticket médio errados nos Relatórios.
+      //
+      // Agora itens e atendimentos saem do MESMO lugar, e o P.A. é uma
+      // divisão de dois números medidos — não o desfazer de uma divisão
+      // que já havia sido arredondada.
+      // ══════════════════════════════════════════════════════════
       const rl = realizadoDoMes(l.id, mesRef).valor || 0;
       if(rl > 0) usouOutra = true;
-      real  += rl;
-      atend += vendasDoMes(l.id, mesRef) || 0;
-      const paObj = paDoMes(l.id, mesRef);
-      const vObj  = vendasDoMes(l.id, mesRef);
-      if(paObj > 0 && vObj > 0) itens += paObj * vObj;
+      real += rl;
+      const ia = _itensAtendDoMes(l.id, mesRef);
+      const at = ia.atend > 0 ? ia.atend : (vendasDoMes(l.id, mesRef) || 0);
+      atend += at;
+      if(ia.itens > 0){
+        itens += ia.itens;
+      } else {
+        // Sem contagem de itens em lugar nenhum, só resta a razão — mas
+        // agora dividida pelo MESMO atendimento que entrou no total.
+        const _pa = paDoMes(l.id, mesRef);
+        if(_pa > 0 && at > 0) itens += _pa * at;
+      }
     }
   });
+  // TM = realizado ÷ vendas.  P.A. = itens ÷ vendas.
   const tm = atend > 0 ? real/atend : 0;
   const pa = atend > 0 ? itens/atend : 0;
   const pct= meta > 0 ? (real/meta)*100 : 0;
@@ -27313,8 +27712,14 @@ function _relExecutivo(){
     { label:'META',        v:fmt(agrAtu.meta),    d:_relDelta(agrAtu.meta, agrAnt.meta), cor:'var(--ouro)'  },
     { label:'% META',      v:agrAtu.pct.toFixed(1)+'%', d:_relDelta(agrAtu.pct, agrAnt.pct), cor:agrAtu.pct>=100?'var(--verde)':agrAtu.pct>=70?'var(--ouro)':'var(--verm)' },
     { label:'ATENDIMENTOS',v:agrAtu.atend.toLocaleString('pt-BR'), d:_relDelta(agrAtu.atend, agrAnt.atend), cor:'var(--azul)' },
-    { label:'TICKET MÉDIO',v:agrAtu.tm > 0 ? fmt(agrAtu.tm) : '--', d:_relDelta(agrAtu.tm, agrAnt.tm), cor:'#b07cd6' },
-    { label:'P.A.',        v:agrAtu.pa > 0 ? fmtPA(agrAtu.pa) : '--', d:_relDelta(agrAtu.pa, agrAnt.pa), cor:'#e6a817' }
+    // [R152] A conta de cada indicador, embaixo do número. TM e P.A. são
+    // divisões, e sem ver o divisor não dá para dizer se o errado é o
+    // indicador ou a base — foi assim que o defeito do round-trip de
+    // itens ficou tanto tempo sem ser localizado.
+    { label:'TICKET MÉDIO',v:agrAtu.tm > 0 ? fmt(agrAtu.tm) : '--', d:_relDelta(agrAtu.tm, agrAnt.tm), cor:'#b07cd6',
+      conta: agrAtu.atend > 0 ? fmt(agrAtu.real) + ' ÷ ' + agrAtu.atend.toLocaleString('pt-BR') + ' vendas' : '' },
+    { label:'P.A.',        v:agrAtu.pa > 0 ? fmtPA(agrAtu.pa) : '--', d:_relDelta(agrAtu.pa, agrAnt.pa), cor:'#e6a817',
+      conta: agrAtu.atend > 0 ? Math.round(agrAtu.itens).toLocaleString('pt-BR') + ' itens ÷ ' + agrAtu.atend.toLocaleString('pt-BR') + ' vendas' : '' }
   ];
 
   const kpiHtml = kpis.map(k=>`
@@ -27322,6 +27727,7 @@ function _relExecutivo(){
       <div class="rel-kpi-l">${k.label}</div>
       <div class="rel-kpi-v" style="color:${k.cor}">${k.v}</div>
       <div class="rel-kpi-s"><span class="${k.d.cls}">${k.d.txt}</span> vs ${_relMesLabel(mesAnt)}</div>
+      ${k.conta ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">'+k.conta+'</div>' : ''}
     </div>`).join('');
 
   // Evolução dos últimos 6 meses (mini gráfico)
@@ -31624,22 +32030,69 @@ window.excelProcessarUpload = function(event){
         _grupos.get(k).push(r);
       });
 
+      // ══════════════════════════════════════════════════════════════
+      // [R152] Importar um mês não pode mais apagar o resto do ano.
+      // Antes daqui ia um `crmGuardar` direto, que substituía o ano
+      // inteiro — quem importava mês a mês ficava só com o último.
+      // Agora cada grupo ganha um plano, e a única situação que ainda
+      // perde mês (o arquivo repete UNS e omite OUTROS) vira decisão
+      // explícita de quem está importando.
+      // ══════════════════════════════════════════════════════════════
+      const _planos = [];
+      _grupos.forEach((linhas, k) => {
+        const [lid, ano] = k.split('|');
+        const cubo = window.crmAgregar(linhas);
+        cubo.arquivo = file.name;
+        const mesesNovos = window.crmMesesDoCubo(cubo);
+        cubo.fontes = {}; mesesNovos.forEach(m => { cubo.fontes[m] = file.name; });
+        const anterior  = ((D.crm||{})[lid]||{})[ano] || null;
+        const mesesAnt  = window.crmMesesDoCubo(anterior);
+        const _novoSet  = new Set(mesesNovos);
+        const conserva  = mesesAnt.filter(m => !_novoSet.has(m));  // só a base tem
+        const repete    = mesesAnt.filter(m =>  _novoSet.has(m));  // os dois têm
+        const acao = !anterior            ? 'novo'
+                   : conserva.length === 0 ? 'substitui'
+                   : repete.length   === 0 ? 'funde'
+                   :                         'conflito';
+        _planos.push({lid, ano, cubo, linhas, anterior, conserva, repete, acao});
+      });
+
+      const _conflitos = _planos.filter(p => p.acao === 'conflito');
+      if(_conflitos.length){
+        const _det = _conflitos.map(p =>
+          '\u2022 ' + ((LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid) + '/' + p.ano
+          + ' \u2014 o arquivo repete ' + p.repete.join(', ')
+          + ' e deixa de fora ' + p.conserva.join(', ')).join('\n');
+        const _segue = confirm(
+          'Este arquivo repete meses que j\u00e1 est\u00e3o na base:\n\n' + _det +
+          '\n\nO CRM guarda o ano agregado \u2014 n\u00e3o d\u00e1 para trocar s\u00f3 um m\u00eas ' +
+          'dentro de um ano j\u00e1 consolidado. Continuar substitui o ANO INTEIRO pelo ' +
+          'conte\u00fado deste arquivo, e os meses listados como "deixa de fora" ' +
+          'precisar\u00e3o ser reimportados.\n\n' +
+          'OK = substituir mesmo assim.\nCancelar = n\u00e3o importar nada ' +
+          '(monte um arquivo com todos os meses que quer manter).');
+        if(!_segue){
+          showToast('Importa\u00e7\u00e3o cancelada \u2014 nada foi alterado.','warn');
+          event.target.value = '';
+          return;
+        }
+      }
+
       const _diagnostico = [];
       const _paresImportados = [];   // [R136] só estes vão ao servidor
       let _totalPedacos = 0;
-      _grupos.forEach((linhas, k) => {
-        const [lid, ano] = k.split('|');
-        _paresImportados.push([lid, ano]);
-        const cubo = window.crmAgregar(linhas);
-        cubo.arquivo = file.name;
-        const dg = window.crmGuardar(lid, ano, cubo);
+      _planos.forEach(p => {
+        const cubo = (p.acao === 'funde') ? window.crmFundirCubos(p.anterior, p.cubo) : p.cubo;
+        _paresImportados.push([p.lid, p.ano]);
+        const dg = window.crmGuardar(p.lid, p.ano, cubo);
         _totalPedacos += dg.pedacos;
         _diagnostico.push({
-          loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid, ano,
-          dedup: cubo.dedup,
-          linhas: linhas.length, clientes: dg.clientes,
+          loja: (LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid, ano: p.ano,
+          dedup: p.cubo.dedup,
+          linhas: p.linhas.length, clientes: dg.clientes,
           kb: Math.round((dg.bytesLeves + dg.bytesClientes)/1024),
-          pedacos: dg.pedacos
+          pedacos: dg.pedacos,
+          acao: p.acao, mesesCubo: window.crmMesesDoCubo(cubo).length
         });
       });
 
@@ -31667,7 +32120,10 @@ window.excelProcessarUpload = function(event){
       const _resumo = _diagnostico
         .map(d => d.loja + '/' + d.ano + ': ' + d.linhas.toLocaleString('pt-BR') + ' linhas → '
              + d.clientes.toLocaleString('pt-BR') + ' clientes (' + d.kb + ' KB'
-             + (d.pedacos > 1 ? ', ' + d.pedacos + ' partes' : '') + ')')
+             + (d.pedacos > 1 ? ', ' + d.pedacos + ' partes' : '') + ')'
+             + (d.acao === 'funde'
+                 ? ' [somado ao que já havia — o ano ficou com ' + d.mesesCubo + ' mês(es)]'
+                 : ''))
         .join(' · ');
 
       // [R65] o que a deduplicação encontrou — precisa ficar visível,
@@ -34798,6 +35254,31 @@ window.excelRender = function(){
       + '<div class="kcard roxo"><div class="kl">📅 MESES</div><div class="kv" style="font-size:20px">'+v.mesesCount+'</div></div>';
   }
 
+  // ── [R152] Por que a tela está zerada ────────────────────────────
+  // Um mês que não foi importado e um mês sem venda produzem a mesma
+  // tela de zeros. Aqui a diferença fica dita.
+  const _avBox = document.getElementById('excel-aviso-recorte');
+  if(_avBox){
+    const _fa = document.getElementById('excel-filtro-ano')?.value || '';
+    const _fm = document.getElementById('excel-filtro-mes')?.value || '';
+    const _disp = v.mesesDisponiveis || [];
+    let _html = '';
+    if(_fm && _disp.length && !_disp.some(m => m.slice(5,7) === _fm)){
+      _html += '<div class="aviso-crm warn">⚠️ <strong>O mês ' + _fm + (_fa ? '/'+_fa : '')
+            + ' não está na base do CRM</strong> — por isso os blocos abaixo aparecem zerados. '
+            + 'Meses importados' + (_fa ? ' de '+_fa : '') + ': <strong>'
+            + _disp.map(m => m.slice(5,7)).join(', ') + '</strong>. '
+            + 'Suba a planilha desse mês na aba de importação.</div>';
+    }
+    if(v.clientesRecorteAproximado){
+      _html += '<div class="aviso-crm info">ℹ️ Este conjunto foi importado antes do recorte mensal de '
+            + 'clientes existir. A lista de clientes do mês está saindo pela data da <em>última</em> '
+            + 'compra — quem comprou neste mês e voltou depois não aparece. Reimporte a planilha '
+            + 'para corrigir.</div>';
+    }
+    _avBox.innerHTML = _html;
+  }
+
   _crmRenderMelhores(v);
   _crmRenderInativos(v);
   _crmRenderProdutos(v);
@@ -35201,6 +35682,7 @@ function _crmRenderConjuntos(){
       const c = D.crm[lid][ano];
       const nome = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
       const cob = _crmCobertura(c);
+      const _fontes = [...new Set(Object.values(c.fontes || {}))].filter(Boolean);
       linhas.push('<tr'+(cob.suspeito?' style="background:rgba(220,53,69,.06)"':'')+'>'
         + '<td><strong>'+nome+'</strong></td>'
         + '<td style="text-align:center">'+ano+'</td>'
@@ -35212,6 +35694,11 @@ function _crmRenderConjuntos(){
         + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
         + '<td style="font-size:10.5px;color:var(--muted)">'+(c.arquivo||'—')
+          // [R152] um ano pode vir de vários arquivos agora
+          + (_fontes.length > 1
+              ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">+ '
+                + (_fontes.length-1) + ' outro(s): ' + _fontes.filter(x=>x!==c.arquivo).join(', ') + '</div>'
+              : '')
           + (c.dedup && c.dedup.semNF
               ? '<div style="color:var(--verm);font-size:9.5px">⚠️ '+c.dedup.semNF.toLocaleString('pt-BR')+' linha(s) sem NF</div>'
               : '') + '</td>'
@@ -35224,9 +35711,11 @@ function _crmRenderConjuntos(){
     ? _crmTabela([{t:'Loja'},{t:'Ano',dir:'center'},{t:'Período coberto'},{t:'Linhas',dir:'right'},{t:'Clientes',dir:'right'},{t:'Faturamento',dir:'right'},{t:'Arquivo'},{t:'',dir:'center'}], linhas)
       + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5">'
         + 'O <strong>período coberto</strong> vem dos meses que realmente têm venda no conjunto. '
-        + 'Mês faltando <strong>no meio</strong> do intervalo, ou intervalo terminando antes do esperado, '
-        + 'é sinal de arquivo que subiu incompleto — reimporte esse arquivo por cima; '
-        + 'o conjunto da mesma loja e ano é substituído.</div>'
+        + 'Mês faltando <strong>no meio</strong> do intervalo é mês que ainda não foi importado — '
+        + 'suba a planilha dele e ela é <strong>somada</strong> ao ano, sem mexer no que já está aqui. '
+        + 'Para corrigir um mês que subiu errado é diferente: reimporte um arquivo que contenha '
+        + '<strong>todos</strong> os meses que você quer manter, porque repetir um mês que já existe '
+        + 'substitui o ano inteiro — e nesse caso o sistema avisa antes de gravar.</div>'
       + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
 }
