@@ -617,12 +617,49 @@ try{
             if(v.loja && D2.vendasVend?.[v.id] && Object.keys(D2.vendasVend[v.id]).length) lojasComDados.add(v.loja);
           });
 
+          // ══════════════════════════════════════════════════════════
+          // [R151] NÃO REESCREVER AS 7 LOJAS QUANDO NENHUMA VENDA MUDOU.
+          //
+          // A propagação era incondicional. Salvar só METAS — que vivem no
+          // principal — regravava mesmo assim os sete documentos de loja.
+          // Uma gravação de metas custava o principal (2 pedaços) mais 7
+          // documentos; cadastrando loja por loja, passava de sessenta
+          // gravações em sequência.
+          //
+          // Não era só desperdício: o SDK responde "Write stream exhausted
+          // maximum allowed queued writes", entra em backoff máximo, e
+          // gravação atrasada é gravação que pode não terminar. Documento
+          // fatiado cujos pedaços de trás sobem e a cabeça não fica com os
+          // carimbos trocados — e é assim que nasce o "principal ILEGÍVEL"
+          // que apareceu logo depois, na mesma sessão.
+          //
+          // A assinatura só é guardada quando TODAS as lojas confirmam. Se
+          // uma falhar, a próxima gravação propaga de novo: na dúvida,
+          // escrever de mais é seguro, escrever de menos não é.
+          // ══════════════════════════════════════════════════════════
+          const _assinaVendas = () => {
+            let h = 5381;
+            const s1 = JSON.stringify(D2.vendas||{}) + '|' + JSON.stringify(D2.vendasVend||{});
+            for(let i = 0; i < s1.length; i++) h = ((h * 33) ^ s1.charCodeAt(i)) >>> 0;
+            return s1.length + ':' + h;
+          };
+          const _assinAgora = _assinaVendas();
+          // Guard em vez de `return`: sair daqui encerraria fsGravar inteira,
+          // e o valor de retorno dela é contrato de quem chama. Pular só o
+          // que precisa ser pulado não depende dessa análise.
+          const _pularPropagacao = (window._assinaturaVendasPropagada === _assinAgora);
+          if(_pularPropagacao){
+            console.log("[Avatim] vendas inalteradas desde a última propagação — "
+              + lojasComDados.size + " documento(s) de loja não foram reescritos.");
+          }
+
           // [R129] As 7 lojas eram gravadas EM FILA: leitura, escrita, próxima
           // loja. Com uma ida ao servidor de ~400ms isso sozinho passava de 10s,
           // e somado às leituras do principal estourava o prazo de 12s — daí o
           // "não confirmou" seguido, no log, de "vendas propagadas para 7 loja(s)".
           // Cada loja escreve num documento próprio e não depende das outras,
           // então vão juntas: o tempo passa a ser o da mais lenta, não a soma.
+          if(!_pularPropagacao){
           await Promise.all([...lojasComDados].map(async (lidA) => {
             const docIdA = "loja_"+lidA;
             let remotoA = {};
@@ -765,6 +802,10 @@ try{
               { lojaId: lidA, por: email + " (admin)" });
           }));
           console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
+          // [R151] Só agora: todas confirmaram. Uma falha deixa a assinatura
+          // como estava e a próxima gravação propaga tudo outra vez.
+          window._assinaturaVendasPropagada = _assinAgora;
+          }
         }catch(eProp){
           console.error("[Avatim] ❌ Admin: falha ao propagar vendas:", eProp.code||eProp.message);
         }
@@ -5427,7 +5468,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-19h';
+window.AVATIM_BUILD = '2026-09-20a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5772,6 +5813,12 @@ window.AVATIM_RECURSOS = {
   benchMetaDoMesEscolhido: () => typeof window._relBenchApurar === 'function'
                             && /metaVendDoMes/.test(String(window._relBenchApurar)),
   // [R148] meta de vendedor(a) passa a ter mês
+  // [R151] metas não reescrevem os 7 documentos de loja
+  gravacaoNaoRepropaga:  () => {
+    const h = document.documentElement.innerHTML;
+    return h.indexOf('_assinaturaVendas' + 'Propagada') > -1
+        && h.indexOf('vendas inalteradas desde a ' + 'última propagação') > -1;
+  },
   metaVendPorMes:        () => typeof window.metaVendDoMes === 'function'
                             && typeof window.setMetaVendDoMes === 'function'
                             && typeof window.vendsDoMesMeta === 'function',
@@ -19231,7 +19278,7 @@ function renderMetasVendSection(lid){
         </div>
         <div>
           <div style="font-size:8px;color:var(--roxo);font-weight:600;margin-bottom:3px">SUPER META (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${v.superMetaMes||''}" oninput="this.dataset.manual='1'" placeholder="Auto +25%"
+          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${window.superMetaVendDoMes(v.id, _mrDias)||''}" oninput="this.dataset.manual='1'" placeholder="Auto +25%"
             style="width:100%;background:var(--cinza);border:1px solid rgba(139,92,246,.3);border-radius:5px;padding:6px 8px;color:var(--roxo);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--roxo)'" onblur="this.style.borderColor='rgba(139,92,246,.3)'">
         </div>
@@ -19278,8 +19325,14 @@ function redistribuirMetaVends(lid){
   const smes= parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||250;
   if(mes<=0){ showToast("Preencha a meta da loja primeiro!","err"); return; }
-  const vends = vendsAtivas(lid);
-  if(!vends.length){ showToast("Sem vendedor(es) ativos(as) para distribuir.","err"); return; }
+  // [R151] Os MESMOS vendedores que o formulário desenhou. Num mês passado
+  // ele lista também quem estava ativo então; redistribuir só entre os
+  // ativos de hoje preencheria parte dos campos e deixaria o resto com o
+  // valor antigo — a soma não fecharia com a meta da loja e pareceria
+  // erro de cálculo.
+  const _mrRedis = (typeof _mesMeta !== 'undefined' && _mesMeta) || mesAtual();
+  const vends = window.vendsDoMesMeta(lid, _mrRedis);
+  if(!vends.length){ showToast("Sem vendedor(es) para distribuir neste mês.","err"); return; }
   if(!confirm("Redistribuir a meta da loja igualmente entre "+vends.length+" vendedor(es)?\n\nIsso sobrescreve os valores atuais dos campos dos(as) vendedor(es).")) return;
   const metaVend  = parseFloat((mes/vends.length).toFixed(2));
   const superVend = parseFloat((smes/vends.length).toFixed(2));
