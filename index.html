@@ -17,6 +17,39 @@
 
 <script>
 // Firebase carregado via dynamic import — funciona em GitHub Pages, file://, etc.
+// ══════════════════════════════════════════════════════════════════════
+// [R154] MERGE DE VENDEDOR(A) QUANDO O LOCAL É O MAIS RECENTE
+//
+// Havia QUATRO cópias desta regra, cada uma com a MESMA lista de campos
+// preservados — e a lista não tinha nome, cargo nem loja. Isso nunca
+// apareceu enquanto esses três não eram editáveis. No R153 o botão de
+// editar chegou, e a correção de nome era desfeita pelo primeiro sync:
+// o merge partia do REMOTO e só trazia de volta as metas e o 'ativa'.
+// Sem erro nenhum no console — o nome simplesmente voltava ao antigo.
+//
+// Fica FORA da IIFE de boot do Firebase de propósito. Lá dentro, um
+// catch no init deixaria a função indefinida e o merge quebraria em
+// tempo de sync — foi assim que o R145 derrubou meia tela.
+// ══════════════════════════════════════════════════════════════════════
+window._vendMesclarLocal = function(bvi, rv){
+  bvi = bvi || {}; rv = rv || {};
+  const pega = c => bvi[c] !== undefined ? bvi[c] : rv[c];
+  return Object.assign({}, rv, {
+    // identidade e cadastro — editáveis desde o R153
+    nome:         pega('nome'),
+    cargo:        pega('cargo'),
+    loja:         pega('loja'),
+    // metas e estado
+    metaMes:      pega('metaMes'),
+    superMetaMes: pega('superMetaMes'),
+    ticketAlvo:   pega('ticketAlvo'),
+    metaAniv:     pega('metaAniv'),
+    metaInativ:   pega('metaInativ'),
+    ativa:        pega('ativa'),
+    _savedAt:     (bvi._savedAt || 0) || (rv._savedAt || 0)
+  });
+};
+
 (async function initFirebase(){
   try{
     const [appMod, authMod, storeMod] = await Promise.all([
@@ -1343,15 +1376,8 @@ try{
                     // [FIX BUG META] mas APENAS se remoto NÃO tiver timestamp maior — comparar pré-merge
                     // Se _rTs > _lTs, esse else NÃO executa (vai pro if acima)
                     // Aqui local é mais recente, então preserva local
-                    base.vendedoras[vi]={...rv,
-                      metaMes:      bvi.metaMes      !== undefined ? bvi.metaMes      : rv.metaMes,
-                      superMetaMes: bvi.superMetaMes !== undefined ? bvi.superMetaMes : rv.superMetaMes,
-                      ticketAlvo:   bvi.ticketAlvo   !== undefined ? bvi.ticketAlvo   : rv.ticketAlvo,
-                      metaAniv:     bvi.metaAniv     !== undefined ? bvi.metaAniv     : rv.metaAniv,
-                      metaInativ:   bvi.metaInativ   !== undefined ? bvi.metaInativ   : rv.metaInativ,
-                      ativa:        bvi.ativa        !== undefined ? bvi.ativa        : rv.ativa,
-                      _savedAt:     _lTs || _rTs
-                    };
+                    // [R154] nome/cargo/loja entram aqui também
+                    base.vendedoras[vi] = window._vendMesclarLocal(bvi, rv);
                   }
                 } else base.vendedoras.push(rv);
               });
@@ -1512,15 +1538,8 @@ try{
                       const _ativaPreserv2 = bvi2.ativa;
                       base.vendedoras[vi] = {...rv, ativa: _ativaPreserv2};
                     } else {
-                      base.vendedoras[vi]={...rv,
-                        metaMes:      bvi2.metaMes      !== undefined ? bvi2.metaMes      : rv.metaMes,
-                        superMetaMes: bvi2.superMetaMes !== undefined ? bvi2.superMetaMes : rv.superMetaMes,
-                        ticketAlvo:   bvi2.ticketAlvo   !== undefined ? bvi2.ticketAlvo   : rv.ticketAlvo,
-                        metaAniv:     bvi2.metaAniv     !== undefined ? bvi2.metaAniv     : rv.metaAniv,
-                        metaInativ:   bvi2.metaInativ   !== undefined ? bvi2.metaInativ   : rv.metaInativ,
-                        ativa:        bvi2.ativa        !== undefined ? bvi2.ativa        : rv.ativa,
-                        _savedAt:     _lTs2 || _rTs2
-                      };
+                      // [R154] nome/cargo/loja entram aqui também
+                      base.vendedoras[vi] = window._vendMesclarLocal(bvi2, rv);
                     }
                   } else base.vendedoras.push(rv);
                 });
@@ -5524,7 +5543,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-20c';
+window.AVATIM_BUILD = '2026-09-20d';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -10940,16 +10959,8 @@ async function loadFromFirestore(){
                 };
               } else {
                 // Sem pending + local mais recente ou igual → preservar local
-                D.vendedoras[idx] = {
-                  ...rv,
-                  metaMes:      _dvi.metaMes      !== undefined ? _dvi.metaMes      : rv.metaMes,
-                  superMetaMes: _dvi.superMetaMes !== undefined ? _dvi.superMetaMes : rv.superMetaMes,
-                  ticketAlvo:   _dvi.ticketAlvo   !== undefined ? _dvi.ticketAlvo   : rv.ticketAlvo,
-                  metaAniv:     _dvi.metaAniv     !== undefined ? _dvi.metaAniv     : rv.metaAniv,
-                  metaInativ:   _dvi.metaInativ   !== undefined ? _dvi.metaInativ   : rv.metaInativ,
-                  ativa:        _dvi.ativa        !== undefined ? _dvi.ativa        : rv.ativa,
-                  _savedAt:     _lTsLF || _rTsLF
-                };
+                // [R154] nome/cargo/loja entram aqui também
+                D.vendedoras[idx] = window._vendMesclarLocal(_dvi, rv);
               }
             } else {
               D.vendedoras.push(rv);
@@ -15665,6 +15676,10 @@ window.salvarEdicaoVend = function(){
   v.nome  = nome;
   v.cargo = cargo;
   v.loja  = loja;
+  // [R154] Sem carimbo novo, o merge compara _savedAt local com o remoto,
+  // acha que a versão de cá é igual ou mais velha, e devolve o cadastro
+  // do servidor — a correção sumia no primeiro sync, sem erro nenhum.
+  v._savedAt = Date.now();
 
   save();
   window.fecharEdicaoVend();
@@ -21525,16 +21540,8 @@ function iniciarAutoRefresh(){
                     const _ativaSync = _bvi3.ativa;
                     D.vendedoras[_i] = {...rv, ativa: _ativaSync}; // preservar arquivamento
                   } else {
-                    const _ativaSA = _bvi3.ativa;
-                    D.vendedoras[_i]={...rv,
-                      metaMes:      _bvi3.metaMes      !== undefined ? _bvi3.metaMes      : rv.metaMes,
-                      superMetaMes: _bvi3.superMetaMes !== undefined ? _bvi3.superMetaMes : rv.superMetaMes,
-                      ticketAlvo:   _bvi3.ticketAlvo   !== undefined ? _bvi3.ticketAlvo   : rv.ticketAlvo,
-                      metaAniv:     _bvi3.metaAniv     !== undefined ? _bvi3.metaAniv     : rv.metaAniv,
-                      metaInativ:   _bvi3.metaInativ   !== undefined ? _bvi3.metaInativ   : rv.metaInativ,
-                      ativa:        _ativaSA           !== undefined ? _ativaSA           : rv.ativa,
-                      _savedAt:     _lTsSA3 || _rTsSA3
-                    };
+                    // [R154] nome/cargo/loja entram aqui também
+                    D.vendedoras[_i] = window._vendMesclarLocal(_bvi3, rv);
                   }
                 } else D.vendedoras.push(rv);
               });
