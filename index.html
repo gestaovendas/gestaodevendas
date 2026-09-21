@@ -90,19 +90,69 @@ window._assinaturaPropagavel = function(D2){
  * sozinho. Comparar a hora resolve — é o que o R88 fez nas modalidades
  * e o R144 nas metas.
  */
+/**
+ * [R156] Campos que ESTA máquina alterou nesta sessão.
+ *
+ * Só eles precisam de comparação de carimbo. Ver _mergeCarimbado.
+ */
+window._camposEditadosAqui = window._camposEditadosAqui || new Set();
+window._marcarCampoEditado = function(campo){
+  if(campo) window._camposEditadosAqui.add(campo);
+};
+
 window._mergeCarimbado = function(campo, valorRemoto, tsRemoto){
   if(valorRemoto === undefined || valorRemoto === null) return false;
   const tam = v => Array.isArray(v) ? v.length
                  : (v && typeof v === 'object') ? Object.keys(v).length
                  : (v ? 1 : 0);
-  const local  = D[campo];
-  // O carimbo pode estar num campo irmão (_metasGrupoTs) ou dentro do
-  // próprio objeto (configFollowUp._savedAt, que já era assim). Aceitar
-  // os dois evita ter de mexer em quem já funciona.
+  const local = D[campo];
+
+  // ══════════════════════════════════════════════════════════════════
+  // [R156] QUEM NÃO EDITOU NÃO TEM O QUE DEFENDER.
+  //
+  // A versão do R155 decidia só por carimbo — e carimbo aqui é
+  // Date.now() de MÁQUINAS DIFERENTES, que não têm relógio sincronizado.
+  // O efeito observado: a meta do grupo alterada numa máquina não
+  // chegava às outras nem recarregando a página, só numa aba anônima.
+  //
+  // O motivo: ao receber o valor, a máquina guarda o carimbo junto no
+  // localStorage. Se o relógio de quem edita estiver ATRASADO em
+  // relação ao carimbo já guardado, `tsR > tsL` é falso para sempre e
+  // aquela máquina nunca mais aceita nada — de forma permanente, não
+  // temporária. Aba anônima funcionava porque nasce sem localStorage,
+  // logo sem carimbo para bloquear.
+  //
+  // A regra passa a ser a mesma que _metaRemotaVence já usa para as
+  // metas de loja: se esta máquina NÃO mexeu neste campo, o servidor é
+  // a verdade e entra sem discussão. Comparar relógio só faz sentido
+  // quando há de fato duas edições disputando — e aí o empate fica com
+  // quem digitou aqui, que é quem está olhando para a tela.
+  // ══════════════════════════════════════════════════════════════════
+  const editadoAqui = !!(window._camposEditadosAqui
+                         && window._camposEditadosAqui.has(campo));
+  if(!editadoAqui){
+    const _ts = Number(tsRemoto || (valorRemoto && valorRemoto._savedAt) || 0);
+    // ════════════════════════════════════════════════════════════════
+    // Vazio COM carimbo é decisão; vazio SEM carimbo é ausência.
+    //
+    // Recusar todo vazio protegeria as metas de serem apagadas por um
+    // servidor que ainda não tem o campo — mas quebraria os campos em
+    // que a lista vazia É o estado desejado. Reativar a última loja
+    // arquivada zera _lojasArquivadas de propósito, e essa reativação
+    // precisa chegar às outras máquinas.
+    //
+    // O carimbo separa os dois: quem gravou deliberadamente carimbou.
+    // ════════════════════════════════════════════════════════════════
+    if(tam(valorRemoto) === 0 && tam(local) > 0 && !_ts) return false;
+    D[campo] = valorRemoto;
+    if(_ts) D[campo + 'Ts'] = _ts;
+    return true;
+  }
+
+  // Editado aqui: agora sim o carimbo decide.
   const carimbo = (ext, obj) => Number(ext || (obj && obj._savedAt) || 0);
   const tsL = carimbo(D[campo + 'Ts'], local);
   const tsR = carimbo(tsRemoto, valorRemoto);
-  // o remoto só entra se for mais novo, ou se não houver nada aqui
   if(tsR > tsL || (tam(local) === 0 && tam(valorRemoto) > 0)){
     D[campo] = valorRemoto;
     if(tsR) D[campo + 'Ts'] = tsR;
@@ -160,6 +210,87 @@ window._mesMenos = function(mesRef, n){
   while(m < 1){ m += 12; y -= 1; }
   while(m > 12){ m -= 12; y += 1; }
   return y + '-' + String(m).padStart(2, '0');
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R156] O QUE CHEGA DO SERVIDOR, EM TODOS OS CAMINHOS DE CARGA
+//
+// A regra da casa é: alteração feita em qualquer máquina vai ao
+// servidor e volta para todas as outras. Na prática, 21 dos 39 campos
+// que SOBEM só eram lidos no boot — numa aba já aberta o dado nunca
+// chegava —, e dois nunca eram lidos em lugar nenhum.
+//
+// Os dois piores eram lápides de exclusão: `_campExcluidos` e
+// `_contatosExcluidos` subiam e jamais voltavam, então um lançamento de
+// campanha ou um contato apagado numa máquina RESSUSCITAVA em todas as
+// outras — nem recarregar resolvia, porque a leitura não existia.
+//
+// Havia três cópias divergentes da carga (boot, pull do admin, pull da
+// loja) e cada campo novo precisava ser lembrado nas três. Esta função
+// é o lugar único: quem acrescentar um campo ao payload acrescenta aqui
+// e ele passa a propagar nos três caminhos de uma vez.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Campos de valor único: o remoto com conteúdo vale; vazio não apaga. */
+window._CAMPOS_SIMPLES = ['arquivos','metasProd','realProd','configCom',
+  'diasAbertosOverride','saldosOverride','precosOverride','produtosExtras',
+  'excelDados','_excelImportacoes','_estqImportacoes','_excelImportInfo',
+  'campanhas','campObjetivos'];
+
+/** Lápides: listas de id. União — exclusão feita em qualquer máquina vale. */
+window._LAPIDES_LISTA = ['_vendsExcluidas','_campExcluidos'];
+
+/** Lápides com carimbo por chave: {id: ts}. Fica o carimbo mais recente. */
+window._LAPIDES_MAPA = ['_contatosExcluidos','_fluxoExcluidos',
+  '_vendasExcluidasTs','_vendasVendExcluidasTs'];
+
+window._mesclarRemotoComum = function(remoto){
+  if(!remoto || typeof remoto !== 'object') return 0;
+  let n = 0;
+  const aceita = (typeof _aceitaRemoto === 'function') ? _aceitaRemoto
+               : (l, r) => r !== undefined && r !== null;
+
+  window._CAMPOS_SIMPLES.forEach(c => {
+    if(remoto[c] === undefined || remoto[c] === null) return;
+    if(aceita(D[c], remoto[c])){ D[c] = remoto[c]; n++; }
+  });
+
+  // Lápide nunca encolhe: quem apagou num lugar apagou para todos.
+  window._LAPIDES_LISTA.forEach(c => {
+    if(!Array.isArray(remoto[c])) return;
+    if(!Array.isArray(D[c])) D[c] = [];
+    remoto[c].forEach(id => { if(!D[c].includes(id)){ D[c].push(id); n++; } });
+  });
+
+  window._LAPIDES_MAPA.forEach(c => {
+    if(!remoto[c] || typeof remoto[c] !== 'object') return;
+    if(!D[c] || typeof D[c] !== 'object') D[c] = {};
+    Object.entries(remoto[c]).forEach(([k, ts]) => {
+      if(!D[c][k] || Number(ts||0) > Number(D[c][k]||0)){ D[c][k] = ts; n++; }
+    });
+  });
+
+  // _vendasExcluidas / _vendasVendExcluidas: {loja: [datas]} — união
+  ['_vendasExcluidas','_vendasVendExcluidas'].forEach(c => {
+    if(!remoto[c] || typeof remoto[c] !== 'object') return;
+    if(!D[c] || typeof D[c] !== 'object') D[c] = {};
+    Object.entries(remoto[c]).forEach(([k, lista]) => {
+      if(!Array.isArray(lista)) return;
+      if(!Array.isArray(D[c][k])) D[c][k] = [];
+      lista.forEach(dt => { if(!D[c][k].includes(dt)){ D[c][k].push(dt); n++; } });
+    });
+  });
+
+  // Campos com carimbo próprio, que já têm regra de "quem editou aqui"
+  if(typeof window._mergeCarimbado === 'function'){
+    window._mergeCarimbado('_metasGrupo',      remoto._metasGrupo,      remoto._metasGrupoTs);
+    window._mergeCarimbado('_superMetaAno',    remoto._superMetaAno,    remoto._superMetaAnoTs);
+    window._mergeCarimbado('configFollowUp',   remoto.configFollowUp,   null);
+    window._mergeCarimbado('_lojasArquivadas', remoto._lojasArquivadas, remoto._lojasArquivadasTs);
+  }
+  if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
+    window.mergeConfigModalidades(remoto.configModalidades);
+  return n;
 };
 
 (async function initFirebase(){
@@ -5704,7 +5835,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-21b';
+window.AVATIM_BUILD = '2026-09-21c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -6475,6 +6606,9 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
     D._lojasArquivadas = D._lojasArquivadas.filter(x=>x!==lid);
   }
   D._lojasArquivadasTs = Date.now();
+  // [R156] sem isto o merge não sabe que foi ESTA máquina que decidiu
+  if(typeof window._marcarCampoEditado === 'function')
+    window._marcarCampoEditado('_lojasArquivadas');
   // gravação imediata no localStorage
   _persistirLocal();
   window._pendingLocalData   = JSON.parse(JSON.stringify(D));
@@ -11377,10 +11511,30 @@ async function loadFromFirestore(){
       // digitado — que é exatamente o sintoma relatado no Painel
       // Gestão. Mesma regra do R88 para as modalidades.
       // ══════════════════════════════════════════════════════════════
+      // [R156] tudo o que o boot precisa mesclar, no mesmo lugar que os
+      // pulls usam — inclusive as lápides que nunca eram lidas
+      if(typeof window._mesclarRemotoComum === 'function')
+        window._mesclarRemotoComum(remoto);
       if(typeof window._mergeCarimbado === 'function'){
         window._mergeCarimbado('_metasGrupo',   remoto._metasGrupo,   remoto._metasGrupoTs);
         window._mergeCarimbado('_superMetaAno', remoto._superMetaAno, remoto._superMetaAnoTs);
         window._mergeCarimbado('configFollowUp',remoto.configFollowUp, null);
+        // ══════════════════════════════════════════════════════════
+        // [R156] _lojasArquivadas SUBIA e NUNCA VOLTAVA.
+        //
+        // Estava no payload desde o R97, com carimbo próprio — e não
+        // havia uma única leitura dele em nenhum dos três caminhos de
+        // carga. Arquivar ou reativar uma loja valia só na máquina que
+        // clicou; as outras seguiam mostrando a loja no estado antigo
+        // para sempre, mesmo recarregando.
+        //
+        // Precisa de _mergeCarimbado (e não de _aceitaRemoto) porque
+        // LISTA VAZIA É UM ESTADO VÁLIDO aqui: reativar a última loja
+        // arquivada zera a lista de propósito, e "remoto vazio não
+        // vence" faria a reativação nunca propagar.
+        // ══════════════════════════════════════════════════════════
+        window._mergeCarimbado('_lojasArquivadas', remoto._lojasArquivadas,
+                               remoto._lojasArquivadasTs);
       }
       // [FIX] reaplicar no array PRODUTOS em memória — antes só D era atualizado
       // e o catálogo na tela ficava defasado até um F5.
@@ -12869,11 +13023,19 @@ function gerarDiagnostico(){
     const meses = [];
     for(let i=0;i<4;i++){
       const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
+      // ══════════════════════════════════════════════════════════
+      // [R156] Três destes quatro meses estão FECHADOS, e a comparação
+      // somava lançamento cru — ignorando a planilha importada. O card
+      // "Mês ant." e o % de crescimento saíam de uma base diferente da
+      // que o Histórico e o Painel Gestão mostram para o mesmo mês.
+      //
+      // fatDoMes já aplica a regra R99 sozinha: mês fechado vale a
+      // planilha, mês corrente vale o lançamento. Para i=0 nada muda.
+      // ══════════════════════════════════════════════════════════
       let fat2=0, nat2=0;
-      D.vendedoras.forEach(v=>{
-        Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-          if(dt.startsWith(mStr)){ fat2+=Number(dd.val||0); nat2+=Number(dd.trans||dd.cli||0); }
-        });
+      LOJAS.forEach(l=>{
+        fat2 += window.fatDoMes(l.id, mStr).valor || 0;
+        nat2 += window.atendDoMes(l.id, mStr) || 0;
       });
       const label = i===0?'Este mês':i===1?'Mês ant.':mStr;
       meses.push({mes:mStr,label,fat:fat2,nat:nat2,tm:nat2>0?fat2/nat2:0});
@@ -13164,17 +13326,11 @@ function gerarDiagnostico(){
   const meses = [];
   for(let i=0;i<4;i++){
     const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
-    let fat=0, nat=0;
-    vends.forEach(v=>{
-      Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){ fat+=Number(dd.val||0); nat+=Number(dd.trans||dd.cli||0); }
-      });
-    });
-    if(fat===0){
-      Object.entries(D.vendas[lid]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){ fat+=Number(dd.fat||0); nat+=Number(dd.trans||0); }
-      });
-    }
+    // [R156] mesma correção do bloco da rede, ver acima. A cascata
+    // "se vendasVend deu zero, tenta D.vendas" já vive dentro de
+    // realizadoDoMes, que fatDoMes chama — não precisa repetir aqui.
+    const fat = window.fatDoMes(lid, mStr).valor || 0;
+    const nat = window.atendDoMes(lid, mStr) || 0;
     const label = i===0?'Este mês':i===1?'Mês ant.':mStr;
     meses.push({mes:mStr,label,fat,nat,tm:nat>0?fat/nat:0});
   }
@@ -21827,10 +21983,9 @@ function iniciarAutoRefresh(){
             });
           });
         }
-        // [R155] mesma falta de alcance do syncAdmin: sem isto a loja só
-        // recebe a config de modalidades depois de recarregar a página
-        if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
-          window.mergeConfigModalidades(remoto.configModalidades);
+        // [R156] pull de 60s: mesma carga do boot, num lugar só
+        if(typeof window._mesclarRemotoComum === 'function')
+          window._mesclarRemotoComum(remoto);
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
           remoto.campRealizados.forEach(r=>{
@@ -21931,8 +22086,9 @@ function iniciarAutoRefresh(){
           // Cash Back no admin não chegava nunca — nem em 30s, nem em
           // 60s, só num F5. As metas, o campo irmão, estavam nos três
           // caminhos; esta ficou só num.
-          if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
-            window.mergeConfigModalidades(remoto.configModalidades);
+          // [R156] pull de 30s: mesma carga do boot, num lugar só
+          if(typeof window._mesclarRemotoComum === 'function')
+            window._mesclarRemotoComum(remoto);
           if(remoto.vendedoras && remoto.vendedoras.length){
             // Sync tombstone de vendedoras excluídas
             if(remoto._vendsExcluidas?.length){
@@ -22963,6 +23119,7 @@ window.salvarSuperMetaAno = function(){
   if(val > 0) D._superMetaAno[ano] = val;
   else delete D._superMetaAno[ano];   // apagar o campo limpa o alvo do ano
   D._superMetaAnoTs = Date.now();     // [R155] sem carimbo o merge devolve o antigo
+  window._marcarCampoEditado('_superMetaAno');   // [R156] idem
   save();
   showToast(val > 0 ? '✅ Super meta de ' + ano + ': ' + fmt(val) : 'Super meta do ano removida.',
             val > 0 ? 'ok' : 'warn');
@@ -22983,6 +23140,7 @@ function salvarMetasGrupo(){
     }
   }
   D._metasGrupoTs = Date.now();   // [R155] sem carimbo o merge devolve o antigo
+  window._marcarCampoEditado('_metasGrupo');   // [R156] defende o que foi digitado AQUI
   save();
   showToast('✅ Metas do Grupo salvas! ('+salvos+' meses)');
   renderGestaoAnual();
@@ -25982,7 +26140,12 @@ function countVendasRef(lid, mesRef){
   vendsReais(lid).forEach(v=>{
     Object.entries(D.vendasVend?.[v.id]||{}).forEach(([dt, vd])=>{
       if(dt.startsWith(mesRef)){
-        const trans = Number(vd?.trans||0);
+        // [R156] `cli` é o campo legado de contagem: lançamentos
+        // anteriores ao campo `trans` só o têm preenchido. Sem lê-lo,
+        // um dia com 7 atendimentos antigos contava como 1. Hoje o
+        // salvamento grava os dois com o mesmo valor, então isto só
+        // alcança registro antigo — que é justamente quem precisa.
+        const trans = Number(vd?.trans||0) || Number(vd?.cli||0);
         n += trans>0 ? trans : ((Number(vd?.val||0))>0 ? 1 : 0);
       }
     });
@@ -26314,44 +26477,111 @@ function atualizaVendedorasLoja(){
 
 // [NEW 25/07] Bug 3: cálculo de faturamento entre duas datas quaisquer
 // (o botão "Buscar" do período customizado só mostrava um toast antes).
-function calcFatEntre(lid, dataIni, dataFim){
-  if(!lid || !dataIni || !dataFim) return 0;
-  let fat = 0;
+// ══════════════════════════════════════════════════════════════════════
+// [R156] PERÍODO LIVRE CONTRA UMA FONTE MENSAL
+//
+// calcFatEntre/calcNAtendEntre/calcNItensEntre somavam lançamento cru
+// em QUALQUER intervalo — inclusive nos que cobrem meses já fechados.
+// O Ranking por Período Customizado deixa escolher duas datas quaisquer,
+// e o Fluxo de Clientes usa 2020-01-01 até hoje quando não há filtro:
+// os dois ignoravam a planilha em anos inteiros de meses fechados.
+//
+// O CRM é MENSAL e não sabe responder "do dia 7 ao dia 23". Então o
+// período é decomposto: mês INTEIRAMENTE dentro do intervalo vale pela
+// regra R99 (planilha se fechado, lançamento se corrente); as bordas
+// que cortam um mês ao meio continuam no lançamento, única fonte capaz
+// de responder por dia. É o mesmo critério que a conciliação do R81 já
+// usa para decidir o que é comparável.
+// ══════════════════════════════════════════════════════════════════════
+
+/** Soma crua do lançamento num intervalo — a camada de baixo. */
+function _lancEntre(lid, dataIni, dataFim){
+  const out = {fat:0, atend:0, itens:0};
   vendsReais(lid).forEach(v => {
     Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
-      if(d >= dataIni && d <= dataFim) fat += Number(vd.val || 0);
+      if(d < dataIni || d > dataFim) return;
+      out.fat   += Number(vd.val || 0);
+      out.itens += Number(vd.itens || 0);
+      const t = Number(vd.trans || 0);
+      out.atend += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
     });
   });
-  // Fallback: consolidado da loja quando não há lançamento por vendedora
-  if(!fat){
+  // ══════════════════════════════════════════════════════════════════
+  // Fallback: consolidado da loja quando não há lançamento por
+  // vendedor(a). O guard é POR CAMPO, de propósito.
+  //
+  // O calcFatEntre antigo acumulava um campo só, então `if(!fat)`
+  // bastava. Ao juntar os três numa função, um guard único passou a ser
+  // errado nos dois sentidos: um dia com trans>0 e val:0 (atendimento
+  // sem venda, uso legítimo) deixa atend positivo com fat zerado — um
+  // guard só em `fat` somaria o consolidado por cima e contaria o
+  // atendimento duas vezes; e um guard exigindo os três zerados deixaria
+  // de buscar o faturamento que o consolidado tem, perdendo o fallback
+  // que existia antes.
+  //
+  // Cada campo cai no consolidado só se ELE estiver zerado.
+  // ══════════════════════════════════════════════════════════════════
+  if(!out.fat || !out.atend || !out.itens){
+    const c = {fat:0, atend:0, itens:0};
     Object.entries(D.vendas[lid] || {}).forEach(([d, vd]) => {
-      if(d >= dataIni && d <= dataFim) fat += Number(vd.fat || 0);
+      if(d < dataIni || d > dataFim) return;
+      c.fat   += Number(vd.fat || 0);
+      c.atend += Number(vd.trans || 0);
+      c.itens += Number(vd.itens || 0);
     });
+    if(!out.fat)   out.fat   = c.fat;
+    if(!out.atend) out.atend = c.atend;
+    if(!out.itens) out.itens = c.itens;
   }
-  return fat;
+  return out;
+}
+
+/** Faturamento, atendimentos e itens de um período, mês a mês. */
+window._periodoConsolidado = function(lid, dataIni, dataFim){
+  const out = {fat:0, atend:0, itens:0, mesesCrm:0, mesesLanc:0, parciais:0};
+  if(!lid || !dataIni || !dataFim || dataIni > dataFim) return out;
+
+  let m = dataIni.slice(0,7);
+  const ultimoMes = dataFim.slice(0,7);
+  let volta = 0;
+  while(m <= ultimoMes && volta++ < 600){   // trava: 50 anos de meses
+    const [y, mm] = m.split('-').map(Number);
+    const ini = m + '-01';
+    const fim = m + '-' + String(new Date(y, mm, 0).getDate()).padStart(2,'0');
+    if(dataIni <= ini && dataFim >= fim){
+      // mês inteiro: a regra de sempre decide a fonte
+      const f  = (typeof window.fatDoMes === 'function')
+                 ? window.fatDoMes(lid, m) : {valor:0, origem:'lancamento'};
+      const ia = (typeof window.itensAtendDoMes === 'function')
+                 ? window.itensAtendDoMes(lid, m) : {itens:0, atend:0};
+      out.fat   += f.valor  || 0;
+      out.atend += ia.atend || 0;
+      out.itens += ia.itens || 0;
+      if(f.origem === 'crm') out.mesesCrm++; else out.mesesLanc++;
+    } else {
+      // borda que corta o mês: só o lançamento responde por dia
+      const de  = dataIni > ini ? dataIni : ini;
+      const ate = dataFim < fim ? dataFim : fim;
+      const p = _lancEntre(lid, de, ate);
+      out.fat += p.fat; out.atend += p.atend; out.itens += p.itens;
+      out.parciais++;
+    }
+    m = window._mesMenos(m, -1);   // avança um mês, sem cair na armadilha do R93
+  }
+  return out;
+};
+
+function calcFatEntre(lid, dataIni, dataFim){
+  if(!lid || !dataIni || !dataFim) return 0;
+  return window._periodoConsolidado(lid, dataIni, dataFim).fat;
 }
 function calcNAtendEntre(lid, dataIni, dataFim){
   if(!lid || !dataIni || !dataFim) return 0;
-  let n = 0;
-  vendsReais(lid).forEach(v => {
-    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
-      if(d >= dataIni && d <= dataFim){
-        const t = Number(vd.trans || 0);
-        n += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
-      }
-    });
-  });
-  return n;
+  return window._periodoConsolidado(lid, dataIni, dataFim).atend;
 }
 function calcNItensEntre(lid, dataIni, dataFim){
   if(!lid || !dataIni || !dataFim) return 0;
-  let n = 0;
-  vendsReais(lid).forEach(v => {
-    Object.entries(D.vendasVend[v.id] || {}).forEach(([d, vd]) => {
-      if(d >= dataIni && d <= dataFim) n += Number(vd.itens || 0);
-    });
-  });
-  return n;
+  return window._periodoConsolidado(lid, dataIni, dataFim).itens;
 }
 
 function buscarRankingPeriodo(){
@@ -35261,7 +35491,23 @@ window._calcularRitmoMeta = function(lid, mesRef, dataRef){
   const diasRestantes = Math.max(0, diasTotais - diasPassados);
 
   const ideal     = diasTotais > 0 ? meta * (diasPassados / diasTotais) : 0;
-  const realizado = _idRealizadoAte(lid, mesRef, dataLim);
+  // ══════════════════════════════════════════════════════════════════
+  // [R156] A planilha só serve quando o recorte é o MÊS INTEIRO.
+  //
+  // Este card já sabia dizer "Mês fechado" — e mesmo assim somava o
+  // lançamento cru, ignorando a planilha importada. O Ritmo mostrava um
+  // realizado diferente do Histórico e do Painel Gestão para o mesmo
+  // mês fechado.
+  //
+  // A condição certa não é "o mês está fechado", é "o recorte cobre o
+  // mês todo": o CRM é MENSAL e não sabe responder "até o dia 12". No
+  // mês corrente dataLim é hoje, fica abaixo de fimMes, e o lançamento
+  // continua mandando — que é a regra R99.
+  // ══════════════════════════════════════════════════════════════════
+  const _mesInteiro = dataLim >= fimMes;
+  const realizado = (_mesInteiro && typeof window.fatDoMes === 'function')
+    ? (window.fatDoMes(lid, mesRef).valor || 0)
+    : _idRealizadoAte(lid, mesRef, dataLim);
   const dif       = realizado - ideal;
   const falta     = Math.max(0, meta - realizado);
 
@@ -35295,15 +35541,25 @@ window._calcularRitmoVend = function(vendId, mesRef, dataRef){
   const dataLim = dataRef || (ehMesFechado ? fimMes : (ehMesFuturo ? mesRef+'-01' : hj));
   const diaLim  = Number(dataLim.slice(8,10));
 
-  const meta = Number(v.metaMes) || 0;
+  // [R156] a meta É por mês desde o R148; usar v.metaMes mostrava a
+  // meta de HOJE ao olhar um mês passado
+  const meta = (typeof window.metaVendDoMes === 'function')
+    ? (window.metaVendDoMes(vendId, mesRef) || 0)
+    : (Number(v.metaMes) || 0);
   const diasTotais    = _idDiasAbertos(v.loja, mesRef);
   const diasPassados  = _idDiasAbertos(v.loja, mesRef, diaLim);
   const diasRestantes = Math.max(0, diasTotais - diasPassados);
 
+  // [R156] mesma regra da loja: a planilha só vale no mês inteiro, e
+  // fatVendDoMes cai no lançamento quando o nome não casa com ela
   let realizado = 0;
-  Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
-    if(d.startsWith(mesRef) && d <= dataLim) realizado += Number(vd.val||0);
-  });
+  if(dataLim >= fimMes && typeof window.fatVendDoMes === 'function'){
+    realizado = window.fatVendDoMes(vendId, mesRef).valor || 0;
+  } else {
+    Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
+      if(d.startsWith(mesRef) && d <= dataLim) realizado += Number(vd.val||0);
+    });
+  }
 
   const ideal = diasTotais > 0 ? meta * (diasPassados / diasTotais) : 0;
   const falta = Math.max(0, meta - realizado);
@@ -35319,7 +35575,23 @@ window._calcularRitmoVend = function(vendId, mesRef, dataRef){
 // Linha compacta de ritmo para o card da vendedora
 window._htmlRitmoVend = function(vendId){
   const r = window._calcularRitmoVend(vendId);
-  if(!r || !r.meta) return '';
+  if(!r) return '';
+  // ══════════════════════════════════════════════════════════════════
+  // [R156] Sem meta o card SUMIA — e desde que o ritmo passou a usar
+  // metaVendDoMes (a meta do MÊS, R148), "sem meta" virou a resposta
+  // normal para qualquer mês passado que não teve meta individual
+  // cadastrada. O bloco inteiro desaparecia ao navegar para um mês
+  // fechado, parecendo tela quebrada.
+  //
+  // Zero continua sendo a resposta honesta: o que muda é que agora ela
+  // é DITA. O card da loja já fazia assim.
+  // ══════════════════════════════════════════════════════════════════
+  if(!r.meta){
+    return '<div style="font-size:10.5px;color:var(--muted);padding:6px 0">'
+      + '🎯 Sem meta cadastrada para ' + (r.mesRef || 'este mês') + '.'
+      + (r.realizado > 0 ? ' Realizado: <strong>' + fmt(r.realizado) + '</strong>.' : '')
+      + '</div>';
+  }
   const noRitmo = r.dif >= 0;
   const cor = noRitmo ? 'var(--verde)' : 'var(--verm)';
   const pctReal  = Math.max(0, Math.min(100, r.meta>0 ? r.realizado/r.meta*100 : 0));
