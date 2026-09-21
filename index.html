@@ -50,6 +50,118 @@ window._vendMesclarLocal = function(bvi, rv){
   });
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R155] ASSINATURA DO QUE VAI NO DOCUMENTO DA LOJA
+//
+// O R151 parou de reescrever os sete documentos de loja quando nada
+// mudava, e assinava só vendas. Mas o documento da loja carrega também
+// vendedoras, metasLoja e historicoMeses — e editar qualquer um deles
+// não mexe em venda nenhuma. A propagação era pulada, o principal ficava
+// com o valor novo e o doc da loja com o antigo; no merge seguinte o
+// antigo voltava.
+//
+// Era isso que fazia "corrigi o nome e ele voltou" e "mudei a meta e ela
+// voltou para a anterior". Nada falhava — por isso o console ficava
+// limpo. O R154 tratou o merge, que era metade do caminho; a outra
+// metade é o dado nem chegar ao servidor.
+//
+// O ganho do R151 fica de pé: salvar sem mexer em nada disso continua
+// não reescrevendo as sete lojas.
+// ══════════════════════════════════════════════════════════════════════
+window._assinaturaPropagavel = function(D2){
+  D2 = D2 || {};
+  let h = 5381;
+  const s1 = JSON.stringify(D2.vendas||{})
+           + '|' + JSON.stringify(D2.vendasVend||{})
+           + '|' + JSON.stringify(D2.vendedoras||[])
+           + '|' + JSON.stringify(D2.metasLoja||{})
+           + '|' + JSON.stringify(D2.historicoMeses||{});
+  for(let i = 0; i < s1.length; i++) h = ((h * 33) ^ s1.charCodeAt(i)) >>> 0;
+  return s1.length + ':' + h;
+};
+
+/**
+ * [R155] Merge de um campo do principal comparando o carimbo de hora.
+ *
+ * Os campos simples do principal usam "remoto com conteúdo vence"
+ * (_aceitaRemoto). Para o que é digitado numa tela e salvo em seguida
+ * isso não serve: uma carga que chegue entre o clique e o fim da
+ * gravação devolve o valor antigo, e quem digitou vê o campo voltar
+ * sozinho. Comparar a hora resolve — é o que o R88 fez nas modalidades
+ * e o R144 nas metas.
+ */
+window._mergeCarimbado = function(campo, valorRemoto, tsRemoto){
+  if(valorRemoto === undefined || valorRemoto === null) return false;
+  const tam = v => Array.isArray(v) ? v.length
+                 : (v && typeof v === 'object') ? Object.keys(v).length
+                 : (v ? 1 : 0);
+  const local  = D[campo];
+  // O carimbo pode estar num campo irmão (_metasGrupoTs) ou dentro do
+  // próprio objeto (configFollowUp._savedAt, que já era assim). Aceitar
+  // os dois evita ter de mexer em quem já funciona.
+  const carimbo = (ext, obj) => Number(ext || (obj && obj._savedAt) || 0);
+  const tsL = carimbo(D[campo + 'Ts'], local);
+  const tsR = carimbo(tsRemoto, valorRemoto);
+  // o remoto só entra se for mais novo, ou se não houver nada aqui
+  if(tsR > tsL || (tam(local) === 0 && tam(valorRemoto) > 0)){
+    D[campo] = valorRemoto;
+    if(tsR) D[campo + 'Ts'] = tsR;
+    return true;
+  }
+  return false;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R155] UMA REGRA SÓ PARA "A META REMOTA VENCE?"
+//
+// Havia TRÊS, e cada uma decidia diferente:
+//
+//   mergeMetasLoja  !local || !local.mes || !meuEdit || rTs>lTs || ambosZero
+//   merge do admin   !local || !local.mes ||             rTs>lTs || ambosZero
+//   merge da loja    !local || !local.mes ||             rTs>lTs
+//
+// Só a primeira consultava _metasEditadasAqui — a proteção contra o
+// servidor devolver por cima da meta que acabou de ser digitada. Os
+// dois merges da CARGA, que são justamente os que rodam a cada sync,
+// não a consultavam. E a da loja ainda ignorava o caso de nenhum dos
+// dois ter carimbo, de modo que admin e loja viam metas diferentes
+// para o mesmo mês em dados antigos.
+//
+// Regra única, com a proteção em todos os caminhos.
+// ══════════════════════════════════════════════════════════════════════
+window._metaRemotaVence = function(lid, mr, local, remoto){
+  if(!remoto || remoto.mes === undefined) return false;
+  if(!local || !local.mes) return true;              // não há o que preservar
+  const editadaAqui = !!(window._metasEditadasAqui
+                         && window._metasEditadasAqui.has(lid + '|' + mr));
+  if(!editadaAqui) return true;                      // ninguém digitou aqui: o remoto manda
+  const lTs = Number(local._savedAt  || 0);
+  const rTs = Number(remoto._savedAt || 0);
+  if(rTs > lTs) return true;                         // lá é mais novo que aqui
+  if(rTs === 0 && lTs === 0) return !!remoto.mes;    // primeira sincronização
+  return false;                                      // digitada aqui e mais nova: fica
+};
+
+/**
+ * [R155] Recuar N meses sobre 'AAAA-MM', por aritmética de string.
+ *
+ * O caminho intuitivo — montar um Date a partir da string ISO do dia
+ * 1º e chamar setMonth(-N) — é uma
+ * armadilha conhecida aqui (R93): a string ISO é lida como UTC, e em
+ * BRT (UTC-3) o dia 1º às 00:00 UTC vira o dia 31 do mês ANTERIOR às
+ * 21:00 local. getMonth() então devolve o mês errado, e a janela
+ * inteira de "últimos N meses" sai deslocada — todo dia do ano, não só
+ * na virada. O R93 corrigiu isso no histórico; três funções ficaram
+ * para trás e são corrigidas agora.
+ */
+window._mesMenos = function(mesRef, n){
+  let [y, m] = String(mesRef).split('-').map(Number);
+  m -= (Number(n) || 0);
+  while(m < 1){ m += 12; y -= 1; }
+  while(m > 12){ m -= 12; y += 1; }
+  return y + '-' + String(m).padStart(2, '0');
+};
+
 (async function initFirebase(){
   try{
     const [appMod, authMod, storeMod] = await Promise.all([
@@ -552,7 +664,28 @@ try{
           // que guarda o "antes" de cada saldo/preço — sem ele no servidor,
           // desfazer uma importação só funcionaria na máquina que a fez.
           _estqImportacoes:    D2._estqImportacoes     || [],
-          _contatosExcluidos:  D2._contatosExcluidos   || {}
+          _contatosExcluidos:  D2._contatosExcluidos   || {},
+          // ══════════════════════════════════════════════════════════
+          // [R155] ESTES NUNCA SUBIRAM — e a lista aqui é EXPLÍCITA, o
+          // que significa que campo esquecido não dá erro: ele grava no
+          // localStorage, a tela mostra salvo, e o primeiro merge com o
+          // servidor devolve o valor antigo. Foi o que fez a meta do
+          // grupo "voltar para a anterior" no Painel Gestão.
+          //
+          // _metasGrupo    — meta do grupo mês a mês, decisão da gestão
+          // _superMetaAno  — alvo anual do grupo [R155]
+          // configFollowUp — régua de follow-up, a MESMA para todos
+          // _diasAbertosTs — carimbo de diasAbertosOverride, que já
+          //                  subia sem a hora; sem ela o merge não sabe
+          //                  qual das duas versões é a mais nova
+          // ══════════════════════════════════════════════════════════
+          _metasGrupo:         D2._metasGrupo          || {},
+          _metasGrupoTs:       D2._metasGrupoTs        || 0,
+          _superMetaAno:       D2._superMetaAno        || {},
+          _superMetaAnoTs:     D2._superMetaAnoTs      || 0,
+          // configFollowUp carrega o carimbo DENTRO dele (_savedAt)
+          configFollowUp:      D2.configFollowUp       || {},
+          _diasAbertosTs:      D2._diasAbertosTs       || 0
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -571,14 +704,39 @@ try{
         // novo payload esvazia o que existe, ela é RECUSADA — o dado remoto
         // é preservado e o usuário é avisado.
         // ══════════════════════════════════════════════════════════════
+        // ══════════════════════════════════════════════════════════
+        // [R155] A trava não pesava os dados de planilha.
+        //
+        // excelDados, _excelImportacoes e _estqImportacoes ficavam de
+        // fora: um payload que os esvaziasse passava sem recusa e sem
+        // aviso. Bastava o admin abrir o sistema num dispositivo novo e
+        // salvar QUALQUER coisa antes da carga terminar — uma meta, uma
+        // campanha — para o servidor ficar com a planilha zerada. Depois
+        // disso todos os outros aparelhos recebiam o vazio.
+        //
+        // _estqImportacoes é o que guarda o "antes" de cada saldo e
+        // preço: sem ele, desfazer uma importação de estoque deixa de
+        // ser possível.
+        //
+        // Apagar de propósito continua valendo — ver _limpezaDeliberada
+        // logo abaixo, que o botão de limpar liga antes de gravar.
+        // ══════════════════════════════════════════════════════════
         const _peso = o => ({
           vendedoras:    (o?.vendedoras    || []).length,
           campanhas:     (o?.campanhas     || []).length,
           campRealizados:(o?.campRealizados|| []).length,
           fluxo:         (o?.fluxo         || []).length,
           contatos:      (o?.contatos      || []).length,
-          metasLoja:     Object.keys(o?.metasLoja || {}).length
+          metasLoja:     Object.keys(o?.metasLoja || {}).length,
+          excelDados:       (o?.excelDados       || []).length,
+          _excelImportacoes:(o?._excelImportacoes|| []).length,
+          _estqImportacoes: (o?._estqImportacoes || []).length
         });
+        // Campos que o usuário pode zerar de propósito, pelo botão de
+        // limpar. Sem esta saída a trava passaria a impedir a limpeza —
+        // trocar um recurso que funciona por outro não é conserto.
+        const _zerarOk = window._limpezaDeliberada
+          ? {excelDados:1, _excelImportacoes:1, _estqImportacoes:1} : {};
         try{
           // [R125] a trava precisa enxergar o documento INTEIRO; lendo só o
           // primeiro pedaço ela veria campos vazios e recusaria toda gravação.
@@ -587,7 +745,8 @@ try{
           if(_objAntes){
             const _antes  = _peso(_objAntes);
             const _depois = _peso(D2_principal);
-            const _sumiu = Object.keys(_antes).filter(k => _antes[k] > 0 && _depois[k] === 0);
+            const _sumiu = Object.keys(_antes)
+              .filter(k => !_zerarOk[k] && _antes[k] > 0 && _depois[k] === 0);
             if(_sumiu.length){
               const _detalhe = _sumiu.map(k => k + ': ' + _antes[k] + '→0').join(', ');
               console.error('[Avatim] GRAVAÇÃO RECUSADA — esvaziaria o servidor:', _detalhe);
@@ -670,19 +829,15 @@ try{
           // uma falhar, a próxima gravação propaga de novo: na dúvida,
           // escrever de mais é seguro, escrever de menos não é.
           // ══════════════════════════════════════════════════════════
-          const _assinaVendas = () => {
-            let h = 5381;
-            const s1 = JSON.stringify(D2.vendas||{}) + '|' + JSON.stringify(D2.vendasVend||{});
-            for(let i = 0; i < s1.length; i++) h = ((h * 33) ^ s1.charCodeAt(i)) >>> 0;
-            return s1.length + ':' + h;
-          };
-          const _assinAgora = _assinaVendas();
+          // [R155] assinatura do que vai ao doc da loja — ver
+          // window._assinaturaPropagavel, definida fora da IIFE de boot
+          const _assinAgora = window._assinaturaPropagavel(D2);
           // Guard em vez de `return`: sair daqui encerraria fsGravar inteira,
           // e o valor de retorno dela é contrato de quem chama. Pular só o
           // que precisa ser pulado não depende dessa análise.
-          const _pularPropagacao = (window._assinaturaVendasPropagada === _assinAgora);
+          const _pularPropagacao = (window._assinaturaPropagada === _assinAgora);
           if(_pularPropagacao){
-            console.log("[Avatim] vendas inalteradas desde a última propagação — "
+            console.log("[Avatim] nada propagável mudou desde a última propagação — "
               + lojasComDados.size + " documento(s) de loja não foram reescritos.");
           }
 
@@ -837,7 +992,7 @@ try{
           console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
           // [R151] Só agora: todas confirmaram. Uma falha deixa a assinatura
           // como estava e a próxima gravação propaga tudo outra vez.
-          window._assinaturaVendasPropagada = _assinAgora;
+          window._assinaturaPropagada = _assinAgora;
           }
         }catch(eProp){
           console.error("[Avatim] ❌ Admin: falha ao propagar vendas:", eProp.code||eProp.message);
@@ -1387,15 +1542,9 @@ try{
               Object.entries(pedaco.metasLoja).forEach(([lid2,meses])=>{
                 if(!base.metasLoja[lid2]) base.metasLoja[lid2]={};
                 Object.entries(meses||{}).forEach(([mr,m])=>{
-                  // [FIX BUG 1] Comparar _savedAt — meta mais recente vence
-                  // Antes: loja_* sobrescrevia meta do principal (admin) porque lia por último
-                  const _bMeta = base.metasLoja[lid2]?.[mr];
-                  const _rTsM  = m?._savedAt      || 0;
-                  const _lTsM  = _bMeta?._savedAt || 0;
-                  // [R85] mesma regra do mergeMetasLoja, inclusive o caso em
-                  // que nenhum dos dois tem carimbo (primeira sincronização).
-                  if(!_bMeta || !_bMeta.mes || _rTsM > _lTsM
-                     || (_rTsM === 0 && _lTsM === 0 && m?.mes))
+                  // [R155] regra única — antes esta cópia não consultava
+                  // _metasEditadasAqui e devolvia por cima do digitado
+                  if(window._metaRemotaVence(lid2, mr, base.metasLoja[lid2]?.[mr], m))
                     base.metasLoja[lid2][mr] = m;
                 }); 
               });
@@ -1548,14 +1697,10 @@ try{
                 if(!base.metasLoja) base.metasLoja={};
                 if(!base.metasLoja[lid]) base.metasLoja[lid]={};
                 Object.entries(pedaco.metasLoja[lid]).forEach(([mr,m])=>{
-                  // [FIX CRÍTICO] Comparar _savedAt — meta mais recente vence
-                  // (vale para principal vs loja_* — quem tem timestamp maior ganha)
-                  // Antes: só preenchia meses ausentes → admin atualizava no principal
-                  // mas loja_* continuava com meta antiga e nunca era atualizada
-                  const _bMetaL = base.metasLoja[lid][mr];
-                  const _rTsML  = m?._savedAt       || 0;
-                  const _lTsML  = _bMetaL?._savedAt || 0;
-                  if(!_bMetaL || !_bMetaL.mes || _rTsML > _lTsML)
+                  // [R155] regra única — esta cópia ainda ignorava o caso
+                  // de nenhum dos dois ter carimbo, e o perfil loja via
+                  // meta diferente da que o admin via no mesmo mês
+                  if(window._metaRemotaVence(lid, mr, base.metasLoja[lid][mr], m))
                     base.metasLoja[lid][mr] = m;
                 });
               }
@@ -2131,6 +2276,13 @@ body:not(.logado) #appScreen{display:none!important}
      telas. Aqui ocupa espaço próprio: nada fica por baixo, e a navegação
      desce naturalmente. Fica grudado no topo quando a lateral rola. -->
 <div id="sync-badge" onclick="window.syncAgora()" title="Clique para sincronizar agora"></div>
+<!-- [R155] O aviso de "sem conexão" era procurado em dois pontos do código
+     (o catch de loadFromFirestore e o showApp), e o CSS .demo-box existia —
+     mas a div nunca foi criada. getElementById devolvia null, os dois usos
+     estavam guardados com if, e o aviso simplesmente nunca aparecia: quem
+     ficava offline seguia vendo dado local desatualizado sem saber disso.
+     Fica ao lado do indicador de sincronização, e nasce escondido. -->
+<div id="demo-box" class="demo-box" style="display:none"></div>
 <!-- [R113b] O botão de descartar a cópia local ficava só em Configurações, que
      é tela de admin — justamente as máquinas de LOJA, que mais sofrem com
      estado local defeituoso, não o alcançavam. Aqui fica ao lado do indicador
@@ -5297,7 +5449,16 @@ service cloud.firestore {
 
     <!-- [R152] ACOMPANHAMENTO DA META ANUAL -->
     <div class="sc" style="margin-bottom:14px">
-      <div class="st" style="margin:0 0 4px">🎯 Acompanhamento da Meta Anual</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:4px">
+        <div class="st" style="margin:0">🎯 Acompanhamento da Meta Anual</div>
+        <!-- [R155] super meta do ANO, digitada -->
+        <div style="display:flex;align-items:center;gap:7px">
+          <label for="gestao-super-meta-ano" style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🚀 Super meta do ano</label>
+          <input type="text" id="gestao-super-meta-ano" placeholder="14.000.000" inputmode="decimal"
+            style="width:130px;background:var(--cinza);border:1px solid rgba(160,110,220,.45);border-radius:7px;padding:6px 9px;color:var(--texto);font-size:12px;font-weight:700;text-align:right">
+          <button class="btn-s" onclick="window.salvarSuperMetaAno()" style="font-size:11px;padding:6px 12px">Salvar</button>
+        </div>
+      </div>
       <div id="gestao-meta-anual-fonte" style="font-size:10px;color:var(--muted);margin-bottom:12px"></div>
       <div id="gestao-meta-anual"></div>
     </div>
@@ -5543,7 +5704,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-20d';
+window.AVATIM_BUILD = '2026-09-21b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -5889,10 +6050,21 @@ window.AVATIM_RECURSOS = {
                             && /metaVendDoMes/.test(String(window._relBenchApurar)),
   // [R148] meta de vendedor(a) passa a ter mês
   // [R151] metas não reescrevem os 7 documentos de loja
+  // [R155] e a assinatura cobre vendedoras/metas, senão editar cadastro
+  // nunca chegava ao doc da loja e o merge devolvia o valor antigo
   gravacaoNaoRepropaga:  () => {
     const h = document.documentElement.innerHTML;
-    return h.indexOf('_assinaturaVendas' + 'Propagada') > -1
-        && h.indexOf('vendas inalteradas desde a ' + 'última propagação') > -1;
+    return h.indexOf('_assinatura' + 'Propagada') > -1
+        && h.indexOf('nada propagável mudou desde a ' + 'última propagação') > -1;
+  },
+  propagacaoCobreCadastro: () => {
+    if(typeof window._assinaturaPropagavel !== 'function') return false;
+    // medida por COMPORTAMENTO: mudar só o cadastro tem de mudar a assinatura
+    const a1 = window._assinaturaPropagavel({vendedoras:[{id:'x', nome:'A'}]});
+    const a2 = window._assinaturaPropagavel({vendedoras:[{id:'x', nome:'B'}]});
+    const m1 = window._assinaturaPropagavel({metasLoja:{l:{'2026-01':{mes:1}}}});
+    const m2 = window._assinaturaPropagavel({metasLoja:{l:{'2026-01':{mes:2}}}});
+    return a1 !== a2 && m1 !== m2;
   },
   metaVendPorMes:        () => typeof window.metaVendDoMes === 'function'
                             && typeof window.setMetaVendDoMes === 'function'
@@ -5907,8 +6079,13 @@ window.AVATIM_RECURSOS = {
   metaIndividualNaoEhReescrita: () => typeof window._conferirMetasDivergentes === 'function'
                             && typeof window._metasDivergentes === 'object',
   // [R144] merge de metas com uma regra só, sem depender do relógio alheio
+  // [R155] a consulta a _metasEditadasAqui saiu de dentro do
+  // mergeMetasLoja e virou regra única, usada também pelos merges da
+  // carga — que antes não a faziam
   metaMergeSemRelogio:   () => typeof window.mergeMetasLoja === 'function'
-                            && /_metasEditadasAqui/.test(String(window.mergeMetasLoja))
+                            && typeof window._metaRemotaVence === 'function'
+                            && /_metasEditadasAqui/.test(String(window._metaRemotaVence))
+                            && /_metaRemotaVence/.test(String(window.mergeMetasLoja))
                             && typeof window._marcarMetaEditada === 'function',
   // [R144] sem acesso ou sem rede não é documento corrompido
   // [R150] NÃO inspecionar window.fsCarregar: quando o Firebase não carrega,
@@ -6094,6 +6271,35 @@ Object.defineProperty(globalThis, 'LOJAS', {
   get(){ return LOJAS_TODAS.filter(l => !lojaArquivada(l.id)); },
   configurable: true
 });
+
+/**
+ * [R155] LOJAS DO ANO — as ativas mais as que fecharam no meio dele.
+ *
+ * Arquivar tira a loja de LOJAS, e com isso ela some do Painel Gestão e
+ * do total do grupo. Para o dia a dia é o certo: loja fechada não tem
+ * meta nem cobrança. Para o FECHAMENTO DO ANO, não: Alto de Pinheiros
+ * vendeu de janeiro a julho, e esse dinheiro é do grupo. Somar o ano
+ * sem ela mostra um realizado menor do que de fato houve.
+ *
+ * Entram só as arquivadas que têm faturamento no ano — uma loja fechada
+ * há três anos continua fora.
+ */
+window.lojasDoAno = function(ano){
+  ano = ano || hoje().slice(0,4);
+  const ativas = LOJAS;
+  const vistas = new Set(ativas.map(l => l.id));
+  const extras = [];
+  LOJAS_TODAS.forEach(l => {
+    if(vistas.has(l.id)) return;
+    let teve = false;
+    for(let m = 1; m <= 12 && !teve; m++){
+      const mr = ano + '-' + String(m).padStart(2,'0');
+      try{ if((window.fatDoMes(l.id, mr).valor || 0) > 0) teve = true; }catch(e){}
+    }
+    if(teve) extras.push(Object.assign({}, l, {arquivada: true}));
+  });
+  return ativas.concat(extras);
+};
 
 /**
  * [R97] Painel de lojas ativas/arquivadas nas Configurações.
@@ -7403,16 +7609,9 @@ window.mergeMetasLoja = function(metasRemotas){
   Object.entries(metasRemotas).forEach(([lid, meses]) => {
     if(!D.metasLoja[lid]) D.metasLoja[lid] = {};
     Object.entries(meses || {}).forEach(([mr, metaObj]) => {
-      const local = D.metasLoja[lid]?.[mr];
-      const lTs   = local?._savedAt   || 0;
-      const rTs   = metaObj?._savedAt || 0;
-      const meuEdit = window._metasEditadasAqui.has(lid + '|' + mr);
-      // Aceita quando: não há meta local · a local é vazia · esta máquina
-      // não editou esta meta nesta sessão · o remoto é mais recente · ou
-      // nenhum dos dois tem carimbo (primeira sincronização).
-      const aceita = !local || !local.mes || !meuEdit || rTs > lTs
-                   || (rTs === 0 && lTs === 0 && metaObj?.mes);
-      if(aceita && metaObj && metaObj.mes !== undefined){
+      // [R155] a mesma regra que os merges da carga usam — ver
+      // window._metaRemotaVence, que consulta _metasEditadasAqui
+      if(window._metaRemotaVence(lid, mr, D.metasLoja[lid]?.[mr], metaObj)){
         D.metasLoja[lid][mr] = metaObj; aceitas++;
       }
     });
@@ -9186,12 +9385,20 @@ window.crmAgregar = function(linhas, opts){
   // [R152] Recorte MENSAL do cliente. O cubo de clientes é anual (guarda
   // primeira e última compra), então filtrar a lista por mês entregava
   // "quem PAROU de comprar naquele mês", não "quem comprou naquele mês":
-  // a cliente de julho que voltou em agosto sumia do recorte de julho, e
-  // o bloco Melhores Clientes aparecia vazio. Guardar mês × cliente
-  // inteiro custaria meses × clientes; o TOPO de cada mês é o que a tela
-  // usa, e cabe folgado.
-  const TOP_CLI_MES = opts.topCliMes || 200;
-  const mesCli=new Map();       // mes|chave -> {t,i,c}
+  // a cliente de julho que voltou em agosto sumia do recorte de julho.
+  //
+  // [R155] Era um TOPO de 200 por mês, por medo do tamanho. Medido num
+  // ano real da Mooca — 22 mil linhas, 8.592 notas, 4.725 clientes —, o
+  // recorte COMPLETO dá 150 KB contra 39 KB do topo, num orçamento de
+  // 700 KB por documento. O medo não se sustentava, e o topo cobrava
+  // caro: sem todos os clientes do mês não dá para RECONSTRUIR o ano ao
+  // remover um mês, e sem isso não há como substituir só agosto.
+  //
+  // Guardamos também o último DIA de compra dentro do mês (2 dígitos —
+  // o mês já vem do índice), para a data da última compra sobreviver à
+  // reconstrução. É o campo que a régua de inativos usa.
+  const TOP_CLI_MES = opts.topCliMes || 0;   // 0 = sem corte
+  const mesCli=new Map();       // mes|chave -> {t,i,c,ud}
   const nfMes=new Map();        // NF -> indice do mes
   let fatTotal=0, dtMin=null, dtMax=null;
 
@@ -9260,8 +9467,10 @@ window.crmAgregar = function(linhas, opts){
       nfValor.set(cup, (nfValor.get(cup)||0) + val);
       nfMes.set(cup, mi);
       let mc=mesCli.get(mi+'|'+cn);
-      if(!mc){ mc={t:0,i:0,c:0}; mesCli.set(mi+'|'+cn, mc); }
+      if(!mc){ mc={t:0,i:0,c:0,ud:''}; mesCli.set(mi+'|'+cn, mc); }
       mc.i += qt;
+      const _dia = String(r.data).slice(8,10);
+      if(_dia > mc.ud) mc.ud = _dia;
 
       let s=cliProd.get(cn); if(!s){ s=new Set(); cliProd.set(cn,s); } s.add(pi);
     } else {
@@ -9331,12 +9540,13 @@ window.crmAgregar = function(linhas, opts){
     const mi = Number(k.slice(0,_c)), cn = k.slice(_c+1);
     const d = cliente.get(cn); if(!d) return;
     if(!_porMesCli.has(mi)) _porMesCli.set(mi,[]);
-    _porMesCli.get(mi).push([window._crmChaveCli(d.n, d.doc), v.c, r2(v.t), v.i]);
+    _porMesCli.get(mi).push([window._crmChaveCli(d.n, d.doc), v.c, r2(v.t), v.i, v.ud||'']);
   });
   const cuboMesCli=[];
   _porMesCli.forEach((arr,mi)=>{
-    arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_CLI_MES)
-       .forEach(a=>cuboMesCli.push([mi, idx(tCli,iCli,a[0]), a[1], a[2], a[3]]));
+    arr.sort((x,y)=>y[2]-x[2]);
+    (TOP_CLI_MES > 0 ? arr.slice(0, TOP_CLI_MES) : arr)
+       .forEach(a=>cuboMesCli.push([mi, idx(tCli,iCli,a[0]), a[1], a[2], a[3], a[4]]));
   });
 
   // cruzamento: pares de produtos comprados pelo mesmo cliente
@@ -9359,6 +9569,8 @@ window.crmAgregar = function(linhas, opts){
     periodo:{ini:dtMin,fim:dtMax}, clientesUnicos:cliente.size,
     anonimo:{notas:anonNotas.size, fat:r2(anonFat)},   // [R90] o que ficou fora das listas
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
+    // [R155] sem corte = dá para reconstruir o ano removendo um mês
+    mesCliCompleto: TOP_CLI_MES === 0,
     mesVend:cuboMesVend, mesProd:cuboMesProd, vendProd:cuboVendProd, prodTotal:cuboProdTot,
     mesCli:cuboMesCli,
     clientes:cuboClientes, cross:cuboCross
@@ -9428,6 +9640,93 @@ window.crmMesesDoCubo = function(cubo){
 };
 
 /**
+ * [R155] Remove meses inteiros de um cubo, reconstruindo o que depende
+ * deles. É o que permite trocar SÓ agosto sem perder janeiro a julho.
+ *
+ * A planilha do ano trazia agosto pela metade, e substituiu o agosto
+ * fechado que já tinha sido importado à parte. Até aqui a importação só
+ * sabia duas coisas: fundir meses novos, ou trocar o ano inteiro.
+ *
+ * Exato em tudo que tem mês na chave (mesVend, mesProd, mesCli) e no
+ * cubo de clientes, que é RECONSTRUÍDO a partir do mesCli dos meses que
+ * ficam — daí a exigência de mesCliCompleto. As duas dimensões sem mês
+ * (prodTotal e cross, que são do ano) são reescaladas pela participação
+ * do que restou; ficam aproximadas e a tela diz isso.
+ *
+ * Devolve null quando não dá para fazer direito, e quem chama decide.
+ */
+window.crmRemoverMeses = function(cubo, mesesFora){
+  if(!cubo) return null;
+  const fora = new Set(mesesFora || []);
+  if(!fora.size) return cubo;
+  if(!cubo.mesCliCompleto || !Array.isArray(cubo.mesCli) || !Array.isArray(cubo.clis)) return null;
+
+  const tab = cubo.meses || [];
+  const ficam = i => { const m = tab[i]; return m && !fora.has(m); };
+
+  const mesVend = (cubo.mesVend||[]).filter(r => ficam(r[0]));
+  const mesProd = (cubo.mesProd||[]).filter(r => ficam(r[0]));
+  const mesCli  = (cubo.mesCli ||[]).filter(r => ficam(r[0]));
+  if(!mesVend.length) return null;   // não sobrou nada: quem chama que troque o ano
+
+  // ── clientes reconstruídos do mesCli que ficou ────────────────────
+  const antes = new Map();
+  (cubo.clientes||[]).forEach(c => antes.set(window._crmChaveCli(c[0], c[7]), c));
+  const acc = new Map();
+  mesCli.forEach(([mi, ci, compras, total, itens, ud]) => {
+    const k = (cubo.clis||[])[ci]; if(!k) return;
+    const mes = tab[mi] || '';
+    const a = acc.get(k) || {compras:0, total:0, itens:0, pri:'', ult:''};
+    a.compras += compras||0; a.total += total||0; a.itens += itens||0;
+    if(!a.pri || mes < a.pri) a.pri = mes;
+    const dia = (mes && ud) ? (mes + '-' + ud) : mes;
+    if(dia > a.ult) a.ult = dia;
+    acc.set(k, a);
+  });
+  const r2 = n => Math.round(n*100)/100;
+  const clientes = [];
+  acc.forEach((a, k) => {
+    const c = antes.get(k);
+    if(!c) return;                       // sem catálogo não há nome/documento
+    const piMes = (cubo.meses||[]).indexOf(a.pri);
+    clientes.push([c[0], c[1], piMes >= 0 ? piMes : c[2], a.ult || c[3],
+                   a.compras, r2(a.total), a.itens, c[7], c[8]]);
+  });
+  clientes.sort((x,y) => y[5] - x[5]);
+
+  // ── escalas do que sobrou ─────────────────────────────────────────
+  const fatAntes = (cubo.mesVend||[]).reduce((t,r) => t + (r[2]||0), 0);
+  const fatDepois = mesVend.reduce((t,r) => t + (r[2]||0), 0);
+  const fator = fatAntes > 0 ? fatDepois / fatAntes : 0;
+  const esc = n => Math.round((n||0) * fator);
+
+  const mesesFicam = [...new Set(mesVend.map(r => tab[r[0]]).filter(Boolean))].sort();
+  const ini = mesesFicam.length ? mesesFicam[0] + '-01' : null;
+  const fimMes = mesesFicam.length ? mesesFicam[mesesFicam.length-1] : null;
+  const fim = fimMes ? (fimMes + '-' + String(new Date(Number(fimMes.slice(0,4)),
+                        Number(fimMes.slice(5,7)), 0).getDate()).padStart(2,'0')) : null;
+
+  const fontes = {};
+  Object.entries(cubo.fontes || {}).forEach(([m, arq]) => { if(!fora.has(m)) fontes[m] = arq; });
+
+  return Object.assign({}, cubo, {
+    ts: Date.now(),
+    linhas: Math.round((cubo.linhas||0) * fator),
+    faturamento: r2(fatDepois),
+    periodo: {ini, fim},
+    clientesUnicos: clientes.length,
+    anonimo: cubo.anonimo ? {notas: esc(cubo.anonimo.notas), fat: r2((cubo.anonimo.fat||0)*fator)} : null,
+    fontes,
+    mesVend, mesProd, mesCli, clientes,
+    // [R155] sem mês na chave: reescalados, não medidos
+    prodTotal: (cubo.prodTotal||[]).map(([pi,q,f,ncli]) =>
+                 [pi, esc(q), r2((f||0)*fator), esc(ncli)]).filter(r => r[2] > 0),
+    cross: (cubo.cross||[]).map(([a,b,n]) => [a, b, esc(n)]).filter(r => r[2] > 0),
+    _aproximado: true
+  });
+};
+
+/**
  * Funde dois cubos loja/ano num só, no mesmo formato do crmAgregar.
  * Espera meses DISJUNTOS: quem chama decide o que fazer quando colidem,
  * porque somar o mesmo mês duas vezes dobraria o faturamento.
@@ -9465,9 +9764,11 @@ window.crmFundirCubos = function(a, b){
     const mP=(c.prods||[]).map(v=>idx(tProd,iProd,v));
     const mC=(c.clis ||[]).map(v=>idx(tCli, iCli, v));
 
-    (c.mesCli||[]).forEach(([mi,ci,compras,total,itens])=>{
-      const k=mM[mi]+'|'+mC[ci], o=mesCli.get(k)||{c:0,t:0,i:0};
-      o.c+=compras||0; o.t+=total||0; o.i+=itens||0; mesCli.set(k,o);
+    (c.mesCli||[]).forEach(([mi,ci,compras,total,itens,ud])=>{
+      const k=mM[mi]+'|'+mC[ci], o=mesCli.get(k)||{c:0,t:0,i:0,ud:''};
+      o.c+=compras||0; o.t+=total||0; o.i+=itens||0;
+      if((ud||'') > o.ud) o.ud = ud||'';   // [R155] último dia do mês
+      mesCli.set(k,o);
     });
     (c.mesVend||[]).forEach(([mi,vi,f,cup,it,ncli])=>{
       const k=mM[mi]+'|'+mV[vi], o=mesVend.get(k)||{f:0,c:0,i:0,cl:0};
@@ -9548,7 +9849,9 @@ window.crmFundirCubos = function(a, b){
     fontes: Object.assign({}, a.fontes||{}, b.fontes||{}),
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,r2(v.f),v.c,v.i,v.cl];}),
-    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,v.c,r2(v.t),v.i];}),
+    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,v.c,r2(v.t),v.i,v.ud];}),
+    // só é completo se OS DOIS lados forem — senão a reconstrução mente
+    mesCliCompleto: !!(a.mesCliCompleto && b.mesCliCompleto),
     mesProd: outMesProd,
     vendProd: outVendProd,
     prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,r2(v.f),v.cl]).sort((x,y)=>y[2]-x[2]),
@@ -9563,6 +9866,46 @@ window.crmGuardar = function(lid, ano, cubo){
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   if(!D.crm) D.crm = {};
   if(!D.crm[lid]) D.crm[lid] = {};
+
+  // ══════════════════════════════════════════════════════════════════
+  // [R155] TETO DO DOCUMENTO — só a lista de clientes é fatiada.
+  //
+  // Tudo que não são `clientes` vai INTEIRO no documento principal, sem
+  // fatiamento. Com o recorte mensal completo do R155 essa parte pulou
+  // de ~95 KB para 245 KB num ano real da Mooca (22 mil linhas, 4.7 mil
+  // clientes). Cabe — mas uma loja três ou quatro vezes maior passaria
+  // de 1 MiB, e o Firestore recusa a gravação inteira com
+  // invalid-argument. Foi exatamente assim que nasceu o R125.
+  //
+  // Se não couber, o mesCli é podado até caber, mantendo os maiores de
+  // cada mês. Com ele podado a reconstrução por mês deixa de ser exata,
+  // então mesCliCompleto cai para false e a troca de um mês volta a
+  // pedir confirmação. Degradar dizendo o que se perdeu é melhor que
+  // gravar um cubo que promete exatidão que não tem.
+  // ══════════════════════════════════════════════════════════════════
+  if(Array.isArray(cubo.mesCli) && cubo.mesCli.length){
+    let corte = 0;
+    while(_crmBytes(Object.assign({}, cubo, {clientes: undefined})) > CRM_ORC_DOC && corte < 12){
+      corte++;
+      const limite = Math.max(50, Math.floor(400 / corte));   // 400, 200, 133, 100...
+      const porMes = new Map();
+      const mantidos = [];
+      // mesCli já sai ordenado por valor decrescente dentro de cada mês
+      cubo.mesCli.forEach(r => {
+        const n = (porMes.get(r[0]) || 0) + 1;
+        porMes.set(r[0], n);
+        if(n <= limite) mantidos.push(r);
+      });
+      if(mantidos.length === cubo.mesCli.length) break;   // não há mais o que podar
+      cubo = Object.assign({}, cubo, {mesCli: mantidos, mesCliCompleto: false});
+    }
+    if(cubo.mesCliCompleto === false){
+      console.warn('[crm] R155: o conjunto ' + lid + '/' + ano + ' passou do orçamento de '
+        + Math.round(CRM_ORC_DOC/1024) + ' KB; o recorte mensal de clientes foi reduzido e a '
+        + 'troca de um mês isolado passa a pedir confirmação nesta loja/ano.');
+    }
+  }
+
   D.crm[lid][ano] = cubo;
 
   const leves = Object.assign({}, cubo); delete leves.clientes;
@@ -9620,10 +9963,12 @@ window.crmCombinar = function(lojas, anos){
       const mP = (c.prods||[]).map(v => idx(tProd,iProd,v));
       const mC = (c.clis ||[]).map(v => idx(tCli, iCli, v));
 
-      (c.mesCli||[]).forEach(([mi,ci,compras,total,itens])=>{
+      (c.mesCli||[]).forEach(([mi,ci,compras,total,itens,ud])=>{
         const k = mM[mi]+'|'+mC[ci];
-        const a = mesCli.get(k) || {c:0,t:0,i:0};
-        a.c+=compras||0; a.t+=total||0; a.i+=itens||0; mesCli.set(k,a);
+        const a = mesCli.get(k) || {c:0,t:0,i:0,ud:''};
+        a.c+=compras||0; a.t+=total||0; a.i+=itens||0;
+        if((ud||'') > a.ud) a.ud = ud||'';
+        mesCli.set(k,a);
       });
       (c.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
         const k = mM[mi]+'|'+mV[vi];
@@ -9673,7 +10018,7 @@ window.crmCombinar = function(lojas, anos){
     periodo:{ini, fim},
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
-    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.c,Math.round(v.t*100)/100,v.i];}),
+    mesCli:  [...mesCli.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.c,Math.round(v.t*100)/100,v.i,v.ud];}),
     mesProd: [...mesProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
     vendProd: [...vendProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
     prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]),
@@ -11003,18 +11348,40 @@ async function loadFromFirestore(){
         });
       }
       // [NEW 13/08] excelDados: substitui inteiro (admin é autoridade)
-      if(Array.isArray(remoto.excelDados)){
+      // [R155] Array.isArray([]) é TRUE — era por aqui que um vazio
+      // vindo do servidor apagava a planilha que esta máquina tinha.
+      // _aceitaRemoto existe exatamente para isso (ver R121).
+      if(Array.isArray(remoto.excelDados) && _aceitaRemoto(D.excelDados, remoto.excelDados)){
         D.excelDados = remoto.excelDados;
         if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
       }
-      if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
-      if(Array.isArray(remoto._estqImportacoes)) D._estqImportacoes = remoto._estqImportacoes;
+      if(_aceitaRemoto(D._excelImportacoes, remoto._excelImportacoes))
+        D._excelImportacoes = remoto._excelImportacoes;
+      if(_aceitaRemoto(D._estqImportacoes, remoto._estqImportacoes))
+        D._estqImportacoes = remoto._estqImportacoes;
       if(_aceitaRemoto(D.configCom, remoto.configCom)) D.configCom = remoto.configCom;
       if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
       if(_aceitaRemoto(D.diasAbertosOverride, remoto.diasAbertosOverride)) D.diasAbertosOverride = remoto.diasAbertosOverride;
       if(_aceitaRemoto(D.saldosOverride, remoto.saldosOverride)) D.saldosOverride = remoto.saldosOverride;
       if(_aceitaRemoto(D.precosOverride, remoto.precosOverride)) D.precosOverride = remoto.precosOverride;
       if(_aceitaRemoto(D.produtosExtras, remoto.produtosExtras)) D.produtosExtras = remoto.produtosExtras;
+      // ══════════════════════════════════════════════════════════════
+      // [R155] Gravar sem ler de volta não resolve nada: o campo sobe,
+      // mas a carga seguinte não o traz e a tela continua com o que
+      // estiver no localStorage de cada máquina.
+      //
+      // Aqui vale o CARIMBO, não o "remoto com conteúdo vence" dos
+      // campos acima. Estes três são editados na tela e gravados logo
+      // em seguida; sem comparar a hora, uma carga que chegue no meio
+      // do caminho devolve o valor velho por cima do que acabou de ser
+      // digitado — que é exatamente o sintoma relatado no Painel
+      // Gestão. Mesma regra do R88 para as modalidades.
+      // ══════════════════════════════════════════════════════════════
+      if(typeof window._mergeCarimbado === 'function'){
+        window._mergeCarimbado('_metasGrupo',   remoto._metasGrupo,   remoto._metasGrupoTs);
+        window._mergeCarimbado('_superMetaAno', remoto._superMetaAno, remoto._superMetaAnoTs);
+        window._mergeCarimbado('configFollowUp',remoto.configFollowUp, null);
+      }
       // [FIX] reaplicar no array PRODUTOS em memória — antes só D era atualizado
       // e o catálogo na tela ficava defasado até um F5.
       if(typeof window.aplicarOverridesProdutos === 'function') window.aplicarOverridesProdutos(D);
@@ -11231,28 +11598,16 @@ function _mesAnteriorDe(mesRef){
 }
 // Meta diária PROGRESSIVA — como na planilha MASTER
 // (meta_mensal - acumulado_até_ontem) ÷ dias_restantes_incluindo_hoje
-function metaDiaProgressiva(metaMes, vendId, dataRef){
-  if(!metaMes || metaMes<=0) return 0;
-  dataRef = dataRef || hoje();
-  // Usar calendário da loja da vendedora
-  const vObj = D.vendedoras.find(v=>v.id===vendId);
-  const lid   = vObj?.loja || '';
-  const diasRestantes = lid ? diasAbertosRestantes(lid) : (() => {
-    const [y,m,d] = dataRef.split('-').map(Number);
-    return new Date(y,m,0).getDate() - d + 1;
-  })();
-  // Acumulado até ONTEM (exclusive)
-  // Acumulado APENAS do mês atual (antes de hoje)
-  const _mesMDF = dataRef.slice(0,7);
-  let acumulado = 0;
-  if(D.vendasVend[vendId]){
-    Object.entries(D.vendasVend[vendId]).forEach(([dt, vd])=>{
-      if(dt.startsWith(_mesMDF) && dt < dataRef) acumulado += Number(vd.val)||0;
-    });
-  }
-  const restante = Math.max(0, metaMes - acumulado);
-  return diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : 0;
-}
+// ══════════════════════════════════════════════════════════════════════
+// [R155] metaDiaProgressiva FOI REMOVIDA — código morto, sem chamador.
+//
+// Gêmea de metaDiaProgressivaVend (viva, usada em nove pontos), mas
+// parada antes do FIX 6: quando a meta do mês já estava batida, esta
+// devolvia 0 como meta do dia, em vez da meta diária base. A viva
+// devolve a base. Mantê-la era guardar o bug esperando alguém religar
+// — e a assinatura dela parece até mais reaproveitável, o que torna
+// isso mais provável, não menos.
+// ══════════════════════════════════════════════════════════════════════
 // Meta diária progressiva da LOJA (consolidado das vendedoras)
 function metaDiaLojaProgressiva(lid, dataRef){
   const m = getMetas(lid);
@@ -12513,9 +12868,7 @@ function gerarDiagnostico(){
     // Comparação meses anteriores (rede)
     const meses = [];
     for(let i=0;i<4;i++){
-      const d = new Date(mes+'-01');
-      d.setMonth(d.getMonth()-i);
-      const mStr = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+      const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
       let fat2=0, nat2=0;
       D.vendedoras.forEach(v=>{
         Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
@@ -12810,9 +13163,7 @@ function gerarDiagnostico(){
 
   const meses = [];
   for(let i=0;i<4;i++){
-    const d = new Date(mes+'-01');
-    d.setMonth(d.getMonth()-i);
-    const mStr = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+    const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
     let fat=0, nat=0;
     vends.forEach(v=>{
       Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
@@ -18920,7 +19271,10 @@ function renderCampLista(){
   document.querySelectorAll('.admin-only[onclick*="abrirFormCampObj"]').forEach(b=>b.style.display=isAdmin()?'':'none');
   document.querySelectorAll('.loja-only[onclick*="abrirFormCampReal"]').forEach(b=>b.style.display=!isAdmin()?'':'none');
   // Mostrar filtro de lojas só para admin
-  const filLojasWrap = document.getElementById('camp-fil-lojas-wrap');
+  // [R155] o elemento chama-se ...-adm; sem o sufixo o getElementById
+  // devolvia null e a linha de filtro por LOJA nunca era exibida para o
+  // admin — ficava em display:none para sempre, sem erro nenhum
+  const filLojasWrap = document.getElementById('camp-fil-lojas-wrap-adm');
   if(filLojasWrap) filLojasWrap.style.display = isAdmin() ? 'flex' : 'none';
 
   let objs = [...D.campObjetivos];
@@ -20369,12 +20723,72 @@ function calcAno(lid){
   return t;
 }
 
+// [R155] cache do recorte vendedor×mês, na mesma linha do _crmMesCache.
+// Sem ele, fatVendDoMes chamava crmRealizadoPeriodo (que percorre o cubo
+// inteiro via crmCombinar) uma vez por mês e por pessoa. Medido num ano
+// real da Mooca: 12,3 ms por chamada, 300 chamadas para 25 vendedoras —
+// 3,7 SEGUNDOS numa tela só, e calcVendPer(id,'ano') é usado por
+// rankings, performance, comissão e pelos PDFs.
+const _crmVendMesCache = new Map();
+
+/** Recorte vendedor(a) × mês de uma loja num ano, com cache. */
+window.crmVendMesesDaLoja = function(lid, ano){
+  const chave = window._crmVersao + '|' + lid + '|' + ano;
+  const emCache = _crmVendMesCache.get(chave);
+  if(emCache) return emCache;
+  let mapa = new Map();
+  try{
+    const c = window.crmRealizadoPeriodo(lid, ano + '-01-01', ano + '-12-31');
+    mapa = (c && c.porVendMes) || new Map();
+  }catch(e){ console.warn('[R155] CRM por vendedor(a)/mês:', e.message); }
+  if(_crmVendMesCache.size > 200) _crmVendMesCache.clear();
+  _crmVendMesCache.set(chave, mapa);
+  return mapa;
+};
+
+/**
+ * [R155] Faturamento de UM vendedor(a) num mês, pela fonte que vale.
+ *
+ * O irmão de loja disso (fatDoMes) já seguia a R99 desde o R152, mas o
+ * de vendedor(a) não existia: calcVendAno somava D.vendasVend cru. O
+ * resultado é que o total da loja saía da planilha e a soma das pessoas
+ * daquela loja saía do lançamento — dois números para o mesmo ano, e
+ * eles não fecham.
+ *
+ * O CRM casa vendedor(a) por NOME. Quando o nome do cadastro não existe
+ * na planilha, não há dado para essa pessoa lá — e aí o lançamento é a
+ * única fonte. Trocar cegamente pelo CRM zeraria quem não casa, que é
+ * pior do que a divergência que se quer corrigir. Por isso: a planilha
+ * manda quando encontra a pessoa; senão, o lançamento.
+ */
+window.fatVendDoMes = function(vid, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vid);
+  const lanc = () => {
+    const vd = (D.vendasVend||{})[vid] || {};
+    let t = 0;
+    Object.entries(vd).forEach(([d, x]) => { if(d.startsWith(mesRef)) t += Number(x?.val||0); });
+    return {valor: t, origem: 'lancamento'};
+  };
+  if(!v || !v.loja || typeof window.crmVendMesesDaLoja !== 'function') return lanc();
+  try{
+    const mapa = window.crmVendMesesDaLoja(v.loja, mesRef.slice(0,4));
+    const k = (typeof _crmNorm === 'function' ? _crmNorm(v.nome) : String(v.nome||'').toLowerCase())
+              + '|' + mesRef;
+    const reg = mapa && mapa.get(k);
+    if(reg && reg.fat > 0) return {valor: reg.fat, origem: 'crm'};
+  }catch(e){ /* sem CRM legível: vale o lançamento */ }
+  return lanc();
+};
+
 function calcVendAno(vid){
+  // [R155] mesma regra do calcAno — senão o ranking anual por pessoa não
+  // fecha com o total anual da loja
   const ano = hoje().slice(0,4);
-  const vd = D.vendasVend[vid]||{};
-  return Object.entries(vd)
-    .filter(([d])=>d.startsWith(ano))
-    .reduce((s,[,v])=>s+Number(v.val||0),0);
+  let t = 0;
+  for(let m = 1; m <= 12; m++){
+    t += Number(window.fatVendDoMes(vid, ano + '-' + String(m).padStart(2,'0')).valor || 0);
+  }
+  return t;
 }
 
 function calcNAtendAno(lid){
@@ -20404,8 +20818,18 @@ function metaAno(lid){
     const meta   = lm[mesRef]?.mes;
     if(meta) total += meta;
   }
-  // Fallback: 12x meta atual
-  if(!total){
+  // ══════════════════════════════════════════════════════════════════
+  // [R155] O atalho de "12x a meta de hoje" não vale para loja fechada.
+  //
+  // Alto de Pinheiros operou de janeiro a julho. Desde que o fechamento
+  // do ano voltou a incluí-la (lojasDoAno), este fallback lhe daria uma
+  // meta de doze meses — inflando a meta do grupo e derrubando o % de
+  // todo mundo por causa de cinco meses em que a loja não existia.
+  //
+  // Sem meta mensal cadastrada e com a loja fechada, o honesto é zero:
+  // não houve meta pactuada. O realizado dela continua contando.
+  // ══════════════════════════════════════════════════════════════════
+  if(!total && !lojaArquivada(lid)){
     const m = getMetas(lid);
     total = (m.mes||0) * 12;
   }
@@ -21311,30 +21735,20 @@ async function sbSelect(table,params=''){return await sbRequest(table,'GET',null
 async function sbUpsert(table,data){return await sbRequest(table,'POST',Array.isArray(data)?data:[data]);}
 
 // Salvar com sync — Supabase e/ou Firebase
-async function saveWithSync(opts={}){
-  _persistirLocal();
-  const hoje_ts = new Date().toISOString();
-  if(opts.lancamento){
-    const {lid,data,dados}=opts.lancamento;
-    const docSB={loja_id:lid,data_venda:data,faturamento:dados.fat||0,num_transacoes:dados.trans||0,tm_itens_venda:dados.tm||0,clientes_total:dados.cli||0,clientes_novos:dados.clinov||0,visitantes:dados.visit||0,observacao:dados.obs||'',lancado_por:window._currentUser?.email||'',atualizado_em:hoje_ts};
-    if(SB_OK()) await sbUpsert('lancamentos',docSB);
-    if(FB_OK()) await fbSet('lancamentos',`${lid}_${data}`,{...docSB,loja_id:lid});
-  }
-  if(opts.vendaVend){
-    const {vendId,data,dados}=opts.vendaVend;
-    const vend=D.vendedoras.find(v=>v.id===vendId);
-    const docSB={vendedora_id:vendId,loja_id:vend?.loja||'',data_venda:data,valor_vendido:dados.val||0,num_transacoes:dados.trans||0,lancado_por:window._currentUser?.email||'',atualizado_em:hoje_ts};
-    if(SB_OK()) await sbUpsert('vendas_vendedora',docSB);
-    if(FB_OK()) await fbSet('vendas_vendedora',`${vendId}_${data}`,docSB);
-  }
-  if(opts.meta){
-    const {lid,dados}=opts.meta;
-    const mesRef=mesAtual();
-    const docSB={loja_id:lid,mes_ref:mesRef,meta_mensal:dados.mes||0,super_meta_mensal:dados.superMes||0,meta_semanal:dados.sem||0,meta_diaria:dados.dia||0,super_semanal:dados.superSem||0,super_diaria:dados.superDia||0,dias_mes:dados.du||31,ticket_alvo:dados.ticket||150,atualizado_em:hoje_ts};
-    if(SB_OK()) await sbUpsert('metas_loja',docSB);
-    if(FB_OK()) await fbSet('metas',`meta_${lid}`,docSB);
-  }
-}
+// ══════════════════════════════════════════════════════════════════════
+// [R155] saveWithSync FOI REMOVIDA — código morto, sem chamador.
+//
+// Era um segundo pipeline de gravação, escrevendo direto por REST no
+// Supabase e no Firebase, em paralelo ao save() real. Nenhuma das
+// proteções que o save() acumulou existia nela: sem prazo na promessa
+// (o R124 existe porque uma gravação sem prazo fica pendurada para
+// sempre), sem o snapshot que evita a corrida com a carga remota, sem
+// retentativa e sem marcar o estado do sync.
+//
+// O nome é convidativo — "salvar com sync" — e é justamente esse o
+// risco: religar por parecer a função certa traz de volta a classe de
+// bug que o R124 corrigiu. Quem grava é save().
+// ══════════════════════════════════════════════════════════════════════
 
 // Admin: sync a cada 30s
 function iniciarAutoRefresh(){
@@ -21404,19 +21818,19 @@ function iniciarAutoRefresh(){
           Object.entries(remoto.metasLoja).forEach(([lid_m,meses])=>{
             if(!D.metasLoja[lid_m]) D.metasLoja[lid_m]={};
             Object.entries(meses||{}).forEach(([mr,metaObj])=>{
-              // [FIX CRÍTICO] Comparar _savedAt — meta mais recente vence
-              // Antes: se loja tinha meta local (>0), admin NUNCA conseguia atualizar
-              // Bug raiz da reclamação "meta não atualiza ao abrir em outra máquina"
-              const localMeta = D.metasLoja[lid_m]?.[mr];
-              const _lTs_sl = localMeta?._savedAt || 0;
-              const _rTs_sl = metaObj?._savedAt   || 0;
-              // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
-              if(!localMeta || !localMeta.mes || localMeta.mes <= 0 || _rTs_sl > _lTs_sl || (_rTs_sl === 0 && _lTs_sl === 0 && metaObj?.mes)){
+              // [R155] era a QUARTA cópia da regra, e ainda trazia uma
+              // condição a mais que as outras três, sobre meta local
+              // zerada. Regra única agora — ver window._metaRemotaVence.
+              if(window._metaRemotaVence(lid_m, mr, D.metasLoja[lid_m]?.[mr], metaObj)){
                 D.metasLoja[lid_m][mr] = metaObj;
               }
             });
           });
         }
+        // [R155] mesma falta de alcance do syncAdmin: sem isto a loja só
+        // recebe a config de modalidades depois de recarregar a página
+        if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
+          window.mergeConfigModalidades(remoto.configModalidades);
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
           remoto.campRealizados.forEach(r=>{
@@ -21512,6 +21926,13 @@ function iniciarAutoRefresh(){
           // para a mesma decisão, e só uma foi corrigida quando o critério
           // mudou. A propagação entre máquinas passava por esta cópia.
           if(remoto.metasLoja) window.mergeMetasLoja(remoto.metasLoja);
+          // [R155] a config de modalidades só era mesclada no BOOT. Com
+          // uma aba já aberta, mudar o percentual de Gift Back/Desconto/
+          // Cash Back no admin não chegava nunca — nem em 30s, nem em
+          // 60s, só num F5. As metas, o campo irmão, estavam nos três
+          // caminhos; esta ficou só num.
+          if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
+            window.mergeConfigModalidades(remoto.configModalidades);
           if(remoto.vendedoras && remoto.vendedoras.length){
             // Sync tombstone de vendedoras excluídas
             if(remoto._vendsExcluidas?.length){
@@ -21564,180 +21985,25 @@ function iniciarAutoRefresh(){
   _autoRefreshTimer=setInterval(syncAdmin,30000);
 }
 
-// ── Sincronização forçada (admin clica no badge) ──────────────────
-async function forceSyncAdmin(){
-  const el = document.getElementById('sync-badge');
-  if(el){ el.textContent='⏳ Sincronizando...'; el.style.color='var(--ouro)'; }
-  try{
-    const ok = await waitForFirebase(5000);
-    if(!ok || !window.fsCarregar){
-      if(el){ el.textContent='❌ Firebase offline'; el.style.color='var(--verm)'; }
-      showToast('Firebase não disponível. Verifique a conexão.','err');
-      return;
-    }
-    const dadosJSON = await window.fsCarregar();
-    if(!dadosJSON){
-      if(el){ el.textContent='⚠️ Sem dados remotos'; el.style.color='var(--ouro)'; }
-      showToast('Nenhum dado remoto encontrado.','err');
-      return;
-    }
-    const remoto = JSON.parse(dadosJSON);
-    // Merge completo — igual ao loadFromFirestore mas sem sobrescrever tombstones locais
-    // [FIX] metasLoja: merge por mês para não apagar metas recentes
-    if(remoto.metasLoja){
-      if(!D.metasLoja) D.metasLoja={};
-      Object.entries(remoto.metasLoja).forEach(([lid_r,meses_r])=>{
-        if(!D.metasLoja[lid_r]) D.metasLoja[lid_r]={};
-        Object.entries(meses_r||{}).forEach(([mr_r,obj_r])=>{
-          // [FIX BUG 1] Aceitar remoto se mais recente ou local inexistente
-          // [FIX BUG CRÍTICO] Se ambos timestamps são 0 (primeira vez), SEMPRE aceitar remoto
-          const _lM_fsa  = D.metasLoja[lid_r]?.[mr_r];
-          const _lTs_fsa = _lM_fsa?._savedAt || 0;
-          const _rTs_fsa = obj_r?._savedAt   || 0;
-          if(!_lM_fsa || !_lM_fsa.mes || _rTs_fsa > _lTs_fsa || (_rTs_fsa === 0 && _lTs_fsa === 0 && obj_r?.mes)){
-            D.metasLoja[lid_r][mr_r] = obj_r;
-          }
-        });
-      });
-    }
-    // [FIX] merge vendedoras preservando metas locais E campo ativa (arquivamento)
-    if(remoto.vendedoras){
-      // Sync tombstone primeiro
-      if(remoto._vendsExcluidas?.length){
-        if(!D._vendsExcluidas) D._vendsExcluidas=[];
-        remoto._vendsExcluidas.forEach(vid=>{
-          if(!D._vendsExcluidas.includes(vid)) D._vendsExcluidas.push(vid);
-        });
-      }
-      const _excFSA2 = D._vendsExcluidas||[];
-      if(!D.vendedoras||!D.vendedoras.length){
-        // Filtrar tombstones ao inicializar
-        D.vendedoras=remoto.vendedoras.filter(rv=>!_excFSA2.includes(rv.id));
-      }
-      else {
-        remoto.vendedoras.forEach(rv=>{
-          // [FIX] Respeitar tombstone — excluídas não voltam
-          if(_excFSA2.includes(rv.id)){
-            D.vendedoras = D.vendedoras.filter(lv=>lv.id!==rv.id);
-            return;
-          }
-          const _im=D.vendedoras.findIndex(lv=>lv.id===rv.id);
-          if(_im>=0){
-            // [FIX cross-device] Comparar _savedAt
-            // [FIX BUG 2] preservar campo ativa ao aceitar remoto mais recente
-            const _bviFSA = D.vendedoras[_im];
-            const _lTsFSA = _bviFSA._savedAt || 0;
-            const _rTsFSA = rv._savedAt      || 0;
-            if(_rTsFSA > _lTsFSA){
-              const _ativaFSA2 = _bviFSA.ativa;
-              D.vendedoras[_im] = {...rv, ativa: _ativaFSA2}; // preservar arquivamento
-            } else {
-              const _ativaFSA = _bviFSA.ativa;
-              D.vendedoras[_im]={...rv,
-                metaMes:_bviFSA.metaMes||rv.metaMes,
-                superMetaMes:_bviFSA.superMetaMes||rv.superMetaMes,
-                ticketAlvo:_bviFSA.ticketAlvo||rv.ticketAlvo,
-                metaAniv:_bviFSA.metaAniv||rv.metaAniv,
-                metaInativ:_bviFSA.metaInativ||rv.metaInativ,
-                ativa: _ativaFSA !== undefined ? _ativaFSA : rv.ativa,
-                _savedAt: _lTsFSA || _rTsFSA
-              };
-            }
-          } else D.vendedoras.push(rv);
-        });
-      }
-    }
-    if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
-    if(_aceitaRemoto(D.arquivos, remoto.arquivos)) D.arquivos = remoto.arquivos;
-    if(remoto.vendas){
-      Object.entries(remoto.vendas).forEach(([l,ds])=>{
-        if(!D.vendas[l]) D.vendas[l]={};
-        const excl = D._vendasExcluidas?.[l]||[];
-        // [FIX cross-device] Timestamp-aware: aceitar remoto se mais recente
-        Object.entries(ds).forEach(([dt,val])=>{
-          if(excl.includes(dt)) return;
-          const _lvFS = D.vendas[l][dt];
-          const _lTsFS = (_lvFS && _lvFS._savedAt) || 0;
-          const _rTsFS = (val && val._savedAt) || 0;
-          if(!_lvFS || _rTsFS > _lTsFS) D.vendas[l][dt] = val;
-        });
-      });
-    }
-    if(remoto.vendasVend){
-      Object.entries(remoto.vendasVend).forEach(([v,ds])=>{
-        if(!D.vendasVend[v]) D.vendasVend[v]={};
-        const excl = D._vendasVendExcluidas?.[v]||[];
-        // [FIX cross-device] Timestamp-aware
-        Object.entries(ds).forEach(([dt,val])=>{
-          if(excl.includes(dt)) return;
-          const _lvvFS = D.vendasVend[v][dt];
-          const _lTsFS2 = (_lvvFS && _lvvFS._savedAt) || 0;
-          const _rTsFS2 = (val && val._savedAt) || 0;
-          if(!_lvvFS || _rTsFS2 > _lTsFS2) D.vendasVend[v][dt] = val;
-        });
-      });
-    }
-    if(remoto.campRealizados?.length){
-      if(!D.campRealizados) D.campRealizados=[];
-      remoto.campRealizados.forEach(r=>{
-        if(_isCampExcluido(r.id)) return; // [FIX Bug2]
-        const i=D.campRealizados.findIndex(x=>x.id===r.id);
-        if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-      });
-    }
-    if(remoto._fluxoExcluidos){
-      if(!D._fluxoExcluidos) D._fluxoExcluidos = {};
-      Object.entries(remoto._fluxoExcluidos).forEach(([id, ts])=>{
-        if(!D._fluxoExcluidos[id] || ts > D._fluxoExcluidos[id]) D._fluxoExcluidos[id] = ts;
-      });
-    }
-    if(remoto.fluxo?.length){
-      if(!D.fluxo) D.fluxo=[];
-      remoto.fluxo.forEach(r=>{
-        if(_fluxoExcluido(r.id)) return;   // [R127]
-        if(!D.fluxo.find(x=>x.id===r.id)) D.fluxo.push(r);
-      });
-    }
-    if(D._fluxoExcluidos && Object.keys(D._fluxoExcluidos).length){
-      D.fluxo = (D.fluxo||[]).filter(f => !_fluxoExcluido(f.id));
-    }
-    // [NEW 11/08] contatos: mesmo padrão
-    if(remoto.contatos?.length){
-      if(!D.contatos) D.contatos=[];
-      remoto.contatos.forEach(c=>{ if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c); });
-    }
-    if(remoto.prospeccoes && remoto.prospeccoes.length){
-      if(!D.prospeccoes) D.prospeccoes=[];
-      remoto.prospeccoes.forEach(pr=>{ if(!D.prospeccoes.find(x=>x.id===pr.id)) D.prospeccoes.push(pr); });
-    }
-    // [NEW 13/08] excelDados: replace do remoto (admin authoritative)
-    if(Array.isArray(remoto.excelDados)){
-      D.excelDados = remoto.excelDados;
-      if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
-    }
-    if(Array.isArray(remoto._excelImportacoes)) D._excelImportacoes = remoto._excelImportacoes;
-    if(Array.isArray(remoto._estqImportacoes)) D._estqImportacoes = remoto._estqImportacoes;
-    _persistirLocal();
-    const ts = new Date().toLocaleTimeString('pt-BR');
-    if(el){ el.textContent='✅ Sync '+ts+' (clique p/ atualizar)'; el.style.color='var(--verde)'; }
-    showToast('✅ Dados sincronizados!');
-    // Re-renderizar página ativa
-    const pg = document.querySelector('.page.active')?.id?.replace('page-','');
-    if(pg==='dash')          carregarDash();
-    else if(pg==='lojas')    renderLojas(_tabLojas);
-    else if(pg==='rankings') renderRankings('rede');
-    else if(pg==='gestao')   renderGestao();
-    else if(pg==='campanhas'){ renderCampLista(); if(typeof renderRelCamp==='function') renderRelCamp(); }
-    else if(pg==='lanc')     { renderPainelDia(); }
-    else if(pg==='fluxo')    { if(typeof renderFluxo==='function') renderFluxo(); }
-    else carregarDash();
-  }catch(e){
-    if(el){ el.textContent='❌ Erro sync'; el.style.color='var(--verm)'; }
-    showToast('Erro ao sincronizar: '+e.message,'err');
-    console.error('[Avatim] forceSyncAdmin erro:', e);
-  }
-}
-
+// ══════════════════════════════════════════════════════════════════════
+// [R155] forceSyncAdmin FOI REMOVIDA.
+//
+// Era uma QUINTA cópia do pipeline de merge — vendedoras, metas e
+// vendas —, e nunca foi migrada quando as outras quatro foram
+// corrigidas. Carregava, ao mesmo tempo, três defeitos que já tinham
+// sido consertados em todos os outros caminhos:
+//   · a lista antiga de campos, sem nome/cargo/loja      (bug do R154)
+//   · comparação de meta só por carimbo, sem consultar
+//     _metasEditadasAqui                                  (bug do R155)
+//   · lápide de venda por includes(), sem carimbo de hora (bug do R130)
+//
+// Não tinha chamador nenhum: o badge de sync usa window.syncAgora()
+// desde sempre (ver o onclick de #sync-badge). Ficava só esperando ser
+// religada para trazer os três de volta em silêncio.
+//
+// Quem precisar de sincronização manual usa window.syncAgora() ou
+// window.forcarSyncCompleto().
+// ══════════════════════════════════════════════════════════════════════
 // Carregar config salva
 (function(){
   // Supabase
@@ -22142,8 +22408,22 @@ function gerarPDF(titulo, htmlContent) {
 }
 
 function exportarPDFRanking() {
-  const per = document.getElementById('rank-periodo')?.value || 'mes';
-  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  // ══════════════════════════════════════════════════════════════════
+  // [R155] Não existe nenhum elemento com id 'rank-periodo'.
+  //
+  // O período do ranking é escolhido por ABAS, que gravam o estado em
+  // _rankPer / _rankPerLoja / _rankPerAdmin (ver tabRankPer). O
+  // getElementById devolvia null, o `|| 'mes'` entrava, e o PDF saía
+  // sempre do MÊS — com o rótulo "Este Mês" — mesmo com Hoje, Semana ou
+  // Ano selecionados na tela. Silencioso: o arquivo é gerado, parece
+  // certo, e traz outro período.
+  //
+  // Agora sai do mesmo estado que a tela está mostrando.
+  // ══════════════════════════════════════════════════════════════════
+  const per = (_rankTab === 'loja'  ? _rankPerLoja
+             : _rankTab === 'admin' ? _rankPerAdmin
+             : _rankPer) || 'mes';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':per==='ano'?'Este Ano':'Este Mês';
   const hj = hoje();
   const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjR = hoje();
@@ -22299,7 +22579,9 @@ function renderGestaoAnual(){
   const mesAtualNum = parseInt(hoje().slice(5,7));
 
   // ── Calcular dados anuais de cada loja ──────────────────────
-  const lojasDados = LOJAS.map(lid=>{
+  // [R155] inclui a loja que fechou no meio do ano — o que ela vendeu
+  // antes de fechar é faturamento do grupo e estava sumindo do total
+  const lojasDados = window.lojasDoAno(ano).map(lid=>{
     const l = lid;
     // ══════════════════════════════════════════════════════════════
     // [R152] O realizado do ano passa a sair da MESMA regra que o
@@ -22325,7 +22607,8 @@ function renderGestaoAnual(){
     const pct  = meta>0 ? fat/meta*100 : 0;
     const tm   = nat>0 ? fat/nat : 0;      // TM = realizado ÷ vendas
     const pa   = nat>0 ? itens/nat : 0;    // P.A. = itens ÷ vendas
-    return {id:l.id, nome:l.nome, fat, meta, pct, tm, pa, nat, itens, mesesCrm, mesesLanc, porMes};
+    return {id:l.id, nome:l.nome, arquivada: !!l.arquivada,
+            fat, meta, pct, tm, pa, nat, itens, mesesCrm, mesesLanc, porMes};
   });
 
   const totalFat  = lojasDados.reduce((s,l)=>s+l.fat,0);
@@ -22345,7 +22628,9 @@ function renderGestaoAnual(){
       {ic:'📊',lab:'% da Meta Anual', val:totalPct.toFixed(1)+'%', sub:totalPct>=100?'✅ Meta atingida!':totalPct>=70?'⚡ Em andamento':'🔴 Abaixo da meta', cor},
       {ic:'🎫',lab:'Ticket Médio Grupo', val:fmt(totalTM), sub:'média das lojas'},
       {ic:'🛒',lab:'Total Atendimentos', val:totalNat.toLocaleString('pt-BR'), sub:'no ano'},
-      {ic:'🏪',lab:'Lojas Acima da Média', val:lojasDados.filter(l=>l.pct>=mediaPct).length+'/'+LOJAS.length, sub:'média grupo: '+mediaPct.toFixed(0)+'%'},
+      // [R155] denominador é o das lojas COMPUTADAS no ano, incluindo a
+      // que fechou — senão o card diz "4/6" tendo avaliado 7
+      {ic:'🏪',lab:'Lojas Acima da Média', val:lojasDados.filter(l=>l.pct>=mediaPct).length+'/'+lojasDados.length, sub:'média grupo: '+mediaPct.toFixed(0)+'%'},
     ].map(k=>`
       <div class="kcard" style="border-top:3px solid ${k.cor||'var(--ouro)'}">
         <div style="font-size:18px;margin-bottom:6px">${k.ic}</div>
@@ -22388,6 +22673,8 @@ function renderGestaoAnual(){
     const pctProj    = metaAnoTot > 0 ? projecao/metaAnoTot*100 : 0;
     const pctFech    = metaFech > 0 ? realFech/metaFech*100 : 0;
 
+    const superAno = (typeof window.superMetaAno === 'function') ? window.superMetaAno(ano) : 0;
+
     const _cor = p => p>=100 ? 'var(--verde)' : p>=90 ? 'var(--ouro)' : 'var(--verm)';
     const _bloco = (lab, val, sub, cor) =>
       '<div style="background:var(--cinza);border:1px solid var(--borda);border-radius:10px;padding:11px 13px">'
@@ -22408,7 +22695,13 @@ function renderGestaoAnual(){
       + 'font-size:11px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,.6)">'
       + fmt(realAno) + ' de ' + fmt(metaAnoTot) + ' · ' + totalPct.toFixed(1) + '%</div></div>'
       + '<div style="font-size:9.5px;color:var(--muted);margin-bottom:12px">'
-      + '▏A marca verde é a meta acumulada até ' + meses[mesAtualNum-1] + '.</div>'
+      + '▏A marca verde é a meta acumulada até ' + meses[mesAtualNum-1] + '.'
+      + (superAno > 0
+          ? ' A super meta do ano é ' + fmt(superAno) + ' — '
+            + (metaAnoTot > 0 ? (superAno/metaAnoTot*100 - 100).toFixed(0) + '% acima da meta somada.'
+                              : 'ainda não há metas mensais para comparar.')
+          : ' Defina a super meta do ano no campo acima para acompanhá-la aqui.')
+      + '</div>'
       + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px">'
       + _bloco('Meses fechados (Jan–' + (fechados>0?meses[fechados-1]:'—') + ')',
                fmt(realFech), 'meta ' + fmt(metaFech) + ' · ' + pctFech.toFixed(1) + '%', _cor(pctFech))
@@ -22423,6 +22716,13 @@ function renderGestaoAnual(){
                falta > 0 ? 'var(--ouro)' : 'var(--verde)')
       + _bloco('Projeção de fechamento', fmt(projecao),
                pctProj.toFixed(1) + '% da meta · ritmo dos meses fechados', _cor(pctProj))
+      // [R155] A super meta só entra quando foi definida — um card com
+      // "R$ 0,00" ao lado dos outros pareceria alvo zerado, não alvo ausente.
+      + (superAno > 0
+          ? _bloco('🚀 Super meta do ano', fmt(superAno),
+                   (superAno > 0 ? (realAno/superAno*100).toFixed(1) : '0') + '% alcançado · faltam '
+                   + fmt(Math.max(0, superAno - realAno)), '#b07cd6')
+          : '')
       + '</div>'
       // Por loja: quem chega e quem não chega no ritmo atual
       + '<div style="margin-top:14px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:560px">'
@@ -22439,7 +22739,10 @@ function renderGestaoAnual(){
           const lp = lf + lr * (12 - fechados);
           const lpc = l.meta > 0 ? lp/l.meta*100 : 0;
           return '<tr style="border-top:1px solid var(--borda)">'
-            + '<td style="padding:6px">'+l.nome+'</td>'
+            + '<td style="padding:6px">'+l.nome
+              + (l.arquivada ? '<span style="font-size:8.5px;color:var(--laranja);margin-left:5px" '
+                  + 'title="loja fechada durante o ano — o que ela vendeu continua no total">FECHADA</span>' : '')
+              + '</td>'
             + '<td style="text-align:right;padding:6px">'+fmt(l.fat)+'</td>'
             + '<td style="text-align:right;padding:6px;color:var(--muted)">'+fmt(l.meta)+'</td>'
             + '<td style="text-align:right;padding:6px;font-weight:700;color:'+_cor(l.pct)+'">'+l.pct.toFixed(1)+'%</td>'
@@ -22447,6 +22750,13 @@ function renderGestaoAnual(){
             + '<td style="text-align:right;padding:6px;color:'+_cor(lpc)+'">'+fmt(lp)+' ('+lpc.toFixed(0)+'%)</td></tr>';
         }).join('')
       + '</tbody></table></div>';
+  }
+
+  // [R155] o campo reflete o que está salvo, sem atropelar quem digita
+  const _smEl = document.getElementById('gestao-super-meta-ano');
+  if(_smEl && document.activeElement !== _smEl){
+    const _sm = (typeof window.superMetaAno === 'function') ? window.superMetaAno(ano) : 0;
+    _smEl.value = _sm > 0 ? _sm.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
   }
 
   // [R152] De onde veio cada número — planilha ou lançamento.
@@ -22628,6 +22938,37 @@ function renderGestaoAnual(){
   if(rtEl) rtEl.innerHTML=sortTM.map((l,i)=>rankRow(l,i,l.tm,maxTM,'var(--azul)',fmt(l.tm))).join('');
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// [R155] SUPER META DO ANO
+//
+// A meta anual é a soma das metas mensais das lojas — ela sai do que já
+// foi pactuado mês a mês. A super meta do ano é outra coisa: um alvo
+// único que a direção define para o grupo (14 milhões, no caso), e que
+// não tem como ser derivado das metas mensais.
+// ══════════════════════════════════════════════════════════════════════
+window.superMetaAno = function(ano){
+  ano = ano || hoje().slice(0,4);
+  const v = Number((D._superMetaAno || {})[ano] || 0);
+  return v > 0 ? v : 0;
+};
+
+window.salvarSuperMetaAno = function(){
+  if(!isAdmin()){ showToast('Só o administrador define a super meta do ano.','err'); return; }
+  const el = document.getElementById('gestao-super-meta-ano');
+  if(!el) return;
+  const ano = hoje().slice(0,4);
+  const val = parseBR(el.value) || 0;
+  if(val < 0){ showToast('Valor inválido.','err'); return; }
+  if(!D._superMetaAno) D._superMetaAno = {};
+  if(val > 0) D._superMetaAno[ano] = val;
+  else delete D._superMetaAno[ano];   // apagar o campo limpa o alvo do ano
+  D._superMetaAnoTs = Date.now();     // [R155] sem carimbo o merge devolve o antigo
+  save();
+  showToast(val > 0 ? '✅ Super meta de ' + ano + ': ' + fmt(val) : 'Super meta do ano removida.',
+            val > 0 ? 'ok' : 'warn');
+  renderGestaoAnual();
+};
+
 function salvarMetasGrupo(){
   const ano = hoje().slice(0,4);
   if(!D._metasGrupo) D._metasGrupo={};
@@ -22641,6 +22982,7 @@ function salvarMetasGrupo(){
       if(val>0) salvos++;
     }
   }
+  D._metasGrupoTs = Date.now();   // [R155] sem carimbo o merge devolve o antigo
   save();
   showToast('✅ Metas do Grupo salvas! ('+salvos+' meses)');
   renderGestaoAnual();
@@ -22651,19 +22993,32 @@ function exportarPDFAnual(){
   const meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const mesAtualNum = parseInt(hoje().slice(5,7));
 
-  const lojasDados = LOJAS.map(l=>{
-    const fat=calcAno(l.id), meta=metaAno(l.id);
-    const pct=meta>0?fat/meta*100:0, tm=calcTMAno(l.id), nat=calcNAtendAno(l.id);
+  // ══════════════════════════════════════════════════════════════════
+  // [R155] O PDF anual dizia duas coisas diferentes sobre o mesmo ano.
+  //
+  // O total saía de calcAno, que desde o R152 lê a planilha do CRM; o
+  // gráfico mês a mês, logo abaixo, continuava somando D.vendasVend na
+  // mão. Na mesma página, o topo dizia um número e as barras somavam
+  // outro. E a lista era LOJAS, que exclui as arquivadas — a loja que
+  // fechou em julho sumia do relatório de fechamento do ano.
+  //
+  // Mesma fonte do Painel Gestão: fatDoMes (R99) e lojasDoAno.
+  // ══════════════════════════════════════════════════════════════════
+  const lojasDados = window.lojasDoAno(ano).map(l=>{
     const porMes=[];
+    let fat=0, nat=0;
     for(let m=1;m<=12;m++){
       const mr=ano+'-'+String(m).padStart(2,'0');
-      let mFat=0;
-      vendsReais(l.id).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{if(d.startsWith(mr))mFat+=Number(vd.val||0);}));
-      if(!mFat){const vd=D.vendas[l.id]||{};Object.entries(vd).forEach(([d,vdd])=>{if(d.startsWith(mr))mFat+=Number(vdd.fat||0);});}
+      const mFat = window.fatDoMes(l.id, mr).valor || 0;
+      const ia   = window.itensAtendDoMes(l.id, mr);
+      fat += mFat; nat += ia.atend || 0;
       const metaMr=(D.metasLoja[l.id]||{})[mr]?.mes||0;
       porMes.push({m,fat:mFat,meta:metaMr});
     }
-    return {id:l.id,nome:l.nome,fat,meta,pct,tm,nat,porMes};
+    const meta=metaAno(l.id);
+    const pct=meta>0?fat/meta*100:0;
+    const tm=nat>0?fat/nat:0;
+    return {id:l.id,nome:l.nome,arquivada:!!l.arquivada,fat,meta,pct,tm,nat,porMes};
   });
 
   const totalFat=lojasDados.reduce((s,l)=>s+l.fat,0);
@@ -22817,8 +23172,7 @@ function exportarPDFDiagnostico(){
     // Comparação meses anteriores
     const meses=[];
     for(let i=0;i<4;i++){
-      const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
-      const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
       let fat2=0,nat2=0;
       D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
         if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
@@ -22955,8 +23309,7 @@ function exportarPDFDiagnostico(){
     const acima=vends.filter(v=>v.pct>=100).length, abaixo=vends.filter(v=>v.pct<70).length;
     const meses=[];
     for(let i=0;i<4;i++){
-      const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
-      const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
       let fat2=0,nat2=0;
       vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
         if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
@@ -23116,8 +23469,7 @@ function exportarPDFGeral(){
   // ── 2. FATURAMENTO MÊS A MÊS (últimos 6 meses) ───────────────
   const historicoMeses=[];
   for(let i=0;i<6;i++){
-    const d=new Date(mes+'-01'); d.setMonth(d.getMonth()-i);
-    const mStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
     const mLabel=new Date(mStr+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
     if(_adm){
       let fat2=0,nat2=0;
@@ -28347,6 +28699,41 @@ function _relItensLanc(vid, de, ate){
  * Uma leitura do cubo por loja — não por pessoa, que relia o mesmo cubo
  * vinte e quatro vezes.
  */
+/**
+ * [R155] Nomes da planilha que não existem no cadastro.
+ *
+ * O cruzamento do benchmark é por nome normalizado (_crmNorm já ignora
+ * acento, caixa e espaço repetido). Nome genuinamente diferente —
+ * "MICHELE ROCHA" no cadastro contra "MICHELLE ROCHA DA SILVA" na
+ * planilha — não casa, e a pessoa aparecia zerada no ranking sem
+ * explicação nenhuma. Foi assim que R$ 5,4 mi da Mooca ficaram fora.
+ *
+ * De propósito NÃO se tenta casar por aproximação: num ranking de
+ * vendas, um "quase igual" credita a venda de uma pessoa a outra. O
+ * sistema aponta a divergência; quem conhece a equipe decide.
+ *
+ * Função própria, e não um efeito colateral de _relBenchApurar, porque
+ * aquela é chamada duas vezes (mês e ano) e a segunda sobrescreveria a
+ * primeira — o aviso mudaria conforme a ordem das chamadas.
+ */
+window._relBenchSemParApurar = function(vends, mesIni, mesFim){
+  const cadastradas = new Set((vends||[]).map(v => _crmNorm(v.nome)).filter(Boolean));
+  const fora = [];
+  [...new Set((vends||[]).map(v => v.loja).filter(Boolean))].forEach(lid => {
+    let mapa = new Map();
+    try{ mapa = window.crmRealizadoPeriodo(lid, mesIni+'-01', mesFim+'-31').porVendMes || new Map(); }
+    catch(e){ return; }
+    const soma = new Map();
+    mapa.forEach((val, k) => {
+      const nome = k.slice(0, k.lastIndexOf('|'));
+      if(!nome || cadastradas.has(nome)) return;
+      soma.set(nome, (soma.get(nome) || 0) + (val.fat || 0));
+    });
+    soma.forEach((fat, nome) => { if(fat > 0) fora.push({loja: lid, nome, fat}); });
+  });
+  return fora.sort((a,b) => b.fat - a.fat);
+};
+
 window._relBenchApurar = function(vends, mesIni, mesFim){
   const crmPorLoja = new Map();
   [...new Set(vends.map(v => v.loja).filter(Boolean))].forEach(lid => {
@@ -28355,6 +28742,7 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
     catch(e){ console.warn('[R143] CRM de', lid, e.message); }
     crmPorLoja.set(lid, m);
   });
+
   const meses = window._histMesesPeriodo(mesIni+'-01', mesFim+'-01');
 
 
@@ -28498,6 +28886,35 @@ function _relBenchVends(){
   const _inat = d => d.ativa === false
     ? '<span style="font-size:8.5px;color:var(--laranja);margin-left:5px">INATIVO(A)</span>' : '';
 
+  // ── [R155] Planilha com nome que o cadastro não tem ───────────────
+  // Sem este aviso, a pessoa aparece zerada no ranking e não há como
+  // saber que a causa é grafia: o faturamento dela existe, está no
+  // cubo, e some no cruzamento.
+  // período ANUAL: é o recorte que enxerga todo mundo que vendeu no ano
+  const _semPar = window._relBenchSemParApurar(vends, ano + '-01', mesAtual)
+                        .filter(x => lojaIds.has(x.loja));
+  const semParHtml = _semPar.length ? `
+    <div style="margin-top:14px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);
+                border-radius:10px;padding:11px 13px;font-size:11.5px;line-height:1.6">
+      ⚠️ <strong>${_semPar.length} nome(s) da planilha sem correspondência no cadastro</strong> —
+      este faturamento está no CRM mas não entra no ranking abaixo, porque não há
+      vendedor(a) cadastrado(a) com esse nome:
+      <div style="margin-top:7px">
+        ${_semPar.slice(0,12).map(x => `<div style="display:flex;justify-content:space-between;gap:10px;
+             padding:3px 0;border-top:1px solid rgba(255,255,255,.06)">
+             <span>${_esc(x.nome)} <span style="color:var(--muted);font-size:10px">·
+               ${_esc((LOJAS.find(l=>l.id===x.loja)||{}).nome || x.loja)}</span></span>
+             <strong>${fmt(x.fat)}</strong></div>`).join('')}
+        ${_semPar.length > 12 ? `<div style="color:var(--muted);margin-top:4px">e mais ${_semPar.length-12}…</div>` : ''}
+      </div>
+      <div style="color:var(--muted);margin-top:7px">
+        Corrija em <strong>Vendedores → ✏️</strong>, escrevendo o nome exatamente como
+        está na planilha. Acento, maiúscula e espaço repetido não atrapalham — nome
+        diferente, sim. Não tento adivinhar quem é quem: num ranking de vendas,
+        um palpite errado credita a venda de uma pessoa a outra.
+      </div>
+    </div>` : '';
+
   // ── Top 3 para divulgação ─────────────────────────────────────────
   const podio = mensal.slice(0,3);
   const cores = ['var(--ouro)','#B8B8C0','#C08457'];
@@ -28590,6 +29007,7 @@ function _relBenchVends(){
         Meta sempre a do mês escolhido, cadastrada pelo administrador.
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">${podioHtml}</div>
+      ${semParHtml}
     </div>
 
     <div class="sc" style="margin-top:12px">
@@ -32298,12 +32716,30 @@ window.excelProcessarUpload = function(event){
         const _novoSet  = new Set(mesesNovos);
         const conserva  = mesesAnt.filter(m => !_novoSet.has(m));  // só a base tem
         const repete    = mesesAnt.filter(m =>  _novoSet.has(m));  // os dois têm
-        const acao = !anterior            ? 'novo'
-                   : conserva.length === 0 ? 'substitui'
-                   : repete.length   === 0 ? 'funde'
-                   :                         'conflito';
-        _planos.push({lid, ano, cubo, linhas, anterior, conserva, repete, acao});
+        // [R155] Repetir uns meses e omitir outros deixou de obrigar a
+        // trocar o ano inteiro: dá para tirar só os meses repetidos do
+        // cubo antigo e fundir o novo por cima. Foi o caso do agosto
+        // fechado, que a planilha do ano sobrescreveu pela metade.
+        let acao = !anterior            ? 'novo'
+                 : conserva.length === 0 ? 'substitui'
+                 : repete.length   === 0 ? 'funde'
+                 :                         'conflito';
+        let podado = null;
+        if(acao === 'conflito'){
+          podado = window.crmRemoverMeses(anterior, repete);
+          if(podado) acao = 'trocaMes';   // só quando dá para fazer direito
+        }
+        _planos.push({lid, ano, cubo, linhas, anterior, conserva, repete, acao, podado});
       });
+
+      // [R155] Troca de mês é o caminho bom: avisa, mas não pede permissão
+      // para perder nada, porque nada se perde.
+      const _trocas = _planos.filter(p => p.acao === 'trocaMes');
+      if(_trocas.length){
+        console.log('[crm] R155: troca por mês —', _trocas.map(p =>
+          ((LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid) + '/' + p.ano
+          + ' troca ' + p.repete.join(',') + ' e mantém ' + p.conserva.join(',')).join(' · '));
+      }
 
       const _conflitos = _planos.filter(p => p.acao === 'conflito');
       if(_conflitos.length){
@@ -32330,7 +32766,9 @@ window.excelProcessarUpload = function(event){
       const _paresImportados = [];   // [R136] só estes vão ao servidor
       let _totalPedacos = 0;
       _planos.forEach(p => {
-        const cubo = (p.acao === 'funde') ? window.crmFundirCubos(p.anterior, p.cubo) : p.cubo;
+        const cubo = (p.acao === 'funde')    ? window.crmFundirCubos(p.anterior, p.cubo)
+                   : (p.acao === 'trocaMes') ? window.crmFundirCubos(p.podado,   p.cubo)
+                   :                           p.cubo;
         _paresImportados.push([p.lid, p.ano]);
         const dg = window.crmGuardar(p.lid, p.ano, cubo);
         _totalPedacos += dg.pedacos;
@@ -32340,7 +32778,8 @@ window.excelProcessarUpload = function(event){
           linhas: p.linhas.length, clientes: dg.clientes,
           kb: Math.round((dg.bytesLeves + dg.bytesClientes)/1024),
           pedacos: dg.pedacos,
-          acao: p.acao, mesesCubo: window.crmMesesDoCubo(cubo).length
+          acao: p.acao, mesesCubo: window.crmMesesDoCubo(cubo).length,
+          repete: p.repete, conserva: p.conserva
         });
       });
 
@@ -32371,6 +32810,10 @@ window.excelProcessarUpload = function(event){
              + (d.pedacos > 1 ? ', ' + d.pedacos + ' partes' : '') + ')'
              + (d.acao === 'funde'
                  ? ' [somado ao que já havia — o ano ficou com ' + d.mesesCubo + ' mês(es)]'
+                 : d.acao === 'trocaMes'
+                 ? ' [substituiu ' + (d.repete||[]).map(m=>m.slice(5)).join(', ')
+                   + ' e manteve ' + (d.conserva||[]).map(m=>m.slice(5)).join(', ')
+                   + ' — o ano ficou com ' + d.mesesCubo + ' mês(es)]'
                  : ''))
         .join(' · ');
 
@@ -32493,6 +32936,7 @@ window.excelLimparDados = async function(){
   // Apagar volume libera espaço: tentar gravar completo já na próxima
   // gravação, em vez de esperar o ciclo de retentativa.
   window._nivelPersist = 0;
+
   // E propagar a exclusão para o cache local imediatamente.
   if(typeof window.idbUtilizavel === 'function' && window.idbUtilizavel()) window.crmGravarIdb().catch(()=>{});
   const pares = [];
@@ -32557,7 +33001,13 @@ window.excelLimparDados = async function(){
     D.crm = {};
     D._excelImportInfo = null;
     D._excelImportacoes = [];
-    save();
+    // [R155] a trava agora pesa os dados de planilha; esta limpeza foi
+    // pedida e confirmada, então ela é autorizada a zerar. A flag é
+    // ligada só aqui, depois de todo return antecipado, e desligada em
+    // seguida — deixá-la de pé abriria a porta para o apagamento
+    // acidental que a trava existe para barrar.
+    window._limpezaDeliberada = true;
+    try{ save(); } finally { window._limpezaDeliberada = false; }
     showToast('⚠️ Limpo apenas neste navegador — ' + (pares.length - apagados)
       + ' conjunto(s) seguem no Firebase e voltarão ao recarregar.','err');
     window.excelRender();
@@ -32568,7 +33018,9 @@ window.excelLimparDados = async function(){
   D.crm = {};
   D._excelImportInfo = null;
   D._excelImportacoes = [];
-  save();
+  // [R155] ver acima: limpeza confirmada tem passe pela trava, e só ela
+  window._limpezaDeliberada = true;
+  try{ save(); } finally { window._limpezaDeliberada = false; }
   showToast('✅ CRM apagado' + (apagados ? ' — ' + apagados + ' conjunto(s) removidos do Firebase.' : '.'), 'ok');
   window.excelRender();
 };
