@@ -31,22 +31,403 @@
 // catch no init deixaria a função indefinida e o merge quebraria em
 // tempo de sync — foi assim que o R145 derrubou meia tela.
 // ══════════════════════════════════════════════════════════════════════
-window._vendMesclarLocal = function(bvi, rv){
+/**
+ * [R157] O QUE ESTA MÁQUINA DE FATO EDITOU NO CADASTRO.
+ *
+ * `_savedAt` é carimbo de REGISTRO, não de campo: salvarMetaLoja
+ * recarimba TODAS as vendedoras da loja, e arquivar recarimba aquela
+ * pessoa. Depois disso, o registro inteiro daquela máquina passa a
+ * "vencer" — e uma correção de NOME feita em outra máquina nunca mais
+ * chega, porque o merge preserva o lado local campo a campo.
+ *
+ * Em vez de inventar oito carimbos (nomeTs, cargoTs, metaMesTs...),
+ * vale a regra que já funciona em _metaRemotaVence e _mergeCarimbado:
+ * só se defende o campo que ESTA máquina realmente digitou. Para o
+ * resto, o servidor manda.
+ *
+ * Grupos: 'cadastro' (nome, cargo, loja) e 'metas' (metaMes,
+ * superMetaMes, ticketAlvo, metaAniv, metaInativ).
+ */
+// Um grupo defende os campos que uma MESMA ação escreve junto. Grupo
+// grande demais faz a máquina defender campo que ninguém digitou ali —
+// foi assim que arquivar (só escreve `ativa`) passou a bloquear a
+// correção de nome vinda de outra máquina.
+window._VEND_GRUPOS = {
+  cadastro: ['nome', 'cargo', 'loja'],          // salvarEdicaoVend
+  metas:    ['metaMes', 'superMetaMes'],        // espelho do mês corrente
+  kpis:     ['ticketAlvo', 'metaAniv', 'metaInativ'],
+  ativa:    ['ativa']                           // arbitrado por ativaTs
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R157] OS MAPAS POR MÊS SE DECIDEM MÊS A MÊS
+//
+// `metasMes` e `diasTrab` são {'2026-09': …, '2026-10': …}. Tratá-los
+// como campo único faz o mapa inteiro de um lado vencer: a loja edita
+// outubro, o admin edita setembro, e quem perder o carimbo perde o mês
+// que digitou — sem erro, sem aviso. Pior, um mês que alguém APAGOU de
+// propósito ("campo limpo = não cadastrado") ressuscita.
+//
+// A marca aqui é por mês, e quem a põe é o único ponto de escrita de
+// cada mapa (setMetaVendDoMes e setDiasTrabVend), então nenhum chamador
+// pode esquecer.
+// ══════════════════════════════════════════════════════════════════════
+window._VEND_MAPAS = ['metasMes', 'diasTrab'];
+
+window._marcarMesVendEditado = function(vid, campo, mes){
+  if(!vid || !campo || !mes) return;
+  window._vendEditadoAqui.add(vid + '|@' + campo + '|' + mes);
+  if(typeof window._persistirMarcasVend === 'function') window._persistirMarcasVend();
+};
+window._mesVendFoiEditadoAqui = function(vid, campo, mes){
+  return !!(window._vendEditadoAqui
+            && window._vendEditadoAqui.has(vid + '|@' + campo + '|' + mes));
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R157] O CICLO DE VIDA DA MARCA
+//
+// Uma marca que nunca sai transforma a máquina em surda: ela defende o
+// campo para sempre e a correção que outra máquina fizer depois não
+// chega mais — o mesmo defeito que este mecanismo veio consertar, só
+// que invertido. A marca existe enquanto o valor daqui ainda NÃO está
+// no servidor; quando os dois lados concordam, a defesa não tem mais
+// objeto e é retirada.
+//
+// E ela precisa sobreviver ao F5: um Set em memória morre na recarga, e
+// a edição que não chegou a subir ficaria desprotegida no primeiro pull
+// da sessão seguinte — perdida em silêncio, sem erro nenhum.
+// ══════════════════════════════════════════════════════════════════════
+const _VEND_MARCAS_LS = 'avatim_vend_editado';
+
+window._vendEditadoAqui = window._vendEditadoAqui || (function(){
+  try{
+    const cru = localStorage.getItem(_VEND_MARCAS_LS);
+    if(cru){
+      const arr = JSON.parse(cru);
+      if(Array.isArray(arr)) return new Set(arr.filter(x => typeof x === 'string'));
+    }
+  }catch(e){ /* localStorage indisponível ou lixo: começa vazio */ }
+  return new Set();
+})();
+
+window._persistirMarcasVend = function(){
+  try{
+    if(window._vendEditadoAqui && window._vendEditadoAqui.size)
+      localStorage.setItem(_VEND_MARCAS_LS, JSON.stringify([...window._vendEditadoAqui]));
+    else
+      localStorage.removeItem(_VEND_MARCAS_LS);
+  }catch(e){
+    // A marca em memória continua defendendo o que foi digitado NESTA
+    // sessão; o que se perde é a defesa depois de um F5. O dado
+    // principal avisa quando o localStorage não cabe (_persistirLocal);
+    // esta chave avisava nada, e a edição sumia sem rastro.
+    if(!window._avisouMarcaSemDisco){
+      window._avisouMarcaSemDisco = true;
+      console.warn('[Avatim] não foi possível guardar as marcas de edição ('
+        + (e && (e.name || e.message)) + '). Uma edição ainda não enviada '
+        + 'pode ser revertida se a página for recarregada antes de o '
+        + 'servidor confirmar.');
+      if(typeof showToast === 'function')
+        showToast('⚠️ Sem espaço para guardar edições pendentes — '
+          + 'evite recarregar antes de o sistema confirmar o envio.', 'warn');
+    }
+  }
+};
+
+/**
+ * Iguais para efeito de merge. JSON.stringify direto NÃO serve: ele
+ * respeita a ordem de inserção das chaves, e duas máquinas que
+ * digitaram os mesmos meses em ordem diferente produziriam strings
+ * diferentes para conteúdo idêntico. A marca nunca baixaria, e a
+ * máquina ficaria surda àquele campo para sempre.
+ */
+window._canonico = function(v){
+  if(v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if(Array.isArray(v)) return '[' + v.map(window._canonico).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map(k => JSON.stringify(k) + ':' + window._canonico(v[k])).join(',') + '}';
+};
+
+window._vendCampoIgual = function(a, b){
+  if(a === b) return true;
+  if(a === undefined || b === undefined) return false;
+  if(typeof a === 'object' && typeof b === 'object' && a && b){
+    try{ return window._canonico(a) === window._canonico(b); }catch(e){ return false; }
+  }
+  return false;
+};
+
+/**
+ * Retira a marca do grupo quando o servidor já traz o mesmo valor —
+ * a gravação chegou, não há mais o que defender.
+ */
+window._marcasABaixar = window._marcasABaixar || new Set();
+let _baixaAgendada = false;
+
+window._baixarMarcaConfirmada = function(vid, grupo, local, remoto){
+  if(!vid || !window._vendEditadoAqui) return;
+  const chave = vid + '|' + grupo;
+  if(!window._vendEditadoAqui.has(chave)) return;
+  const campos = (window._VEND_GRUPOS || {})[grupo] || [];
+  if(!campos.length) return;
+  const todosIguais = campos.every(c => window._vendCampoIgual(
+    local && local[c], remoto && remoto[c]));
+  if(!todosIguais) return;
+  // Baixa DIFERIDA. Apagar aqui teria dois efeitos indesejados: o merge
+  // desta mesma vendedora ainda vai consultar a marca logo abaixo, e
+  // tirar a última marca no meio do laço religaria o modo de
+  // compatibilidade para as vendedoras seguintes — duas regras
+  // diferentes na mesma passagem.
+  window._marcasABaixar.add(chave);
+  if(!_baixaAgendada){
+    _baixaAgendada = true;
+    setTimeout(window._flushMarcasBaixadas, 0);
+  }
+};
+
+/** Idem, para a marca de um mês dentro de metasMes/diasTrab. */
+window._baixarMarcaMesConfirmada = function(vid, campo, local, remoto){
+  if(!vid || !window._vendEditadoAqui || !window._vendEditadoAqui.size) return;
+  const pre = vid + '|@' + campo + '|';
+  window._vendEditadoAqui.forEach(ch => {
+    if(ch.indexOf(pre) !== 0) return;
+    const mes = ch.slice(pre.length);
+    // ausência dos dois lados também é acordo: o mês apagado aqui já
+    // está apagado lá, não há mais nada a defender
+    if(window._vendCampoIgual(local && local[mes], remoto && remoto[mes])
+       || ((local ? local[mes] : undefined) === undefined
+           && (remoto ? remoto[mes] : undefined) === undefined)){
+      window._marcasABaixar.add(ch);
+      if(!_baixaAgendada){ _baixaAgendada = true; setTimeout(window._flushMarcasBaixadas, 0); }
+    }
+  });
+};
+
+window._flushMarcasBaixadas = function(){
+  _baixaAgendada = false;
+  if(!window._marcasABaixar || !window._marcasABaixar.size) return;
+  let mexeu = false;
+  window._marcasABaixar.forEach(ch => {
+    if(window._vendEditadoAqui.delete(ch)) mexeu = true;
+  });
+  window._marcasABaixar.clear();
+  if(mexeu && typeof window._persistirMarcasVend === 'function')
+    window._persistirMarcasVend();
+};
+
+
+// [R157] Lojas cujo documento precisa receber a gravação, mesmo que a
+// vendedora já não pertença a elas. É o caso da TROCA de loja: o
+// cadastro muda para a loja nova e o doc da loja ANTIGA ficaria com o
+// registro obsoleto para sempre, porque a varredura lê `v.loja` já
+// atualizado e nunca chega lá.
+window._lojasEditadasAqui = window._lojasEditadasAqui || new Set();
+window._marcarLojaEditada = function(lid){
+  if(lid) window._lojasEditadasAqui.add(lid);
+};
+window._marcarVendEditado = function(vid, grupo){
+  if(!vid || !grupo) return;
+  window._vendEditadoAqui.add(vid + '|' + grupo);
+  if(typeof window._persistirMarcasVend === 'function') window._persistirMarcasVend();
+  // [R157] E carimba os campos daquele grupo no PRÓPRIO registro.
+  //
+  // A marca vale só nesta máquina. O carimbo viaja com o dado, e é ele
+  // que decide quando as duas cópias do servidor — `principal` e
+  // `loja_*` — discordam. Sem ele restava o `_savedAt` do registro
+  // inteiro, inflado por qualquer edição não relacionada: era o que
+  // fazia a correção de nome de um lado perder para o recarimbo de
+  // meta do outro.
+  try{
+    const _lv = (typeof D !== 'undefined' && D.vendedoras) || [];
+    const _v  = _lv.find(x => x && x.id === vid);
+    if(!_v && _lv.length)
+      console.warn('[Avatim] marca de edição sem registro correspondente ('
+        + vid + '/' + grupo + ') — o campo ficaria sem carimbo. '
+        + 'Marcou-se antes de inserir a vendedora?');
+    if(_v){
+      if(!_v.camposTs || typeof _v.camposTs !== 'object') _v.camposTs = {};
+      const _ts = Date.now();
+      ((window._VEND_GRUPOS || {})[grupo] || []).forEach(c => {
+        // Monotônico: se o relógio desta máquina andou para trás — ou
+        // se o carimbo que veio do servidor é maior que o relógio
+        // local —, gravar `Date.now()` cru rebaixaria o campo e a
+        // edição que acabou de ser feita perderia para a anterior.
+        // Não resolve o desvio ENTRE máquinas, mas impede que uma
+        // máquina contradiga a si mesma.
+        const _ant = Number(_v.camposTs[c]) || 0;
+        _v.camposTs[c] = _ts > _ant ? _ts : _ant + 1;
+      });
+    }
+  }catch(e){ /* sem D ainda: a marca em memória já cobre esta sessão */ }
+};
+window._vendFoiEditadoAqui = function(vid, grupo){
+  return !!(window._vendEditadoAqui && window._vendEditadoAqui.has(vid + '|' + grupo));
+};
+
+window._vendMesclarLocal = function(bvi, rv, opts){
   bvi = bvi || {}; rv = rv || {};
-  const pega = c => bvi[c] !== undefined ? bvi[c] : rv[c];
+  const _vid = bvi.id || rv.id;
+  // ════════════════════════════════════════════════════════════════
+  // [R157] `fsCarregar` reaproveita esta função para reconciliar o doc
+  // `principal` com um doc `loja_*` — DUAS cópias do servidor. Ali as
+  // marcas desta máquina não descrevem nenhum dos dois lados, e
+  // consultá-las decidiria por um motivo sem relação com os dados.
+  //
+  // Nesse modo vence o doc da LOJA (o segundo argumento), e não o
+  // carimbo. O motivo é quem pode escrever onde:
+  //
+  //   · a loja só consegue gravar no `loja_X`;
+  //   · o admin grava no `principal` E propaga para o `loja_X`, e essa
+  //     propagação é um merge campo a campo.
+  //
+  // Então uma edição do ADMIN está nos dois documentos — preferir o da
+  // loja não a perde. Já uma edição da LOJA existe só no `loja_X`:
+  // preferir o `principal` a apaga, e para sempre, porque a loja não
+  // tem como reescrevê-la em lugar nenhum.
+  //
+  // E o `principal` é um DESPEJO da memória do admin (`vendedoras:
+  // D2.vendedoras`), não um merge. Basta `salvarMetaLoja` recarimbar
+  // `_savedAt` de todas as vendedoras da loja — o que ela faz — para o
+  // `principal` levar o nome velho com carimbo novo e vencer um
+  // desempate que nada tem a ver com o nome. É o bug do R154 de novo,
+  // agora entre dois documentos do servidor.
+  // ════════════════════════════════════════════════════════════════
+  const _semMarcas = !!(opts && opts.ignorarMarcas);
+  // ════════════════════════════════════════════════════════════════
+  // [R157] Só se defende o que foi digitado AQUI; o resto vem do
+  // servidor. Não há mais modo de compatibilidade.
+  //
+  // Havia: sem nenhuma marca, o local vencia. Fazia sentido enquanto um
+  // portão por _savedAt decidia antes e só chamava esta função quando o
+  // lado local já era o mais novo. Sem o portão — ele contornava as
+  // marcas e foi removido — a compatibilidade passaria a valer em toda
+  // máquina que ainda não editou nada na vida, e essas são justamente
+  // as que só precisam RECEBER. Elas nunca mais veriam uma atualização.
+  //
+  // O que a compatibilidade protegia — a edição que ainda não subiu —
+  // hoje é protegido pela própria marca, que é posta no ponto de
+  // escrita e sobrevive ao F5 no localStorage.
+  // ════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════
+  // Uma regra só, em três degraus:
+  //
+  //  1. o que ESTA máquina digitou e o servidor ainda não confirmou
+  //     (só no modo com marcas — entre dois docs do servidor a marca
+  //     não descreve nenhum dos lados);
+  //  2. senão, o carimbo DO CAMPO: quem escreveu aquele campo por
+  //     último vence, venha de onde vier. É o que resolve o empate
+  //     entre `principal` e `loja_*` sem ter de adivinhar qual dos
+  //     dois é mais confiável;
+  //  3. sem carimbo dos dois lados (dado anterior ao R157), vale o
+  //     segundo argumento. Na leitura isso é "o servidor manda", que é
+  //     o que propaga; na reconciliação é o doc da LOJA, que é o lado
+  //     certo de errar — a loja só consegue gravar nele, então
+  //     preferir o `principal` apagaria a edição dela sem recurso,
+  //     enquanto uma edição do admin está nos dois documentos.
+  // ════════════════════════════════════════════════════════════════
+  const pega = (c, grupo) => {
+    if(bvi[c] === undefined) return rv[c];
+    if(!_semMarcas && window._vendFoiEditadoAqui(_vid, grupo)) return bvi[c];
+    const _tcL = Number((bvi.camposTs || {})[c]) || 0;
+    const _tcR = Number((rv.camposTs  || {})[c]) || 0;
+    if(_tcL !== _tcR) return _tcL > _tcR ? bvi[c] : rv[c];
+    return rv[c] !== undefined ? rv[c] : bvi[c];
+  };
+  // Mapa por mês: cada mês se decide sozinho. Ausência é valor — um
+  // mês apagado aqui tem de continuar apagado, e um mês que só o
+  // servidor tem precisa chegar. Sem marca daquele mês, o servidor
+  // manda: é o que faz a atualização se propagar.
+  const pegaMapa = (campo) => {
+    const L = bvi[campo], R = rv[campo];
+    const objL = (L && typeof L === 'object') ? L : null;
+    const objR = (R && typeof R === 'object') ? R : null;
+    if(!objL && !objR) return L !== undefined ? L : R;
+    if(!objL) return objR;
+    if(!objR) return objL;
+    const out = {};
+    new Set(Object.keys(objL).concat(Object.keys(objR))).forEach(mes => {
+      // Entre dois docs do SERVIDOR quem decide é o carimbo daquele
+      // mês — é o que distingue "nunca existiu aqui" de "foi apagado
+      // aqui". Sem carimbo dos dois lados (dado anterior ao R157),
+      // prevalece o lado que o chamador já julgou mais recente e o mês
+      // que só o outro tem entra: na dúvida, não se apaga.
+      let daqui;
+      if(_semMarcas){
+        const tsL = Number((bvi[campo + 'Ts'] || {})[mes]) || 0;
+        const tsR = Number((rv[campo  + 'Ts'] || {})[mes]) || 0;
+        daqui = (tsL !== tsR) ? (tsL > tsR) : (objL[mes] !== undefined);
+      } else {
+        daqui = !!(_vid && window._mesVendFoiEditadoAqui(_vid, campo, mes));
+      }
+      const v = daqui ? objL[mes] : objR[mes];
+      if(v !== undefined) out[mes] = v;
+    });
+    return out;
+  };
+  const mesclaCamposTs = () => {
+    const L = bvi.camposTs, R = rv.camposTs;
+    if(!L && !R) return undefined;
+    const out = Object.assign({}, R || {});
+    Object.keys(L || {}).forEach(c => {
+      out[c] = Math.max(Number(out[c]) || 0, Number(L[c]) || 0);
+    });
+    return out;
+  };
+  const mesclaTs = (campo) => {
+    const L = bvi[campo + 'Ts'], R = rv[campo + 'Ts'];
+    if(!L && !R) return undefined;
+    const out = Object.assign({}, R || {});
+    Object.keys(L || {}).forEach(m => {
+      out[m] = Math.max(Number(out[m]) || 0, Number(L[m]) || 0);
+    });
+    return out;
+  };
+  // uma vez só: isto roda dentro do laço de merge de vendedoras
+  const _av = window._ativaQueVence(bvi, rv);
+  // A marca sai quando o servidor já traz o mesmo valor: a gravação
+  // chegou e a defesa não tem mais objeto. A baixa é agendada, não
+  // imediata — ver _baixarMarcaConfirmada.
+  // a baixa compara o que ESTA máquina digitou com o que o servidor
+  // devolveu; entre duas cópias do servidor não há o que confirmar
+  if(!_semMarcas && _vid && typeof window._baixarMarcaConfirmada === 'function'){
+    Object.keys(window._VEND_GRUPOS || {}).forEach(g =>
+      window._baixarMarcaConfirmada(_vid, g, bvi, rv));
+    (window._VEND_MAPAS || []).forEach(campo =>
+      window._baixarMarcaMesConfirmada(_vid, campo, bvi[campo], rv[campo]));
+  }
   return Object.assign({}, rv, {
     // identidade e cadastro — editáveis desde o R153
-    nome:         pega('nome'),
-    cargo:        pega('cargo'),
-    loja:         pega('loja'),
+    nome:         pega('nome',  'cadastro'),
+    cargo:        pega('cargo', 'cadastro'),
+    loja:         pega('loja',  'cadastro'),
     // metas e estado
-    metaMes:      pega('metaMes'),
-    superMetaMes: pega('superMetaMes'),
-    ticketAlvo:   pega('ticketAlvo'),
-    metaAniv:     pega('metaAniv'),
-    metaInativ:   pega('metaInativ'),
-    ativa:        pega('ativa'),
-    _savedAt:     (bvi._savedAt || 0) || (rv._savedAt || 0)
+    metaMes:      pega('metaMes',      'metas'),
+    superMetaMes: pega('superMetaMes', 'metas'),
+    ticketAlvo:   pega('ticketAlvo',   'kpis'),
+    metaAniv:     pega('metaAniv',     'kpis'),
+    metaInativ:   pega('metaInativ',   'kpis'),
+    // [R157] As metas de VERDADE moram aqui desde o R148: `metaMes` é só
+    // o espelho do mês corrente, e `metasMes[AAAA-MM]` é o dado. Ficando
+    // de fora, o merge devolvia o mapa inteiro do servidor e a meta de
+    // qualquer mês digitada aqui sumia — a proteção acima estava
+    // guardando o espelho, não o original. `diasTrab` acompanha porque é
+    // o que rateia a meta entre as vendedoras.
+    metasMes:     pegaMapa('metasMes'),
+    diasTrab:     pegaMapa('diasTrab'),
+    // O carimbo de cada mês fica com o maior dos dois lados: perdê-lo
+    // devolveria a reconciliação ao empate, e o mês apagado voltaria.
+    metasMesTs:   mesclaTs('metasMes'),
+    diasTrabTs:   mesclaTs('diasTrab'),
+    camposTs:     mesclaCamposTs(),
+    // [R157] arquivamento tem carimbo próprio: quem decidiu por último
+    // vence, venha de onde vier. Preso ao local, ele nunca atravessava.
+    ativa:        _av.ativa,
+    ativaTs:      _av.ativaTs || undefined,
+    // o maior dos dois: o registro resultante contém o que os dois
+    // lados tinham, e um carimbo que anda para trás faria o merge
+    // seguinte tomar a decisão errada
+    _savedAt:     Math.max(Number(bvi._savedAt)||0, Number(rv._savedAt)||0)
   });
 };
 
@@ -240,13 +621,274 @@ window._CAMPOS_SIMPLES = ['arquivos','metasProd','realProd','configCom',
 /** Lápides: listas de id. União — exclusão feita em qualquer máquina vale. */
 window._LAPIDES_LISTA = ['_vendsExcluidas','_campExcluidos'];
 
+/**
+ * [R157] Marca um realizado de campanha como excluído, nas duas formas
+ * em que a lápide existe. Havia três cópias disto, todas assumindo
+ * array — e `_isCampExcluido`, que LÊ, já tratava as duas.
+ */
+window._marcarCampExcluido = function(id){
+  if(!id) return;
+  if(!D._campExcluidos) D._campExcluidos = {};
+  if(Array.isArray(D._campExcluidos)){
+    if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+    return;
+  }
+  if(!D._campExcluidos[id]) D._campExcluidos[id] = Date.now();
+};
+
 /** Lápides com carimbo por chave: {id: ts}. Fica o carimbo mais recente. */
-window._LAPIDES_MAPA = ['_contatosExcluidos','_fluxoExcluidos',
+window._LAPIDES_MAPA = ['_contatosExcluidos','_prospeccoesExcluidas','_fluxoExcluidos',
   '_vendasExcluidasTs','_vendasVendExcluidasTs'];
+
+// ══════════════════════════════════════════════════════════════════════
+// [R157] O MERGE DE VENDEDORAS QUE O PULL DA LOJA NÃO TINHA
+//
+// syncAdmin (30s) mesclava `remoto.vendedoras`; syncLoja (60s) não
+// mesclava nada — nem por carimbo, nem por campo. Numa máquina de loja
+// aberta o dia inteiro, cadastro, meta e arquivamento feitos pelo admin
+// só chegavam no próximo F5. Era isto que produzia o "só aparece em aba
+// anônima": a aba anônima faz boot do zero e passa pelo caminho que
+// tinha o merge.
+//
+// Mesma lógica que o syncAdmin já usava, agora num lugar só, para os
+// dois pulls. O boot (loadFromFirestore) tem o seu próprio caminho, com
+// o tratamento de gravação pendente, e continua separado de propósito.
+// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// [R157] O QUE A LOJA GRAVA NO PRÓPRIO DOCUMENTO
+//
+// Era um despejo de `D2.vendedoras` filtrado pela loja. `vendas`,
+// `campRealizados` e `fluxo` já mesclavam com o que está no servidor;
+// só o cadastro não mesclava — e uma aba de loja com a cópia velha
+// desfazia o ajuste que o admin acabara de propagar.
+//
+// Vive aqui, no nível do módulo, e não dentro de `_fsGravarInterno`,
+// para que o teste possa EXECUTÁ-LA. A primeira versão ficou lá dentro
+// e tinha um ReferenceError que derrubava toda gravação de loja; o
+// teste conferia a presença do nome da função no texto e passava.
+// ══════════════════════════════════════════════════════════════════════
+// [R157] Estas duas viviam embutidas em `_fsGravarInterno`, e os
+// testes as REIMPLEMENTAVAM para poder verificá-las — o que testa a
+// cópia do teste, não o sistema. Subiram para cá pelo mesmo motivo que
+// `_vendedorasParaDocLoja`: para serem executadas de verdade.
+
+/** Qual dos dois lados serve de base antes de sobrepor os campos decididos. */
+window._baseDaPropagacao = function(local, remoto){
+  const tsL = Number((local  && local._savedAt)  || 0);
+  const tsR = Number((remoto && remoto._savedAt) || 0);
+  return (tsL >= tsR) ? local : remoto;
+};
+
+/** As lojas cujo cadastro foi mexido NESTA máquina. */
+window._lojasTocadasPor = function(marcas, vendedoras){
+  const saida = new Set();
+  if(!marcas || !marcas.size) return saida;
+  const ids = new Set();
+  marcas.forEach(ch => ids.add(String(ch).split('|')[0]));
+  (vendedoras || []).forEach(v => {
+    if(v && v.loja && ids.has(v.id)) saida.add(v.loja);
+  });
+  return saida;
+};
+
+// [R157] As três abaixo também subiram de dentro de `_fsGravarInterno`
+// para cá, pelo mesmo motivo das outras: fechadas lá dentro, nenhum
+// teste conseguia EXECUTÁ-LAS, e foi por isso que a prospecção excluída
+// voltando na própria gravação passou despercebida.
+
+/** metasLoja do mês: o servidor só é substituído quando a regra deixa. */
+window._metasParaDocLoja = function(metasLocais, lid, metasRemotas){
+  const locais  = Object.assign({}, (metasLocais && metasLocais[lid]) || {});
+  const remotas = (metasRemotas && metasRemotas[lid]) || {};
+  Object.entries(remotas).forEach(([mr, mRemota]) => {
+    if(typeof window._metaRemotaVence === 'function'
+       && window._metaRemotaVence(lid, mr, locais[mr], mRemota)) locais[mr] = mRemota;
+    else if(locais[mr] === undefined) locais[mr] = mRemota;
+  });
+  return locais;
+};
+
+/** Histórico: mês que só existe no servidor não pode sumir. */
+window._historicoParaDocLoja = function(histLocal, lid, histRemoto){
+  const _l = (histLocal  && histLocal[lid])  || null;
+  const _r = (histRemoto && histRemoto[lid]) || null;
+  // ══════════════════════════════════════════════════════════════════
+  // [R157] As duas formas não são iguais, e tratá-las igual corrompia
+  // o dado: `historicoMeses[lid]` é MAPA por mês, mas
+  // `historicoLojas[lid]` é ARRAY de períodos {chave, ts}. Um
+  // `Object.assign({}, array)` vira objeto de índices numéricos — e os
+  // guards `if(!Array.isArray(...)) return;` na leitura descartavam
+  // tudo em silêncio. O "Lançamento por Loja" subia corrompido e nunca
+  // chegava ao admin, sem erro nenhum na tela.
+  // ══════════════════════════════════════════════════════════════════
+  if(Array.isArray(_l) || Array.isArray(_r)){
+    const porChave = new Map();
+    const põe = p => {
+      if(!p || p.chave === undefined) return;
+      const ant = porChave.get(p.chave);
+      if(!ant || (Number(p.ts)||0) > (Number(ant.ts)||0)) porChave.set(p.chave, p);
+    };
+    (Array.isArray(_r) ? _r : []).forEach(põe);
+    (Array.isArray(_l) ? _l : []).forEach(põe);
+    const arr = [...porChave.values()];
+    return arr.length ? { [lid]: arr } : {};
+  }
+  const locais  = Object.assign({}, _l || {});
+  const remotas =                   _r || {};
+  // [R157] O comentário prometia "mês a mês, como o admin já faz", mas
+  // só preenchia mês AUSENTE: para mês presente dos dois lados o local
+  // vencia sempre, mesmo com o servidor mais novo — o caso de dois
+  // dispositivos no mesmo login de loja. Compara o carimbo, igual ao
+  // merge do admin.
+  Object.keys(remotas).forEach(mr => {
+    if(locais[mr] === undefined){ locais[mr] = remotas[mr]; return; }
+    const tsL = Number((locais[mr]  || {}).ts || 0);
+    const tsR = Number((remotas[mr] || {}).ts || 0);
+    if(tsR > tsL) locais[mr] = remotas[mr];
+  });
+  return Object.keys(locais).length ? { [lid]: locais } : {};
+};
+
+/** Contatos/prospecções: une por id, com a lápide mandando. */
+// ══════════════════════════════════════════════════════════════════════
+// [R157] O QUE A TRAVA ANTI-APAGAMENTO PESA
+//
+// Vivia fechada dentro de `_fsGravarInterno`, sem teste possível — e
+// por isso ninguém notou que `prospeccoes` subia no payload sem ser
+// pesada, nem que outros quatro arrays de registro estavam de fora.
+// A regra é simples: o que vai no payload e pode ser zerado tem de
+// entrar aqui.
+// ══════════════════════════════════════════════════════════════════════
+window._pesoDoPayload = function(o){
+  return {
+    vendedoras:    (o?.vendedoras    || []).length,
+    campanhas:     (o?.campanhas     || []).length,
+    campRealizados:(o?.campRealizados|| []).length,
+    fluxo:         (o?.fluxo         || []).length,
+    contatos:      (o?.contatos      || []).length,
+    prospeccoes:   (o?.prospeccoes   || []).length,
+    // [R157] sobem no payload do principal e não eram pesados
+    campObjetivos: (o?.campObjetivos || []).length,
+    arquivos:      (o?.arquivos      || []).length,
+    metasProd:     (o?.metasProd     || []).length,
+    produtosExtras:(o?.produtosExtras|| []).length,
+    metasLoja:     Object.keys(o?.metasLoja || {}).length,
+    excelDados:       (o?.excelDados       || []).length,
+    _excelImportacoes:(o?._excelImportacoes|| []).length,
+    _estqImportacoes: (o?._estqImportacoes || []).length
+  };
+};
+
+window._LAPIDE_DO_CAMPO = { contatos: '_contatosExcluidos',
+                            prospeccoes: '_prospeccoesExcluidas' };
+
+window._listaParaDocLoja = function(campo, lista, daLoja, remotaLista, fonte){
+  const nomeLapide = window._LAPIDE_DO_CAMPO[campo];
+  const mortos = (nomeLapide && fonte && fonte[nomeLapide]) || {};
+  const saida = (lista || []).filter(x => x && daLoja(x) && !mortos[x.id]);
+  const remotos = Array.isArray(remotaLista) ? remotaLista : [];
+  remotos.forEach(r => {
+    if(!r || !r.id || !daLoja(r)) return;
+    if(mortos[r.id]) return;              // excluído não volta
+    if(saida.some(x => x.id === r.id)) return;
+    saida.push(r);
+  });
+  return saida;
+};
+
+window._vendedorasParaDocLoja = function(locaisTodas, lid, noServidor, excluidas){
+  const mortas = Array.isArray(excluidas) ? excluidas : [];
+  const locais = (locaisTodas || []).filter(v =>
+    v && v.loja === lid && !mortas.includes(v.id));
+  const doServidor = Array.isArray(noServidor) ? noServidor : [];
+  if(!doServidor.length) return locais;
+  const saida = locais.map(v => {
+    const r = doServidor.find(x => x && x.id === v.id);
+    // sem par no servidor é registro novo; com par, a regra única
+    // decide campo a campo — o que esta máquina digitou resiste, o
+    // resto vem de lá
+    return (r && typeof window._vendMesclarLocal === 'function')
+      ? window._vendMesclarLocal(v, r)
+      : v;
+  });
+  // Quem está no servidor e NÃO na cópia desta máquina não pode sumir:
+  // a cópia local pode estar incompleta — primeira carga, F5 no meio de
+  // um pull, sync parcial — e gravar só o que se tem aqui apagaria o
+  // resto. A trava anti-apagamento não cobre este caminho: ela só roda
+  // no ramo do admin, contra o doc `principal`.
+  doServidor.forEach(r => {
+    if(!r || !r.id) return;
+    if(mortas.includes(r.id)) return;        // lápide manda
+    if(saida.some(v => v.id === r.id)) return;
+    // Distinguir "ainda não sincronizei" de "esta pessoa não é mais
+    // daqui". Olhar o `loja` do registro do SERVIDOR não serve: ele é
+    // justamente a cópia velha, e continua dizendo que é desta loja.
+    //
+    // O que decide é a cópia local COMPLETA: se esta máquina conhece a
+    // vendedora e sabe que ela está em outra loja, o registro do doc
+    // antigo é fantasma de uma transferência e não pode voltar. Se a
+    // máquina não a conhece de lado nenhum, é cache incompleto — e aí
+    // vale a regra de não apagar.
+    const conhecida = (locaisTodas || []).some(v => v && v.id === r.id);
+    if(conhecida) return;
+    saida.push(r);
+  });
+  return saida;
+};
+
+window._mesclarVendedoras = function(remoto){
+  if(!remoto || !Array.isArray(remoto.vendedoras) || !remoto.vendedoras.length) return 0;
+  let n = 0;
+  // lápides primeiro: quem foi excluída não pode voltar pelo merge
+  if(Array.isArray(remoto._vendsExcluidas) && remoto._vendsExcluidas.length){
+    if(!D._vendsExcluidas) D._vendsExcluidas = [];
+    remoto._vendsExcluidas.forEach(vid=>{
+      if(!D._vendsExcluidas.includes(vid)){ D._vendsExcluidas.push(vid); n++; }
+    });
+  }
+  const excl = D._vendsExcluidas || [];
+  if(!D.vendedoras || !D.vendedoras.length){
+    D.vendedoras = remoto.vendedoras.filter(rv => !excl.includes(rv.id));
+    return n + D.vendedoras.length;
+  }
+  remoto.vendedoras.forEach(rv=>{
+    if(excl.includes(rv.id)){
+      const antes = D.vendedoras.length;
+      D.vendedoras = D.vendedoras.filter(lv => lv.id !== rv.id);
+      if(D.vendedoras.length !== antes) n++;
+      return;
+    }
+    const i = D.vendedoras.findIndex(lv => lv.id === rv.id);
+    if(i < 0){ D.vendedoras.push(rv); n++; return; }
+    // ══════════════════════════════════════════════════════════════
+    // [R157] Aqui havia um portão: se o _savedAt REMOTO fosse maior, o
+    // registro era substituído inteiro e _vendMesclarLocal nunca era
+    // chamado — todo o mecanismo de marcas ficava de fora.
+    //
+    // E o portão não tinha como estar certo: `_savedAt` é um carimbo
+    // por VENDEDORA, não por campo. O admin mexer no ticketAlvo de Ana
+    // às 9h00m20 passa na frente da meta de novembro que a loja digitou
+    // às 9h00m00 e ainda não subiu — campos diferentes, um apagando o
+    // outro. Era o mesmo defeito do R154, um nível acima.
+    //
+    // _vendMesclarLocal já sabe decidir campo a campo e mês a mês, e
+    // sem marca nenhuma ela devolve o remoto — que é o que propaga.
+    // Não há mais o que o portão decidisse melhor.
+    // ══════════════════════════════════════════════════════════════
+    D.vendedoras[i] = window._vendMesclarLocal(D.vendedoras[i], rv);
+    n++;
+  });
+  return n;
+};
 
 window._mesclarRemotoComum = function(remoto){
   if(!remoto || typeof remoto !== 'object') return 0;
   let n = 0;
+  // [R157] Esta declaração foi removida por engano numa substituição e
+  // o uso abaixo ficou: `aceita` virou ReferenceError, e como esta é a
+  // PRIMEIRA coisa que a função faz, o boot e os dois pulls abortavam
+  // inteiros — sem tela de erro, só um console.warn. O badge de sync
+  // continuava dizendo "sincronizado".
   const aceita = (typeof _aceitaRemoto === 'function') ? _aceitaRemoto
                : (l, r) => r !== undefined && r !== null;
 
@@ -257,7 +899,30 @@ window._mesclarRemotoComum = function(remoto){
 
   // Lápide nunca encolhe: quem apagou num lugar apagou para todos.
   window._LAPIDES_LISTA.forEach(c => {
+    // [R157] `_campExcluidos` é migrado para {id: ts} desde o FIX Bug2,
+    // e este merge só aceitava array — a partir da primeira exclusão de
+    // lançamento ou objetivo de campanha, a lápide deixava de atravessar
+    // entre máquinas, em silêncio. Aceita as duas formas.
+    if(remoto[c] && !Array.isArray(remoto[c]) && typeof remoto[c] === 'object'){
+      if(!D[c] || Array.isArray(D[c])){
+        const antigo = Array.isArray(D[c]) ? D[c] : [];
+        D[c] = {};
+        antigo.forEach(id => { D[c][id] = 1; });
+      }
+      Object.entries(remoto[c]).forEach(([id, ts])=>{
+        if(!D[c][id] || ts > D[c][id]){ D[c][id] = ts; n++; }
+      });
+      return;
+    }
     if(!Array.isArray(remoto[c])) return;
+    // Local já migrado para objeto e o remoto chegando em array legado:
+    // trocar o objeto por `[]` jogava fora todo id que só existia aqui
+    // — o oposto exato do que esta função promete. O array recebido
+    // entra NO objeto.
+    if(D[c] && !Array.isArray(D[c]) && typeof D[c] === 'object'){
+      remoto[c].forEach(id => { if(!D[c][id]){ D[c][id] = 1; n++; } });
+      return;
+    }
     if(!Array.isArray(D[c])) D[c] = [];
     remoto[c].forEach(id => { if(!D[c].includes(id)){ D[c].push(id); n++; } });
   });
@@ -281,6 +946,36 @@ window._mesclarRemotoComum = function(remoto){
     });
   });
 
+  // ══════════════════════════════════════════════════════════════════
+  // [R157] contatos e prospecções eram lidos SÓ no boot. Numa aba já
+  // aberta, um contato cadastrado por outra loja não aparecia até o F5;
+  // prospecção não aparecia nunca.
+  //
+  // Vem DEPOIS das lápides de propósito: a varredura precisa enxergar a
+  // exclusão que acabou de chegar neste mesmo pull, senão o contato
+  // apagado em outra máquina só sumiria daqui no ciclo seguinte.
+  // ══════════════════════════════════════════════════════════════════
+  [['contatos', '_contatosExcluidos'], ['prospeccoes', '_prospeccoesExcluidas']].forEach(([campo, lapide])=>{
+    const mortos = lapide ? (D[lapide] || {}) : {};
+    if(Array.isArray(remoto[campo])){
+      if(!Array.isArray(D[campo])) D[campo] = [];
+      remoto[campo].forEach(r=>{
+        if(!r || !r.id) return;
+        if(mortos[r.id]) return;                 // excluído: não ressuscita
+        const i = D[campo].findIndex(x=>x.id===r.id);
+        if(i < 0){ D[campo].push(r); n++; }
+        else if((Number(r.ts)||0) > (Number(D[campo][i].ts)||0)){ D[campo][i] = r; n++; }
+      });
+    }
+    // A varredura roda MESMO quando o pull não trouxe a lista: a lápide
+    // pode ter chegado sozinha, e o registro morto precisa sair daqui.
+    if(lapide && Array.isArray(D[campo]) && Object.keys(mortos).length){
+      const antes = D[campo].length;
+      D[campo] = D[campo].filter(x => !mortos[x.id]);
+      if(D[campo].length !== antes) n++;
+    }
+  });
+
   // Campos com carimbo próprio, que já têm regra de "quem editou aqui"
   if(typeof window._mergeCarimbado === 'function'){
     window._mergeCarimbado('_metasGrupo',      remoto._metasGrupo,      remoto._metasGrupoTs);
@@ -291,6 +986,80 @@ window._mesclarRemotoComum = function(remoto){
   if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
     window.mergeConfigModalidades(remoto.configModalidades);
   return n;
+};
+
+/**
+ * [R157] QUEM DECIDIU O ARQUIVAMENTO POR ÚLTIMO?
+ *
+ * O campo `ativa` era SEMPRE preservado do lado local, em cinco pontos
+ * de merge diferentes. A intenção era boa e está documentada como
+ * "arquivamento NUNCA reverte": sem isso, um registro remoto antigo
+ * reativava sozinho quem tinha acabado de ser arquivado.
+ *
+ * O efeito colateral é o oposto e igualmente ruim: se o arquivamento
+ * foi feito em OUTRA máquina, ele viaja no registro remoto e é
+ * descartado nessas linhas. A vendedora arquivada na loja continua
+ * ativa em todas as outras telas — e numa aba anônima, que não tem
+ * lado local nenhum, ela reaparece.
+ *
+ * `ativa` sozinho não diz QUANDO foi decidido, e o `_savedAt` do
+ * registro muda por qualquer edição (nome, meta, cargo) — não serve
+ * para arbitrar só o arquivamento. Daí `ativaTs`: carimbo exclusivo
+ * dessa decisão. Quem decidiu por último vence, venha de onde vier.
+ *
+ * Sem carimbo dos dois lados, mantém-se o comportamento antigo
+ * (preserva o local), que é o que protege as bases já existentes.
+ */
+window._ativaQueVence = function(local, remoto){
+  const tsL = Number((local  && local.ativaTs)  || 0);
+  const tsR = Number((remoto && remoto.ativaTs) || 0);
+  if(tsR > tsL) return {ativa: remoto.ativa, ativaTs: tsR};
+  if(tsL > 0)   return {ativa: local.ativa,  ativaTs: tsL};
+  // nenhum dos dois carimbou: regra antiga — o local manda
+  const a = (local && local.ativa !== undefined) ? local.ativa
+          : (remoto ? remoto.ativa : undefined);
+  return {ativa: a, ativaTs: 0};
+};
+
+/**
+ * [R157] "2.500" É DOIS MIL E QUINHENTOS OU DOIS E MEIO?
+ *
+ * Havia TRÊS parsers de número: parseBR (lançamento, metas, comissão),
+ * _excelParseNumero (importação do CRM) e _estqNum (importação de
+ * estoque). Só o primeiro sabia desfazer a ambiguidade do ponto.
+ *
+ * Medido nos três, com a mesma entrada:
+ *     "2.500"      → 2500   ·  2.5   ·  2.5
+ *     "1.000.000"  → 1000000 ·  1    ·  1
+ *
+ * Ou seja: uma célula de planilha formatada com ponto de milhar e sem
+ * casas decimais — coisa comum quando a célula não é numérica nativa —
+ * entrava valendo um milésimo do real, em silêncio, tanto no valor da
+ * venda quanto no saldo do estoque.
+ *
+ * A regra do parseBR é a certa: vírgula presente significa formato BR;
+ * sem vírgula, o ponto só é separador de milhar quando TODOS os grupos
+ * depois dele têm exatamente três dígitos.
+ */
+window._numBR = function(v){
+  if(typeof v === 'number') return isFinite(v) ? v : 0;
+  if(v === null || v === undefined) return 0;
+  let s = String(v).trim().replace(/R\$\s*/gi, '').replace(/\s/g, '');
+  if(!s || s === '-') return 0;
+  // Os dois separadores: manda o que estiver mais à direita
+  if(s.indexOf(',') >= 0 && s.indexOf('.') >= 0){
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',', '.');
+    else                                        s = s.replace(/,/g,'');
+    return parseFloat(s) || 0;
+  }
+  if(s.indexOf(',') >= 0) return parseFloat(s.replace(',', '.')) || 0;
+  if(s.indexOf('.') >= 0){
+    const partes = s.split('.');
+    const milhar = partes.slice(1).every(x => x.length === 3 && /^\d+$/.test(x));
+    if(milhar) return parseFloat(s.replace(/\./g,'')) || 0;
+    return parseFloat(s) || 0;
+  }
+  return parseFloat(s) || 0;
 };
 
 (async function initFirebase(){
@@ -796,6 +1565,7 @@ try{
           // desfazer uma importação só funcionaria na máquina que a fez.
           _estqImportacoes:    D2._estqImportacoes     || [],
           _contatosExcluidos:  D2._contatosExcluidos   || {},
+          _prospeccoesExcluidas: D2._prospeccoesExcluidas || {},   // [R157]
           // ══════════════════════════════════════════════════════════
           // [R155] ESTES NUNCA SUBIRAM — e a lista aqui é EXPLÍCITA, o
           // que significa que campo esquecido não dá erro: ele grava no
@@ -852,22 +1622,15 @@ try{
         // Apagar de propósito continua valendo — ver _limpezaDeliberada
         // logo abaixo, que o botão de limpar liga antes de gravar.
         // ══════════════════════════════════════════════════════════
-        const _peso = o => ({
-          vendedoras:    (o?.vendedoras    || []).length,
-          campanhas:     (o?.campanhas     || []).length,
-          campRealizados:(o?.campRealizados|| []).length,
-          fluxo:         (o?.fluxo         || []).length,
-          contatos:      (o?.contatos      || []).length,
-          metasLoja:     Object.keys(o?.metasLoja || {}).length,
-          excelDados:       (o?.excelDados       || []).length,
-          _excelImportacoes:(o?._excelImportacoes|| []).length,
-          _estqImportacoes: (o?._estqImportacoes || []).length
-        });
+        const _peso = window._pesoDoPayload;
         // Campos que o usuário pode zerar de propósito, pelo botão de
         // limpar. Sem esta saída a trava passaria a impedir a limpeza —
         // trocar um recurso que funciona por outro não é conserto.
         const _zerarOk = window._limpezaDeliberada
-          ? {excelDados:1, _excelImportacoes:1, _estqImportacoes:1} : {};
+          ? {excelDados:1, _excelImportacoes:1, _estqImportacoes:1,
+             // [R157] desfazer importação de estoque também remove os
+             // produtos que ela criou — em lote, e de propósito
+             produtosExtras:1, saldosOverride:1, precosOverride:1} : {};
         try{
           // [R125] a trava precisa enxergar o documento INTEIRO; lendo só o
           // primeiro pedaço ela veria campos vazios e recusaria toda gravação.
@@ -878,8 +1641,34 @@ try{
             const _depois = _peso(D2_principal);
             const _sumiu = Object.keys(_antes)
               .filter(k => !_zerarOk[k] && _antes[k] > 0 && _depois[k] === 0);
-            if(_sumiu.length){
-              const _detalhe = _sumiu.map(k => k + ': ' + _antes[k] + '→0').join(', ');
+            // ══════════════════════════════════════════════════════
+            // [R157] Estes quatro entraram no peso nesta rodada e o
+            // efeito foi pior que o problema: excluir o ÚLTIMO arquivo,
+            // o último objetivo de campanha ou o último produto extra
+            // é ação legítima e corriqueira, e passava a recusar a
+            // gravação do `principal` inteiro. Pior: o `D` em memória
+            // já refletia a exclusão, então toda gravação seguinte
+            // reencontrava o mesmo estado — travava para sempre, com
+            // uma mensagem dizendo para recarregar a página, que não
+            // resolveria nada.
+            //
+            // Continuam pesados — é assim que a trava de piso enxerga
+            // "máquina sem dado nenhum" —, mas sozinhos não recusam.
+            // O que a trava existe para barrar é a máquina vazia, e
+            // essa esvazia também os campos centrais.
+            // ══════════════════════════════════════════════════════
+            const _auxiliares = {campObjetivos:1, arquivos:1,
+                                 metasProd:1, produtosExtras:1};
+            // A isenção vale só para "sumiu o ÚLTIMO item", que é a
+            // exclusão legítima. Isentar o campo inteiro era largo
+            // demais: uma máquina com carga parcial — o boot falhou e
+            // só estes quatro ficaram vazios — zeraria os quatro para
+            // a rede inteira, sem bloqueio. Caindo de mais de um item
+            // para zero não é alguém excluindo, é máquina sem dado.
+            const _sumiuCentral = _sumiu.filter(k =>
+              !_auxiliares[k] || Number(_antes[k]) > 1);
+            if(_sumiuCentral.length){
+              const _detalhe = _sumiuCentral.map(k => k + ': ' + _antes[k] + '→0').join(', ');
               console.error('[Avatim] GRAVAÇÃO RECUSADA — esvaziaria o servidor:', _detalhe);
               // [R129] Em sync de FUNDO o balão só assusta: o usuário não pediu
               // nada e não há ação a tomar. A recusa continua no console e o
@@ -939,6 +1728,28 @@ try{
           (D2.vendedoras||[]).forEach(v=>{
             if(v.loja && D2.vendasVend?.[v.id] && Object.keys(D2.vendasVend[v.id]).length) lojasComDados.add(v.loja);
           });
+          // ══════════════════════════════════════════════════════════
+          // [R157] A lista acima só pegava loja com VENDA lançada, e um
+          // arquivamento isolado deixava o documento daquela loja com o
+          // cadastro velho.
+          //
+          // A primeira tentativa foi incluir a loja de TODA vendedora —
+          // e estava errada: como quase toda loja tem equipe, isso
+          // fazia qualquer gravação reescrever as sete, justamente a
+          // enxurrada que o R151 combateu. O argumento de que "a
+          // assinatura impede" não se sustenta: ela impede quando NADA
+          // mudou; quando algo muda — o caso comum — propagaria para
+          // todas.
+          //
+          // Entram só as lojas cujo CADASTRO foi mexido nesta máquina,
+          // que é exatamente o que precisa alcançar o doc da loja.
+          // ══════════════════════════════════════════════════════════
+          window._lojasTocadasPor(window._vendEditadoAqui, D2.vendedoras)
+            .forEach(l => lojasComDados.add(l));
+          // e as lojas marcadas à mão — a de ORIGEM numa troca de loja,
+          // que a varredura acima não tem mais como encontrar
+          if(window._lojasEditadasAqui)
+            window._lojasEditadasAqui.forEach(l => { if(l) lojasComDados.add(l); });
 
           // ══════════════════════════════════════════════════════════
           // [R151] NÃO REESCREVER AS 7 LOJAS QUANDO NENHUMA VENDA MUDOU.
@@ -979,6 +1790,13 @@ try{
           // Cada loja escreve num documento próprio e não depende das outras,
           // então vão juntas: o tempo passa a ser o da mais lenta, não a soma.
           if(!_pularPropagacao){
+          // [R157] Quais lojas de fato receberam. Uma leitura ilegível
+          // faz a loja ser pulada em silêncio, e o Promise.all resolve
+          // como se tudo tivesse ido bem — a assinatura avançava e a
+          // loja pulada só voltaria a ser escrita quando alguém
+          // editasse outra coisa. Era o contrário do que o R151
+          // prometia: "uma falha deixa a assinatura como estava".
+          const _lojasOk = new Set();
           await Promise.all([...lojasComDados].map(async (lidA) => {
             const docIdA = "loja_"+lidA;
             let remotoA = {};
@@ -994,7 +1812,7 @@ try{
               console.error("[Avatim] admin: " + docIdA + " ilegível ("
                 + (eR.code||eR.message) + ") — propagação PULADA para não gravar "
                 + "por cima do que já está lá.");
-              return;
+              return;   // sem entrar em _lojasOk: a próxima gravação tenta de novo
             }
 
             // vendas consolidadas — dia a dia, o mais RECENTE vence
@@ -1042,8 +1860,20 @@ try{
               vendas:     { [lidA]: vendasA },
               vendasVend: vendVendA
             });
+            // [R157] Era sobrescrita cega do bloco inteiro da loja. Um
+            // mês de histórico lançado pela loja e ainda não puxado
+            // pelo admin sumia quando o admin salvasse qualquer coisa.
+            // Agora compara mês a mês pelo carimbo, como o merge de
+            // leitura já fazia.
             if(D2.historicoMeses?.[lidA]){
-              payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: D2.historicoMeses[lidA] });
+              const _hRem = (remotoA.historicoMeses || {})[lidA] || {};
+              const _hFim = Object.assign({}, _hRem);
+              Object.entries(D2.historicoMeses[lidA]).forEach(([mr, obj])=>{
+                const _tsH = Number(obj?.ts || 0);
+                const _tsHR = Number(_hRem[mr]?.ts || 0);
+                if(!_hRem[mr] || _tsH >= _tsHR) _hFim[mr] = obj;
+              });
+              payloadA.historicoMeses = Object.assign({}, remotoA.historicoMeses||{}, { [lidA]: _hFim });
             }
             // [FIX 27/07] admin propaga metasLoja/vendedoras/tombstones desta loja.
             // Antes o admin gravava só no principal, e o doc da loja continuava com
@@ -1054,10 +1884,14 @@ try{
             if(D2.metasLoja?.[lidA]){
               const metasRemotasLoja = remotoA.metasLoja?.[lidA] || {};
               const metasFinal = Object.assign({}, metasRemotasLoja);
+              // [R157] A regra única _metaRemotaVence governava os 4
+              // caminhos de LEITURA e não este, o de gravação. Sem a
+              // consulta a _metasEditadasAqui, uma meta que o admin
+              // nunca tocou nesta sessão podia sobrescrever, por acaso
+              // de carimbo, a que a loja tinha acabado de definir.
               Object.entries(D2.metasLoja[lidA]).forEach(([mr, m])=>{
-                const _tsL = Number(m?._savedAt||0);
-                const _tsR = Number(metasRemotasLoja[mr]?._savedAt||0);
-                if(!metasRemotasLoja[mr] || _tsL >= _tsR) metasFinal[mr] = m;
+                if(!window._metaRemotaVence(lidA, mr, m, metasRemotasLoja[mr]))
+                  metasFinal[mr] = m;
               });
               payloadA.metasLoja = Object.assign({}, remotoA.metasLoja||{}, { [lidA]: metasFinal });
             }
@@ -1071,18 +1905,75 @@ try{
                   const i = outV.findIndex(x=>x.id===rv.id);
                   if(i<0) outV.push(rv);
                   else {
-                    const _tsL = Number(rv._savedAt||0);
-                    const _tsR = Number(outV[i]?._savedAt||0);
-                    if(_tsL >= _tsR) outV[i] = rv;
+                    // ══════════════════════════════════════════════════
+                    // [R157] Aqui era `outV[i] = rv` — o objeto INTEIRO
+                    // do admin por cima do da loja, decidido só pelo
+                    // _savedAt. E _savedAt muda por qualquer coisa:
+                    // salvarMetaLoja recarimba TODAS as vendedoras
+                    // ativas da loja. Bastava a loja arquivar alguém e
+                    // o admin salvar uma meta com a cópia velha em
+                    // memória para a pessoa ser DESARQUIVADA em
+                    // silêncio, no ato de salvar outra coisa.
+                    //
+                    // O R157 resolveu isso na leitura e deixou a
+                    // gravação de fora — que é por onde o estrago
+                    // acontece. A decisão de arquivar tem carimbo
+                    // próprio e vale aqui também.
+                    // ══════════════════════════════════════════════════
+                    // [R157] Protegia só `ativa`. Os demais campos
+                    // seguiam na substituição cega por _savedAt — o
+                    // mesmo mecanismo que causou o bug do arquivamento.
+                    // Cenário: a loja corrige o nome; o admin salva uma
+                    // meta (que recarimba todas as vendedoras) com o
+                    // nome velho em memória, e a correção da loja é
+                    // sobrescrita no documento dela.
+                    //
+                    // _vendMesclarLocal já sabe decidir campo a campo,
+                    // respeitando o que foi editado nesta máquina — mas
+                    // ele monta o resultado sobre o SEGUNDO argumento,
+                    // então os campos que ele não lista viriam do doc
+                    // da loja mesmo quando a cópia local é a mais nova.
+                    // Por isso a base continua sendo o vencedor do
+                    // carimbo, e só os campos decididos são sobrepostos.
+                    const _baseG = window._baseDaPropagacao(rv, outV[i]);
+                    // [R157] Havia aqui um `else` para o caso de
+                    // _vendMesclarLocal não existir — inalcançável, ela
+                    // é definida no topo do módulo. O ramo morto ainda
+                    // mantinha vivo um teste que casava com o texto
+                    // dele em vez de com o comportamento real.
+                    //
+                    // Ao acrescentar um campo novo à vendedora, ele
+                    // precisa entrar NAS DUAS listas: aqui e na de
+                    // _vendMesclarLocal. Fora delas, a leitura o pega
+                    // sempre do outro lado e a gravação o pega do
+                    // vencedor do carimbo — assimetria silenciosa.
+                    const _mg = window._vendMesclarLocal(rv, outV[i]);
+                    const _sobre = {};
+                    ['nome','cargo','loja','metaMes','superMetaMes',
+                     'ticketAlvo','metaAniv','metaInativ','ativa','ativaTs',
+                     'metasMes','diasTrab','metasMesTs','diasTrabTs',
+                     'camposTs']
+                      .forEach(c=>{ if(_mg[c] !== undefined) _sobre[c] = _mg[c]; });
+                    outV[i] = Object.assign({}, _baseG, _sobre);
                   }
                 });
                 payloadA.vendedoras = outV;
               }
             }
             // tombstones (lojas arquivadas etc)
+            // [R157] Era sobrescrita cega: o admin gravava a lista dele
+            // por cima sem olhar o que estava no doc da loja. Com o
+            // mesmo login aberto em duas máquinas, a que tivesse a
+            // lista mais velha em memória desfazia o arquivamento de
+            // loja feito na outra ao salvar qualquer coisa.
             if(Array.isArray(D2._lojasArquivadas)){
-              payloadA._lojasArquivadas   = D2._lojasArquivadas;
-              payloadA._lojasArquivadasTs = D2._lojasArquivadasTs || Date.now();
+              const _tsLA = Number(D2._lojasArquivadasTs || 0);
+              const _tsRA = Number(remotoA._lojasArquivadasTs || 0);
+              if(_tsLA >= _tsRA){
+                payloadA._lojasArquivadas   = D2._lojasArquivadas;
+                payloadA._lojasArquivadasTs = _tsLA || Date.now();
+              }
+              // senão: o que já veio em remotoA (via Object.assign) fica
             }
             // [R130] A lápide viaja junto com o dado. Antes o admin excluía um
             // dia, o doc da loja ficava sem saber, e o próximo login da loja
@@ -1117,13 +2008,41 @@ try{
             // cresce na direção dele. Estourado, a recusa cai no catch de
             // "falha ao propagar", que só escreve no console: o lançamento
             // feito pelo admin nunca chegaria à loja e ninguém saberia.
-            await _gravarDocFatiado(db, doc, setDoc, docIdA, payloadA,
-              { lojaId: lidA, por: email + " (admin)" });
+            // [R157] A leitura tinha try/catch, a gravação não. Uma loja
+            // que falhasse ao gravar rejeitava o Promise.all inteiro, e
+            // aí nem o cálculo de _todasOk nem a limpeza de
+            // _lojasEditadasAqui chegavam a rodar — as lojas que JÁ
+            // tinham gravado com sucesso continuavam marcadas e eram
+            // reescritas na gravação seguinte, sem necessidade. É a
+            // enxurrada que derrubou o R129 ("Write stream exhausted").
+            try{
+              await _gravarDocFatiado(db, doc, setDoc, docIdA, payloadA,
+                { lojaId: lidA, por: email + " (admin)" });
+              _lojasOk.add(lidA);
+            }catch(eW){
+              console.error("[Avatim] admin: falha ao gravar " + docIdA + " ("
+                + (eW.code||eW.message) + ") — as demais lojas seguem, e esta "
+                + "é tentada de novo na próxima gravação.");
+            }
           }));
-          console.log("[Avatim] ✅ Admin: vendas propagadas para", lojasComDados.size, "loja(s)");
+          const _todasOk = (_lojasOk.size === lojasComDados.size);
+          console.log("[Avatim] ✅ Admin: vendas propagadas para", _lojasOk.size,
+            "de", lojasComDados.size, "loja(s)");
           // [R151] Só agora: todas confirmaram. Uma falha deixa a assinatura
           // como estava e a próxima gravação propaga tudo outra vez.
-          window._assinaturaPropagada = _assinAgora;
+          if(_todasOk){
+            window._assinaturaPropagada = _assinAgora;
+          } else {
+            console.warn("[Avatim] ⚠️ " + (lojasComDados.size - _lojasOk.size)
+              + " loja(s) não receberam — assinatura mantida para tentar de novo.");
+          }
+          // [R157] A loja de origem de uma troca já recebeu o cadastro
+          // novo; mantê-la marcada faria toda gravação seguinte da
+          // sessão reescrever aquele documento à toa. Sai só quem
+          // confirmou — quem foi pulada continua marcada e é tentada
+          // na próxima gravação.
+          if(window._lojasEditadasAqui)
+            _lojasOk.forEach(l => window._lojasEditadasAqui.delete(l));
           }
         }catch(eProp){
           console.error("[Avatim] ❌ Admin: falha ao propagar vendas:", eProp.code||eProp.message);
@@ -1186,8 +2105,13 @@ try{
         const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid && !_excFluxo[r.id]);
 
         // ── Merge com Firebase: preservar histórico não presente localmente ──
+        // [R157] `existing` era `const` DENTRO do try, e o merge de
+        // vendedoras, montado depois, o referenciava — ReferenceError
+        // em toda gravação de loja. O ramo do admin já declarava o
+        // equivalente (`remotoA`) fora do bloco; este não.
+        let existing = null;
         try{
-          const existing = await _lerDocObj(db, doc, getDoc, docId);
+          existing = await _lerDocObj(db, doc, getDoc, docId);
           if(existing){
             // Vendas: adicionar dias do Firebase que não existem localmente
             Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
@@ -1227,6 +2151,23 @@ try{
         // [R125] o objeto é montado solto; quem serializa e fatia é o
         // _gravarDocFatiado. O doc da Mooca, com 70 dias de vendas mais
         // fluxo e contatos, corre o mesmo risco de estourar 1 MiB.
+        // [R157] ver o comentário em `vendedoras:` abaixo
+        const _vendedorasDaLoja = () => window._vendedorasParaDocLoja(
+          D2.vendedoras, lid,
+          (existing && existing.vendedoras) || [],
+          D2._vendsExcluidas);
+
+        const _metasDaLoja     = () => window._metasParaDocLoja(
+          D2.metasLoja, lid, existing && existing.metasLoja);
+        const _historicoDaLoja = (campo) => window._historicoParaDocLoja(
+          D2[campo], lid, existing && existing[campo]);
+        // [R157] a escolha da lápide foi para DENTRO da função pura:
+        // aqui no invólucro ela era inalcançável por teste, e inverter
+        // o ternário reintroduziria o defeito da prospecção sem que
+        // nada falhasse
+        const _listaDaLoja     = (campo, daLoja) => window._listaParaDocLoja(
+          campo, D2[campo], daLoja, existing && existing[campo], D2);
+
         const _dadosLoja = {
             vendas:         { [lid]: vendasLoja },
             vendasVend:     vendasVendLoja,
@@ -1235,19 +2176,37 @@ try{
             _fluxoExcluidos: D2._fluxoExcluidos || {},   // [R127]
             // [FIX] Filtrar vendedoras tombstoneadas — excluídas não voltam
             // Antes: loja ainda gravava Maria, e na próxima carga admin via Maria voltar
-            vendedoras:     (D2.vendedoras||[]).filter(v=>
-              v.loja===lid &&
-              !(Array.isArray(D2._vendsExcluidas) && D2._vendsExcluidas.includes(v.id))
-            ),
-            metasLoja:      { [lid]: D2.metasLoja?.[lid] || {} },
+            // [R157] Era um DESPEJO da memória desta máquina. `vendas`,
+            // `campRealizados` e `fluxo`, logo acima, mesclam com o que
+            // está no servidor; `vendedoras` não mesclava.
+            //
+            // Cenário: o admin ajusta o ticketAlvo às 9h00 e propaga
+            // para o `loja_X`. Às 9h00m10 uma aba da loja — que só
+            // puxa a cada 60s e ainda não viu — lança uma venda, e a
+            // gravação reescrevia o `vendedoras` inteiro com a cópia
+            // velha, desfazendo o ajuste do admin. Ele só voltaria
+            // quando o admin gravasse outra coisa.
+            vendedoras:     _vendedorasDaLoja(),
+            // [R157] Tinha exatamente o mesmo defeito que `vendedoras`
+            // acima, e ficou de fora da primeira correção: despejo da
+            // memória local por cima do que o admin acabara de
+            // propagar. Mesma regra de sempre — _metaRemotaVence.
+            metasLoja:      { [lid]: _metasDaLoja() },
             // [FIX 22/07] histórico da loja também precisa subir
-            historicoMeses: D2.historicoMeses?.[lid] ? { [lid]: D2.historicoMeses[lid] } : {},
-            historicoLojas: D2.historicoLojas?.[lid] ? { [lid]: D2.historicoLojas[lid] } : {},
+            // [R157] mês a mês contra o servidor, como o admin já faz
+            // ao propagar — o despejo apagava mês fechado que só
+            // existia lá
+            historicoMeses: _historicoDaLoja('historicoMeses'),
+            historicoLojas: _historicoDaLoja('historicoLojas'),
             // [FIX 13/08] contatos NÃO estava subindo — vendedoras registravam e admin nunca via
             // Loja envia SÓ os contatos da própria loja
-            contatos:       (D2.contatos||[]).filter(c => c.loja === lid),
-            prospeccoes:    (D2.prospeccoes||[]).filter(p => p.loja === lid),
+            // [R157] dois dispositivos no mesmo login de loja: o de
+            // cache defasado encolhia a lista. Une-se por id, com a
+            // lápide mandando.
+            contatos:       _listaDaLoja('contatos',    c => c.loja === lid),
+            prospeccoes:    _listaDaLoja('prospeccoes', p => p.loja === lid),
             _contatosExcluidos: D2._contatosExcluidos || {},
+            _prospeccoesExcluidas: D2._prospeccoesExcluidas || {},   // [R157]
             // [FIX] Propagar tombstones para o doc loja_* — sync cross-device de exclusões
             _vendsExcluidas:      D2._vendsExcluidas      || [],
             _vendasExcluidas:     D2._vendasExcluidas?.[lid] ? { [lid]: D2._vendasExcluidas[lid] } : {},
@@ -1573,7 +2532,37 @@ try{
                 else if((Number(c.ts)||0) > (Number(base.contatos[idx].ts)||0)) base.contatos[idx] = c;
               });
             }
+            // ══════════════════════════════════════════════════════
+            // [R157] PROSPECÇÃO SUBIA E NUNCA VOLTAVA.
+            //
+            // O campo ia no documento da loja e havia até um merge
+            // esperando por ele em loadFromFirestore — mas ninguém
+            // agregava `pedaco.prospeccoes` aqui, então `remoto` nunca
+            // chegava com as prospecções das lojas. O merge do outro
+            // lado era código morto.
+            //
+            // Resultado: a prospecção ficava gravada no Firestore e
+            // invisível para todo mundo, inclusive para outra aba da
+            // MESMA loja depois de recarregar. Write-only.
+            // ══════════════════════════════════════════════════════
+            if(pedaco.prospeccoes && pedaco.prospeccoes.length){
+              if(!base.prospeccoes) base.prospeccoes = [];
+              pedaco.prospeccoes.forEach(pr=>{
+                if((base._prospeccoesExcluidas||{})[pr.id]) return;   // [R157]
+                const i = base.prospeccoes.findIndex(x=>x.id===pr.id);
+                if(i < 0) base.prospeccoes.push(pr);
+                else if((Number(pr.ts)||0) > (Number(base.prospeccoes[i].ts)||0))
+                  base.prospeccoes[i] = pr;
+              });
+            }
             // Mesclar tombstones de contatos da loja
+            if(pedaco._prospeccoesExcluidas){   // [R157]
+              if(!base._prospeccoesExcluidas) base._prospeccoesExcluidas = {};
+              Object.entries(pedaco._prospeccoesExcluidas).forEach(([id, ts])=>{
+                if(!base._prospeccoesExcluidas[id] || ts > base._prospeccoesExcluidas[id])
+                  base._prospeccoesExcluidas[id] = ts;
+              });
+            }
             if(pedaco._contatosExcluidos){
               if(!base._contatosExcluidos) base._contatosExcluidos = {};
               Object.entries(pedaco._contatosExcluidos).forEach(([id, ts])=>{
@@ -1617,7 +2606,23 @@ try{
             }
             if(pedaco._campExcluidos){
               if(!base._campExcluidos) base._campExcluidos = Array.isArray(pedaco._campExcluidos)?[]:{};
-              if(Array.isArray(pedaco._campExcluidos)){
+              // [R157] as formas mistas caíam num ramo sem `else` e a
+              // lápide recebida era descartada em silêncio — o mesmo
+              // defeito que _mesclarRemotoComum já trata
+              if(Array.isArray(pedaco._campExcluidos)
+                 !== Array.isArray(base._campExcluidos)){
+                const alvo = {};
+                const absorve = v => {
+                  if(Array.isArray(v)) v.forEach(id => { if(!alvo[id]) alvo[id] = 1; });
+                  else if(v && typeof v === 'object')
+                    Object.entries(v).forEach(([id, ts])=>{
+                      if(!alvo[id] || ts > alvo[id]) alvo[id] = ts;
+                    });
+                };
+                absorve(base._campExcluidos);
+                absorve(pedaco._campExcluidos);
+                base._campExcluidos = alvo;
+              } else if(Array.isArray(pedaco._campExcluidos)){
                 if(Array.isArray(base._campExcluidos)){
                   pedaco._campExcluidos.forEach(id=>{
                     if(!base._campExcluidos.includes(id)) base._campExcluidos.push(id);
@@ -1651,20 +2656,27 @@ try{
                 if(vi>=0){
                   // [FIX cross-device] Comparar _savedAt: aceitar a versão mais RECENTE
                   // [FIX BUG 2] SEMPRE preservar campo 'ativa' local — arquivamento NUNCA reverte
-                  const bvi = base.vendedoras[vi];
-                  const _lTs = bvi._savedAt || 0;
-                  const _rTs = rv._savedAt  || 0;
-                  if(_rTs > _lTs){
-                    const _ativaPreserv = bvi.ativa;
-                    base.vendedoras[vi] = {...rv, ativa: _ativaPreserv}; // preserva arquivamento
-                  } else {
-                    // local mais recente OU iguais → preservar campos editáveis locais
-                    // [FIX BUG META] mas APENAS se remoto NÃO tiver timestamp maior — comparar pré-merge
-                    // Se _rTs > _lTs, esse else NÃO executa (vai pro if acima)
-                    // Aqui local é mais recente, então preserva local
-                    // [R154] nome/cargo/loja entram aqui também
-                    base.vendedoras[vi] = window._vendMesclarLocal(bvi, rv);
-                  }
+                  // ══════════════════════════════════════════════
+                  // [R157] Aqui sobrevivia o portão por `_savedAt` que
+                  // o R157 tirou dos outros merges — e era o pior
+                  // lugar para ele ficar, porque este código monta o
+                  // `base` que TODO mundo lê: o poll de 30s, o de 60s
+                  // e o boot. Numa aba anônima, que não tem lado local
+                  // para corrigir depois, era o dado errado que
+                  // aparecia.
+                  //
+                  // O portão substituía o registro INTEIRO pelo lado
+                  // de `_savedAt` maior, e `_savedAt` é carimbo de
+                  // registro: a loja salvar um KPI qualquer recarimba
+                  // todas as vendedoras dela e levava junto o nome
+                  // velho que estivesse na memória daquela máquina.
+                  // O `camposTs` nem chegava a ser consultado.
+                  //
+                  // Uma decisão só, campo a campo, pelo carimbo de
+                  // cada campo. Ver _vendMesclarLocal.
+                  // ══════════════════════════════════════════════
+                  base.vendedoras[vi] = window._vendMesclarLocal(
+                    base.vendedoras[vi], rv, {ignorarMarcas: true});
                 } else base.vendedoras.push(rv);
               });
             }
@@ -1785,6 +2797,26 @@ try{
                   else if((Number(c.ts)||0) > (Number(base.contatos[idx].ts)||0)) base.contatos[idx] = c;
                 });
               }
+              // [R157] mesma lacuna do ramo do admin: a prospecção da
+              // própria loja não era agregada, então nem depois de um
+              // F5 ela voltava do servidor
+              if(pedaco.prospeccoes && pedaco.prospeccoes.length){
+                if(!base.prospeccoes) base.prospeccoes = [];
+                pedaco.prospeccoes.forEach(pr=>{
+                  if((base._prospeccoesExcluidas||{})[pr.id]) return;   // [R157]
+                  const i = base.prospeccoes.findIndex(x=>x.id===pr.id);
+                  if(i < 0) base.prospeccoes.push(pr);
+                  else if((Number(pr.ts)||0) > (Number(base.prospeccoes[i].ts)||0))
+                    base.prospeccoes[i] = pr;
+                });
+              }
+              if(pedaco._prospeccoesExcluidas){   // [R157]
+                if(!base._prospeccoesExcluidas) base._prospeccoesExcluidas = {};
+                Object.entries(pedaco._prospeccoesExcluidas).forEach(([id, ts])=>{
+                  if(!base._prospeccoesExcluidas[id] || ts > base._prospeccoesExcluidas[id])
+                    base._prospeccoesExcluidas[id] = ts;
+                });
+              }
               if(pedaco._contatosExcluidos){
                 if(!base._contatosExcluidos) base._contatosExcluidos = {};
                 Object.entries(pedaco._contatosExcluidos).forEach(([id, ts])=>{
@@ -1811,16 +2843,9 @@ try{
                   if(vi>=0){
                     // [FIX cross-device] Timestamp-aware merge
                     // [FIX BUG arquivamento] preservar campo ativa ao aceitar remoto
-                    const bvi2 = base.vendedoras[vi];
-                    const _lTs2 = bvi2._savedAt || 0;
-                    const _rTs2 = rv._savedAt  || 0;
-                    if(_rTs2 > _lTs2){
-                      const _ativaPreserv2 = bvi2.ativa;
-                      base.vendedoras[vi] = {...rv, ativa: _ativaPreserv2};
-                    } else {
-                      // [R154] nome/cargo/loja entram aqui também
-                      base.vendedoras[vi] = window._vendMesclarLocal(bvi2, rv);
-                    }
+                    // [R157] o mesmo portão, no caminho da loja
+                    base.vendedoras[vi] = window._vendMesclarLocal(
+                      base.vendedoras[vi], rv, {ignorarMarcas: true});
                   } else base.vendedoras.push(rv);
                 });
               }
@@ -5835,7 +6860,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-21c';
+window.AVATIM_BUILD = '2026-09-22';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -8343,9 +9368,26 @@ const _RENDER_PAGINA = {
   gestao:      () => renderGestao(),
   estoque:     () => { renderCampLista?.(); if(typeof renderRelCamp === 'function') renderRelCamp(); },
   metaslojas:  () => renderMetasLojas(),
-  config:      () => { window.renderCfgLojas?.(); window.renderCfgCampOrfas?.(); }
-  // 'acompgeral' fica de fora de propósito: aquela tela só busca quando o
-  // usuário clica, e redesenhar sozinho contrariaria esse desenho.
+  config:      () => { window.renderCfgLojas?.(); window.renderCfgCampOrfas?.(); },
+  // [R157] Estas duas estavam de fora — e, diferente da 'acompgeral',
+  // sem nenhuma razão registrada: parecem ter sido esquecidas. As duas
+  // já se redesenham sozinhas ao abrir a página, e as duas leem o
+  // período e a loja DO PRÓPRIO DOM (hist-loja-de / lpl-filtro-loja),
+  // de modo que repintar preserva o que o usuário escolheu. Sem isto,
+  // o admin olhava um histórico "de agora" que era o estado de antes
+  // do último pull.
+  historico:   () => { if(typeof buscarHistoricoLoja === 'function') buscarHistoricoLoja(); },
+  lancperloja: () => { if(typeof renderHistoricoLoja === 'function') renderHistoricoLoja(); }
+  // ── Fora do mapa DE PROPÓSITO (as duas só produzem conteúdo quando
+  // o usuário manda): 'acompgeral' e 'relatorio' (o Relatório Semanal,
+  // que só existe depois do clique em "Gerar"). Redesenhar sozinho
+  // apagaria o resultado que a pessoa acabou de pedir.
+  //
+  // [R157] 'relatorio' já estava fora, mas sem nota — e uma auditoria
+  // chegou a apontá-la como esquecimento. Fica registrado que é
+  // escolha, não descuido. O contraste é com 'historico' e
+  // 'lancperloja', que ESTAVAM esquecidas: aquelas se redesenham
+  // sozinhas ao abrir e leem o filtro do DOM, então repintar é seguro.
 };
 
 /** Página aberta agora. */
@@ -8368,6 +9410,20 @@ window.rerenderPaginaAtiva = function(motivo){
   const foco = document.activeElement;
   if(foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName) && foco.type !== 'button'){
     window._rerenderAdiado = true;
+    // [R157] Antes, nada escutava esta bandeira: ela era içada e
+    // ficava lá. A tela só voltava a pintar no batimento de 45s, no
+    // próximo pull ou no próximo save — ou seja, o usuário terminava
+    // de digitar e continuava vendo número velho por até 45 segundos.
+    // Agora o próprio campo avisa quando sai de foco.
+    if(!window._rerenderEsperandoBlur){
+      window._rerenderEsperandoBlur = true;
+      foco.addEventListener('blur', function _aoSair(){
+        foco.removeEventListener('blur', _aoSair);
+        window._rerenderEsperandoBlur = false;
+        if(window._rerenderAdiado && typeof window.agendarRerender === 'function')
+          window.agendarRerender('campo liberado');
+      }, {once:true});
+    }
     return false;
   }
   window._rerenderAdiado = false;
@@ -11405,7 +12461,6 @@ async function loadFromFirestore(){
         if(!D.vendedoras || !D.vendedoras.length){
           D.vendedoras = remoto.vendedoras.filter(rv=>!_excVends.includes(rv.id));
         } else {
-          const _hasPending = !!window._pendingLocalData;
           remoto.vendedoras.forEach(rv => {
             // Não restaurar vendedoras que foram explicitamente excluídas
             if(_excVends.includes(rv.id)){
@@ -11417,30 +12472,17 @@ async function loadFromFirestore(){
             if(idx >= 0){
               // [FIX cross-device] Comparar _savedAt — aceita o mais recente
               // [FIX BUG 2] SEMPRE preservar ativa local — arquivamento NÃO reverte
-              const _dvi = D.vendedoras[idx];
-              const _lTsLF = _dvi._savedAt || 0;
-              const _rTsLF = rv._savedAt   || 0;
-              if(_rTsLF > _lTsLF){
-                // Remoto mais recente → merge preservando arquivamento local
-                const _ativaLF = _dvi.ativa;
-                D.vendedoras[idx] = {...rv, ativa: _ativaLF};
-              } else if(_hasPending){
-                // Pending local + local mais recente → preservar metas locais
-                D.vendedoras[idx] = {
-                  ...rv,
-                  metaMes:      _dvi.metaMes,
-                  superMetaMes: _dvi.superMetaMes,
-                  ticketAlvo:   _dvi.ticketAlvo,
-                  metaAniv:     _dvi.metaAniv,
-                  metaInativ:   _dvi.metaInativ,
-                  ativa:        _dvi.ativa !== undefined ? _dvi.ativa : rv.ativa,
-                  _savedAt:     _lTsLF || _rTsLF
-                };
-              } else {
-                // Sem pending + local mais recente ou igual → preservar local
-                // [R154] nome/cargo/loja entram aqui também
-                D.vendedoras[idx] = window._vendMesclarLocal(_dvi, rv);
-              }
+              // [R157] Eram três ramos com três regras — remoto novo
+              // substituía tudo, gravação pendente preservava cinco
+              // campos escolhidos a dedo, e só o terceiro mesclava de
+              // verdade. O primeiro contornava as marcas e o segundo
+              // não cobria nome, cargo, loja nem as metas por mês.
+              //
+              // Uma regra só, a mesma dos dois pulls: campo a campo e
+              // mês a mês, pelo que ESTA máquina digitou e ainda não
+              // confirmou. A marca sobrevive ao F5 no localStorage, que
+              // é o que o ramo de gravação pendente tentava cobrir.
+              D.vendedoras[idx] = window._vendMesclarLocal(D.vendedoras[idx], rv);
             } else {
               D.vendedoras.push(rv);
             }
@@ -11471,6 +12513,11 @@ async function loadFromFirestore(){
       if(remoto.contatos && remoto.contatos.length){
         if(!D.contatos) D.contatos=[];
         remoto.contatos.forEach(c=>{
+          // [R157] O boot era o único caminho que trazia contato de
+          // volta sem olhar a lápide — o inverso exato do defeito da
+          // prospecção. Um F5 noutra máquina ressuscitava o contato
+          // excluído, porque a cópia do servidor ainda o tinha.
+          if((D._contatosExcluidos||{})[c.id]) return;
           if(!D.contatos.find(x=>x.id===c.id)) D.contatos.push(c);
         });
       }
@@ -11478,6 +12525,7 @@ async function loadFromFirestore(){
       if(remoto.prospeccoes && remoto.prospeccoes.length){
         if(!D.prospeccoes) D.prospeccoes=[];
         remoto.prospeccoes.forEach(pr=>{
+          if((D._prospeccoesExcluidas||{})[pr.id]) return;   // [R157]
           if(!D.prospeccoes.find(x=>x.id===pr.id)) D.prospeccoes.push(pr);
         });
       }
@@ -11963,6 +13011,16 @@ function arquivarVendedora(vid, arquivar){
   if(idx<0){ showToast("Vendedor(a) não encontrada","err"); return; }
   D.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
   D.vendedoras[idx]._savedAt = Date.now(); // [FIX cross-device] timestamp para merge
+  // [R157] carimbo exclusivo do arquivamento: _savedAt muda por qualquer
+  // edição do cadastro e não serve para arbitrar só esta decisão
+  D.vendedoras[idx].ativaTs = Date.now();
+  // [R157] Grupo 'ativa', não 'cadastro'. Arquivar não escreve nome,
+  // cargo nem loja — marcar 'cadastro' fazia esta máquina defender um
+  // nome que ninguém digitou aqui, e a correção de nome feita em outra
+  // máquina não chegava mais. Quem arbitra `ativa` é o ativaTs; este
+  // grupo existe só para a vendedora entrar no alcance da propagação.
+  if(typeof window._marcarVendEditado === 'function')
+    window._marcarVendEditado(vid, 'ativa');
   const nome = D.vendedoras[idx].nome;
   // [FIX CRÍTICO] Gravar imediatamente no localStorage e Firebase
   // bypass do save() que pode ter guards bloqueando admin
@@ -12064,6 +13122,10 @@ function setDiasTrabVend(vendId, mesRef, dias){
   const n = Number(dias);
   if(dias === '' || dias === null || !isFinite(n)) delete v.diasTrab[mesRef];
   else v.diasTrab[mesRef] = Math.max(0, Math.round(n));
+  if(!v.diasTrabTs || typeof v.diasTrabTs !== 'object') v.diasTrabTs = {};
+  v.diasTrabTs[mesRef] = Date.now();   // [R157] idem — o apagamento carimba
+  if(typeof window._marcarMesVendEditado === 'function')
+    window._marcarMesVendEditado(vendId, 'diasTrab', mesRef);
   v._savedAt = Date.now();
 }
 
@@ -12121,7 +13183,22 @@ window.setMetaVendDoMes = function(vendId, mesRef, valor, superValor){
   const sup = Number(superValor) || Math.round(mes * 1.255);
   if(mes > 0) v.metasMes[mesRef] = {mes, superMes: sup};
   else delete v.metasMes[mesRef];   // campo limpo = não cadastrado
-  if(mesRef === mesAtual()){ v.metaMes = mes; v.superMetaMes = sup; }
+  // [R157] Carimbo do MÊS, gravado também quando o mês é apagado. Sem
+  // ele, a reconciliação entre o doc `principal` e o `loja_*` — duas
+  // cópias do servidor, nenhuma "local" — não tem como distinguir
+  // "este mês nunca existiu deste lado" de "este mês foi apagado
+  // deste lado", e o mês apagado voltava.
+  if(!v.metasMesTs || typeof v.metasMesTs !== 'object') v.metasMesTs = {};
+  v.metasMesTs[mesRef] = Date.now();
+  // [R157] Marca no ÚNICO ponto de escrita: nenhum chamador pode
+  // esquecer, e a marca é do mês, não do mapa inteiro.
+  if(typeof window._marcarMesVendEditado === 'function')
+    window._marcarMesVendEditado(vendId, 'metasMes', mesRef);
+  if(mesRef === mesAtual()){
+    v.metaMes = mes; v.superMetaMes = sup;
+    if(typeof window._marcarVendEditado === 'function')
+      window._marcarVendEditado(vendId, 'metas');   // o espelho
+  }
   v._savedAt = Date.now();
   return true;
 };
@@ -16083,10 +17160,21 @@ function salvarVend(){
   }
   // Cadastrar nova vendedora já com a meta proporcional
   const _idNovo = "v"+Date.now();
+  // [R157] O mapa `metasMes` era montado aqui na mão, sem carimbo do
+  // mês e sem marca de edição — furando o ponto único de escrita e
+  // reabrindo, para toda vendedora recém-cadastrada, a brecha em que
+  // um mês sem carimbo se decide por empate na reconciliação entre o
+  // doc principal e o da loja.
   D.vendedoras.push({id:_idNovo,nome,loja:lid,metaMes:metaMesAuto,
                      superMetaMes:superMetaMesAuto,cargo,
-                     metasMes: metaMesAuto>0
-                       ? {[_mrNovo]:{mes:metaMesAuto, superMes:superMetaMesAuto}} : {}});
+                     metasMes:{}, _savedAt: Date.now()});
+  // [R157] carimba o cadastro da recém-criada: hoje não há disputa
+  // possível (id novo, nada no servidor), mas deixar os campos sem
+  // carimbo os manteria no degrau do dado legado indefinidamente
+  if(typeof window._marcarVendEditado === 'function')
+    window._marcarVendEditado(_idNovo, 'cadastro');
+  if(metaMesAuto>0)
+    window.setMetaVendDoMes(_idNovo, _mrNovo, metaMesAuto, superMetaMesAuto);
   save();
   const msg=metaMesAuto>0
     ? "✅ "+nome+" cadastrada! Meta: "+fmt(metaMesAuto)+" ("+novoTotal+"x vendedoras)"
@@ -16187,6 +17275,18 @@ window.salvarEdicaoVend = function(){
   // acha que a versão de cá é igual ou mais velha, e devolve o cadastro
   // do servidor — a correção sumia no primeiro sync, sem erro nenhum.
   v._savedAt = Date.now();
+  // [R157] diz ao merge que o cadastro foi digitado AQUI — sem isto, o
+  // _savedAt sozinho não distingue esta correção de um recarimbo por
+  // meta, e a correção de outra máquina passaria por cima
+  if(typeof window._marcarVendEditado === 'function')
+    window._marcarVendEditado(v.id, 'cadastro');
+  // [R157] Numa troca de loja, a propagação encontra só a loja NOVA —
+  // ela lê `v.loja`, que acabou de mudar. O documento da loja de ORIGEM
+  // guardaria o registro velho indefinidamente; marcamos as duas.
+  if(typeof window._marcarLojaEditada === 'function'){
+    window._marcarLojaEditada(loja);
+    if(mudouLoja && antes.loja) window._marcarLojaEditada(antes.loja);
+  }
 
   save();
   window.fecharEdicaoVend();
@@ -16215,6 +17315,15 @@ function excluirVend(id){
   // Guardar tombstone — impede que syncs futuros restaurem a vendedora
   if(!D._vendsExcluidas) D._vendsExcluidas = [];
   if(!D._vendsExcluidas.includes(id)) D._vendsExcluidas.push(id);
+  // [R157] As marcas de edição dela não têm mais o que defender e
+  // ficariam no localStorage para sempre — o registro nunca mais volta
+  // no merge, então a baixa automática jamais aconteceria.
+  if(window._vendEditadoAqui && window._vendEditadoAqui.size){
+    [...window._vendEditadoAqui]
+      .filter(ch => ch.indexOf(id + '|') === 0)
+      .forEach(ch => window._vendEditadoAqui.delete(ch));
+    if(typeof window._persistirMarcasVend === 'function') window._persistirMarcasVend();
+  }
   // Não deletar vendasVend — dados históricos preservados
   save();
   showToast('✅ '+(vObj?.nome||'Vendedor(a)')+' excluída.');
@@ -17570,22 +18679,17 @@ function _estqCod(v){
  * veio em branco apagaria estoque que existe.
  */
 function _estqNum(v){
+  // [R157] regra única do _numBR — antes "2.500" virava 2,5 no saldo.
+  // O contrato aqui é DIFERENTE dos outros dois: célula vazia devolve
+  // null (que significa "não informado", e não "zero"), porque zero
+  // apagaria um saldo real. Só o vazio vira null; o resto vai pela
+  // regra comum.
   if(v === null || v === undefined) return null;
   if(typeof v === 'number') return isFinite(v) ? v : null;
-  let t = String(v).trim();
+  const t = String(v).trim().replace(/[R$\s]/gi,'');
   if(!t) return null;
-  t = t.replace(/[R$\s]/gi,'');
-  if(!t) return null;
-  // "1.234,56" (BR) → tira o ponto de milhar, vírgula vira ponto.
-  // "1,234.56" (US) → tira a vírgula de milhar.
-  if(t.indexOf(',') >= 0 && t.indexOf('.') >= 0){
-    if(t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g,'').replace(',','.');
-    else t = t.replace(/,/g,'');
-  } else if(t.indexOf(',') >= 0){
-    t = t.replace(',','.');
-  }
-  const n = parseFloat(t);
-  return isNaN(n) ? null : n;
+  const n = window._numBR(t);
+  return (n === 0 && !/^-?0+([.,]0+)?$/.test(t)) ? null : n;
 }
 
 /** Descobre as colunas pelo cabeçalho — a ordem no arquivo não importa. */
@@ -17891,7 +18995,14 @@ window.estqExcluirImportacao = function(impId){
   });
 
   D._estqImportacoes = lista.filter(i => i.id !== impId);
-  save();
+  // [R157] Desfazer uma importação remove de uma vez TODOS os produtos
+  // que ela criou. Se forem os únicos do catálogo, `produtosExtras`
+  // cai de N>1 para zero — e a trava anti-apagamento recusa a
+  // gravação, com o `D` já mutado. O retry de 10s reenviaria o mesmo
+  // payload para sempre. É apagamento DELIBERADO, e o sistema já tem
+  // a saída certa para isso.
+  window._limpezaDeliberada = true;
+  try{ save(); } finally { window._limpezaDeliberada = false; }
 
   showToast('🗑️ Importação desfeita — ' + revertidos + ' produto(s) revertido(s)'
     + (removidos ? ' · ' + removidos + ' removido(s) do catálogo' : '')
@@ -19801,8 +20912,14 @@ function editarCampReal(id){
 function excluirCampRealLoja(id){
   if(!confirm('Remover seu realizado desta campanha?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  if(!D._campExcluidos) D._campExcluidos=[];
-  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+  // [R157] Assumia array. A lápide migra para {id: ts} desde o FIX
+  // Bug2, e agora migra com mais frequência, porque o merge genérico
+  // traz a forma objeto de qualquer máquina da rede. Com objeto, o
+  // `.includes` dava TypeError DEPOIS de o registro já ter saído da
+  // memória e ANTES do save(): a exclusão parecia ter funcionado,
+  // não saía da máquina, e voltava no F5.
+  if(typeof window._marcarCampExcluido === 'function')
+    window._marcarCampExcluido(id);
   save();
   showToast('🗑️ Realizado removido.');
   renderCampLista();
@@ -19819,8 +20936,14 @@ function abrirFormCampRealPara(campId){
 function excluirCampReal(id){
   if(!confirm('Remover este realizado?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  if(!D._campExcluidos) D._campExcluidos=[];
-  if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
+  // [R157] Assumia array. A lápide migra para {id: ts} desde o FIX
+  // Bug2, e agora migra com mais frequência, porque o merge genérico
+  // traz a forma objeto de qualquer máquina da rede. Com objeto, o
+  // `.includes` dava TypeError DEPOIS de o registro já ter saído da
+  // memória e ANTES do save(): a exclusão parecia ter funcionado,
+  // não saía da máquina, e voltava no F5.
+  if(typeof window._marcarCampExcluido === 'function')
+    window._marcarCampExcluido(id);
   save();
   showToast('🗑️ Realizado removido.');
   renderCampLista();
@@ -20058,6 +21181,14 @@ function salvarMetasVendedoras(lid){
       D.vendedoras[i].ticketAlvo=ticket;
       D.vendedoras[i].metaAniv=aniv;
       D.vendedoras[i].metaInativ=inativ;
+      // [R157] grupo próprio: metas por mês têm marca por mês, posta
+      // dentro de setMetaVendDoMes. Aqui só os três KPIs.
+      if(typeof window._marcarVendEditado === 'function')
+        window._marcarVendEditado(v.id, 'kpis');
+      // [R157] Esta função nunca carimbou o registro. Sem carimbo, nem a
+      // máquina que digitou tinha garantia de manter o valor no próximo
+      // sync.
+      D.vendedoras[i]._savedAt = Date.now();
       // [R123] Campo vazio = "não informado", e setDiasTrabVend apaga a chave
       // do mês — aí diasTrabVend volta a devolver os dias de abertura da loja.
       // Isso é intencional: é como se limpa um ajuste, não um bug.
@@ -20388,6 +21519,8 @@ function salvarMetaLoja(lid){
         D.vendedoras[idx].ticketAlvo    = tick;
         D.vendedoras[idx].metaAniv      = aniv;
         D.vendedoras[idx].metaInativ    = inat;
+        if(typeof window._marcarVendEditado === 'function')
+          window._marcarVendEditado(v.id, 'kpis');
         D.vendedoras[idx]._savedAt      = Date.now(); // [FIX cross-device] timestamp
         if(mv>0){ somaMes+=mv; somaSmes+=smv; nVend++; }
       }
@@ -20505,6 +21638,10 @@ function salvarTodasMetas(){
       const autoMetas = calcMetasAuto(mes,ticket,smes,loja.id);
       autoMetas._savedAt = Date.now(); // timestamp para sync cross-device
       D.metasLoja[loja.id][_mr] = autoMetas;
+      // [R157] salvarMetaLoja marca; esta, que salva as SETE de uma vez,
+      // não marcava nada — e era a que mais tinha a perder.
+      if(typeof window._marcarMetaEditada === 'function')
+        window._marcarMetaEditada(loja.id, _mr);
       // [FIX] Distribuir só entre ativas — arquivadas não recebem nova meta
       const vends=window.vendsDoMesMeta(loja.id, _mr);   // [R148]
       if(vends.length){
@@ -21943,7 +23080,7 @@ function iniciarAutoRefresh(){
           if(!D.vendas[lid2]) D.vendas[lid2]={};
           const excDias = D._vendasExcluidas?.[lid2] || [];
           // [FIX cross-device] Timestamp-aware
-          Object.entries(remoto.vendas[lid2]).forEach(([dt,dados])=>{
+          Object.entries(remoto.vendas[lid2]).forEach(([dt6,dados])=>{
             if(excDias.includes(dt)) return;
             const _lvSL = D.vendas[lid2][dt];
             const _lTsSL = (_lvSL && _lvSL._savedAt) || 0;
@@ -21986,6 +23123,9 @@ function iniciarAutoRefresh(){
         // [R156] pull de 60s: mesma carga do boot, num lugar só
         if(typeof window._mesclarRemotoComum === 'function')
           window._mesclarRemotoComum(remoto);
+        // [R157] o pull da loja nunca mesclou vendedoras: cadastro, meta
+        // e arquivamento feitos pelo admin só chegavam no F5
+        window._mesclarVendedoras?.(remoto);
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
           remoto.campRealizados.forEach(r=>{
@@ -22089,41 +23229,9 @@ function iniciarAutoRefresh(){
           // [R156] pull de 30s: mesma carga do boot, num lugar só
           if(typeof window._mesclarRemotoComum === 'function')
             window._mesclarRemotoComum(remoto);
-          if(remoto.vendedoras && remoto.vendedoras.length){
-            // Sync tombstone de vendedoras excluídas
-            if(remoto._vendsExcluidas?.length){
-              if(!D._vendsExcluidas) D._vendsExcluidas=[];
-              remoto._vendsExcluidas.forEach(vid=>{
-                if(!D._vendsExcluidas.includes(vid)) D._vendsExcluidas.push(vid);
-              });
-            }
-            const _excSA = D._vendsExcluidas||[];
-            const _hpSA = !!window._pendingLocalData;
-            if(!D.vendedoras||!D.vendedoras.length){
-              D.vendedoras=remoto.vendedoras.filter(rv=>!_excSA.includes(rv.id));
-            } else {
-              remoto.vendedoras.forEach(rv=>{
-                if(_excSA.includes(rv.id)){
-                  D.vendedoras=D.vendedoras.filter(lv=>lv.id!==rv.id); return;
-                }
-                const _i=D.vendedoras.findIndex(lv=>lv.id===rv.id);
-                if(_i>=0){
-                  // [FIX cross-device] Comparar _savedAt
-                  // [FIX BUG 2] preservar campo ativa ao aceitar remoto
-                  const _bvi3 = D.vendedoras[_i];
-                  const _lTsSA3 = _bvi3._savedAt || 0;
-                  const _rTsSA3 = rv._savedAt   || 0;
-                  if(_rTsSA3 > _lTsSA3){
-                    const _ativaSync = _bvi3.ativa;
-                    D.vendedoras[_i] = {...rv, ativa: _ativaSync}; // preservar arquivamento
-                  } else {
-                    // [R154] nome/cargo/loja entram aqui também
-                    D.vendedoras[_i] = window._vendMesclarLocal(_bvi3, rv);
-                  }
-                } else D.vendedoras.push(rv);
-              });
-            }
-          }
+          // [R157] era a cópia que o syncLoja não tinha — ver
+          // window._mesclarVendedoras. `_hpSA` era variável morta.
+          window._mesclarVendedoras?.(remoto);
           _persistirLocal();
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
         }
@@ -25975,6 +27083,11 @@ function filtroStatusProspec(st, btn){
 function excluirProspec(id){
   if(!confirm('Excluir esta prospec\u00e7\u00e3o?')) return;
   D.prospeccoes = (D.prospeccoes||[]).filter(p=>p.id!==id);
+  // [R157] Sem lápide, a exclusão não saía da máquina que a fez: o
+  // merge com o servidor reinseria o registro na MESMA gravação que
+  // deveria removê-lo. Contato já tinha a dele; prospecção, não.
+  if(!D._prospeccoesExcluidas) D._prospeccoesExcluidas = {};
+  D._prospeccoesExcluidas[id] = Date.now();
   save();
   renderProspec();
   showToast('Prospec\u00e7\u00e3o exclu\u00edda');
@@ -32558,17 +33671,8 @@ function _excelDetectarColunas(headers){
 
 // Converter valor de célula para número (aceita "R$ 1.234,56" e "1234.56")
 function _excelParseNumero(v){
-  if(typeof v === 'number') return v;
-  if(v === null || v === undefined || v === '') return 0;
-  const s = String(v).replace(/R\$/g,'').replace(/\s/g,'').trim();
-  // Formato BR: "1.234,56" → separador milhar . e decimal ,
-  if(/,/.test(s) && /\./.test(s)){
-    return parseFloat(s.replace(/\./g,'').replace(',','.')) || 0;
-  }
-  if(/,/.test(s)){
-    return parseFloat(s.replace(',','.')) || 0;
-  }
-  return parseFloat(s) || 0;
+  // [R157] regra única — antes "2.500" virava 2,5 aqui
+  return window._numBR(v);
 }
 
 // Converter data → "YYYY-MM-DD"
