@@ -6962,7 +6962,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-23';
+window.AVATIM_BUILD = '2026-09-23b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -7300,9 +7300,11 @@ window.AVATIM_RECURSOS = {
                             && typeof window.relBenchVendsPDF === 'function',
   // [R144] mês em curso manda no lançamento; mês fechado, na planilha
   // [R146] a planilha do CRM manda sempre que existir
-  benchPlanilhaManda:    () => typeof window._relBenchApurar === 'function'
-                            && /const usaCrm = !!\(c && c\.fat > 0\)/
-                                 .test(window._semComentarios(window._relBenchApurar)),
+  // [R160] de volta à regra do R144, e amarrada à LOJA: a vendedora segue
+  // a decisão da loja dela, para a soma das pessoas fechar com a loja
+  benchSegueRegraDaLoja: () => typeof window._relBenchApurar === 'function'
+                            && typeof window._crmVendVale === 'function'
+                            && /_crmVendVale\(/.test(window._semComentarios(window._relBenchApurar)),
   // [R144] a meta do ranking é a do mês escolhido, não a do cadastro de hoje
   benchMetaDoMesEscolhido: () => typeof window._relBenchApurar === 'function'
                             && /metaVendDoMes/.test(String(window._relBenchApurar)),
@@ -11536,13 +11538,6 @@ window.crmDoMes = function(lid, mesRef){
 window.historicoConsolidado = function(lid, deMes, ateMes){
   const lojas = lid ? [lid] : LOJAS.map(l => l.id);
 
-  // CRM de uma vez só para todo o intervalo — evita reler o cubo por mês.
-  let crmMes = new Map();
-  try{
-    const p = window.crmRealizadoPeriodo(lid, deMes + '-01', ateMes + '-31');
-    crmMes = p.porMes;
-  }catch(e){ console.warn('[R83] CRM indisponível:', e.message); }
-
   const meses = [];
   for(let m = deMes; m <= ateMes; ){
     meses.push(m);
@@ -11553,39 +11548,45 @@ window.historicoConsolidado = function(lid, deMes, ateMes){
   }
 
   const linhas = meses.map(mes => {
-    const crm = crmMes.get(mes) || null;
-
     // Faturamento e atendimentos, da mesma fonte
     let fat = 0, atend = 0, itens = 0, fonte = null;
-    if(crm && crm.fat > 0){
-      fat = crm.fat; atend = crm.notas || 0; itens = crm.itens || 0; fonte = 'crm';
-    } else {
-      let fatL = 0, atendL = 0, itensL = 0;
-      lojas.forEach(l => {
-        const r = realizadoDoMes(l, mes);
-        fatL += r.valor || 0;
-        const ia = _itensAtendDoMes(l, mes);
-        atendL += ia.atend || 0; itensL += ia.itens || 0;
-        if(r.origem && !fonte) fonte = (r.origem === 'diario') ? 'lancamento' : 'historico';
-      });
-      fat = fatL; atend = atendL; itens = itensL;
-
-      // [R116] Último recurso: a Origem do Fluxo. Um mês pode ter só
-      // atendimentos registrados no fluxo — sem planilha importada e sem
-      // lançamento no Painel do Dia. Antes esse mês aparecia ZERADO, como se
-      // a loja não tivesse vendido. Não há risco de contar duas vezes: isto
-      // só entra quando as outras fontes não trouxeram nada.
-      if(fat === 0){
-        let fatF = 0, atendF = 0;
-        (D.fluxo || []).forEach(f => {
-          if(!f || !String(f.data||'').startsWith(mes)) return;
-          const fl = f.loja || f.lojaId || '';
-          if(lid && fl !== lid) return;
-          const v = Number(f.valor) || 0;
-          if(v > 0){ fatF += v; atendF++; }
-        });
-        if(fatF > 0){ fat = fatF; atend = atendF; itens = 0; fonte = 'fluxo'; }
+    // [R160] A fonte se decide LOJA A LOJA (crmDoMesPreferido), e só
+    // depois se soma. Decidir uma vez para a rede inteira errava nos dois
+    // sentidos: no mês corrente, uma loja que lançou fazia as outras — que
+    // só têm a planilha — entrarem com zero; no mês fechado, a planilha de
+    // umas escondia o lançamento de quem não tem planilha.
+    const crmPorLoja = {};
+    let nCrm = 0, fonteL = null;
+    lojas.forEach(l => {
+      const c = typeof window.crmDoMesPreferido === 'function' ? window.crmDoMesPreferido(l, mes) : null;
+      if(c && c.fat > 0){
+        crmPorLoja[l] = c; nCrm++;
+        fat += c.fat; atend += c.notas || 0; itens += c.itens || 0;
+        return;
       }
+      const r = realizadoDoMes(l, mes);
+      fat += r.valor || 0;
+      const ia = _itensAtendDoMes(l, mes);
+      atend += ia.atend || 0; itens += ia.itens || 0;
+      if(r.origem && !fonteL) fonteL = (r.origem === 'diario') ? 'lancamento' : 'historico';
+    });
+    fonte = !nCrm ? fonteL : (fonteL ? 'misto' : 'crm');
+
+    // [R116] Último recurso: a Origem do Fluxo. Um mês pode ter só
+    // atendimentos registrados no fluxo — sem planilha importada e sem
+    // lançamento no Painel do Dia. Antes esse mês aparecia ZERADO, como se
+    // a loja não tivesse vendido. Não há risco de contar duas vezes: isto
+    // só entra quando as outras fontes não trouxeram nada.
+    if(fat === 0){
+      let fatF = 0, atendF = 0;
+      (D.fluxo || []).forEach(f => {
+        if(!f || !String(f.data||'').startsWith(mes)) return;
+        const fl = f.loja || f.lojaId || '';
+        if(lid && fl !== lid) return;
+        const v = Number(f.valor) || 0;
+        if(v > 0){ fatF += v; atendF++; }
+      });
+      if(fatF > 0){ fat = fatF; atend = atendF; itens = 0; fonte = 'fluxo'; }
     }
 
     // Meta: soma das lojas do recorte
@@ -11598,6 +11599,9 @@ window.historicoConsolidado = function(lid, deMes, ateMes){
     return {
       mes, fat, meta, atend, itens, aniv, inativ,
       fonte: fat > 0 ? (fonte || 'lancamento') : null,
+      // [R160] o CRM de cada loja que entrou pela planilha — quem recorta
+      // o mês (_crescLinhasLoja) precisa saber quais lojas cortar
+      crmPorLoja,
       pctMeta: meta > 0 ? fat / meta * 100 : 0,
       tm: atend > 0 ? fat / atend : 0,
       pa: atend > 0 ? itens / atend : 0
@@ -11656,8 +11660,8 @@ window.renderHistoricoEvolucao = function(elId, lid, deMes, ateMes){
     return;
   }
 
-  const rotuloFonte = {crm:'CRM', lancamento:'Lançamento', historico:'Base histórica', fluxo:'Origem do Fluxo'};
-  const corFonte    = {crm:'var(--azul)', lancamento:'var(--verde)', historico:'var(--muted)', fluxo:'var(--roxo)'};
+  const rotuloFonte = {crm:'CRM', misto:'CRM + Lançamento', lancamento:'Lançamento', historico:'Base histórica', fluxo:'Origem do Fluxo'};
+  const corFonte    = {crm:'var(--azul)', misto:'var(--ouro)', lancamento:'var(--verde)', historico:'var(--muted)', fluxo:'var(--roxo)'};
 
   const corpo = comDado.map(l => {
     const mesFmt = l.mes.split('-').reverse().join('/');
@@ -22110,6 +22114,35 @@ window.crmVendMesesDaLoja = function(lid, ano){
  * pior do que a divergência que se quer corrigir. Por isso: a planilha
  * manda quando encontra a pessoa; senão, o lançamento.
  */
+/**
+ * [R160] A planilha vale para ESTA vendedora neste mês?
+ *
+ * Ela segue a decisão da LOJA dela, não uma própria. Se decidisse
+ * sozinha — olhando só os lançamentos dela —, a vendedora que ainda não
+ * vendeu no mês corrente cairia na planilha enquanto a loja, que tem
+ * lançamentos, usa o lançamento: a soma das pessoas deixaria de fechar
+ * com a loja, que é o que o dono pediu para garantir.
+ *
+ * Então: a planilha vale se a loja está usando a planilha naquele mês
+ * (crmDoMesPreferido: mês fechado, ou mês corrente sem lançamento) E a
+ * vendedora aparece nela. Quem não casa pelo nome cai no lançamento,
+ * como já era desde o R155.
+ */
+window._crmVendVale = function(lid, mesRef, reg, memo){
+  if(!reg || !(Number(reg.fat) > 0) || !lid || !mesRef) return false;
+  if(typeof window.crmDoMesPreferido !== 'function') return false;
+  // A resposta é da LOJA, igual para todas as vendedoras dela. Quem
+  // apura muitas de uma vez passa um Map (vivo só naquela chamada) e o
+  // cálculo — que no mês corrente percorre os lançamentos da loja — sai
+  // uma vez por loja×mês, não uma por vendedora.
+  if(memo){
+    const k = lid + '|' + mesRef;
+    if(!memo.has(k)) memo.set(k, !!window.crmDoMesPreferido(lid, mesRef));
+    return memo.get(k);
+  }
+  return !!window.crmDoMesPreferido(lid, mesRef);
+};
+
 window.fatVendDoMes = function(vid, mesRef){
   const v = (D.vendedoras||[]).find(x => x.id === vid);
   const lanc = () => {
@@ -22124,7 +22157,8 @@ window.fatVendDoMes = function(vid, mesRef){
     const k = (typeof _crmNorm === 'function' ? _crmNorm(v.nome) : String(v.nome||'').toLowerCase())
               + '|' + mesRef;
     const reg = mapa && mapa.get(k);
-    if(reg && reg.fat > 0) return {valor: reg.fat, origem: 'crm'};
+    // [R160] a vendedora segue a decisão da LOJA dela — ver _crmVendVale
+    if(window._crmVendVale(v.loja, mesRef, reg)) return {valor: reg.fat, origem: 'crm'};
   }catch(e){ /* sem CRM legível: vale o lançamento */ }
   return lanc();
 };
@@ -25656,14 +25690,24 @@ window._crescLinhasLoja = function(lid, de, ate, opts){
     // no lançamento, que é diário e dá para cortar.
     // ══════════════════════════════════════════════════════════════
     const _temCrm = l.fonte === 'crm' && l.fat > 0;
+    let _crmNoRecorte = false;
     if(!coberto && !_temCrm){
       const [y, m] = l.mes.split('-').map(Number);
       const ini = l.mes + '-01';
       const fim = l.mes + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0');
       const a = deEf > ini ? deEf : ini;
       const b = ate  < fim ? ate  : fim;
-      let f2 = 0, t2 = 0, a2 = 0, i2 = 0;
+      let f2 = 0, t2 = 0, a2 = 0, i2 = 0, fCrm = 0, metaCrm = 0;
       lojas.forEach(x => {
+        // [R160] Loja que está na planilha neste mês entra INTEIRA (a
+        // planilha é mensal, não dá para cortar), com a meta cheia dela;
+        // só as outras são cortadas no lançamento.
+        const cx = l.crmPorLoja && l.crmPorLoja[x];
+        if(cx){
+          fCrm += cx.fat; t2 += cx.notas || 0;
+          metaCrm += (metaDoMes(x, l.mes).valor || 0);
+          return;
+        }
         const lc = window._histLancLoja(x, a, b);
         f2 += lc.fat; t2 += lc.trans; a2 += lc.aniv; i2 += lc.inativ;
       });
@@ -25673,11 +25717,14 @@ window._crescLinhasLoja = function(lid, de, ate, opts){
         const fx = window._histFluxoAnivInat(a, b, lid || null);
         if(fx.aniv || fx.inativ){ a2 = fx.aniv; i2 = fx.inativ; }
       }catch(e){}
-      fat = f2; trans = t2; aniv = a2; inativ = i2;
-      fonte = (f2 > 0 || t2 > 0) ? 'lancamento' : null;
+      fat = f2 + fCrm; trans = t2; aniv = a2; inativ = i2;
+      fonte = fCrm > 0 ? (f2 > 0 ? 'misto' : 'crm')
+            : (f2 > 0 || t2 > 0) ? 'lancamento' : null;
+      _crmNoRecorte = fCrm > 0;
       // A meta é mensal: cobrar o mês inteiro de dez dias faria toda loja
-      // aparecer com 30%. Mesmo rateio do bloco Realizado × Meta.
-      meta = meta * window._histFracaoMes(l.mes, deEf, ate);
+      // aparecer com 30%. Mesmo rateio do bloco Realizado × Meta — só nas
+      // lojas cortadas; a que veio inteira da planilha leva a meta cheia.
+      meta = (meta - metaCrm) * window._histFracaoMes(l.mes, deEf, ate) + metaCrm;
     }
 
     return {
@@ -25689,7 +25736,7 @@ window._crescLinhasLoja = function(lid, de, ate, opts){
       parcial: !coberto,
       // [R146] "mês inteiro": o período corta este mês, mas o número veio
       // da planilha, que é mensal — logo cobre mais dias do que se pediu.
-      mesInteiro: !coberto && _temCrm
+      mesInteiro: !coberto && (_temCrm || _crmNoRecorte)
     };
   }).filter(l => l.fat > 0 || l.meta > 0);
 };
@@ -25715,8 +25762,6 @@ window._crescLinhasVend = function(vendId, de, ate, opts){
   }catch(e){ console.warn('[R140] CRM por vendedor(a):', e.message); }
   const chave = _crmNorm(v.nome);
 
-  const metaMes = Number(v.metaMes) || 0;
-
   return meses.map(mes => {
     const [y, m] = mes.split('-').map(Number);
     const ini = mes + '-01';
@@ -25726,7 +25771,12 @@ window._crescLinhasVend = function(vendId, de, ate, opts){
     // e a linha avisa que o número cobre o mês inteiro. Só o mês que ela
     // não tem é lido dia a dia do lançamento.
     const c = crmVend.get(chave + '|' + mes);
-    const _crmVale = !!(c && c.fat > 0);
+    // [R160] ...mas no mês CORRENTE com lançamento, o lançamento manda —
+    // a mesma decisão da loja dela (_crmVendVale), para as pessoas somarem
+    // o que a loja mostra.
+    const _crmVale = window._crmVendVale(v.loja, mes, c);
+    // [R160] a meta DO MÊS (R148); o campo único só vale pelo corrente
+    const metaMes = window.metaVendDoMes(vendId, mes) || 0;
     const a = (coberto || _crmVale) ? ini : (deEf > ini ? deEf : ini);
     const b = (coberto || _crmVale) ? fim : (ate  < fim ? ate  : fim);
     const lc = window._histLancVend(vendId, a, b);
@@ -25772,6 +25822,7 @@ function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes, linhasPre){
       '<span title="' + tit + '" style="font-size:8.5px;color:' + cor
       + ';border:1px solid ' + borda + ';border-radius:3px;padding:0 4px;margin-left:5px">' + txt + '</span>';
     const f = m2.fonte === 'crm'        ? et('var(--azul)','rgba(91,141,239,.4)','PLANILHA','Faturamento da planilha importada no CRM')
+            : m2.fonte === 'misto'      ? et('var(--ouro)','rgba(201,168,76,.4)','MISTO','Lojas com planilha somadas às lojas com lançamento')
             : m2.fonte === 'lancamento' ? et('var(--verde)','rgba(46,204,135,.4)','LANÇAMENTO','Lançamento diário registrado pela loja')
             : m2.fonte === 'historico'  ? et('var(--muted)','var(--borda)','HISTÓRICO','Base histórica, anterior ao CRM')
             : m2.fonte === 'fluxo'      ? et('var(--roxo)','rgba(139,92,246,.4)','FLUXO','Registros da Origem do Fluxo')
@@ -25995,8 +26046,10 @@ async function buscarHistoricoLoja(){
       if(_fat > 0){
         fatTotal   = _fat;
         transTotal = _tr;
+        // [R160] a linha da rede pode ser 'misto' (lojas com planilha +
+        // lojas com lançamento) — e isso também é planilha no meio
         _origemKpi = _lk.every(x => x.fonte === 'crm') ? 'crm'
-                   : _lk.some(x => x.fonte === 'crm')  ? 'misto' : 'lancamento';
+                   : _lk.some(x => x.fonte === 'crm' || x.fonte === 'misto') ? 'misto' : 'lancamento';
       }
     }
   }catch(e){ console.warn('[R143] KPIs do histórico pelo CRM:', e.message); }
@@ -26354,7 +26407,8 @@ window._histRealMetaLojas = function(de, ate, lid){
     let usouCrm = false, usouLanc = false;
     meses.forEach(mes => {
       const inteiro = window._mesInteiroNoPeriodo(mes, de, ate);
-      const crm = inteiro && typeof window.crmDoMes === 'function' ? window.crmDoMes(l, mes) : null;
+      // [R160] pelo portão do mês: no corrente, o lançamento manda
+      const crm = inteiro && typeof window.crmDoMesPreferido === 'function' ? window.crmDoMesPreferido(l, mes) : null;
       if(crm){
         usouCrm = true;
         real += crm.fat; atend += crm.notas || 0; itens += crm.itens || 0;
@@ -26402,6 +26456,7 @@ window._histRealMetaVends = function(de, ate, lid){
     }
   }catch(e){ console.warn('[R138] CRM por vendedor(a):', e.message); }
 
+  const _vale = new Map();   // [R160] decisão por loja×mês, uma vez
   return vends.map(v => {
     const chave = _crmNorm(v.nome);
     let real = 0, atend = 0, itens = 0, meta = 0;
@@ -26410,7 +26465,9 @@ window._histRealMetaVends = function(de, ate, lid){
     meses.forEach(mes => {
       const inteiro = window._mesInteiroNoPeriodo(mes, de, ate);
       const c = inteiro ? crmVend.get(chave + '|' + mes) : null;
-      if(c && c.fat > 0){
+      // [R160] a vendedora segue a decisão da loja dela (_crmVendVale):
+      // no mês corrente com lançamento, a soma das pessoas fecha com a loja
+      if(window._crmVendVale(v.loja, mes, c, _vale)){
         usouCrm = true;
         real += c.fat; atend += c.notas || 0; itens += c.itens || 0;
       } else {
@@ -26423,9 +26480,10 @@ window._histRealMetaVends = function(de, ate, lid){
         real += lc.fat; atend += lc.trans;
         anivL += lc.aniv; inatL += lc.inativ;
       }
-      // A meta da vendedora é um valor mensal único no cadastro; rateada
-      // pela fatia do mês que o período cobre.
-      meta += (Number(v.metaMes) || 0) * window._histFracaoMes(mes, de, ate);
+      // [R160] a meta DO MÊS (R148), rateada pela fatia que o período
+      // cobre. O campo único do cadastro só responde pelo mês corrente —
+      // aplicá-lo a janeiro cobrava a meta de hoje de um mês passado.
+      meta += (window.metaVendDoMes(v.id, mes) || 0) * window._histFracaoMes(mes, de, ate);
     });
     const fx = fluxo.porVend.get(v.id) || {aniv:0, inativ:0, valor:0};
     const usouFluxo = (fx.aniv + fx.inativ) > 0;
@@ -26593,7 +26651,8 @@ window._histMetasFaltando = function(de, ate, lid){
       // pedaço de mês não diz quanto a loja fatura no mês.
       if(!window._mesInteiroNoPeriodo(mes, de, ate)) return;
       const temMeta = Number((D.metasLoja?.[l]?.[mes] || {}).mes || 0) > 0;
-      const crm = typeof window.crmDoMes === 'function' ? window.crmDoMes(l, mes) : null;
+      // [R160] mesma fonte do resto do Histórico
+      const crm = typeof window.crmDoMesPreferido === 'function' ? window.crmDoMesPreferido(l, mes) : null;
       const lc  = window._histLancLoja(l, mes+'-01', mes+'-31');
       const real = crm ? crm.fat : lc.fat;
       if(real <= 0) return;
@@ -26834,8 +26893,10 @@ async function buscarHistoricoVend(){
   // planilha, então o casamento é por nome normalizado — é o que
   // _crescLinhasVend já faz. Sem correspondência, nada muda.
   let _origemKpiV = 'lancamento';
+  let _linhasPer = [];
   try{
     const _lv = window._crescLinhasVend(vendId, de, ate, {semExtra:true});
+    _linhasPer = _lv || [];
     if(_lv && _lv.length){
       const _f = _lv.reduce((s2,x) => s2 + (x.fat   || 0), 0);
       const _t = _lv.reduce((s2,x) => s2 + (x.trans || 0), 0);
@@ -26902,11 +26963,35 @@ async function buscarHistoricoVend(){
     if(_ce2) _ce2.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px;text-align:center">Não foi possível montar a conciliação: '+e.message+'</div>';
   }
 
+  // [R160] Mês que a planilha do CRM cobre vira UMA linha, com o total
+  // dele: é o número que o resto do sistema usa para aquele mês. Listar
+  // também os dias lançados mostraria o mesmo mês duas vezes, com dois
+  // valores. Os dias continuam no lançamento — só não entram nesta tabela.
+  const _mesesPlan = new Map();
+  _linhasPer.forEach(x => { if(x.fonte === 'crm') _mesesPlan.set(x.mes, x); });
+  const _linhasTab = dias.filter(d => !_mesesPlan.has(d.slice(0,7))).map(d => ({chave: d, dia: d}))
+    .concat([..._mesesPlan.values()].map(x => ({chave: x.mes + '-99', plan: x})))
+    .sort((a,b) => a.chave < b.chave ? 1 : a.chave > b.chave ? -1 : 0);
   const tab = document.getElementById('hist-pg-tabela');
-  if(tab) tab.innerHTML = dias.length
+  if(tab) tab.innerHTML = _linhasTab.length
     ? `<div style="overflow-x:auto"><table class="dtable" style="font-size:12px">
         <thead><tr><th>Data</th><th>Valor</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:80px"></th></tr></thead>
-        <tbody>${dias.slice().reverse().map(d=>{
+        <tbody>${_linhasTab.map(it=>{
+          if(it.plan){
+            const x = it.plan;
+            const nLanc = dias.filter(d => d.slice(0,7) === x.mes).length;
+            return `<tr style="background:rgba(91,141,239,.06)">
+            <td><strong>${x.mes.split('-').reverse().join('/')}</strong>
+              <div style="font-size:8.5px;color:var(--azul)">MÊS INTEIRO · PLANILHA CRM</div></td>
+            <td style="color:var(--verde);font-weight:600">${fmt(x.fat)}</td>
+            <td style="color:var(--azul)">${fmt(x.tm)}</td>
+            <td>${x.trans}</td>
+            <td>${x.aniv||0}</td>
+            <td>${x.inativ||0}</td>
+            <td style="font-size:9px;color:var(--muted)" title="Os lançamentos diários deste mês continuam gravados, mas o total do mês vem da planilha do CRM">${nLanc ? nLanc + ' lanç. fora do total' : ''}</td>
+          </tr>`;
+          }
+          const d=it.dia;
           const r=vd[d];
           const fat2=Number(r.val||0);
           const trans2=Number(r.trans||0);
@@ -28932,7 +29017,8 @@ function _dadosLojaMes(lid, mesRef){
   // comparação ano a ano ficava sem base. Mesma regra do Histórico e dos
   // relatórios — quando o CRM cobre o mês, faturamento, atendimentos e itens
   // saem TODOS dele, para o TM e o P.A. não dividirem bases diferentes.
-  const crm = typeof window.crmDoMes === 'function' ? window.crmDoMes(lid, mesRef) : null;
+  // [R160] pelo portão do mês — ver _relCrm
+  const crm = typeof window.crmDoMesPreferido === 'function' ? window.crmDoMesPreferido(lid, mesRef) : null;
   if(crm){
     const tmC = crm.notas > 0 ? crm.fat / crm.notas : 0;
     const paC = crm.notas > 0 ? crm.itens / crm.notas : 0;
@@ -29519,7 +29605,10 @@ function _relMesesOfertados(){
   return [...set].sort().reverse();
 }
 function _relCrm(lid, mesRef){
-  return typeof window.crmDoMes === 'function' ? window.crmDoMes(lid, mesRef) : null;
+  // [R160] Pelo portão do mês. Chamava crmDoMes direto: no mês corrente
+  // os relatórios mostravam a ÚLTIMA PLANILHA em vez dos lançamentos,
+  // contra a regra que o Painel Gestão já seguia (fatDoMes).
+  return typeof window.crmDoMesPreferido === 'function' ? window.crmDoMesPreferido(lid, mesRef) : null;
 }
 function _relReal(lid, mesRef){
   const c = _relCrm(lid, mesRef);
@@ -30146,6 +30235,7 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
 
 
 
+  const _vale = new Map();   // [R160] decisão por loja×mês, uma vez
   return vends.map(v => {
     const chave = _crmNorm(v.nome);
     const crmV  = crmPorLoja.get(v.loja) || new Map();
@@ -30159,19 +30249,17 @@ window._relBenchApurar = function(vends, mesIni, mesFim){
       const c   = crmV.get(chave + '|' + mes);
 
       // ══════════════════════════════════════════════════════════════
-      // [R146] A PLANILHA MANDA SEMPRE QUE EXISTIR.
+      // [R160] A MESMA REGRA DAS LOJAS: mês fechado pela planilha, mês
+      // corrente pelo lançamento. Decisão do dono em 2026-09-22.
       //
-      // O R144 tinha invertido isto a pedido: mês em curso pelo
-      // lançamento, mês fechado pela planilha. O pedido agora é o
-      // oposto — a planilha do CRM é a fonte do benchmark, e o
-      // lançamento só cobre o mês que ela ainda não trouxe.
-      //
-      // Consequência a conhecer: no mês em curso o ranking reflete a
-      // ÚLTIMA IMPORTAÇÃO, não as vendas de hoje. Quem vendeu depois do
-      // arquivo subir só aparece na próxima importação. É o preço de ter
-      // o faturamento conferido como base, e está dito na tela.
+      // O R146 tinha feito "a planilha manda sempre que existir", aceitando
+      // que no mês em curso o ranking refletisse a última importação. O
+      // efeito era a soma das vendedoras não fechar com a loja no mês
+      // corrente — a loja já seguia o lançamento. Agora a vendedora segue
+      // a decisão DA LOJA dela (_crmVendVale), e a soma fecha por
+      // construção.
       // ══════════════════════════════════════════════════════════════
-      const usaCrm = !!(c && c.fat > 0);
+      const usaCrm = window._crmVendVale(v.loja, mes, c, _vale);
 
       if(usaCrm){
         real += c.fat; atend += c.notas || 0; itens += c.itens || 0; nCrm++;
@@ -30337,15 +30425,15 @@ function _relBenchVends(){
     <div style="overflow-x:auto;margin-top:10px">
       <table class="rel-tabela">
         <thead><tr>
-          <th>POS.</th><th>VENDEDOR(A)</th><th class="num">REALIZADO</th>
+          <th>POS.</th><th>VENDEDOR(A)</th><th>LOJA</th><th class="num">REALIZADO</th>
           <th class="num">META</th><th class="num">% META</th>
           <th class="num">TICKET MÉDIO</th><th class="num">P.A.</th><th class="num">ATEND.</th>
         </tr></thead>
         <tbody>${dados.map((v,i) => `
           <tr>
             <td>${_pos(i+1)}</td>
-            <td><strong>${_esc(v.nome)}</strong>${_selo(v.fonte)}${_inat(v)}
-                <br><small style="color:var(--muted)">${_esc(v.lojaNome)}</small></td>
+            <td><strong>${_esc(v.nome)}</strong>${_selo(v.fonte)}${_inat(v)}</td>
+            <td>${_esc(v.lojaNome)}</td>
             <td class="num">${fmt(v.real)}</td>
             <td class="num">${v.meta > 0 ? fmt(v.meta) : '--'}</td>
             <td class="num" style="color:${_corPct(v.pct)};font-weight:600">${v.meta > 0 ? v.pct.toFixed(0)+'%' : '--'}</td>
@@ -30361,14 +30449,14 @@ function _relBenchVends(){
     <div style="overflow-x:auto;margin-top:10px">
       <table class="rel-tabela">
         <thead><tr>
-          <th>POS.</th><th>VENDEDOR(A)</th><th class="num">REALIZADO</th>
+          <th>POS.</th><th>VENDEDOR(A)</th><th>LOJA</th><th class="num">REALIZADO</th>
           <th class="num">TICKET MÉDIO</th><th class="num">P.A.</th><th class="num">ATEND.</th>
         </tr></thead>
         <tbody>${semanal.map((v,i) => `
           <tr>
             <td>${_pos(i+1)}</td>
-            <td><strong>${_esc(v.nome)}</strong>
-                <br><small style="color:var(--muted)">${_esc(v.lojaNome)}</small></td>
+            <td><strong>${_esc(v.nome)}</strong></td>
+            <td>${_esc(v.lojaNome)}</td>
             <td class="num">${fmt(v.real)}</td>
             <td class="num">${v.tm > 0 ? fmt(v.tm) : '--'}</td>
             <td class="num">${v.pa > 0 ? fmtPA(v.pa) : '--'}</td>
@@ -30399,10 +30487,9 @@ function _relBenchVends(){
         </div>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
-        Realizado <strong>sempre da planilha importada no CRM</strong>; o lançamento
-        diário só cobre o mês que a planilha ainda não trouxe. No mês em curso isso
-        significa que o ranking reflete a <strong>última importação</strong> — quem
-        vendeu depois do arquivo subir aparece na próxima.
+        Realizado da <strong>planilha importada no CRM</strong> nos meses fechados, e do
+        <strong>lançamento diário</strong> no mês em curso — a mesma regra das lojas, então
+        a soma das vendedoras fecha com a loja.
         Meta sempre a do mês escolhido, cadastrada pelo administrador.
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">${podioHtml}</div>
