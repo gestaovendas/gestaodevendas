@@ -965,6 +965,43 @@ window._mesclarVendedoras = function(remoto){
   return n;
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R162] MESCLA DAS BUSCAS SOB DEMANDA — COM A LÁPIDE.
+//
+// Ranking por período (tabRankPer, tabRankPerLoja) e histórico
+// (buscarHistoricoLoja, buscarHistoricoVend) vão ao servidor quando falta
+// dado local, e cada uma trazia a SUA cópia da mescla: só o _savedAt, sem
+// olhar a lápide. Um lançamento excluído voltava sempre que alguém abria
+// um ranking anual ou buscava um histórico — e subia de novo no save.
+//
+// Uma função só, com a mesma régua dos pulls: o dia remoto não entra se a
+// lápide daqui OU a do servidor o barra (_lapideBarra: dado gravado depois
+// da exclusão é relançamento e passa). Nunca remove nada local — só decide
+// o que entra. Devolve quantos dias entraram.
+// ══════════════════════════════════════════════════════════════════════
+window._mesclarVendasSobDemanda = function(remoto, opts){
+  if(!remoto || typeof remoto !== 'object') return 0;
+  opts = opts || {};
+  const barra = (tipo, chave, dt, val) => typeof window._lapideBarra === 'function'
+    && (window._lapideBarra(D, tipo, chave, dt, val) || window._lapideBarra(remoto, tipo, chave, dt, val));
+  let n = 0;
+  const mesclar = (tipo, alvo, fonte) => {
+    Object.entries(fonte || {}).forEach(([chave, dias]) => {
+      Object.entries(dias || {}).forEach(([dt, val]) => {
+        if(barra(tipo, chave, dt, val)) return;
+        if(!alvo[chave]) alvo[chave] = {};
+        const loc = alvo[chave][dt];
+        if(!loc || Number(val && val._savedAt || 0) > Number(loc._savedAt || 0)){
+          alvo[chave][dt] = val; n++;
+        }
+      });
+    });
+  };
+  if(opts.vendasVend !== false){ if(!D.vendasVend) D.vendasVend = {}; mesclar('vend', D.vendasVend, remoto.vendasVend); }
+  if(opts.vendas !== false){ if(!D.vendas) D.vendas = {}; mesclar('venda', D.vendas, remoto.vendas); }
+  return n;
+};
+
 window._mesclarRemotoComum = function(remoto){
   if(!remoto || typeof remoto !== 'object') return 0;
   let n = 0;
@@ -6119,7 +6156,10 @@ body:not(.logado) #appScreen{display:none!important}
     <!-- Estoque crítico + catálogo lado a lado no topo -->
     <div class="g2" style="margin-bottom:12px">
       <div class="sc"><div class="st">🔴 Estoque Crítico (saldo ≤5)</div><div id="estq-critico">--</div></div>
-      <div class="sc">
+      <!-- [R162] Só o admin ajusta o saldo: o estoque é da REDE e mora no
+           documento principal, que só o admin grava. Para a loja o card
+           aparecia e o ajuste dela era desfeito pelo pull em ~60 s. -->
+      <div class="sc admin-only" style="display:none">
         <div class="st">📦 Atualizar Saldo</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Busque um produto e atualize o saldo de estoque</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -6962,7 +7002,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-23b';
+window.AVATIM_BUILD = '2026-09-23e';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -7282,6 +7322,10 @@ window.AVATIM_RECURSOS = {
   crmAvisaSoLocal:       () => typeof window.crmCarregar === 'function'
                             && /_soLocal/.test(String(window.crmCarregar))
                             && /_crmSoLocal/.test(String(window.crmCarregar)),
+  // [R161] o cubo do CRM chega às outras máquinas pelo índice, sem F5
+  crmRecarregaPeloIndice: () => typeof window.crmAtualizarSeMudou === 'function'
+                            && /_crmEscritaIndice/.test(String(window.crmSincronizarUm))
+                            && /crmAtualizarSeMudou/.test(String(iniciarAutoRefresh)),
   // [R143] o recorte na tela do CRM deixa de ser descrito pelo cubo inteiro
   // [R149] inativos olham a base inteira, não o ano selecionado
   crmInativosTodosAnos:  () => typeof window.crmClientesTodosAnos === 'function'
@@ -9087,9 +9131,9 @@ window.forcarMetaPrincipal = async function(lid, valorMes){
     dia: Math.round(valorMes/30),
     sem: Math.round(valorMes/4),
     ticket: 150,
-    superMes: Math.round(valorMes*1.255),
-    superSem: Math.round(valorMes*1.255/4),
-    superDia: Math.round(valorMes*1.255/30),
+    superMes: Math.round(valorMes*window.SUPER_META_PADRAO),
+    superSem: Math.round(valorMes*window.SUPER_META_PADRAO/4),
+    superDia: Math.round(valorMes*window.SUPER_META_PADRAO/30),
     du: 30,
     sw: 4,
     _savedAt: Date.now()
@@ -9699,7 +9743,9 @@ function _bkCobertura(linhas){
     else ok.push(l.nome);
   });
   const temPrincipal = achados.has('principal');
-  const nCrm = linhas.filter(l => /^crm_/.test(l.nome) && !/_c\d+$/.test(l.nome)).length;
+  // [R161] crm_indice é coordenação, não conjunto
+  const nCrm = linhas.filter(l => /^crm_/.test(l.nome) && !/_c\d+$/.test(l.nome)
+                               && l.nome !== CRM_INDICE).length;
 
   const bloco = (cor, icone, titulo, texto) =>
     '<div style="padding:8px 11px;border-left:3px solid '+cor+';background:rgba(255,255,255,.03);border-radius:5px;margin-top:6px;font-size:11.5px">'
@@ -9735,7 +9781,11 @@ window.backupRestaurar = async function(){
   if(!pacote){ showToast('Carregue um arquivo de backup primeiro.','err'); return; }
   if(!isAdmin()){ showToast('Só o administrador pode restaurar.','err'); return; }
 
-  const nomes = Object.keys(pacote.docs || {}).filter(n => pacote.docs[n] && !pacote.docs[n]._erroLeitura);
+  // [R161] o índice do CRM não é dado, é coordenação: não tem campo
+  // `dados`, e regravá-lo como os demais apagava os carimbos de todas as
+  // lojas. Ele é refeito abaixo, a partir dos cubos restaurados.
+  const nomes = Object.keys(pacote.docs || {}).filter(n => n !== CRM_INDICE
+    && pacote.docs[n] && !pacote.docs[n]._erroLeitura);
   if(!nomes.length){ showToast('O backup não tem nenhum documento válido.','err'); return; }
 
   if(!confirm('RESTAURAR ' + nomes.length + ' documento(s) do backup de '
@@ -9754,16 +9804,28 @@ window.backupRestaurar = async function(){
     const {mod, db} = await _bkFirestore();
     const {setDoc, doc} = mod;
     let ok = 0, erros = [];
+    const _carimbos = {};   // [R161] cabeças de cubo restauradas → índice
     for(const nome of nomes){
       try{
         const d = pacote.docs[nome];
+        const _tsR = Date.now();
         await setDoc(doc(db, 'avatim', nome), {
           dados: d.dados || '{}',
-          ts: Date.now(),
+          ts: _tsR,
           por: (window._currentUser?.email || 'restauracao') + ' (restaurado)'
         });
         ok++;
+        const _m = /^crm_([a-z0-9]+)_(\d{4})$/.exec(nome);
+        if(_m){ (_carimbos[_m[1]] = _carimbos[_m[1]] || {})[_m[2]] = _tsR; }
       }catch(e){ erros.push(nome + ': ' + (e.code||e.message)); }
+    }
+    // [R161] as outras máquinas só recarregam o CRM restaurado se o índice
+    // disser que ele mudou. Merge: carimbo de conjunto fora do backup fica.
+    if(Object.keys(_carimbos).length){
+      try{
+        await window._crmGravarLote([{id: CRM_INDICE, merge: true, dados: {carimbos: _carimbos,
+          ts: Date.now(), por: (window._currentUser?.email || 'restauracao') + ' (restaurado)'}}]);
+      }catch(e){ erros.push(CRM_INDICE + ': ' + (e.code||e.message)); }
     }
     if(erros.length){
       console.error('[Avatim] restauração com falhas:', erros);
@@ -10162,7 +10224,8 @@ window._crmGravarLote = async function(escritas, ms){
   if(typeof writeBatch !== 'function'){
     console.warn('[Avatim] R133: writeBatch indisponível — gravando um a um');
     for(const e of escritas){
-      await comPrazo(setDoc(doc(db,'avatim',e.id), e.dados), e.id);
+      await comPrazo(e.merge ? setDoc(doc(db,'avatim',e.id), e.dados, {merge:true})
+                             : setDoc(doc(db,'avatim',e.id), e.dados), e.id);
     }
     return {lotes:0, docs:escritas.length};
   }
@@ -10187,7 +10250,10 @@ window._crmGravarLote = async function(escritas, ms){
       if(esperas[t]) await _dormir(esperas[t]);
       try{
         const lote = writeBatch(db);
-        bloco.forEach(e => lote.set(doc(db,'avatim',e.id), e.dados));
+        // [R161] e.merge: o índice do CRM é mesclado, nunca substituído —
+        // substituí-lo apagaria os carimbos das outras lojas e anos
+        bloco.forEach(e => e.merge ? lote.set(doc(db,'avatim',e.id), e.dados, {merge:true})
+                                   : lote.set(doc(db,'avatim',e.id), e.dados));
         await comPrazo(lote.commit(), bloco.length + ' documento(s)');
         gravado = true;
       }catch(e){
@@ -10207,6 +10273,39 @@ window._crmGravarLote = async function(escritas, ms){
   }
   return {lotes, docs:escritas.length};
 };
+
+// ══════════════════════════════════════════════════════════════════════
+// [R161] O CUBO DO CRM SÓ ERA LIDO NO BOOT.
+//
+// Importar a planilha numa máquina dizia "enviado ao servidor, já visível
+// nas outras máquinas" — e as outras só a viam depois de um F5. Os pulls
+// de 30s/60s leem o principal e os docs loja_*, nunca os crm_*.
+//
+// Reler os cubos a cada pull custaria dezenas de leituras. Em vez disso,
+// um documento-índice pequeno, `crm_indice`, guarda o carimbo de cada
+// conjunto: {carimbos: {loja: {ano: ts}}}. Ele é a ÚLTIMA escrita do
+// envio — no mesmo lote da cabeça, ou no lote seguinte se o conjunto
+// passar de CRM_LOTE_MAX —, então só muda quando o conjunto inteiro
+// entrou; e vai com merge (nunca apaga o carimbo de outro conjunto). O
+// pull lê só o índice e recarrega só o que mudou.
+// ══════════════════════════════════════════════════════════════════════
+const CRM_INDICE = 'crm_indice';
+
+/** Escrita do carimbo de um conjunto no índice (vai no lote da cabeça). */
+function _crmEscritaIndice(lid, ano, ts, por){
+  const c = {}; c[lid] = {}; c[lid][String(ano)] = ts;
+  return {id: CRM_INDICE, merge: true, dados: {carimbos: c, ts, por}};
+}
+
+/** Carimbo do conjunto que ESTA máquina tem (lido ou enviado por ela). */
+window._crmTsVisto = window._crmTsVisto || {};
+function _crmMarcarVisto(lid, ano, ts){
+  if(!window._crmTsVisto[lid]) window._crmTsVisto[lid] = {};
+  window._crmTsVisto[lid][String(ano)] = Number(ts) || 0;
+}
+
+/** Conjuntos que esta máquina não conseguiu enviar — a recarga não os toca. */
+window._crmNaoEnviados = window._crmNaoEnviados || {};
 
 window.crmSincronizarUm = async function(lid, ano){
   const cubo = ((D.crm||{})[lid]||{})[ano];
@@ -10231,8 +10330,13 @@ window.crmSincronizarUm = async function(lid, ano){
     id: _crmDocNome(lid, ano),
     dados: {dados: JSON.stringify(leves), ts, por, loja: lid, ano: String(ano)}
   });
+  // [R161] junto da cabeça, no mesmo lote: o índice só anuncia o conjunto
+  // quando ele já está inteiro no servidor
+  escritas.push(_crmEscritaIndice(lid, ano, ts, por));
 
   await window._crmGravarLote(escritas);
+  // o que esta máquina acabou de enviar ela já tem — não precisa reler
+  _crmMarcarVisto(lid, ano, ts);
   return {partes: pedacos.length, clientes: (cubo.clientes||[]).length};
 };
 
@@ -10264,8 +10368,16 @@ window.crmSincronizar = async function(paresOpt){
   showToast('⏳ Enviando ' + pares.length + ' conjunto(s) de CRM...','ok');
   let ok = 0, docs = 0; const erros = [];
   for(const [lid, ano] of pares){
-    try{ const r = await window.crmSincronizarUm(lid, ano); ok++; docs += 1 + r.partes; }
-    catch(e){ erros.push(lid+'/'+ano+': '+(e.code||e.message)); }
+    try{
+      const r = await window.crmSincronizarUm(lid, ano); ok++; docs += 1 + r.partes;
+      delete window._crmNaoEnviados[lid + '|' + ano];
+    }
+    catch(e){
+      erros.push(lid+'/'+ano+': '+(e.code||e.message));
+      // [R161] até ser reenviado, este conjunto só existe aqui: a recarga
+      // periódica não pode trocá-lo pela versão do servidor
+      window._crmNaoEnviados[lid + '|' + ano] = Date.now();
+    }
   }
   if(erros.length){
     console.error('[crm] sync com falhas:', erros);
@@ -10280,7 +10392,7 @@ window.crmSincronizar = async function(paresOpt){
  * Lê do Firestore os cubos das lojas visíveis para quem está logado.
  * Admin lê de todas; loja lê só a própria.
  */
-window.crmCarregar = async function(){
+window.crmCarregar = async function(paresOpt){
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   let db, mod;
   try{ ({mod, db} = await _bkFirestore()); }
@@ -10298,6 +10410,16 @@ window.crmCarregar = async function(){
   Object.values(D.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
 
   if(!D.crm) D.crm = {};
+  // [R161] Com `paresOpt` ([[loja, ano], ...]) só esses conjuntos são
+  // lidos — é a recarga do pull, que só pede o que o índice diz ter mudado.
+  const _parcial = Array.isArray(paresOpt);
+  // [R161] a recarga pelo índice espera a carga COMPLETA: o primeiro pull
+  // sai antes de o boot terminar, e sem carimbo nenhum marcado ele releria
+  // todos os conjuntos em paralelo com o próprio boot
+  if(!_parcial) window._crmCargaCompleta = 'andamento';
+  const _pares = [];
+  if(_parcial) paresOpt.forEach(x => { if(Array.isArray(x) && lojas.includes(x[0])) _pares.push([x[0], String(x[1])]); });
+  else lojas.forEach(lid => anos.forEach(ano => _pares.push([lid, ano])));
   let carregados = 0;
   // ══════════════════════════════════════════════════════════════════
   // [R142] CONJUNTO QUE SÓ EXISTE NESTA MÁQUINA NÃO PODE PASSAR CALADO.
@@ -10314,48 +10436,61 @@ window.crmCarregar = async function(){
   // legítima). Só se diz a verdade, e em voz alta.
   // ══════════════════════════════════════════════════════════════════
   const _soLocal = [];
-  for(const lid of lojas){
-    for(const ano of anos){
-      try{
-        const snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano)));
-        const _temLocal = !!((D.crm[lid]||{})[ano]);
-        if(!snap.exists()){
-          if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
-          continue;
-        }
-        const raw = snap.data();
-        // conjunto apagado deixa um documento vazio como lápide
-        if(raw._apagado || !raw.dados){
-          if(_temLocal) _soLocal.push({lid, ano,
-            motivo: raw._apagado ? 'APAGADO no servidor' : 'vazio no servidor',
-            quando: raw.ts, por: raw.por});
-          continue;
-        }
-        const leves = JSON.parse(raw.dados || '{}');
-        if(!leves.linhas){
-          if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
-            quando: raw.ts, por: raw.por});
-          continue;
-        }
-        const partes = Number(leves._partes) || 0;
-        const clientes = [];
-        for(let i = 0; i < partes; i++){
-          const sp = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano, i)));
-          if(sp.exists()) clientes.push(...JSON.parse(sp.data().dados || '[]'));
-        }
-        delete leves._partes;
-        leves.clientes = clientes;
-        if(!D.crm[lid]) D.crm[lid] = {};
-        D.crm[lid][ano] = leves;
-        carregados++;
-      }catch(e){
-        console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
+  for(const [lid, ano] of _pares){
+    try{
+      const snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano)));
+      const _temLocal = !!((D.crm[lid]||{})[ano]);
+      if(!snap.exists()){
+        if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
+        continue;
       }
+      const raw = snap.data();
+      // conjunto apagado deixa um documento vazio como lápide
+      if(raw._apagado || !raw.dados){
+        // [R161] carimbo marcado só nos desfechos DEFINITIVOS (aqui, sem
+        // linhas e carga completa): uma leitura que falha no meio não pode
+        // dar o conjunto por visto, senão o pull nunca mais o tenta
+        _crmMarcarVisto(lid, ano, raw.ts);
+        if(_temLocal) _soLocal.push({lid, ano,
+          motivo: raw._apagado ? 'APAGADO no servidor' : 'vazio no servidor',
+          quando: raw.ts, por: raw.por});
+        continue;
+      }
+      const leves = JSON.parse(raw.dados || '{}');
+      if(!leves.linhas){
+        _crmMarcarVisto(lid, ano, raw.ts);
+        if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
+          quando: raw.ts, por: raw.por});
+        continue;
+      }
+      const partes = Number(leves._partes) || 0;
+      const clientes = [];
+      for(let i = 0; i < partes; i++){
+        const sp = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano, i)));
+        if(sp.exists()) clientes.push(...JSON.parse(sp.data().dados || '[]'));
+      }
+      delete leves._partes;
+      leves.clientes = clientes;
+      if(!D.crm[lid]) D.crm[lid] = {};
+      D.crm[lid][ano] = leves;
+      _crmMarcarVisto(lid, ano, raw.ts);
+      carregados++;
+    }catch(e){
+      console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
     }
   }
   if(carregados) console.log('[crm] carregados', carregados, 'conjunto(s) loja/ano');
+  // [R161] invalida de novo no FIM: uma tela desenhada durante a leitura
+  // teria guardado no cache um resultado com metade dos conjuntos
+  if(carregados) window._crmVersao = (window._crmVersao||0) + 1;
+  if(!_parcial) window._crmCargaCompleta = 'ok';
 
-  window._crmSoLocal = _soLocal;
+  // [R161] recarga parcial: só os conjuntos relidos saem da lista antiga
+  if(_parcial){
+    const _relidos = new Set(_pares.map(x => x[0] + '|' + x[1]));
+    window._crmSoLocal = (window._crmSoLocal || [])
+      .filter(x => !_relidos.has(x.lid + '|' + x.ano)).concat(_soLocal);
+  } else window._crmSoLocal = _soLocal;
   if(_soLocal.length){
     const _quando = x => x.quando ? ' em ' + new Date(x.quando).toLocaleString('pt-BR') : '';
     const _por    = x => x.por ? ', por ' + x.por : '';
@@ -10371,6 +10506,60 @@ window.crmCarregar = async function(){
     }
   }
   return carregados;
+};
+
+/**
+ * [R161] Chamado pelos pulls de 30s/60s: lê o índice do CRM (UMA leitura)
+ * e recarrega só os conjuntos cujo carimbo mudou desde que esta máquina
+ * os leu ou enviou. Devolve quantos conjuntos foram recarregados.
+ *
+ * Sem índice (servidor anterior ao R161) ou sem conseguir lê-lo, não faz
+ * nada — fica como era: o cubo novo chega no próximo F5.
+ */
+let _crmIndiceLidoEm = 0, _crmAtualizando = false;
+window.crmAtualizarSeMudou = async function(opts){
+  // o pull também roda a cada troca de tela; o índice não precisa disso
+  const forcar = !!(opts && opts.forcar);
+  if(_crmAtualizando || (!forcar && Date.now() - _crmIndiceLidoEm < 25000)) return 0;
+  // só depois de uma carga completa, e nunca durante uma
+  if(window._crmCargaCompleta !== 'ok') return 0;
+  _crmAtualizando = true;
+  try{
+    let db, mod;
+    try{ ({mod, db} = await _bkFirestore()); }catch(e){ return 0; }
+    const {getDoc, doc} = mod;
+    let carimbos;
+    try{
+      const snap = await getDoc(doc(db, 'avatim', CRM_INDICE));
+      _crmIndiceLidoEm = Date.now();
+      if(!snap.exists()) return 0;
+      carimbos = (snap.data() || {}).carimbos || {};
+    }catch(e){
+      console.warn('[crm] índice ilegível — o CRM novo chega no próximo F5:', e.code || e.message);
+      return 0;
+    }
+    const lojas = isAdmin()
+      ? (typeof LOJAS !== 'undefined' ? LOJAS.map(l=>l.id) : [])
+      : [lojaId()].filter(Boolean);
+    const mudados = [];
+    lojas.forEach(lid => Object.entries(carimbos[lid] || {}).forEach(([ano, ts]) => {
+      if(!(Number(ts) > 0)) return;
+      if(Number(ts) === Number(((window._crmTsVisto||{})[lid]||{})[ano])) return;
+      // conjunto mudado aqui e ainda não confirmado no servidor (envio em
+      // voo, ou que falhou) só existe aqui
+      if(window._crmNaoEnviados[lid + '|' + ano]){
+        console.warn('[crm] ' + lid + '/' + ano + ' mudou no servidor, mas o daqui '
+          + 'ainda não foi confirmado lá — mantido. Se o envio falhou, reenvie ao Firebase.');
+        return;
+      }
+      mudados.push([lid, ano]);
+    }));
+    if(!mudados.length) return 0;
+    console.log('[crm] índice: recarregando', mudados.map(x => x.join('/')).join(', '));
+    const n = await window.crmCarregar(mudados);
+    if(n && typeof window.crmAgendarGravacaoIdb === 'function') window.crmAgendarGravacaoIdb();
+    return n;
+  } finally { _crmAtualizando = false; }
 };
 
 /** Apaga um conjunto loja/ano — local e remoto. */
@@ -10411,7 +10600,10 @@ window.crmApagar = async function(lid, ano){
     for(let i=0;i<partes;i++){
       _escritas.push({id:_crmDocNome(lid,ano,i), dados:{dados:'[]', ts:_ts, _apagado:true}});
     }
+    // [R161] a exclusão também avisa as outras máquinas, pelo índice
+    _escritas.push(_crmEscritaIndice(lid, ano, _ts, _por));
     await window._crmGravarLote(_escritas);
+    _crmMarcarVisto(lid, ano, _ts);
   }catch(e){
     erro = e.code || e.message || String(e);
     console.error('[crm] apagar remoto falhou:', erro);
@@ -10431,6 +10623,9 @@ window.crmApagar = async function(lid, ano){
     }
     delete D.crm[lid][ano];
     if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
+    // [R161] sem cubo local, a marca de "não enviado" não protege mais nada
+    // — e deixá-la barraria a recarga de uma importação futura deste par
+    delete window._crmNaoEnviados[lid + '|' + ano];
     _persistirLocal();   // [R135] ver comentário abaixo: o principal não guarda D.crm
     showToast('⚠️ ' + nomeLoja + '/' + ano + ' removido apenas deste navegador — '
       + 'segue no Firebase e voltará ao recarregar.','err');
@@ -10440,6 +10635,7 @@ window.crmApagar = async function(lid, ano){
 
   delete D.crm[lid][ano];
   if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
+  delete window._crmNaoEnviados[lid + '|' + ano];   // [R161] ver acima
   // ══════════════════════════════════════════════════════════════════
   // [R135] AQUI NÃO PODE CHAMAR save().
   //
@@ -11182,6 +11378,12 @@ window.crmGuardar = function(lid, ano, cubo){
   }
 
   D.crm[lid][ano] = cubo;
+  // [R161] mudou aqui e ainda não subiu: até crmSincronizar confirmar o
+  // envio, a recarga pelo índice não pode trocar este cubo pelo do
+  // servidor. Marcar só quando o envio FALHA deixava aberta a janela do
+  // envio em voo — o pull trazia a versão de outra máquina, e depois do
+  // envio o carimbo daqui batia com o índice e ninguém corrigia mais.
+  (window._crmNaoEnviados = window._crmNaoEnviados || {})[lid + '|' + ano] = Date.now();
 
   const leves = Object.assign({}, cubo); delete leves.clientes;
   const pedacos = window.crmFatiarClientes(cubo.clientes || []);
@@ -12910,8 +13112,8 @@ function metaDiaLojaProgressiva(lid, dataRef){
   // Isso evita que a tela mostre "Meta dia: R$0" parecendo erro
   const diaBase   = m.dia || (m.du>0 ? m.mes/m.du : m.mes/26);
   const dia       = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : diaBase;
-  const resSuper  = Math.max(0, (m.superMes||m.mes*1.255) - acumulado);
-  const superDiaBase = m.superDia || (m.du>0 ? (m.superMes||m.mes*1.255)/m.du : m.mes*1.255/26);
+  const resSuper  = Math.max(0, (m.superMes||m.mes*window.SUPER_META_PADRAO) - acumulado);
+  const superDiaBase = m.superDia || (m.du>0 ? (m.superMes||m.mes*window.SUPER_META_PADRAO)/m.du : m.mes*window.SUPER_META_PADRAO/26);
   const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : superDiaBase;
   return {dia, superDia, diasRestantes, acumulado, restante};
 }
@@ -13251,6 +13453,78 @@ window.metaVendDoMes = function(vendId, mesRef){
   if(mesRef === mesAtual()) return Number(v.metaMes) || 0;
   return 0;
 };
+// ══════════════════════════════════════════════════════════════════════
+// [R163] SUPER META ATINGIDA = O REALIZADO ALCANÇOU O VALOR DA SUPER META.
+//
+// Decisão do dono (2026-09-22). O código usava limiares fixos e
+// discordantes: super meta a partir de 120% numas telas, 125% noutras, e super meta
+// padrão de meta × 1,255 aqui e × 1,25 ali. Uma loja podia estar "em
+// Super Meta" no ranking e não no painel. Agora há um número só: o % da
+// meta em que a super meta cadastrada é batida (super ÷ meta). Sem super
+// meta cadastrada, vale o padrão SUPER_META_PADRAO (meta × 1,25).
+// ══════════════════════════════════════════════════════════════════════
+window.SUPER_META_PADRAO = 1.25;
+
+/** % da meta em que a super meta é batida, a partir dos VALORES. */
+function _superPctDe(meta, superMeta){
+  meta = Number(meta) || 0; superMeta = Number(superMeta) || 0;
+  if(meta > 0 && superMeta > 0) return superMeta / meta * 100;
+  return window.SUPER_META_PADRAO * 100;
+}
+/** Meses do ano corrente, 'AAAA-01'..'AAAA-12'. */
+function _superMesesDoAno(){
+  const ano = hoje().slice(0,4);
+  return Array.from({length:12}, (_,i) => ano + '-' + String(i+1).padStart(2,'0'));
+}
+/** Limiar da LOJA no mês corrente, ou no ano (per === 'ano'). */
+function _superPctLoja(lid, per){
+  if(per === 'ano'){
+    const lm = (D.metasLoja || {})[lid] || {};
+    let m = 0, sm = 0;
+    _superMesesDoAno().forEach(mes => {
+      const x = lm[mes]; if(!x || !(Number(x.mes) > 0)) return;
+      m += Number(x.mes);
+      sm += Number(x.superMes) > 0 ? Number(x.superMes) : Number(x.mes) * window.SUPER_META_PADRAO;
+    });
+    return _superPctDe(m, sm);
+  }
+  const g = getMetas(lid) || {};
+  return _superPctDe(g.mes, g.superMes);
+}
+/** Limiar da VENDEDORA no mês corrente, ou no ano. */
+function _superPctVend(vid, per){
+  if(per === 'ano'){
+    let m = 0, sm = 0;
+    _superMesesDoAno().forEach(mes => {
+      const mv = window.metaVendDoMes(vid, mes) || 0; if(!(mv > 0)) return;
+      const sv = window.superMetaVendDoMes(vid, mes) || 0;
+      m += mv; sm += sv > 0 ? sv : mv * window.SUPER_META_PADRAO;
+    });
+    return _superPctDe(m, sm);
+  }
+  return _superPctDe(window.metaVendDoMes(vid), window.superMetaVendDoMes(vid));
+}
+/** Limiar da REDE: soma das lojas no mês; no ano, o alvo anual do grupo se houver. */
+function _superPctRede(per){
+  const lojas = typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : [];
+  if(per === 'ano'){
+    const mAno = lojas.reduce((s, l) => s + (metaAno(l) || 0), 0);
+    const sGrupo = typeof window.superMetaAno === 'function' ? (Number(window.superMetaAno(hoje().slice(0,4))) || 0) : 0;
+    if(mAno > 0 && sGrupo > 0) return _superPctDe(mAno, sGrupo);
+    let m = 0, sm = 0;
+    lojas.forEach(l => { const pl = _superPctLoja(l, 'ano'), ml = metaAno(l) || 0; m += ml; sm += ml * pl / 100; });
+    return _superPctDe(m, sm);
+  }
+  let m = 0, sm = 0;
+  lojas.forEach(l => {
+    const g = getMetas(l) || {}; const ml = Number(g.mes) || 0; if(!(ml > 0)) return;
+    m += ml; sm += Number(g.superMes) > 0 ? Number(g.superMes) : ml * window.SUPER_META_PADRAO;
+  });
+  return _superPctDe(m, sm);
+}
+window._superPctDe = _superPctDe; window._superPctLoja = _superPctLoja;
+window._superPctVend = _superPctVend; window._superPctRede = _superPctRede;
+
 window.superMetaVendDoMes = function(vendId, mesRef){
   const v = (D.vendedoras||[]).find(x => x.id === vendId);
   if(!v) return 0;
@@ -13267,7 +13541,7 @@ window.setMetaVendDoMes = function(vendId, mesRef, valor, superValor){
   const v = D.vendedoras[i];
   if(!v.metasMes || typeof v.metasMes !== 'object') v.metasMes = {};
   const mes = Number(valor) || 0;
-  const sup = Number(superValor) || Math.round(mes * 1.255);
+  const sup = Number(superValor) || Math.round(mes * window.SUPER_META_PADRAO);
   if(mes > 0) v.metasMes[mesRef] = {mes, superMes: sup};
   else delete v.metasMes[mesRef];   // campo limpo = não cadastrado
   // [R157] Carimbo do MÊS, gravado também quando o mês é apagado. Sem
@@ -13323,7 +13597,7 @@ function metaVendPorDias(vendId, mesRef){
 
 function calcMetasAuto(mes, ticket, superMes, lid){
   mes      = Number(mes)||0;
-  superMes = Number(superMes)||Math.round(mes*1.255);
+  superMes = Number(superMes)||Math.round(mes*window.SUPER_META_PADRAO);
   // [FIX 3] Evitar divisão por zero/NaN quando chamada sem lid ou em casos de borda
   let DU;
   if(lid && typeof diasAbertosNoMes === 'function'){
@@ -13533,9 +13807,11 @@ function getMetas(lid, mesRef, strictMode){
   const somaMetas = vends.reduce((s,v)=>s+(Number(v.metaMes)||0),0);
   if(somaMetas>0){
     const avgTicket = vends.length ? vends.reduce((s,v)=>s+(Number(v.ticketAlvo||v.ticket||350)),0)/vends.length : 350;
-    return calcMetasAuto(somaMetas, avgTicket, somaMetas*1.25);
+    return calcMetasAuto(somaMetas, avgTicket, somaMetas*window.SUPER_META_PADRAO);
   }
-  return calcMetasAuto(50000,150,60000);
+  // [R163] a super daqui era 60000 sobre 50000 — 120%, o limiar antigo
+  // escondido num número. Sem super informada, calcMetasAuto usa o padrão.
+  return calcMetasAuto(50000,150);
 }
 
 function calcDia(lid, data){
@@ -14262,7 +14538,7 @@ function gerarDiagnostico(){
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">🏪 Lojas — % da Meta</div>
         ${redeData.sort((a,b)=>b.pct-a.pct).map(l=>{
           const c=l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-          const icon=l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+          const icon=l.pct>=_superPctLoja(l.id)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
             <div style="flex:1">
               <div style="font-size:11px;font-weight:600">${icon} ${l.nome}</div>
@@ -14339,8 +14615,8 @@ function gerarDiagnostico(){
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🏪 Análise por Loja — Fat · Clientes · Ticket Médio · Diagnóstico</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">
           ${redeData.sort((a,b)=>b.pct-a.pct).map(l=>{
-            const c     = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-            const icon  = l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+            const c     = l.pct>=_superPctLoja(l.id)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+            const icon  = l.pct>=_superPctLoja(l.id)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
             const mTick = getMetas(l.id).ticket||150;
             const pctTM = mTick>0?l.tm/mTick*100:0;
             const corTM = pctTM>=100?'var(--verde)':pctTM>=80?'var(--ouro)':'var(--verm)';
@@ -14542,7 +14818,7 @@ function gerarDiagnostico(){
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Ranking equipe</div>
       ${vendsData.map(v=>{
         const corV=v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--verm)';
-        const icon=v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+        const icon=v.pct>=_superPctVend(v.id)?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">
           <span style="font-size:11px">${icon} ${v.nome}</span>
           <span style="font-size:11px;font-weight:600;color:${corV}">${v.pct.toFixed(0)}%</span>
@@ -14913,7 +15189,7 @@ function carregarDash(){
   const alertaEl=document.getElementById("alerta-ritmo");
   if(proj){
     let msg="",sub="";
-    if(pProjMes>=120){msg=`${sf.icone} Ritmo EXCELENTE! Projecao: ${fmt(proj.projecao)} — pode bater a Super Meta!`;sub=`Media diaria: ${fmt(proj.mediaD)} | Dias uteis restantes: ${proj.dr}`;}
+    if(pProjMes>=(_ehVisaoRede ? _superPctRede() : _superPctLoja(_lidEfetivo))){msg=`${sf.icone} Ritmo EXCELENTE! Projecao: ${fmt(proj.projecao)} — pode bater a Super Meta!`;sub=`Media diaria: ${fmt(proj.mediaD)} | Dias uteis restantes: ${proj.dr}`;}
     else if(pProjMes>=100){msg=`${sf.icone} No ritmo certo! Projecao: ${fmt(proj.projecao)} de ${fmt(metaMesRef)}`;sub=`Continue assim! Faltam ${proj.dr} dias uteis.`;}
     else if(pProjMes>=70){msg=`${sf.icone} Atencao: projecao de ${fmt(proj.projecao)} vs meta ${fmt(metaMesRef)}`;sub=`Precisa vender ${fmt(Math.ceil((metaMesRef-realMes)/proj.dr))} por dia nos ${proj.dr} dias restantes.`;}
     else{msg=`${sf.icone} Alerta! Projetado ${fmt(proj.projecao)} — abaixo da meta de ${fmt(metaMesRef)}`;sub=`Precisa de ${fmt(Math.ceil((metaMesRef-realMes)/proj.dr))}/dia nos ${proj.dr} dias uteis restantes. Acao imediata!`;}
@@ -14999,7 +15275,7 @@ function carregarDash(){
 function setBar(id,pct,real,meta,superMeta){
   const pEl=document.getElementById("p"+id); if(pEl) pEl.textContent=Math.min(pct,100).toFixed(1)+"%";
   const b=document.getElementById("b"+id);
-  if(b){const pctVis=Math.min(100,pct);b.style.width=pctVis+"%";b.className="pfill"+(pct>=120?" roxo":pct>=100?" g":pct<50?" r":"");}
+  if(b){const pctVis=Math.min(100,pct);b.style.width=pctVis+"%";b.className="pfill"+(pct>=_superPctDe(meta,superMeta)?" roxo":pct>=100?" g":pct<50?" r":"");}
   const vals={d:["pvd1","pvd2"],s:["pvs1","pvs2"],m:["pvm1","pvm2"]}[id];
   if(vals){const e0=document.getElementById(vals[0]),e1=document.getElementById(vals[1]);if(e0)e0.textContent=fmt(real)+" realizado";if(e1)e1.textContent="Meta "+fmt(meta)+" | Super "+fmt(superMeta);}
   // Semaforo
@@ -15023,7 +15299,7 @@ function gerarDicas(v,m,pD){
   const proj=(_lidD ? calcProjecao(_lidD) : (isAdmin() ? calcProjecaoRede() : calcProjecao(lid2)));
   const mRef=isAdmin()?LOJAS.reduce((s,l)=>s+(getMetas(l.id).mes||0),0):(m.mes||0);
   const pProjMes=proj&&mRef>0?proj.projecao/mRef*100:pD;
-  if(pProjMes>=120) ds.push({c:"var(--verde)",t:"<strong>Ritmo de Super Meta!</strong> Continue o foco e vai superar os 125% da meta!"});
+  if(pProjMes>=(isAdmin()?_superPctRede():_superPctLoja(lid2))) ds.push({c:"var(--verde)",t:"<strong>Ritmo de Super Meta!</strong> Continue o foco e vai bater a Super Meta!"});
   else if(pProjMes>=100) ds.push({c:"var(--verde)",t:`<strong>No ritmo certo!</strong> Projecao de ${fmt(proj?.projecao||0)} — meta no caminho.`});
   else if(pProjMes>=70)  ds.push({c:"var(--ouro)",t:`<strong>Atencao:</strong> precisa de ${fmt(proj?Math.ceil((m.mes-calcMes(lojaId()))/proj.dr):0)}/dia para bater a meta.`});
   else                   ds.push({c:"var(--verm)",t:`<strong>Ritmo critico!</strong> Requer acao imediata para atingir a meta mensal.`});
@@ -15044,8 +15320,8 @@ function renderRankHoje(){
   const r=lojasRank.map(l=>{const m=getMetas(l.id),v=calcDia(l.id);return{...l,v,m:m.dia,sm:m.superDia,pct:m.dia>0?v/m.dia*100:0};}).sort((a,b)=>b.pct-a.pct||b.v-a.v);
   const max=r[0]?.v||1,cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-hoje").innerHTML=r.map((l,i)=>{
-    const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
-    const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
+    const c=l.pct>=_superPctDe(l.m,l.sm)?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
+    const badge=l.pct>=_superPctDe(l.m,l.sm)?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
     return `<div class="ritem"><div class="rpos ${cls[i]}">${i+1}</div><div class="rinfo"><div class="rn">${l.nome} ${badge}</div><div class="rv">${l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="width:${max>0?l.v/max*100:0}%;background:${c}"></div></div><div class="rpct" style="color:${c}">${l.pct.toFixed(0)}%</div></div></div>`;
   }).join("");
 }
@@ -15176,12 +15452,12 @@ function renderPainelDia(){
               : (Number(v.superMetaMes)||0);
           const pct = meta>0 ? val/meta*100 : 0;
           const pctSuper = superMeta>0 ? val/superMeta*100 : 0;
-          const cor = pct>=125?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
+          const cor = pct>=_superPctDe(meta,superMeta)?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
           const tm = calcTMVend(v.id, per==='hoje'?'dia':per==='semana'?'semana':'mes');
           const gapV = val - meta;
           const corGapV = gapV>=0?"var(--verde)":"var(--verm)";
           const _lblPer = per==='hoje'?'Dia':per==='semana'?'Semana':'Mês';
-          return `<div style="background:var(--card2);border:1px solid ${pct>=125?'rgba(139,92,246,.4)':pct>=100?'rgba(46,204,135,.3)':pct>=70?'rgba(201,168,76,.2)':'var(--borda)'};border-radius:12px;padding:14px">
+          return `<div style="background:var(--card2);border:1px solid ${pct>=_superPctDe(meta,superMeta)?'rgba(139,92,246,.4)':pct>=100?'rgba(46,204,135,.3)':pct>=70?'rgba(201,168,76,.2)':'var(--borda)'};border-radius:12px;padding:14px">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
               <div>
                 <div style="font-size:13px;font-weight:700;color:var(--texto)">${v.nome}</div>
@@ -15513,7 +15789,7 @@ function atualizarCardVend(id, val, meta_dia){
   const v=parseBR(val)||0;
   if(v===0){el.textContent="—";return;}
   const pct=meta_dia>0?v/meta_dia*100:0;
-  const cor=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
+  const cor=pct>=_superPctVend(id)?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
   el.innerHTML=`<span style="color:${cor};font-weight:600">${pct.toFixed(0)}% da meta dia</span>`;
 }
 
@@ -15982,7 +16258,9 @@ function renderConsolidadoLanc(lid){
   const du=diasUteisNoMes()||1;
   const idealSem=(m.mes||0)/du*diasSem;
   const periodos=[
-    {label:"Hoje",     fat:calcDia(lidReal), nat:calcNAtend(lidReal,"dia"),    meta:idealDia, ideal:idealDia, sup:m.superDia},
+    // [R163] a meta de hoje é a progressiva; a super acompanha pela mesma
+    // proporção super÷meta da loja — a diária fixa não conversava com ela
+    {label:"Hoje",     fat:calcDia(lidReal), nat:calcNAtend(lidReal,"dia"),    meta:idealDia, ideal:idealDia, sup:idealDia*_superPctDe(m.mes,m.superMes)/100},
     {label:"Semana",   fat:calcSem(lidReal), nat:calcNAtend(lidReal,"semana"), meta:m.sem,    ideal:idealSem, sup:m.superSem},
     {label:"Este Mês", fat:calcMes(lidReal), nat:calcNAtend(lidReal,"mes"),    meta:m.mes,    ideal:m.mes,    sup:m.superMes},
   ];
@@ -15991,7 +16269,7 @@ function renderConsolidadoLanc(lid){
     const pct=p.meta>0?p.fat/p.meta*100:0;
     const gap=p.fat-(p.ideal||0);
     const corGap=gap>=0?"var(--verde)":"var(--verm)";
-    const cor=pct>=125?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":p.fat>0?"var(--verm)":"var(--muted)";
+    const cor=pct>=_superPctDe(p.meta,p.sup)?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":p.fat>0?"var(--verm)":"var(--muted)";
     return "<div style='background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:14px'>"
       +"<div style='font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;text-align:center'>"+p.label+"</div>"
       +"<div style='font-size:18px;font-weight:700;color:"+cor+";text-align:center;margin-bottom:2px'>"+fmt(p.fat)+"</div>"
@@ -16298,7 +16576,7 @@ function renderMetas(){
   document.getElementById("m-per").textContent=lbl;
   document.getElementById("m-real").textContent=fmt(real);
   document.getElementById("m-rpct").textContent=pct.toFixed(0)+"%";
-  document.getElementById("m-rpct").className="kbadge "+(pct>=120?"roxo":pct>=100?"up":pct>=70?"warn":"dn");
+  document.getElementById("m-rpct").className="kbadge "+(pct>=_superPctDe(meta,superMeta)?"roxo":pct>=100?"up":pct>=70?"warn":"dn");
   document.getElementById("m-gap").textContent=fmt(Math.abs(gap));
   document.getElementById("m-gap-s").textContent=gap>=0?"Acima da meta!":"Faltam "+fmt(Math.abs(gap));
 
@@ -16352,7 +16630,7 @@ function renderMetas(){
   // Usar projeção para o alerta (igual ao dashboard) — mais preciso que % realizado
   const pProj = proj && meta>0 ? proj.projecao/meta*100 : pct;
   const drLabel = proj?.dr>0 ? ` · ${proj.dr} dias úteis restantes` : "";
-  if(pProj>=125) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">🏆</div><div class="alerta-txt"><strong>Ritmo de Super Meta! Projeção: ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
+  if(pProj>=_superPctDe(meta,superMeta)) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">🏆</div><div class="alerta-txt"><strong>Ritmo de Super Meta! Projeção: ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
   else if(pProj>=100) alertaEl.innerHTML=`<div class="alerta-box verde"><div class="alerta-icon">✅</div><div class="alerta-txt"><strong>No ritmo certo! Projeção: ${fmt(proj?.projecao||0)} de ${fmt(meta)} (${pProj.toFixed(0)}%)</strong>${drLabel}</div></div>`;
   else if(pProj>=70) alertaEl.innerHTML=`<div class="alerta-box amarelo"><div class="alerta-icon">⚠️</div><div class="alerta-txt"><strong>Atenção: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
   else if(real>0) alertaEl.innerHTML=`<div class="alerta-box vermelho"><div class="alerta-icon">🔴</div><div class="alerta-txt"><strong>Ritmo crítico: projeção de ${fmt(proj?.projecao||0)} (${pProj.toFixed(0)}% da meta).</strong> Necessário ${fmt(proj?.dr>0?(meta-real)/proj.dr:0)}/dia${drLabel}</div></div>`;
@@ -16365,8 +16643,8 @@ function renderMetas(){
         gsm=[superDia, superSem, superMes_];
   document.getElementById("gap-anal").innerHTML=gls.map((l,i)=>{
     const p=gms[i]>0?gvs[i]/gms[i]*100:0, g2=gvs[i]-gms[i];
-    const c=p>=120?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":gvs[i]>0?"var(--verm)":"var(--muted)";
-    const badge=p>=120?'<span style="font-size:9px;background:rgba(139,92,246,.2);color:var(--roxo);padding:2px 6px;border-radius:10px;margin-left:6px">SUPER!</span>':
+    const c=p>=_superPctDe(gms[i],gsm[i])?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":gvs[i]>0?"var(--verm)":"var(--muted)";
+    const badge=p>=_superPctDe(gms[i],gsm[i])?'<span style="font-size:9px;background:rgba(139,92,246,.2);color:var(--roxo);padding:2px 6px;border-radius:10px;margin-left:6px">SUPER!</span>':
                 p>=100?'<span style="font-size:9px;background:rgba(46,204,135,.2);color:var(--verde);padding:2px 6px;border-radius:10px;margin-left:6px">META ✓</span>':"";
     return `<div style="padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
@@ -16403,7 +16681,7 @@ function renderMetas(){
       const rLoja=_tabMeta==="dia"?calcDia(lj.id):_tabMeta==="semana"?calcSem(lj.id):calcMes(lj.id);
       const mLoja=_tabMeta==="dia"?getMetas(lj.id).dia:_tabMeta==="semana"?getMetas(lj.id).sem:getMetas(lj.id).mes;
       const pLoja=mLoja>0?rLoja/mLoja*100:0;
-      const cLoja=pLoja>=120?"var(--roxo)":pLoja>=100?"var(--verde)":pLoja>=70?"var(--ouro)":rLoja>0?"var(--verm)":"var(--muted)";
+      const cLoja=pLoja>=_superPctLoja(lj.id)?"var(--roxo)":pLoja>=100?"var(--verde)":pLoja>=70?"var(--ouro)":rLoja>0?"var(--verm)":"var(--muted)";
       html+=`<div style="margin-bottom:12px;background:var(--card2);border:1px solid var(--borda);border-radius:10px;overflow:hidden">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--borda)">
           <span style="font-size:12px;font-weight:700;color:var(--ouro)">${lj.nome}</span>
@@ -16415,7 +16693,7 @@ function renderMetas(){
           const _swRM=semanaDoMes(hoje());
           const mv=_tabMeta==="dia"?metaDiaProgressivaVend(v.id,hoje()):_tabMeta==="semana"?metaSemanaProgressivaVend(v.id,_swRM):Number(v.metaMes)||0;
           const pv=mv>0?vm/mv*100:0;
-          const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
+          const cv=pv>=_superPctVend(v.id)?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)">
             <span style="font-size:11px;color:var(--texto)">${v.nome}</span>
             <div style="text-align:right">
@@ -16436,7 +16714,7 @@ function renderMetas(){
           ? metaSemanaProgressivaVend(v.id, semanaDoMes(hoje()))
           : Number(v.metaMes)||0;
       const pv=metaVend>0?vm/metaVend*100:0;
-      const cv=pv>=120?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
+      const cv=pv>=_superPctVend(v.id)?"var(--roxo)":pv>=100?"var(--verde)":pv>=70?"var(--ouro)":vm>0?"var(--verm)":"var(--muted)";
       const metaLabel=_tabMeta==="dia"?"Meta dia":_tabMeta==="semana"?"Meta sem":"Meta mês";
       return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -16464,7 +16742,7 @@ function renderMetas(){
         const mt=_tabMeta==="dia"?ml.dia:_tabMeta==="semana"?ml.sem:ml.mes;
         const sm=_tabMeta==="dia"?ml.superDia:_tabMeta==="semana"?ml.superSem:ml.superMes;
         const pl=mt>0?rl/mt*100:0;
-        const cl=pl>=120?"var(--roxo)":pl>=100?"var(--verde)":pl>=70?"var(--ouro)":rl>0?"var(--verm)":"var(--muted)";
+        const cl=pl>=_superPctDe(mt,sm)?"var(--roxo)":pl>=100?"var(--verde)":pl>=70?"var(--ouro)":rl>0?"var(--verm)":"var(--muted)";
         const nv=vendsAtivas(l.id).length;   // [R158] headcount sem o VR Líder Loja
         totalReal+=rl; totalMeta+=mt;
         return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
@@ -16484,7 +16762,7 @@ function renderMetas(){
         </div>`;
       }).join("");
       const pTotal=totalMeta>0?totalReal/totalMeta*100:0;
-      const cTotal=pTotal>=120?"var(--roxo)":pTotal>=100?"var(--verde)":pTotal>=70?"var(--ouro)":"var(--verm)";
+      const cTotal=pTotal>=_superPctRede()?"var(--roxo)":pTotal>=100?"var(--verde)":pTotal>=70?"var(--ouro)":"var(--verm)";
       elRede.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-bottom:8px;border-bottom:2px solid rgba(201,168,76,.3)">
           <span style="font-size:11px;font-weight:700;color:var(--ouro)">TOTAL REDE</span>
           <div style="text-align:right">
@@ -17206,7 +17484,7 @@ function toggleFormVend(){
 function prevMetaVend(val){
   const mes=parseBR(val)||0;
   if(mes>0){
-    const auto=calcMetasAuto(mes,150,mes*1.255);
+    const auto=calcMetasAuto(mes,150,mes*window.SUPER_META_PADRAO);
     document.getElementById("prev-meta-vend").style.display="block";
     document.getElementById("prev-sem-vend").textContent="Semanal: "+fmt(auto.sem);
     document.getElementById("prev-dia-vend").textContent="Diaria: "+fmt(auto.dia);
@@ -17235,7 +17513,7 @@ function salvarVend(){
   const vendsAtual=window.vendsDoMesMeta(lid, mesAtual());   // [R158] os mesmos que salvarMetaLoja reparte: sem VRLL e sem arquivadas
   const novoTotal=vendsAtual.length+1;
   const metaMesAuto = metaLoja.mes>0 ? parseFloat((metaLoja.mes/novoTotal).toFixed(2)) : 0;
-  const superMetaMesAuto = metaLoja.superMes>0 ? parseFloat((metaLoja.superMes/novoTotal).toFixed(2)) : parseFloat((metaMesAuto*1.255).toFixed(2));
+  const superMetaMesAuto = metaLoja.superMes>0 ? parseFloat((metaLoja.superMes/novoTotal).toFixed(2)) : parseFloat((metaMesAuto*window.SUPER_META_PADRAO).toFixed(2));
   // Redistribuir entre as existentes
   // [R148] Cadastrar alguém redistribui a meta DO MÊS CORRENTE. Mexer nos
   // meses passados aqui reescreveria história por causa de uma contratação.
@@ -17830,11 +18108,11 @@ function renderVendRanking(per){
   document.getElementById("vend-ranking").innerHTML=vends.length?vends.map((v,i)=>{
     const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0;
     const spct=v.superPerV>0?v.val/v.superPerV*100:0;
-    const c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
+    const c=pct>=_superPctDe(v.metaPerV,v.superPerV)?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--verm)";
     const medal=["🥇","🥈","🥉"][i]||(i+1);
-    const badge=pct>=120?'<span class="sbadge roxo">Super!</span>':pct>=100?'<span class="sbadge ok">Meta!</span>':"";
+    const badge=pct>=_superPctDe(v.metaPerV,v.superPerV)?'<span class="sbadge roxo">Super!</span>':pct>=100?'<span class="sbadge ok">Meta!</span>':"";
     const projecaoV=per==="mes"?calcProjecao_vend(v.id):"";
-    return `<div style="background:var(--card2);border:1px solid ${pct>=100?"rgba(46,204,135,.2)":pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:10px;padding:14px;transition:all .2s">
+    return `<div style="background:var(--card2);border:1px solid ${pct>=100?"rgba(46,204,135,.2)":pct>=_superPctDe(v.metaPerV,v.superPerV)?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:10px;padding:14px;transition:all .2s">
       <div style="font-size:22px;margin-bottom:4px">${medal}</div>
       <div style="font-size:13px;font-weight:600">${v.nome} ${badge}</div>
       <div style="font-size:10px;color:var(--muted);margin-bottom:8px">${loja?.nome||v.loja}</div>
@@ -17905,7 +18183,7 @@ function renderTabelaVend(){
     }
     const vm=calcVendPer(v.id,"mes");
     const pct=v.metaMes>0?vm/v.metaMes*100:0;
-    const cls=pct>=120?"roxo":pct>=100?"ok":pct>=70?"warn":"bad";
+    const cls=pct>=_superPctDe(v.metaMes,v.superMetaMes)?"roxo":pct>=100?"ok":pct>=70?"warn":"bad";
     const proj=calcProjecao_vend(v.id);
     const projPct=proj&&v.metaMes>0?proj/v.metaMes*100:0;
     const projC=projPct>=100?"var(--verde)":projPct>=70?"var(--ouro)":"var(--verm)";
@@ -18192,7 +18470,7 @@ function renderRankComissao(){
     <div style="overflow-x:auto"><table class="dtable">
       <thead><tr><th>#</th><th>Vendedor(a)</th><th>Cargo</th><th>Loja</th><th>Vendas Mes</th><th>% Meta</th><th>Taxa</th><th>Bonus Prod</th><th>Comissao</th></tr></thead>
       <tbody>${ranked.map((v,i)=>{
-        const c=v.pct>=120?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--verm)";
+        const c=v.pct>=(v.cargo==='VRLL'?_superPctLoja(v.loja):_superPctVend(v.id))?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--verm)";
         const tbl=getComConfig(v.cargo||'ESP');
         return `<tr><td>${["🥇","🥈","🥉"][i]||i+1}</td><td><strong>${v.nome}</strong></td><td style="font-size:10px;color:var(--muted)">${tbl.nome}</td><td style="font-size:11px;color:var(--muted)">${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja}</td><td>${fmt(v.vm)}</td><td style="color:${c};font-weight:700">${v.pct.toFixed(0)}%</td><td>${v.taxa}%</td><td style="color:var(--laranja)">${v.bonus_prod>0?fmt(v.bonus_prod):"—"}</td><td style="font-weight:700;color:var(--ouro)">${fmt(v.comissao)}</td></tr>`;
       }).join("")}</tbody>
@@ -18340,7 +18618,7 @@ function renderSemana(){
     total += v; diasCount++;
 
     const pct = metaDia>0 ? v/metaDia*100 : 0;
-    const cor = v===0 ? 'var(--muted)' : pct>=120 ? 'var(--roxo)' : pct>=100 ? 'var(--verde)' : pct>=70 ? 'var(--ouro)' : 'var(--verm)';
+    const cor = v===0 ? 'var(--muted)' : pct>=(_adm?_superPctRede():_superPctLoja(lid)) ? 'var(--roxo)' : pct>=100 ? 'var(--verde)' : pct>=70 ? 'var(--ouro)' : 'var(--verm)';
     const isHj = ds===hj;
     const falta = metaDia>0 && v<metaDia ? metaDia-v : 0;
 
@@ -18373,7 +18651,7 @@ function renderSemana(){
   const necessarioPorDia = faltaSem>0 && diasRestSem>0 ? faltaSem/diasRestSem : 0;
 
   const ds2 = [];
-  if(pctS>=120) ds2.push({c:'var(--roxo)',t:`<strong>Super meta da semana! ${pctS.toFixed(0)}%</strong> — Excelente desempenho!`});
+  if(pctS>=(_adm?_superPctRede():_superPctLoja(lid))) ds2.push({c:'var(--roxo)',t:`<strong>Super meta da semana! ${pctS.toFixed(0)}%</strong> — Excelente desempenho!`});
   else if(pctS>=100) ds2.push({c:'var(--verde)',t:`<strong>Meta semanal atingida! ${pctS.toFixed(0)}%</strong> 🎉`});
   else if(pctS>=60) ds2.push({c:'var(--ouro)',t:`<strong>Semana em andamento (${pctS.toFixed(0)}%).</strong> Foca nos próximos dias!`});
   else ds2.push({c:'var(--verm)',t:`<strong>Semana crítica (${pctS.toFixed(0)}%).</strong> Esforço extra necessário!`});
@@ -18460,13 +18738,13 @@ function renderLojas(per="hoje"){
       }).join('')}</div></div>`;
   };
   document.getElementById("lojas-grid").innerHTML=ld.map((l,i)=>{
-    const c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
-    const badge=l.pct>=120?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
-    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=120?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span>${isAdmin()?`<button onclick="event.stopPropagation();arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer" title="Arquivar loja">📦</button>`:''}</div></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
+    const c=l.pct>=_superPctDe(l.meta,l.smeta)?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":l.v>0?"var(--verm)":"var(--muted)";
+    const badge=l.pct>=_superPctDe(l.meta,l.smeta)?'<span class="sbadge roxo">Super!</span>':l.pct>=100?'<span class="sbadge ok">Meta!</span>':"";
+    return `<div style="background:var(--card);border:1px solid ${l.pct>=100?"rgba(46,204,135,.2)":l.pct>=_superPctDe(l.meta,l.smeta)?"rgba(139,92,246,.2)":"var(--borda)"};border-radius:12px;padding:16px;transition:all .2s"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:12px;font-weight:600">${l.nome} ${badge}</div><div style="font-size:9px;color:var(--muted)">${l.cnpj}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font-size:18px">${["🥇","🥈","🥉"][i]||""}</span>${isAdmin()?`<button onclick="event.stopPropagation();arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:9px;cursor:pointer" title="Arquivar loja">📦</button>`:''}</div></div><div style="font-family:Playfair Display,serif;font-size:22px;font-weight:700;color:${c}">${l.pct.toFixed(0)}%</div><div style="height:4px;background:var(--cinza);border-radius:4px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:4px"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${l.pct>=100?'✅ Meta!'  :l.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</span></div></div>`;
   }).join("") + _renderArquivadas();
   const cls=["r1","r2","r3","rx","rx","rx","rx"];
   document.getElementById("rank-lojas").innerHTML=ld.map((l,i)=>{
-    const max=ld[0].v||1, c=l.pct>=120?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
+    const max=ld[0].v||1, c=l.pct>=_superPctDe(l.meta,l.smeta)?"var(--roxo)":l.pct>=100?"var(--verde)":l.pct>=70?"var(--ouro)":"var(--verm)";
     // Hora do último lançamento hoje
     const ultTs = D.vendas[l.id]?.[hoje()]?.ts;
     const ultHora = ultTs ? new Date(ultTs).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : "—";
@@ -18474,7 +18752,7 @@ function renderLojas(per="hoje"){
     const proj2 = calcProjecao(l.id);
     const mMes  = getMetas(l.id).mes;
     const pProj = proj2&&mMes>0 ? proj2.projecao/mMes*100 : l.pct;
-    const alertaTxt = pProj>=120?"🏆 Super Meta!" : pProj>=100?"✅ No ritmo" : pProj>=70?"⚠️ Acelerar" : "🔴 Crítico";
+    const alertaTxt = pProj>=_superPctLoja(l.id)?"🏆 Super Meta!" : pProj>=100?"✅ No ritmo" : pProj>=70?"⚠️ Acelerar" : "🔴 Crítico";
     const alertaCor = pProj>=100?"var(--verde)" : pProj>=70?"var(--ouro)" : "var(--verm)";
     // Soma das vendedoras hoje
     const somavv = vendsAtivas(l.id)
@@ -18490,7 +18768,7 @@ function renderLojas(per="hoje"){
           <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${c};border-radius:3px"></div>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
-          <span>${l.pct>=120?'🏆 Super Meta!':l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}</span>
+          <span>${l.pct>=_superPctDe(l.meta,l.smeta)?'🏆 Super Meta!':l.pct>=100?'✅ Meta!':l.pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}</span>
         </div>
         
         <div style="font-size:9px;color:var(--muted);margin-top:2px">📍 último lançamento: <strong>${ultHora}</strong></div>
@@ -18516,7 +18794,7 @@ function renderLojas(per="hoje"){
     return {...v, val:_val, pct:_pct, metaPer:_metaPer};
   }).sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,10);
   document.getElementById("rank-vend-rede").innerHTML=allVends.length?allVends.map((v,i)=>{
-    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0,c=pct>=120?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
+    const loja=LOJAS.find(l=>l.id===v.loja),pct=v.pct||0,c=pct>=_superPctVend(v.id)?"var(--roxo)":pct>=100?"var(--verde)":pct>=70?"var(--ouro)":"var(--muted)";
     return `<div class="ritem"><div class="rpos ${["r1","r2","r3","rx","rx","rx","rx","rx","rx","rx"][i]}">${["🥇","🥈","🥉"][i]||i+1}</div><div class="rinfo"><div class="rn">${v.nome}</div><div class="rv">${loja?.nome||v.loja}</div></div><div class="rbar"><div class="rbarb"><div class="rbarf" style="background:${c}"></div></div><div class="rpct" style="color:${c}">${pct.toFixed(0)}%</div></div></div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px;padding:8px'>Sem lancamentos.</div>";
 }
@@ -18612,6 +18890,9 @@ function fecharFormNovoProd(){
   const pv=document.getElementById('nprod-preco'); if(pv) pv.value='0';
 }
 function salvarNovoProd(){
+  // [R162] estoque é da rede e só o admin grava o principal — a loja
+  // ajustava, e o pull desfazia em ~60 s. A tela já esconde; isto é a trava.
+  if(!isAdmin()){ showToast('Só o administrador ajusta o estoque.','err'); return; }
   const cod   = document.getElementById('nprod-cod').value.trim();
   const nome  = document.getElementById('nprod-nome').value.trim().toUpperCase();
   const grupo = document.getElementById('nprod-grupo').value.trim().toUpperCase();
@@ -18668,6 +18949,9 @@ function buscarProdSaldo(q){
 
 // [R43] Atualizar PREÇO de um produto (admin) — persiste em D.precosOverride
 function atualizarPrecoProd(cod, valorStr){
+  // [R162] estoque é da rede e só o admin grava o principal — a loja
+  // ajustava, e o pull desfazia em ~60 s. A tela já esconde; isto é a trava.
+  if(!isAdmin()){ showToast('Só o administrador ajusta o estoque.','err'); return; }
   const novoPreco = parseFloat(String(valorStr).replace(',','.'));
   if(isNaN(novoPreco) || novoPreco < 0){ showToast('Preço inválido','err'); return; }
   const idx = PRODUTOS.findIndex(p=>p.c===cod);
@@ -18690,6 +18974,9 @@ function popularFiltroLinhas(){
 }
 
 function atualizarSaldoProd(cod){
+  // [R162] estoque é da rede e só o admin grava o principal — a loja
+  // ajustava, e o pull desfazia em ~60 s. A tela já esconde; isto é a trava.
+  if(!isAdmin()){ showToast('Só o administrador ajusta o estoque.','err'); return; }
   const input = document.getElementById('saldo-input-'+cod);
   if(!input) return;
   const novoSaldo = parseInt(input.value);
@@ -21047,7 +21334,7 @@ function renderMetasLojas(){
     const pM=m.mes>0?Math.min(100,rM/m.mes*100):0;
     const cor=pM>=100?"var(--verde)":pM>=70?"var(--ouro)":"var(--verm)";
     const nv=vendsAtivas(loja.id).length;
-    const miniB=(lbl,r,mt,sm)=>{const p=mt>0?Math.min(120,r/mt*100):0,c=p>=120?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":r>0?"var(--verm)":"var(--muted)";return`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px"><span style="color:var(--muted)">${lbl}</span><span style="color:${c};font-weight:600">${fmt(r)} / ${fmtK(mt)} (${p.toFixed(0)}%)</span></div><div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden"><div style="width:${Math.min(100,p)}%;height:100%;background:${c};border-radius:3px"></div></div></div>`;};
+    const miniB=(lbl,r,mt,sm)=>{const p=mt>0?Math.min(200,r/mt*100):0,c=p>=_superPctDe(mt,sm)?"var(--roxo)":p>=100?"var(--verde)":p>=70?"var(--ouro)":r>0?"var(--verm)":"var(--muted)";return`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px"><span style="color:var(--muted)">${lbl}</span><span style="color:${c};font-weight:600">${fmt(r)} / ${fmtK(mt)} (${p.toFixed(0)}%)</span></div><div style="height:3px;background:var(--cinza);border-radius:3px;overflow:hidden"><div style="width:${Math.min(100,p)}%;height:100%;background:${c};border-radius:3px"></div></div></div>`;};
     return`<div style="background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div>
@@ -21153,7 +21440,7 @@ function calcPrevLoja(lid){
   // BUG 3 FIX: só preencher se campo estiver vazio E não foi editado manualmente
   const smesEl = document.getElementById("ml-smes-"+lid);
   if(smesEl && mes>0){
-    const autoSM = parseFloat((mes*1.25).toFixed(2));
+    const autoSM = parseFloat((mes*window.SUPER_META_PADRAO).toFixed(2));
     const campoVazio = !smesEl.value || smesEl.value==="0" || smesEl.value==="";
     const editadoManualmente = smesEl.dataset.manual === '1';
     if(campoVazio && !editadoManualmente){
@@ -21161,7 +21448,7 @@ function calcPrevLoja(lid){
     }
     smesEl.placeholder = "Auto: "+autoSM.toLocaleString("pt-BR",{minimumFractionDigits:2});
   }
-  const smes   = parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
+  const smes   = parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*window.SUPER_META_PADRAO);
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   const prev   = document.getElementById("ml-prev-"+lid);
   if(mes<=0){if(prev)prev.style.display="none";return;}
@@ -21228,7 +21515,7 @@ function salvarMetasVendedoras(lid){
     const diasEl=document.getElementById("mv-dias-"+v.id);
     if(!mesEl) return;
     const mes=parseBR(mesEl.value)||0;
-    const smes=parseBR(smesEl?.value)||Math.round(mes*1.255);
+    const smes=parseBR(smesEl?.value)||Math.round(mes*window.SUPER_META_PADRAO);
     const ticket=parseBR(tickEl?.value)||350;
     const aniv=parseInt(anivEl?.value)||0;
     const inativ=parseInt(inativEl?.value)||0;
@@ -21373,7 +21660,7 @@ window.redistribuirPorDiasTrab = function(lid){
     const elM = document.getElementById('mv-mes-' + v.id);
     if(elM){ elM.value = meta; elM.dataset.manual = '1'; }
     const elS = document.getElementById('mv-smes-' + v.id);
-    if(elS && !elS.value){ elS.value = Math.round(meta * 1.25); }
+    if(elS && !elS.value){ elS.value = Math.round(meta * window.SUPER_META_PADRAO); }
     window._previewMetaPorDias(v.id, lid);
   });
   const metaLoja = (metaDoMes(lid, mr).valor) || 0;
@@ -21493,7 +21780,7 @@ function redistribuirMetaVends(lid){
   // campos que ela editou manualmente antes. Também limpa dataset.manual
   // para que a distribuição volte a valer.
   const mes = parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
-  const smes= parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*1.255);
+  const smes= parseBR(document.getElementById("ml-smes-"+lid)?.value)||Math.round(mes*window.SUPER_META_PADRAO);
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||250;
   if(mes<=0){ showToast("Preencha a meta da loja primeiro!","err"); return; }
   // [R151] Os MESMOS vendedores que o formulário desenhou. Num mês passado
@@ -21531,7 +21818,7 @@ function salvarMetaLoja(lid){
   const mes=parseBR(document.getElementById("ml-mes-"+lid)?.value)||0;
   console.log("[salvarMetaLoja] INICIO", {lid, mes_raw: document.getElementById("ml-mes-"+lid)?.value, mes_parsed: mes});
   if(mes<=0){showToast("Informe a meta mensal!","err");return;}
-  const smes  = parseBR(document.getElementById("ml-smes-"+lid)?.value)||parseFloat((mes*1.255).toFixed(2));
+  const smes  = parseBR(document.getElementById("ml-smes-"+lid)?.value)||parseFloat((mes*window.SUPER_META_PADRAO).toFixed(2));
   const ticket= parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   if(!D.metasLoja[lid]) D.metasLoja[lid]={};
   const _mr = _mesMeta||mesAtual();
@@ -21563,7 +21850,7 @@ function salvarMetaLoja(lid){
       const inativEl= document.getElementById("mv-inativ-"+v.id);
       if(!mesEl) return;
       const mv   = parseBR(mesEl.value)||0;
-      const smv  = parseBR(smesEl?.value)||Math.round(mv*1.255);
+      const smv  = parseBR(smesEl?.value)||Math.round(mv*window.SUPER_META_PADRAO);
       const tick = parseBR(tickEl?.value)||350;
       const aniv = parseInt(anivEl?.value)||0;
       const inat = parseInt(inativEl?.value)||0;
@@ -21689,7 +21976,7 @@ function salvarTodasMetas(){
   LOJAS.forEach(loja=>{
     const mes=parseBR(document.getElementById("ml-mes-"+loja.id)?.value)||0;
     if(mes>0){
-      const smes=parseBR(document.getElementById("ml-smes-"+loja.id)?.value)||Math.round(mes*1.255);
+      const smes=parseBR(document.getElementById("ml-smes-"+loja.id)?.value)||Math.round(mes*window.SUPER_META_PADRAO);
       const ticket=parseBR(document.getElementById("ml-ticket-"+loja.id)?.value)||150;
       // [FIX CRÍTICO] Usar estrutura {mesRef: meta} — não substituir tudo
       // Antes: D.metasLoja[loja.id] = calcMetasAuto() destruía meses anteriores
@@ -21726,7 +22013,7 @@ function atualizaResumoRede(){
   let tM=0,tSM=0,tS=0,tD=0,tT=0;
   LOJAS.forEach(l=>{
     const mes=parseBR(document.getElementById("ml-mes-"+l.id)?.value)||getMetas(l.id).mes||0;
-    const smes=parseBR(document.getElementById("ml-smes-"+l.id)?.value)||getMetas(l.id).superMes||Math.round(mes*1.255);
+    const smes=parseBR(document.getElementById("ml-smes-"+l.id)?.value)||getMetas(l.id).superMes||Math.round(mes*window.SUPER_META_PADRAO);
     const ticket=parseBR(document.getElementById("ml-ticket-"+l.id)?.value)||getMetas(l.id).ticket||150;
     const a=calcMetasAuto(mes,ticket,smes);tM+=a.mes;tSM+=a.superMes;tS+=a.sem;tD+=a.dia;tT+=a.ticket;
   });
@@ -21789,7 +22076,7 @@ function gerarRel(){
   const metaTot=ld.reduce((s,l)=>s+l.meta,0);
   const smTot  =ld.reduce((s,l)=>s+(l.sm||0),0);
   const pctRede=metaTot>0?fatTot/metaTot*100:0;
-  const corRede=pctRede>=125?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)'; const perLabel=isMes?"Mensal":"Semanal";
+  const corRede=pctRede>=_superPctDe(metaTot,smTot)?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)'; const perLabel=isMes?"Mensal":"Semanal";
   const nTot=LOJAS.reduce((s,l)=>s+calcNVendas(l.id,isMes?"mes":"semana"),0);
   const tmRede=nTot>0?fatTot/nTot:0;
   const metaTMRede=LOJAS.reduce((s,l)=>s+(getMetas(l.id).ticket||150),0)/LOJAS.length;
@@ -21844,8 +22131,8 @@ function gerarRel(){
       </div>
       <div style="background:rgba(139,92,246,.07);border:1px solid rgba(139,92,246,.2);border-radius:10px;padding:12px;text-align:center">
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Super Meta</div>
-        <div style="font-size:22px;font-weight:800;color:var(--roxo)">${ld.filter(l=>l.pct>=125).length}</div>
-        <div style="font-size:9px;color:var(--muted)">lojas acima 125%</div>
+        <div style="font-size:22px;font-weight:800;color:var(--roxo)">${ld.filter(l=>l.pct>=_superPctDe(l.meta,l.sm)).length}</div>
+        <div style="font-size:9px;color:var(--muted)">lojas em Super Meta</div>
       </div>
     </div>
 
@@ -21854,7 +22141,7 @@ function gerarRel(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;font-weight:700;color:var(--ouro)">🏆 Atingimento da Meta — Ranking por Loja</div>
         <div style="display:flex;gap:10px;font-size:10px;color:var(--muted)">
-          <span><span style="display:inline-block;width:10px;height:10px;background:#8B5CF6;border-radius:2px;margin-right:3px;vertical-align:middle"></span>125%+</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#8B5CF6;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Super Meta</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#2ECC87;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Meta ✓</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#C9A84C;border-radius:2px;margin-right:3px;vertical-align:middle"></span>70%+</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Abaixo</span>
@@ -21868,7 +22155,7 @@ function gerarRel(){
         var medals = ["🥇","🥈","🥉"];
         var h = '<div style="display:flex;align-items:flex-end;gap:6px;height:'+(BAR_H+90)+'px">';
         ranked.forEach(function(l, i){
-          var corR  = l.pct>=125?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
+          var corR  = l.pct>=_superPctDe(l.meta,l.sm)?"#8B5CF6":l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
           var corP  = l.pct>=100?"#2ECC87":l.pct>=70?"#C9A84C":"#ef4444";
           var hR    = l.pct>0 ? Math.max(8, Math.round(l.pct/ranked[0].pct*BAR_H)) : 6;
           var nome  = nomes[l.nome]||l.nome;
@@ -22024,28 +22311,8 @@ async function tabRankPer(per, el, ctx) {
         const json = await window.fsCarregar();
         if(json){
           const remoto = JSON.parse(json);
-          if(remoto.vendasVend){
-            Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              Object.entries(dias).forEach(([dt,val])=>{
-                const _lvX = D.vendasVend[vid][dt];
-                const _lT = (_lvX && _lvX._savedAt) || 0;
-                const _rT = (val && val._savedAt) || 0;
-                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
-              });
-            });
-          }
-          if(remoto.vendas){
-            Object.entries(remoto.vendas).forEach(([lid,dias])=>{
-              if(!D.vendas[lid]) D.vendas[lid]={};
-              Object.entries(dias).forEach(([dt,val])=>{
-                const _lvY = D.vendas[lid][dt];
-                const _lT2 = (_lvY && _lvY._savedAt) || 0;
-                const _rT2 = (val && val._savedAt) || 0;
-                if(!_lvY || _rT2 > _lT2) D.vendas[lid][dt] = val;
-              });
-            });
-          }
+          // [R162] com a lápide — ver window._mesclarVendasSobDemanda
+          window._mesclarVendasSobDemanda(remoto);
           _persistirLocal();
         }
       }catch(e){ console.warn('[Avatim] tabRankPer ano Firebase:', e.message); }
@@ -22236,7 +22503,7 @@ function renderRankings(tab) {
     const m    = getMetas(l.id);
     const v    = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : per==='ano' ? calcAno(l.id) : calcMes(l.id);
     const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(l.id) : m.mes;
-    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(l.id)*1.2 : m.superMes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(l.id)*_superPctLoja(l.id,'ano')/100 : m.superMes;
     const pct  = meta>0 ? v/meta*100 : 0;
     const tm   = per==='ano' ? calcTMAno(l.id) : calcTMLoja(l.id, perV);
     const nat  = per==='ano' ? calcNAtendAno(l.id) : calcNAtend(l.id, perV);
@@ -22246,28 +22513,28 @@ function renderRankings(tab) {
   const totRede   = ld.reduce((s,l)=>s+l.v, 0);
   const metaTotal = ld.reduce((s,l)=>s+l.meta, 0);
   const pctRede   = metaTotal>0 ? totRede/metaTotal*100 : 0;
-  const cr        = pctRede>=120?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
+  const cr        = pctRede>=_superPctRede(per==='ano'?'ano':undefined)?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
 
   // --- KPIs consolidados ---
   document.getElementById('rank-kpis-rede').innerHTML = `
     <div class="kcard ouro" style="padding:14px"><div class="kl">Total Rede</div><div class="kv" style="font-size:18px">${fmt(totRede)}</div></div>
     <div class="kcard" style="padding:14px;border-color:${cr}"><div class="kl">% da Meta</div><div class="kv" style="font-size:18px;color:${cr}">${pctRede.toFixed(0)}%</div></div>
     <div class="kcard verde" style="padding:14px"><div class="kl">Lojas na Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=100).length}/${LOJAS.length}</div></div>
-    <div class="kcard roxo" style="padding:14px"><div class="kl">Super Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=120).length}</div><div class="ks">lojas acima de 120%</div></div>
+    <div class="kcard roxo" style="padding:14px"><div class="kl">Super Meta</div><div class="kv" style="font-size:18px">${ld.filter(l=>l.pct>=_superPctDe(l.meta,l.sm)).length}</div><div class="ks">lojas em Super Meta</div></div>
     <div class="kcard azul" style="padding:14px"><div class="kl">Melhor Loja</div><div class="kv" style="font-size:14px">${[...ld].sort((a,b)=>b.pct-a.pct)[0]?.nome||'--'}</div></div>
     <div class="kcard verm" style="padding:14px"><div class="kl">Precisa Atencao</div><div class="kv" style="font-size:14px">${[...ld].sort((a,b)=>a.pct-b.pct)[0]?.nome||'--'}</div></div>`;
 
   // --- Podio: top 3 por % da meta ---
   const ldMeta = [...ld].sort((a,b)=>b.pct-a.pct||b.v-a.v);
   document.getElementById('rank-podio-lojas').innerHTML = _buildPodio(ldMeta.slice(0,3), l=>({
-    titulo: l.nome, sub:'', val:'', pct:l.pct, meta:'', sm:''
+    titulo: l.nome, sub:'', val:'', pct:l.pct, meta:'', sm:'', superPct:_superPctDe(l.meta,l.sm)
   }));
 
   // --- Ranking 1: Maior Faturamento Lojas ---
   const ldFat = [...ld].sort((a,b)=>b.v-a.v);
   const maxFat = ldFat[0]?.v||1;
   document.getElementById('rank-full-lojas').innerHTML = ldFat.map((l,i)=>{
-    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const c=l.pct>=_superPctDe(l.meta,l.sm)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
       <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
@@ -22285,7 +22552,7 @@ function renderRankings(tab) {
 
   // --- Ranking 2: Mais Próximo da Meta Lojas ---
   document.getElementById('rank-meta-lojas').innerHTML = ldMeta.map((l,i)=>{
-    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const c=l.pct>=_superPctDe(l.meta,l.sm)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
       <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
@@ -22357,7 +22624,7 @@ function renderRankings(tab) {
   const allVFat = [...allVBase].sort((a,b)=>b.val-a.val).slice(0,10);
   document.getElementById('rank-full-vends-rede').innerHTML = allVFat.length
     ? allVFat.map((v,i)=>{
-        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+        const c=v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
@@ -22379,7 +22646,7 @@ function renderRankings(tab) {
   const maxPct = allVMeta[0]?.pct||1;
   document.getElementById('rank-meta-vends-rede').innerHTML = allVMeta.length
     ? allVMeta.map((v,i)=>{
-        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+        const c=v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
@@ -22495,15 +22762,8 @@ function tabRankPerLoja(per, el){
             const json = await window.fsCarregar();
             if(json){
               const remoto = JSON.parse(json);
-              if(remoto.vendasVend) Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-                if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-                Object.entries(dias).forEach(([dt,val])=>{
-                const _lvX = D.vendasVend[vid][dt];
-                const _lT = (_lvX && _lvX._savedAt) || 0;
-                const _rT = (val && val._savedAt) || 0;
-                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
-              });
-              });
+              // [R162] com a lápide — ver window._mesclarVendasSobDemanda
+              window._mesclarVendasSobDemanda(remoto, {vendas:false});
               _persistirLocal();
             }
           }catch(e){}
@@ -22669,7 +22929,7 @@ function renderRankingLoja() {
   const meta  = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(lid) : m.mes;
   const sm    = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
   const pct   = meta>0 ? vLoja/meta*100 : 0;
-  const cor   = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
+  const cor   = pct>=_superPctLoja(lid,per==='ano'?'ano':undefined)?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
   const perV  = per==='hoje'?'dia':per;
 
   // Header da loja
@@ -22683,12 +22943,12 @@ function renderRankingLoja() {
           <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};border-radius:6px;transition:width .8s"></div>
         </div>
         <div style="font-size:10px;color:var(--muted);margin-top:4px">
-          ${pct>=120?'🏆 Super Meta!':pct>=100?'✅ Meta atingida!':pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}
+          ${pct>=_superPctLoja(lid,per==='ano'?'ano':undefined)?'🏆 Super Meta!':pct>=100?'✅ Meta atingida!':pct>=70?'⚡ Próximo da meta':'🔴 Abaixo da meta'}
         </div>
       </div>
       <div style="text-align:center;padding:0 12px">
         <div style="font-family:Playfair Display,serif;font-size:40px;font-weight:900;color:${cor}">${pct.toFixed(0)}%</div>
-        <div style="font-size:10px;color:var(--muted)">${pct>=120?'SUPER META!':pct>=100?'META ATINGIDA':pct>=70?'Em andamento':'Precisa acelerar'}</div>
+        <div style="font-size:10px;color:var(--muted)">${pct>=_superPctLoja(lid,per==='ano'?'ano':undefined)?'SUPER META!':pct>=100?'META ATINGIDA':pct>=70?'Em andamento':'Precisa acelerar'}</div>
       </div>
     </div>`;
 
@@ -22714,7 +22974,7 @@ function renderRankingLoja() {
         titulo: v.nome, sub: v.lojaNome||'',
         val: '',
         pct: (v.mPer||0)>0?v.val/(v.mPer||1)*100:0,
-        meta: '', sm: ''
+        meta: '', sm: '', superPct: _superPctVend(v.id,per==='ano'?'ano':undefined)
       }))
     : '';
 
@@ -22762,12 +23022,12 @@ function renderRankingLoja() {
     ? vends.map((v,i) => {
         const pct2   = (v.mPer||0)>0?v.val/(v.mPer||1)*100:0;
         const spct   = v.superMetaMes>0?v.val/v.superMetaMes*100:0;
-        const cls2   = pct2>=120?'roxo':pct2>=100?'ok':pct2>=70?'warn':'bad';
-        const c2     = pct2>=120?'var(--roxo)':pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
+        const cls2   = pct2>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'roxo':pct2>=100?'ok':pct2>=70?'warn':'bad';
+        const c2     = pct2>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'var(--roxo)':pct2>=100?'var(--verde)':pct2>=70?'var(--ouro)':'var(--verm)';
         const proj   = calcProjecao_vend(v.id);
         const projPct= proj&&v.metaMes>0?proj/v.metaMes*100:0;
         const pc2    = projPct>=100?'var(--verde)':projPct>=70?'var(--ouro)':'var(--verm)';
-        const status = pct2>=120?'Super Meta!':pct2>=100?'Meta batida!':pct2>=70?'No ritmo':'Atencao';
+        const status = pct2>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'Super Meta!':pct2>=100?'Meta batida!':pct2>=70?'No ritmo':'Atencao';
         return `<tr>
           <td style="font-size:18px;text-align:center">${['🥇','🥈','🥉'][i]||i+1}</td>
           <td><strong>${v.nome}</strong></td>
@@ -22790,9 +23050,9 @@ function renderRankingAdmin() {
     const m    = getMetas(loja.id);
     const vL   = per==='hoje' ? calcDia(loja.id) : per==='semana' ? calcSem(loja.id) : per==='ano' ? calcAno(loja.id) : calcMes(loja.id);
     const meta = per==='hoje' ? m.dia : per==='semana' ? m.sem : per==='ano' ? metaAno(loja.id) : m.mes;
-    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(loja.id)*1.2 : m.superMes;
+    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : per==='ano' ? metaAno(loja.id)*_superPctLoja(loja.id,'ano')/100 : m.superMes;
     const pct  = meta>0 ? vL/meta*100 : 0;
-    const cor  = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':vL>0?'var(--verm)':'var(--muted)';
+    const cor  = pct>=_superPctDe(meta,sm)?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':vL>0?'var(--verm)':'var(--muted)';
 
     const vends = D.vendedoras
       .filter(v=>v.loja===loja.id)
@@ -22820,7 +23080,7 @@ function renderRankingAdmin() {
           ? metaDiaProgressivaVend(v.id, hj)
           : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mvMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})() : _mvMes;
         const pv = _mvPer>0?v.val/_mvPer*100:0;
-        const cv = pv>=120?'var(--roxo)':pv>=100?'var(--verde)':pv>=70?'var(--ouro)':'var(--muted)';
+        const cv = pv>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'var(--roxo)':pv>=100?'var(--verde)':pv>=70?'var(--ouro)':'var(--muted)';
         return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03)">
           <div style="font-size:12px;width:18px;text-align:center">${['🥇','🥈','🥉','4','5'][i]}</div>
           <div style="flex:1;font-size:11px;font-weight:500">${v.nome}</div>
@@ -22851,13 +23111,13 @@ function _buildPodio(items, getInfo) {
       const h   = heights[displayIdx];
       const med = medals[displayIdx];
       const brd = bordas[displayIdx];
-      const cor = info.pct>=120?'var(--roxo)':info.pct>=100?'var(--verde)':info.pct>=70?'var(--ouro)':'var(--verm)';
-      const bgPct = info.pct>=120?'rgba(139,92,246,.08)':info.pct>=100?'rgba(46,204,135,.06)':info.pct>=70?'rgba(201,168,76,.06)':'rgba(255,71,87,.05)';
+      const cor = info.pct>=(info.superPct??125)?'var(--roxo)':info.pct>=100?'var(--verde)':info.pct>=70?'var(--ouro)':'var(--verm)';
+      const bgPct = info.pct>=(info.superPct??125)?'rgba(139,92,246,.08)':info.pct>=100?'rgba(46,204,135,.06)':info.pct>=70?'rgba(201,168,76,.06)':'rgba(255,71,87,.05)';
       return `<div style="flex:1;max-width:220px;min-height:${h};background:${bgPct};border:1px solid ${brd};border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;transition:all .2s">
         <div style="font-size:32px;margin-bottom:6px">${med}</div>
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">${info.titulo}</div>
         <div style="font-family:Playfair Display,serif;font-size:28px;font-weight:900;color:${cor}">${info.pct.toFixed(0)}%</div>
-        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct>=120?'🏆 Super Meta!':info.pct>=100?'✅ Meta!':info.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
+        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct>=(info.superPct??125)?'🏆 Super Meta!':info.pct>=100?'✅ Meta!':info.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -23163,38 +23423,24 @@ function iniciarAutoRefresh(){
         // Antes: lojas com campo legado não recebiam campanhas criadas pelo admin
         if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
         // Merge só vendas e vendasVend desta loja
-        const lid = lojaId();
-        // LOCAL SEMPRE TEM PRIORIDADE — remoto só preenche dias ausentes
-        const lid2 = lid; // alias para clareza
-        if(remoto.vendas?.[lid2]){
-          if(!D.vendas[lid2]) D.vendas[lid2]={};
-          const excDias = D._vendasExcluidas?.[lid2] || [];
-          // [FIX cross-device] Timestamp-aware
-          Object.entries(remoto.vendas[lid2]).forEach(([dt,dados])=>{
-            if(excDias.includes(dt)) return;
-            const _lvSL = D.vendas[lid2][dt];
-            const _lTsSL = (_lvSL && _lvSL._savedAt) || 0;
-            const _rTsSL = (dados && dados._savedAt) || 0;
-            if(!_lvSL || _rTsSL > _lTsSL) D.vendas[lid2][dt] = dados;
-          });
-        }
-        if(remoto.vendasVend){
-          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-            const v = D.vendedoras.find(x=>x.id===vid);
-            if(v && v.loja===lid2){
-              if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-              const excDiasV = D._vendasVendExcluidas?.[vid] || [];
-              // [FIX cross-device] Timestamp-aware
-              Object.entries(dias).forEach(([dt,dados])=>{
-                if(excDiasV.includes(dt)) return;
-                const _lvvSL = D.vendasVend[vid][dt];
-                const _lTsSL2 = (_lvvSL && _lvvSL._savedAt) || 0;
-                const _rTsSL2 = (dados && dados._savedAt) || 0;
-                if(!_lvvSL || _rTsSL2 > _lTsSL2) D.vendasVend[vid][dt] = dados;
-              });
-            }
-          });
-        }
+        const lid2 = lojaId();
+        // [R162] Era a última cópia da mescla com a lápide antiga, uma lista
+        // sem carimbo: bloqueava para sempre o relançamento feito DEPOIS da
+        // exclusão em outro computador da loja, e não via a exclusão feita
+        // lá — que só chega a D com _mesclarRemotoComum, mais abaixo; o dia
+        // voltava e ficava até o F5. Agora a mesma regra das buscas: lápide
+        // daqui ou do servidor, com carimbo. Só o que é desta loja entra.
+        const _daLoja = {
+          vendas: remoto.vendas?.[lid2] ? {[lid2]: remoto.vendas[lid2]} : {},
+          vendasVend: {},
+          _vendasExcluidas: remoto._vendasExcluidas, _vendasExcluidasTs: remoto._vendasExcluidasTs,
+          _vendasVendExcluidas: remoto._vendasVendExcluidas, _vendasVendExcluidasTs: remoto._vendasVendExcluidasTs
+        };
+        Object.entries(remoto.vendasVend || {}).forEach(([vid, dias]) => {
+          const v = D.vendedoras.find(x => x.id === vid);
+          if(v && v.loja === lid2) _daLoja.vendasVend[vid] = dias;
+        });
+        window._mesclarVendasSobDemanda(_daLoja);
         // Sync metas do admin → loja (admin define metas, loja precisa receber)
         if(remoto.metasLoja){
           if(!D.metasLoja) D.metasLoja={};
@@ -23243,6 +23489,10 @@ function iniciarAutoRefresh(){
           D.fluxo = (D.fluxo||[]).filter(f => !_fluxoExcluido(f.id));
         }
         _persistirLocal();
+        // [R161] planilha do CRM importada em outra máquina — depois do
+        // merge inteiro, porque recarregar um conjunto grande leva tempo
+        try{ await window.crmAtualizarSeMudou?.(); }
+        catch(eC){ console.warn('[Avatim] syncLoja CRM:', eC.message); }
         // [FIX R75] carimbar a LEITURA — é o que faz o indicador refletir
         // que a tela acabou de receber dados novos.
         window._syncMarcarPull?.();
@@ -23324,6 +23574,10 @@ function iniciarAutoRefresh(){
           window._mesclarVendedoras?.(remoto);
           _persistirLocal();
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
+          // [R161] planilha do CRM importada em outra máquina — depois do
+          // merge inteiro, porque recarregar um conjunto grande leva tempo
+          try{ await window.crmAtualizarSeMudou?.(); }
+          catch(eC){ console.warn('[Avatim] syncAdmin CRM:', eC.message); }
         }
       }
     }catch(e){ console.warn('[Avatim] syncAdmin erro:', e.message); }
@@ -23671,11 +23925,11 @@ function compartilharWhatsApp(){
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
     const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
     const pct=meta>0?fat/meta*100:0;
-    return {nome:l.nome,fat,pct};
+    return {nome:l.nome,fat,pct,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
   const medals=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣'];
   ldW.forEach((l,i)=>{
-    const s = l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+    const s = l.pct>=_superPctLoja(l.id)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
     txt += `${medals[i]||i+1} ${l.nome} — ${s} *${l.pct.toFixed(0)}%*\n`;
   });
 
@@ -23687,10 +23941,10 @@ function compartilharWhatsApp(){
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjW):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
-    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,id:v.id};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,5);
   vendsW.forEach((v,i)=>{
-    const s=v.pct>=120?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+    const s=v.pct>=_superPctVend(v.id)?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
     txt += `${medals[i]} ${v.nome} (${v.loja}) — ${s} *${v.pct.toFixed(0)}%*\n`;
   });
 
@@ -23698,7 +23952,7 @@ function compartilharWhatsApp(){
   const totalFat = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)),0);
   const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
   const pctRede = totalMeta>0?totalFat/totalMeta*100:0;
-  const sRede = pctRede>=120?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
+  const sRede = pctRede>=_superPctRede()?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
   txt += `\n📈 *REDE: ${sRede} ${pctRede.toFixed(0)}% da meta*\n`;
   txt += `_Gerado pelo Avatim Gestão_`;
 
@@ -23788,12 +24042,12 @@ function exportarPDFRanking() {
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
     const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
     const pct=meta>0?fat/meta*100:0;
-    return {nome:l.nome,fat,meta,pct};
+    return {nome:l.nome,fat,meta,pct,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
 
   const rowsLojas = ldR.map((l,i)=>{
-    const badge = l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
-    const label = l.pct>=120?'Super Meta!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo';
+    const badge = l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const label = l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'Super Meta!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${l.nome}</strong></td>
@@ -23809,17 +24063,17 @@ function exportarPDFRanking() {
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjR):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
-    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,mPer};
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,mPer,id:v.id};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,15);
 
   const rowsVends = vendsR.map((v,i)=>{
-    const badge = v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    const badge = v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${v.nome}</strong></td>
       <td>${v.loja}</td>
       <td>${v.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+      <td><span class="badge-${badge}">${v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
     </tr>`;
   }).join('');
 
@@ -23855,10 +24109,10 @@ function exportarPDFRanking() {
   }).filter(v=>v.tm>0).sort((a,b)=>b.tm-a.tm).slice(0,15);
 
   const rowsFatLojas = ldByFatR.map((l,i)=>{
-    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const badge=l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
     return `<tr><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
       <td>${fmt(l.fat)}</td><td>${l.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
   }).join('');
 
   const rowsTMLoja = ldTMR2.map((l,i)=>`<tr>
@@ -23866,10 +24120,10 @@ function exportarPDFRanking() {
     <td>${fmt(l.tm)}</td><td>${l.nat} atend.</td><td>${fmt(l.fat)}</td></tr>`).join('');
 
   const rowsVendsFat = vendsRFat.map((v,i)=>{
-    const badge=v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    const badge=v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
     return `<tr><td>${i+1}</td><td><strong>${v.nome}</strong></td><td>${v.loja}</td>
       <td>${fmt(v.val)}</td><td>${v.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+      <td><span class="badge-${badge}">${v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
   }).join('');
 
   const rowsVendsTM = vendsRTM.map((v,i)=>`<tr>
@@ -24965,11 +25219,11 @@ function exportarPDFGestao() {
     const pct=meta>0?fat/meta*100:0;
     const tm=calcTMLoja(l.id,perV);
     const proj=calcProjecao(l.id);
-    return {nome:l.nome,fat,meta,pct,tm,proj:proj?.projecao||0};
+    return {nome:l.nome,fat,meta,pct,tm,proj:proj?.projecao||0,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
 
   const rowsG = ldG.map((l,i)=>{
-    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const badge=l.pct>=_superPctLoja(l.id)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${l.nome}</strong></td>
@@ -24978,7 +25232,7 @@ function exportarPDFGestao() {
       <td>${l.pct.toFixed(0)}%</td>
       <td>${fmt(l.tm)}</td>
       <td>${l.proj>0?fmt(l.proj):'—'}</td>
-      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td>
+      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td>
     </tr>`;
   }).join('');
 
@@ -24988,17 +25242,17 @@ function exportarPDFGestao() {
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjG):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
-    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
+    return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,id:v.id};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,10);
 
   const rowsVG = vendsG.map((v,i)=>{
-    const badge=v.pct>=120?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    const badge=v.pct>=_superPctVend(v.id)?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${v.nome}</strong></td>
       <td>${v.loja}</td>
       <td>${v.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+      <td><span class="badge-${badge}">${v.pct>=_superPctVend(v.id)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
     </tr>`;
   }).join('');
 
@@ -25011,10 +25265,10 @@ function exportarPDFGestao() {
   const pctRedeG = totMetaG>0?totFatG/totMetaG*100:0;
 
   const rowsFat = ldByFatPDF.map((l,i)=>{
-    const badge=l.pct>=120?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const badge=l.pct>=_superPctLoja(l.id)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
     return `<tr><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
       <td>${fmt(l.fat)}</td><td>${l.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${l.pct>=120?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
   }).join('');
 
   const rowsTM = ldByTMPDF.map((l,i)=>`<tr>
@@ -25092,9 +25346,9 @@ function exportarPDFRelatorio() {
     .map(v=>{
       const vm=calcVendPer(v.id,'mes');
       const pct=v.metaMes>0?vm/v.metaMes*100:0;
-      const badge=pct>=120?'roxo':pct>=100?'ok':pct>=70?'warn':'bad';
+      const badge=pct>=_superPctVend(v.id)?'roxo':pct>=100?'ok':pct>=70?'warn':'bad';
       const lj=LOJAS.find(l=>l.id===v.loja);
-      return {nome:v.nome,loja:lj?.nome||v.loja,vm,pct,badge};
+      return {nome:v.nome,loja:lj?.nome||v.loja,vm,pct,badge,id:v.id};
     }).sort((a,b)=>b.pct-a.pct);
 
   const rowsV = vends.map((v,i)=>`<tr>
@@ -25102,7 +25356,7 @@ function exportarPDFRelatorio() {
     <td><strong>${v.nome}</strong></td>
     ${isAdmin()?`<td>${v.loja}</td>`:''}
     <td>${v.pct.toFixed(0)}%</td>
-    <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+    <td><span class="badge-${v.badge}">${v.pct>=_superPctVend(v.id)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
   </tr>`).join('');
 
   // Lançamentos diários do mês para a loja
@@ -25159,7 +25413,7 @@ function exportarPDFRelatorio() {
         ${isAdmin()?`<td>${v.loja}</td>`:''}
         <td>${fmt(v.vm)}</td>
         <td>${v.pct.toFixed(0)}%</td>
-        <td><span class="badge-${v.badge}">${v.pct>=120?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+        <td><span class="badge-${v.badge}">${v.pct>=_superPctVend(v.id)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
       </tr>`).join('')}</tbody>
     </table>
 
@@ -25234,7 +25488,10 @@ function renderGestao() {
     const m    = getMetas(l.id);
     const fat  = per==='hoje' ? calcDia(l.id) : per==='semana' ? calcSem(l.id) : calcMes(l.id);
     const meta = per==='hoje' ? m.dia : per==='semana' ? getMetaSemLoja(l.id) : m.mes;
-    const sm   = per==='hoje' ? m.superDia : per==='semana' ? m.superSem : m.superMes;
+    // [R163] a super meta do período sai da MESMA proporção super÷meta da
+    // loja. A semanal era a mensal ÷ 4, fixa, enquanto a meta da semana é
+    // progressiva (35/25/25/15%) — as duas não conversavam.
+    const sm   = meta * _superPctDe(m.mes, m.superMes) / 100;
     const pct  = meta>0 ? fat/meta*100 : 0;
     const tm   = calcTMLoja(l.id, perV);
     const nat  = calcNAtend(l.id, perV);
@@ -25251,16 +25508,26 @@ function renderGestao() {
   const totMeta  = ld.reduce((s,l)=>s+l.meta,0);
   const pctRede  = totMeta>0 ? totFat/totMeta*100 : 0;
   const nasMeta  = ld.filter(l=>l.pct>=100).length;
-  const superMeta= ld.filter(l=>l.pct>=120).length;
+  const superMeta= ld.filter(l=>l.pct>=_superPctDe(l.meta,l.sm)).length;
   const totAtend = ld.reduce((s,l)=>s+l.nat,0);
   const tmRede   = totAtend>0 ? totFat/totAtend : 0;
-  const crRede   = pctRede>=120?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
+  // [R163] super meta da REDE no período: soma das super metas das lojas
+  const totSM    = ld.reduce((s,l)=>s+(l.sm||0),0);
+  const pctSMRede= totSM>0 ? totFat/totSM*100 : 0;
+  const faltaMetaRede = Math.max(0, totMeta - totFat);
+  const faltaSMRede   = Math.max(0, totSM - totFat);
+  const crRede   = pctRede>=_superPctDe(totMeta,totSM)?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
 
   document.getElementById('gestao-kpis').innerHTML = `
     <div class="kcard ouro" style="padding:16px">
       <div class="kl">Faturamento Rede</div>
       <div class="kv" style="font-size:20px">${totFat>0?fmt(totFat):'--'}</div>
-      <div class="ks">${totFat>0?'Meta: '+fmt(totMeta):'Sem lançamentos no período'}</div>
+      <div class="ks">${totFat>0?'Meta: '+fmt(totMeta)+(faltaMetaRede>0?' · faltam '+fmt(faltaMetaRede):' · ✓ batida'):'Sem lançamentos no período'}</div>
+    </div>
+    <div class="kcard roxo" style="padding:16px;border-color:var(--roxo)">
+      <div class="kl">Super Meta da Rede</div>
+      <div class="kv" style="font-size:20px;color:var(--roxo)">${totSM>0?pctSMRede.toFixed(1)+'%':'--'}</div>
+      <div class="ks">${totSM<=0?'Sem meta no período':faltaSMRede>0?'Faltam '+fmt(faltaSMRede)+' de '+fmt(totSM):'✓ Super Meta batida'}</div>
     </div>
     <div class="kcard" style="padding:16px;border-color:${crRede}">
       <div class="kl">% da Meta da Rede</div>
@@ -25291,7 +25558,7 @@ function renderGestao() {
   // ── Ranking 1: Maior Faturamento Lojas
   const maxFatG = ldByFat[0]?.fat||1;
   document.getElementById('gestao-rank-fat-lojas').innerHTML = ldByFat.map((l,i)=>{
-    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const c=l.pct>=_superPctDe(l.meta,l.sm)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
       <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
@@ -25309,7 +25576,7 @@ function renderGestao() {
 
   // ── Ranking 2: Mais Próximo da Meta Lojas
   document.getElementById('gestao-rank-meta-lojas').innerHTML = ldByMeta.map((l,i)=>{
-    const c=l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const c=l.pct>=_superPctDe(l.meta,l.sm)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
     return `<div class="ritem">
       <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
       <div class="rinfo">
@@ -25346,9 +25613,9 @@ function renderGestao() {
 
   // ── Status de metas — cards por loja
   document.getElementById('gestao-status-lojas').innerHTML = ld.map(l => {
-    const c   = l.pct>=120?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
-    const bg  = l.pct>=120?'rgba(139,92,246,.08)':l.pct>=100?'rgba(52,211,153,.08)':l.pct>=70?'rgba(251,191,36,.06)':'rgba(239,68,68,.06)';
-    const icon= l.pct>=120?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+    const c   = l.pct>=_superPctDe(l.meta,l.sm)?'var(--roxo)':l.pct>=100?'var(--verde)':l.pct>=70?'var(--ouro)':'var(--verm)';
+    const bg  = l.pct>=_superPctDe(l.meta,l.sm)?'rgba(139,92,246,.08)':l.pct>=100?'rgba(52,211,153,.08)':l.pct>=70?'rgba(251,191,36,.06)':'rgba(239,68,68,.06)';
+    const icon= l.pct>=_superPctDe(l.meta,l.sm)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
     const faltaMeta = Math.max(0, l.meta - l.fat);
     const faltaSM   = Math.max(0, l.sm - l.fat);
     return `<div style="background:${bg};border:1px solid ${c};border-radius:12px;padding:14px">
@@ -25366,7 +25633,7 @@ function renderGestao() {
         <div><span style="color:var(--muted)">TM</span><br><strong style="color:var(--azul)">${fmt(l.tm)}</strong></div>
         <div><span style="color:var(--muted)">Atend.</span><br><strong>${l.nat}</strong></div>
         ${faltaMeta>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Meta</span> <strong style="color:var(--verm)">${fmt(faltaMeta)}</strong></div>`:''}
-        ${l.pct>=100&&faltaSM>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Super</span> <strong style="color:var(--roxo)">${fmt(faltaSM)}</strong></div>`:''}
+        ${faltaSM>0?`<div style="grid-column:1/-1"><span style="color:var(--muted)">Falta p/ Super Meta</span> <strong style="color:var(--roxo)">${fmt(faltaSM)}</strong></div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -25394,7 +25661,7 @@ function renderGestao() {
   const allVFat = [...allVBase].sort((a,b)=>b.val-a.val).slice(0,8);
   document.getElementById('gestao-rank-fat-vends').innerHTML = allVFat.length
     ? allVFat.map((v,i)=>{
-        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+        const c=v.pct>=_superPctVend(v.id)?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
@@ -25416,7 +25683,7 @@ function renderGestao() {
   const allVMeta = [...allVBase].sort((a,b)=>b.pct-a.pct||b.val-a.val).slice(0,8);
   document.getElementById('gestao-rank-meta-vends').innerHTML = allVMeta.length
     ? allVMeta.map((v,i)=>{
-        const c=v.pct>=120?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
+        const c=v.pct>=_superPctVend(v.id)?'var(--roxo)':v.pct>=100?'var(--verde)':v.pct>=70?'var(--ouro)':'var(--muted)';
         return `<div class="ritem">
           <div class="rpos ${cls[Math.min(i,6)]}">${['🥇','🥈','🥉'][i]||i+1}</div>
           <div class="rinfo">
@@ -25457,7 +25724,7 @@ function renderGestao() {
     const m  = getMetas(l.id);
     const pr = calcProjecao(l.id);
     const pct= pr&&m.mes>0 ? pr.projecao/m.mes*100 : 0;
-    const c  = pct>=120?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
+    const c  = pct>=_superPctLoja(l.id)?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':'var(--verm)';
     return `<div style="background:var(--cinza);border-radius:10px;padding:12px">
       <div style="font-size:12px;font-weight:700;margin-bottom:8px">${l.nome}</div>
       ${pr ? `
@@ -25950,29 +26217,9 @@ async function buscarHistoricoLoja(){
       const json = await window.fsCarregar();
       if(json){
         const remoto = JSON.parse(json);
-        // Merge vendas remotas sem sobrescrever locais
-        if(remoto.vendas){
-          Object.entries(remoto.vendas).forEach(([l,dias])=>{
-            if(!D.vendas[l]) D.vendas[l]={};
-            Object.entries(dias).forEach(([dt,val])=>{
-            const _lvZ = D.vendas[l][dt];
-            const _lT3 = (_lvZ && _lvZ._savedAt) || 0;
-            const _rT3 = (val && val._savedAt) || 0;
-            if(!_lvZ || _rT3 > _lT3) D.vendas[l][dt] = val;
-          });
-          });
-        }
-        if(remoto.vendasVend){
-          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-            if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-            Object.entries(dias).forEach(([dt,val])=>{
-                const _lvX = D.vendasVend[vid][dt];
-                const _lT = (_lvX && _lvX._savedAt) || 0;
-                const _rT = (val && val._savedAt) || 0;
-                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
-              });
-          });
-        }
+        // [R162] mescla sem sobrescrever locais, e com a lápide — ver
+        // window._mesclarVendasSobDemanda
+        window._mesclarVendasSobDemanda(remoto);
         _persistirLocal();
         console.log('[Avatim] buscarHistoricoLoja: dados do Firebase carregados');
       }
@@ -26862,17 +27109,8 @@ async function buscarHistoricoVend(){
       const json = await window.fsCarregar();
       if(json){
         const remoto = JSON.parse(json);
-        if(remoto.vendasVend){
-          Object.entries(remoto.vendasVend).forEach(([vid,dias])=>{
-            if(!D.vendasVend[vid]) D.vendasVend[vid]={};
-            Object.entries(dias).forEach(([dt,val])=>{
-                const _lvX = D.vendasVend[vid][dt];
-                const _lT = (_lvX && _lvX._savedAt) || 0;
-                const _rT = (val && val._savedAt) || 0;
-                if(!_lvX || _rT > _lT) D.vendasVend[vid][dt] = val;
-              });
-          });
-        }
+        // [R162] com a lápide — ver window._mesclarVendasSobDemanda
+        window._mesclarVendasSobDemanda(remoto, {vendas:false});
         _persistirLocal();
       }
     }catch(e){ console.warn('[Avatim] buscarHistoricoVend Firebase:', e.message); }
@@ -34361,7 +34599,9 @@ window.excelProcessarUpload = function(event){
           + _envio.erros.join(' | ') + '). Os dados valem só nesta máquina até você clicar em '
           + '"Reenviar ao Firebase".', 'err');
       } else if(_envio){
-        showToast('✅ ' + _msgLocal + ' — enviado ao servidor, já visível nas outras máquinas.', 'ok');
+        // [R161] as outras máquinas recebem pelo índice do CRM, no pull
+        showToast('✅ ' + _msgLocal + ' — enviado ao servidor; as outras máquinas '
+          + 'recebem na próxima sincronização (até ~1 min).', 'ok');
       } else {
         showToast('⚠️ ' + _msgLocal + ' — sem envio ao servidor nesta sessão.', 'warn');
       }
@@ -34448,7 +34688,11 @@ window.excelLimparDados = async function(){
             _escritas.push({id:'crm_'+lid+'_'+ano+'_c'+i,
                             dados:{dados:'[]', ts:_ts, _apagado:true}});
           }
+          // [R161] como no crmApagar: a exclusão chega às outras máquinas
+          // pelo índice, e quem apagou não relê a própria exclusão
+          _escritas.push(_crmEscritaIndice(lid, ano, _ts, _por));
           await window._crmGravarLote(_escritas);
+          _crmMarcarVisto(lid, ano, _ts);
           apagados++;
         }catch(e){ erros.push(lid+'/'+ano+': '+(e.code||e.message)); }
       }
@@ -34476,6 +34720,8 @@ window.excelLimparDados = async function(){
     }
     D.excelDados = [];
     D.crm = {};
+    // [R161] sem cubo local, não há o que proteger da recarga pelo índice
+    window._crmNaoEnviados = {};
     D._excelImportInfo = null;
     D._excelImportacoes = [];
     // [R155] a trava agora pesa os dados de planilha; esta limpeza foi
@@ -34493,6 +34739,7 @@ window.excelLimparDados = async function(){
 
   D.excelDados = [];
   D.crm = {};
+  window._crmNaoEnviados = {};   // [R161] ver acima
   D._excelImportInfo = null;
   D._excelImportacoes = [];
   // [R155] ver acima: limpeza confirmada tem passe pela trava, e só ela
