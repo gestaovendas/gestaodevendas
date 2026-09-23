@@ -449,14 +449,70 @@ window._vendMesclarLocal = function(bvi, rv, opts){
 // O ganho do R151 fica de pé: salvar sem mexer em nada disso continua
 // não reescrevendo as sete lojas.
 // ══════════════════════════════════════════════════════════════════════
-window._assinaturaPropagavel = function(D2){
+// [R159] A função global `_assinaturaPropagavel` que ficava aqui foi
+// substituída por `_assinaturaDaLoja`, logo abaixo: uma assinatura só,
+// sobre todas as lojas, fazia qualquer edição reescrever as sete.
+
+// ══════════════════════════════════════════════════════════════════════
+// [R159] A ASSINATURA DE UMA LOJA SÓ
+//
+// Tem de cobrir TUDO o que vai no documento `loja_<lid>` — um campo
+// esquecido faria a loja deixar de receber aquela mudança, o bug do R155
+// de volta. A lista espelha o payload montado em _fsGravarInterno:
+//
+//   vendas[lid] · vendasVend das vendedoras da loja · as vendedoras da
+//   loja · metasLoja[lid] · historicoMeses[lid] · _lojasArquivadas (+Ts)
+//   · _vendasExcluidas[lid] · _vendasVendExcluidas das vendedoras da loja
+//   · as entradas de _vendasExcluidasTs e _vendasVendExcluidasTs da loja
+//
+// A global cobria cinco destes e deixava as lápides e _lojasArquivadas de
+// fora: arquivar uma LOJA, sozinho, nem chegava aos documentos delas.
+//
+// Ao ACRESCENTAR um campo ao payload da loja em _fsGravarInterno, ele
+// precisa entrar aqui também.
+//
+// Brinde: quando uma vendedora troca de loja, ela sai desta lista, e a
+// assinatura da loja antiga muda sozinha — o documento dela é reescrito.
+// ══════════════════════════════════════════════════════════════════════
+/**
+ * [R159] Quais lojas precisam ter o documento reescrito: as candidatas
+ * cuja assinatura mudou desde a última propagação confirmada.
+ * Devolve também as assinaturas calculadas, para o chamador registrar só
+ * as das lojas que confirmarem a gravação.
+ */
+window._lojasAPropagar = function(candidatas, D2, jaPropagadas){
+  const assinaturas = {};
+  const lista = Array.isArray(candidatas) ? candidatas : [...(candidatas || [])];
+  lista.forEach(l => { assinaturas[l] = window._assinaturaDaLoja(D2, l); });
+  const feitas = jaPropagadas || {};
+  return { mudadas: lista.filter(l => feitas[l] !== assinaturas[l]), assinaturas };
+};
+
+window._assinaturaDaLoja = function(D2, lid){
   D2 = D2 || {};
+  const vends = (D2.vendedoras || []).filter(v => v && v.loja === lid)
+    .slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const ids = new Set(vends.map(v => v.id));
+  const vv = {}, vvExc = {}, vvExcTs = {}, vExcTs = {};
+  ids.forEach(id => {
+    if(D2.vendasVend && D2.vendasVend[id]) vv[id] = D2.vendasVend[id];
+    if(D2._vendasVendExcluidas && D2._vendasVendExcluidas[id])
+      vvExc[id] = D2._vendasVendExcluidas[id];
+  });
+  Object.keys(D2._vendasVendExcluidasTs || {}).forEach(k => {
+    if(ids.has(k.split('|')[0])) vvExcTs[k] = D2._vendasVendExcluidasTs[k];
+  });
+  Object.keys(D2._vendasExcluidasTs || {}).forEach(k => {
+    if(k.split('|')[0] === lid) vExcTs[k] = D2._vendasExcluidasTs[k];
+  });
+  const partes = [
+    (D2.vendas || {})[lid], vv, vends,
+    (D2.metasLoja || {})[lid], (D2.historicoMeses || {})[lid],
+    D2._lojasArquivadas, D2._lojasArquivadasTs,
+    (D2._vendasExcluidas || {})[lid], vvExc, vExcTs, vvExcTs
+  ];
+  const s1 = partes.map(p => JSON.stringify(p === undefined ? null : p)).join('|');
   let h = 5381;
-  const s1 = JSON.stringify(D2.vendas||{})
-           + '|' + JSON.stringify(D2.vendasVend||{})
-           + '|' + JSON.stringify(D2.vendedoras||[])
-           + '|' + JSON.stringify(D2.metasLoja||{})
-           + '|' + JSON.stringify(D2.historicoMeses||{});
   for(let i = 0; i < s1.length; i++) h = ((h * 33) ^ s1.charCodeAt(i)) >>> 0;
   return s1.length + ':' + h;
 };
@@ -626,15 +682,43 @@ window._LAPIDES_LISTA = ['_vendsExcluidas','_campExcluidos'];
  * em que a lápide existe. Havia três cópias disto, todas assumindo
  * array — e `_isCampExcluido`, que LÊ, já tratava as duas.
  */
+/**
+ * [R158] Migra UMA lápide de campanha do array legado para a forma
+ * canônica {id: ts}. Havia quatro cópias disto — _marcarCampExcluido,
+ * excluirLancCamp, excluirCampObj e salvarCampReal —, e uma mudança de
+ * fórmula numa delas divergiria das outras em silêncio.
+ *
+ * UNIR duas lápides (o merge entre máquinas e entre documentos) é outra
+ * operação e ainda tem duas implementações: em _mesclarRemotoComum e no
+ * absorvedor do fsCarregar. As duas usam _TS_LAPIDE_LEGADA. Unificá-las
+ * mexe no merge central e ficou declarado como pendência — não entrou
+ * no mesmo lote para não criar ponto de falha novo.
+ */
+window._migrarLapideCamp = function(){
+  if(D._campExcluidos && !Array.isArray(D._campExcluidos)) return;
+  const legado = Array.isArray(D._campExcluidos) ? D._campExcluidos : [];
+  D._campExcluidos = {};
+  legado.forEach(x => { D._campExcluidos[x] = window._TS_LAPIDE_LEGADA(); });
+};
+
 window._marcarCampExcluido = function(id){
   if(!id) return;
-  if(!D._campExcluidos) D._campExcluidos = {};
-  if(Array.isArray(D._campExcluidos)){
-    if(!D._campExcluidos.includes(id)) D._campExcluidos.push(id);
-    return;
-  }
+  // [R158] A forma canônica é objeto {id: ts} desde o FIX Bug2. Esta
+  // função mantinha o array legado quando o encontrava, enquanto
+  // excluirLancCamp e excluirCampObj migravam — três pontos de escrita,
+  // duas convenções. Agora todos migram, aqui, num lugar só.
+  window._migrarLapideCamp();
   if(!D._campExcluidos[id]) D._campExcluidos[id] = Date.now();
 };
+
+/**
+ * [R158] Carimbo para um id de lápide que veio da forma ARRAY, que não
+ * guardava hora. Havia dois valores em uso — `Date.now() - 1000` e o
+ * sentinela `1` —, e o `1` era uma armadilha: qualquer rotina de
+ * expiração o leria como "excluído há 56 anos" e apagaria a lápide na
+ * hora, deixando o registro ressuscitar. Um valor só, e plausível.
+ */
+window._TS_LAPIDE_LEGADA = function(){ return Date.now() - 1000; };
 
 /** Lápides com carimbo por chave: {id: ts}. Fica o carimbo mais recente. */
 window._LAPIDES_MAPA = ['_contatosExcluidos','_prospeccoesExcluidas','_fluxoExcluidos',
@@ -907,7 +991,7 @@ window._mesclarRemotoComum = function(remoto){
       if(!D[c] || Array.isArray(D[c])){
         const antigo = Array.isArray(D[c]) ? D[c] : [];
         D[c] = {};
-        antigo.forEach(id => { D[c][id] = 1; });
+        antigo.forEach(id => { D[c][id] = window._TS_LAPIDE_LEGADA(); });
       }
       Object.entries(remoto[c]).forEach(([id, ts])=>{
         if(!D[c][id] || ts > D[c][id]){ D[c][id] = ts; n++; }
@@ -920,7 +1004,7 @@ window._mesclarRemotoComum = function(remoto){
     // — o oposto exato do que esta função promete. O array recebido
     // entra NO objeto.
     if(D[c] && !Array.isArray(D[c]) && typeof D[c] === 'object'){
-      remoto[c].forEach(id => { if(!D[c][id]){ D[c][id] = 1; n++; } });
+      remoto[c].forEach(id => { if(!D[c][id]){ D[c][id] = window._TS_LAPIDE_LEGADA(); n++; } });
       return;
     }
     if(!Array.isArray(D[c])) D[c] = [];
@@ -1771,16 +1855,33 @@ try{
           // uma falhar, a próxima gravação propaga de novo: na dúvida,
           // escrever de mais é seguro, escrever de menos não é.
           // ══════════════════════════════════════════════════════════
-          // [R155] assinatura do que vai ao doc da loja — ver
-          // window._assinaturaPropagavel, definida fora da IIFE de boot
-          const _assinAgora = window._assinaturaPropagavel(D2);
-          // Guard em vez de `return`: sair daqui encerraria fsGravar inteira,
-          // e o valor de retorno dela é contrato de quem chama. Pular só o
-          // que precisa ser pulado não depende dessa análise.
-          const _pularPropagacao = (window._assinaturaPropagada === _assinAgora);
+          // ══════════════════════════════════════════════════════════
+          // [R159] ASSINATURA POR LOJA, NÃO GLOBAL.
+          //
+          // A do R151 era uma só, calculada sobre TODAS as vendedoras de
+          // TODAS as lojas. Arquivar uma pessoa da Mooca mudava o hash e
+          // as sete lojas eram reescritas: ~18 operações no Firestore por
+          // gravação. Duas seguidas estouravam o limite ("Write stream
+          // exhausted"), e a leitura passava a pegar o principal pela
+          // metade. Agora cada loja tem a sua, e só é reescrita a loja
+          // cujo documento de fato mudou.
+          //
+          // Guard em vez de `return`: sair daqui encerraria fsGravar
+          // inteira, e o valor de retorno dela é contrato de quem chama.
+          // ══════════════════════════════════════════════════════════
+          if(!window._assinaturasPropagadas) window._assinaturasPropagadas = {};
+          // a decisão mora fora daqui para o teste poder EXECUTÁ-LA —
+          // esta função lê o Firestore de variáveis fechadas no boot, e
+          // não roda na suíte offline
+          const { mudadas: _lojasMudadas, assinaturas: _assinPorLoja } =
+            window._lojasAPropagar(lojasComDados, D2, window._assinaturasPropagadas);
+          const _pularPropagacao = (_lojasMudadas.length === 0);
           if(_pularPropagacao){
             console.log("[Avatim] nada propagável mudou desde a última propagação — "
               + lojasComDados.size + " documento(s) de loja não foram reescritos.");
+          } else if(_lojasMudadas.length < lojasComDados.size){
+            console.log("[Avatim] só " + _lojasMudadas.length + " de " + lojasComDados.size
+              + " loja(s) mudaram — as demais não são reescritas: " + _lojasMudadas.join(', '));
           }
 
           // [R129] As 7 lojas eram gravadas EM FILA: leitura, escrita, próxima
@@ -1797,7 +1898,7 @@ try{
           // editasse outra coisa. Era o contrário do que o R151
           // prometia: "uma falha deixa a assinatura como estava".
           const _lojasOk = new Set();
-          await Promise.all([...lojasComDados].map(async (lidA) => {
+          await Promise.all(_lojasMudadas.map(async (lidA) => {
             const docIdA = "loja_"+lidA;
             let remotoA = {};
             try{
@@ -2025,16 +2126,17 @@ try{
                 + "é tentada de novo na próxima gravação.");
             }
           }));
-          const _todasOk = (_lojasOk.size === lojasComDados.size);
           console.log("[Avatim] ✅ Admin: vendas propagadas para", _lojasOk.size,
-            "de", lojasComDados.size, "loja(s)");
-          // [R151] Só agora: todas confirmaram. Uma falha deixa a assinatura
-          // como estava e a próxima gravação propaga tudo outra vez.
-          if(_todasOk){
-            window._assinaturaPropagada = _assinAgora;
-          } else {
-            console.warn("[Avatim] ⚠️ " + (lojasComDados.size - _lojasOk.size)
-              + " loja(s) não receberam — assinatura mantida para tentar de novo.");
+            "de", _lojasMudadas.length, "loja(s) que mudaram");
+          // [R159] A assinatura avança loja a loja, só para quem confirmou.
+          // Antes era tudo ou nada: uma loja que falhasse fazia as SETE
+          // serem regravadas na próxima vez. Agora só a que falhou é
+          // tentada de novo — na dúvida, escrever de mais é seguro,
+          // escrever de menos não é, e isso continua valendo por loja.
+          _lojasOk.forEach(l => { window._assinaturasPropagadas[l] = _assinPorLoja[l]; });
+          if(_lojasOk.size < _lojasMudadas.length){
+            console.warn("[Avatim] ⚠️ " + (_lojasMudadas.length - _lojasOk.size)
+              + " loja(s) não receberam — serão tentadas de novo na próxima gravação.");
           }
           // [R157] A loja de origem de uma troca já recebeu o cadastro
           // novo; mantê-la marcada faria toda gravação seguinte da
@@ -2613,7 +2715,7 @@ try{
                  !== Array.isArray(base._campExcluidos)){
                 const alvo = {};
                 const absorve = v => {
-                  if(Array.isArray(v)) v.forEach(id => { if(!alvo[id]) alvo[id] = 1; });
+                  if(Array.isArray(v)) v.forEach(id => { if(!alvo[id]) alvo[id] = window._TS_LAPIDE_LEGADA(); });
                   else if(v && typeof v === 'object')
                     Object.entries(v).forEach(([id, ts])=>{
                       if(!alvo[id] || ts > alvo[id]) alvo[id] = ts;
@@ -6860,7 +6962,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-22';
+window.AVATIM_BUILD = '2026-09-23';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -7208,18 +7310,26 @@ window.AVATIM_RECURSOS = {
   // [R151] metas não reescrevem os 7 documentos de loja
   // [R155] e a assinatura cobre vendedoras/metas, senão editar cadastro
   // nunca chegava ao doc da loja e o merge devolvia o valor antigo
+  // [R159] medido por COMPORTAMENTO: numa rede de duas lojas, sem
+  // mudança nenhuma nada é reescrito; mudando uma, só ela é
   gravacaoNaoRepropaga:  () => {
-    const h = document.documentElement.innerHTML;
-    return h.indexOf('_assinatura' + 'Propagada') > -1
-        && h.indexOf('nada propagável mudou desde a ' + 'última propagação') > -1;
+    if(typeof window._lojasAPropagar !== 'function') return false;
+    const D2 = { vendas: { a: {d:{fat:1}}, b: {d:{fat:1}} },
+                 vendedoras: [{id:'va', loja:'a'}, {id:'vb', loja:'b'}] };
+    const feitas = window._lojasAPropagar(['a','b'], D2, {}).assinaturas;
+    const nada = window._lojasAPropagar(['a','b'], D2, feitas).mudadas.length === 0;
+    const D3 = JSON.parse(JSON.stringify(D2)); D3.vendedoras[0].nome = 'X';
+    const so = window._lojasAPropagar(['a','b'], D3, feitas).mudadas;
+    return nada && so.length === 1 && so[0] === 'a';
   },
   propagacaoCobreCadastro: () => {
-    if(typeof window._assinaturaPropagavel !== 'function') return false;
-    // medida por COMPORTAMENTO: mudar só o cadastro tem de mudar a assinatura
-    const a1 = window._assinaturaPropagavel({vendedoras:[{id:'x', nome:'A'}]});
-    const a2 = window._assinaturaPropagavel({vendedoras:[{id:'x', nome:'B'}]});
-    const m1 = window._assinaturaPropagavel({metasLoja:{l:{'2026-01':{mes:1}}}});
-    const m2 = window._assinaturaPropagavel({metasLoja:{l:{'2026-01':{mes:2}}}});
+    if(typeof window._assinaturaDaLoja !== 'function') return false;
+    // mudar só o cadastro, ou só a meta, tem de mudar a assinatura da loja
+    const A = window._assinaturaDaLoja;
+    const a1 = A({vendedoras:[{id:'x', loja:'l', nome:'A'}]}, 'l');
+    const a2 = A({vendedoras:[{id:'x', loja:'l', nome:'B'}]}, 'l');
+    const m1 = A({metasLoja:{l:{'2026-01':{mes:1}}}}, 'l');
+    const m2 = A({metasLoja:{l:{'2026-01':{mes:2}}}}, 'l');
     return a1 !== a2 && m1 !== m2;
   },
   metaVendPorMes:        () => typeof window.metaVendDoMes === 'function'
@@ -8367,7 +8477,7 @@ window._conferirMetasDivergentes = function(mesRef){
   Object.entries(D.metasLoja||{}).forEach(([lid, meses])=>{
     const metaMesLoja = meses?.[mr]?.mes;
     if(!metaMesLoja || metaMesLoja <= 0) return;
-    const vendsLoja = (D.vendedoras||[]).filter(v=>v.loja===lid && v.ativa!==false);
+    const vendsLoja = vendsAtivas(lid);   // [R158] a soma das metas não inclui o VRLL
     if(!vendsLoja.length) return;
     const soma = vendsLoja.reduce((s,v)=>s+(Number(v.metaMes)||0), 0);
     if(Math.abs(soma - metaMesLoja) / metaMesLoja > 0.01){
@@ -8591,33 +8701,6 @@ if(!D.historicoLojas) D.historicoLojas={}; // [NEW] Histórico POR LOJA — lan�
 // Ex: meta.mes=190 (deveria ser 190000), dia=6 (deveria ser 6129)
 // ============================================================
 // Limpar tombstones antigos (>90 dias) para evitar overflow do localStorage
-function limparTombstonesAntigos(){
-  const limite = Date.now() - (90 * 24 * 60 * 60 * 1000);
-  let removidos = 0;
-  // _vendasExcluidas: {loja: [datas]} — manter como está
-  if(D._vendasExcluidas && typeof D._vendasExcluidas === 'object' && !Array.isArray(D._vendasExcluidas)){
-    Object.keys(D._vendasExcluidas).forEach(id=>{
-      const ts = D._vendasExcluidas[id];
-      if(typeof ts === 'number' && ts < limite){ delete D._vendasExcluidas[id]; removidos++; }
-    });
-  }
-  // [FIX Bug2] _campExcluidos: objeto {id: timestamp} — migrar array legado e expirar
-  if(D._campExcluidos){
-    // Migrar array legado para objeto {id: ts} se necessário
-    if(Array.isArray(D._campExcluidos)){
-      const _arrLeg = D._campExcluidos;
-      D._campExcluidos = {};
-      _arrLeg.forEach(id => { D._campExcluidos[id] = Date.now() - 1000; });
-      console.log('[Avatim] _campExcluidos migrado para objeto:', Object.keys(D._campExcluidos).length);
-    }
-    if(typeof D._campExcluidos === 'object'){
-      Object.keys(D._campExcluidos).forEach(id=>{
-        if(D._campExcluidos[id] < limite){ delete D._campExcluidos[id]; removidos++; }
-      });
-    }
-  }
-  if(removidos>0) console.log('[Avatim] Tombstones expirados removidos:', removidos);
-}
 (function limparDadosInvalidos(){
   let corrompidas = 0;
   LOJAS.forEach(l=>{
@@ -13288,7 +13371,7 @@ function metaSemanaProgressiva(lid, semana){
 
   // Somar realizado até o final da semana anterior
   let acumAntSem = 0;
-  const vends = D.vendedoras.filter(v => v.loja === lid);
+  const vends = vendsReais(lid);   // [R158] soma de faturamento: sem VRLL, com arquivadas — como calcMes
   vends.forEach(v => {
     Object.entries(D.vendasVend[v.id] || {}).forEach(([dt, vd]) => {
       if(dt.startsWith(mes) && dt <= fimSemAnt) acumAntSem += Number(vd.val || 0);
@@ -14798,7 +14881,7 @@ function carregarDash(){
   const lojasBase2 = isAdmin() ? LOJAS : LOJAS.filter(l=>l.id===lid);
   let cliHj=0, clinovHj=0;
   lojasBase2.forEach(l=>{
-    D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false).forEach(v=>{
+    vendsAtivas(l.id).forEach(v=>{
       cliHj += D.vendasVend[v.id]?.[hj]?.trans || (D.vendasVend[v.id]?.[hj]?.val>0?1:0);
     });
     clinovHj+=(D.vendas[l.id]?.[hj]?.clinov||0);
@@ -15068,7 +15151,7 @@ function renderPainelDia(){
   // Renderizar cards das vendedoras no período
   const grid = document.getElementById('vend-lanc-grid');
   if(grid){
-    const vends = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false);
+    const vends = vendsAtivas(lid);   // [R158] sem card fantasma do VRLL
     if(!vends.length){
       grid.innerHTML = "<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Nenhum(a) vendedor(a) cadastrado(a) nesta loja.</div>";
     } else {
@@ -16070,7 +16153,7 @@ function renderHistoricoLanc(){
   }
   // Pegar todos os dias do mês com lançamentos (via vendasVend + fallback D.vendas)
   const diasComLanc={};
-  D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+  vendsReais(lid).forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([d,vd])=>{
       if(d.startsWith(mes)&&(vd.val||0)>0){
         if(!diasComLanc[d]) diasComLanc[d]=0;
@@ -16095,7 +16178,7 @@ function renderHistoricoLanc(){
   dias.forEach(function(item){
     const d=item[0], fat=item[1];
     let natDia=0, itensDia=0;
-    D.vendedoras.filter(function(v){return v.loja===lid;}).forEach(function(v){
+    vendsReais(lid).forEach(function(v){
       const reg=D.vendasVend[v.id]?D.vendasVend[v.id][d]:null;
       if(reg){ natDia += reg.trans>0 ? reg.trans : ((reg.val||0)>0?1:0); itensDia += Number(reg.itens||0); }
     });
@@ -16311,7 +16394,7 @@ function renderMetas(){
     // Agrupa por loja
     let html="";
     LOJAS.forEach(lj=>{
-      const vls=D.vendedoras.filter(v=>v.loja===lj.id && v.ativa!==false);
+      const vls=vendsAtivas(lj.id);   // [R158] sem o VR Líder Loja
       if(!vls.length) return;
       const rLoja=_tabMeta==="dia"?calcDia(lj.id):_tabMeta==="semana"?calcSem(lj.id):calcMes(lj.id);
       const mLoja=_tabMeta==="dia"?getMetas(lj.id).dia:_tabMeta==="semana"?getMetas(lj.id).sem:getMetas(lj.id).mes;
@@ -16378,7 +16461,7 @@ function renderMetas(){
         const sm=_tabMeta==="dia"?ml.superDia:_tabMeta==="semana"?ml.superSem:ml.superMes;
         const pl=mt>0?rl/mt*100:0;
         const cl=pl>=120?"var(--roxo)":pl>=100?"var(--verde)":pl>=70?"var(--ouro)":rl>0?"var(--verm)":"var(--muted)";
-        const nv=D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false).length;
+        const nv=vendsAtivas(l.id).length;   // [R158] headcount sem o VR Líder Loja
         totalReal+=rl; totalMeta+=mt;
         return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -17106,7 +17189,7 @@ function toggleFormVend(){
     // Mostrar prévia da meta automática
     const lid=isAdmin()?(document.getElementById("vn-loja")?.value||lojaId()):lojaId();
     const metaLoja=getMetas(lid);
-    const nAtual=D.vendedoras.filter(v=>v.loja===lid).length;
+    const nAtual=window.vendsDoMesMeta(lid, mesAtual()).length;   // [R158] ver salvarVend
     const estimada=metaLoja.mes>0?parseFloat((metaLoja.mes/(nAtual+1)).toFixed(2)):0;
     const el=document.getElementById("prev-meta-vend-val");
     if(el){
@@ -17145,7 +17228,7 @@ function salvarVend(){
   const cargo=document.getElementById("vn-cargo")?.value||"ESP";
   // Busca meta já definida para a loja e redistribui entre TODAS as vendedoras (incluindo a nova)
   const metaLoja=getMetas(lid);
-  const vendsAtual=D.vendedoras.filter(v=>v.loja===lid);
+  const vendsAtual=window.vendsDoMesMeta(lid, mesAtual());   // [R158] os mesmos que salvarMetaLoja reparte: sem VRLL e sem arquivadas
   const novoTotal=vendsAtual.length+1;
   const metaMesAuto = metaLoja.mes>0 ? parseFloat((metaLoja.mes/novoTotal).toFixed(2)) : 0;
   const superMetaMesAuto = metaLoja.superMes>0 ? parseFloat((metaLoja.superMes/novoTotal).toFixed(2)) : parseFloat((metaMesAuto*1.255).toFixed(2));
@@ -17430,7 +17513,7 @@ function preencherSelHistVend(){
   if(!sel) return;
   const vends = isAdmin()
     ? D.vendedoras
-    : D.vendedoras.filter(v=>v.loja===lojaId() && v.ativa!==false);
+    : vendsAtivas(lojaId());
   sel.innerHTML = '<option value="">Selecione...</option>'
     + vends.map(v=>`<option value="${v.id}">${v.nome} (${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja})</option>`).join('');
   // pré-selecionar a própria vendedora se for loja
@@ -18390,7 +18473,7 @@ function renderLojas(per="hoje"){
     const alertaTxt = pProj>=120?"🏆 Super Meta!" : pProj>=100?"✅ No ritmo" : pProj>=70?"⚠️ Acelerar" : "🔴 Crítico";
     const alertaCor = pProj>=100?"var(--verde)" : pProj>=70?"var(--ouro)" : "var(--verm)";
     // Soma das vendedoras hoje
-    const somavv = D.vendedoras.filter(v=>v.loja===l.id && v.ativa!==false)
+    const somavv = vendsAtivas(l.id)
       .reduce((s,v)=>s+(D.vendasVend[v.id]?.[hoje()]?.val||0),0);
     return `<div class="ritem">
       <div class="rpos ${cls[i]}">${i+1}</div>
@@ -20169,7 +20252,7 @@ function renderHistoricoCamp(campId, lid){
     lancs.forEach(l=>{
       if(l.vendedoras){
         Object.entries(l.vendedoras).forEach(([vId, val])=>{
-          if(!rankVend[vId]) rankVend[vId]={fat:0, nome:''};
+          if(!rankVend[vId]) rankVend[vId]={fat:0, nome:'', id:vId};   // [R158] o id viaja no item
           rankVend[vId].fat += Number(val)||0;
           const vObj = D.vendedoras.find(v=>v.id===vId);
           if(vObj) rankVend[vId].nome = vObj.nome;
@@ -20190,7 +20273,7 @@ function renderHistoricoCamp(campId, lid){
             <div style="width:20px;font-size:14px;text-align:center">${medals3[i]||(i+1)+'º'}</div>
             <div style="flex:1">
               <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-                <span style="font-weight:600">${v.nome||vId}</span>
+                <span style="font-weight:600">${v.nome||v.id}</span>
                 <span style="font-weight:700;color:${c}">${fmt(v.fat)}</span>
               </div>
               <div style="height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
@@ -20253,13 +20336,8 @@ function editarLancCamp(id){
 function excluirLancCamp(id){
   if(!confirm('Remover este lançamento?')) return;
   D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  // [FIX Bug2] Tombstone como objeto {id: timestamp} — permite expiração após 90 dias
-  if(!D._campExcluidos || Array.isArray(D._campExcluidos)){
-    const _legCR = Array.isArray(D._campExcluidos) ? D._campExcluidos : [];
-    D._campExcluidos = {};
-    _legCR.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
-  }
-  D._campExcluidos[id] = Date.now();
+  // [R158] a migração e o carimbo moram em _marcarCampExcluido
+  window._marcarCampExcluido(id);
   save();
   const campId = document.getElementById('camp-sel-real')?.value;
   if(campId){ renderHistoricoCamp(campId, lojaId()); atualizarObjetivoCamp(); }
@@ -20320,11 +20398,8 @@ async function salvarCampReal(){
     lancadoEm: hoje()
   };
   // [FIX Bug2] Migrar _campExcluidos legado e remover tombstone ao re-lançar
-  if(Array.isArray(D._campExcluidos)){
-    const _lg = D._campExcluidos; D._campExcluidos = {};
-    _lg.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
-  }
-  if(!D._campExcluidos) D._campExcluidos = {};
+  // [R158] a migração mora num lugar só — ver _migrarLapideCamp
+  window._migrarLapideCamp();
   // Se havia tombstone deste ID, remover — usuário está relançando intencionalmente
   if(D._campExcluidos[lancamento.id]) delete D._campExcluidos[lancamento.id];
   // Lançamento de campanha é INDEPENDENTE do faturamento do dia.
@@ -20843,12 +20918,8 @@ function excluirCampObj(id){
   if(!confirm('Excluir este objetivo? Os realizados vinculados também serão removidos.')) return;
   D.campObjetivos = D.campObjetivos.filter(o=>o.id!==id);
   // [FIX Bug2] Registrar tombstone para cada realizado excluído com o objetivo
-  if(!D._campExcluidos || Array.isArray(D._campExcluidos)){
-    const _legCO = Array.isArray(D._campExcluidos) ? D._campExcluidos : [];
-    D._campExcluidos = {};
-    _legCO.forEach(_id => { D._campExcluidos[_id] = Date.now() - 1000; });
-  }
-  D.campRealizados.filter(r=>r.campId===id).forEach(r=>{ D._campExcluidos[r.id] = Date.now(); });
+  // [R158] pela função única — ver _marcarCampExcluido
+  D.campRealizados.filter(r=>r.campId===id).forEach(r=>{ window._marcarCampExcluido(r.id); });
   D.campRealizados = D.campRealizados.filter(r=>r.campId!==id);
   save(); renderCampLista();
 }
@@ -20909,21 +20980,6 @@ function editarCampReal(id){
   },120);
 }
 
-function excluirCampRealLoja(id){
-  if(!confirm('Remover seu realizado desta campanha?')) return;
-  D.campRealizados = D.campRealizados.filter(r=>r.id!==id);
-  // [R157] Assumia array. A lápide migra para {id: ts} desde o FIX
-  // Bug2, e agora migra com mais frequência, porque o merge genérico
-  // traz a forma objeto de qualquer máquina da rede. Com objeto, o
-  // `.includes` dava TypeError DEPOIS de o registro já ter saído da
-  // memória e ANTES do save(): a exclusão parecia ter funcionado,
-  // não saía da máquina, e voltava no F5.
-  if(typeof window._marcarCampExcluido === 'function')
-    window._marcarCampExcluido(id);
-  save();
-  showToast('🗑️ Realizado removido.');
-  renderCampLista();
-}
 
 function abrirFormCampRealPara(campId){
   abrirFormCampReal();
@@ -22376,7 +22432,7 @@ function tabRankPerLoja(per, el){
     const sel = document.getElementById('rh-sel-vend');
     if(sel){
       sel.innerHTML = '<option value="">Todas da loja</option>'
-        + D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false)
+        + vendsAtivas(lid)
             .map(v=>`<option value="${v.id}">${v.nome}</option>`).join('');
     }
     // datas padrão = mês atual
@@ -22395,7 +22451,7 @@ function tabRankPerLoja(per, el){
     if(per==='ano' && window.fsCarregar){
       const ano = hoje().slice(0,4);
       const lid2 = isAdmin() ? (document.getElementById('sel-loja-rank')?.value||(LOJAS[0]?.id||'')) : lojaId();
-      const temAno = D.vendedoras.filter(v=>v.loja===lid2 && v.ativa!==false).some(v=>
+      const temAno = vendsAtivas(lid2).some(v=>
         Object.keys(D.vendasVend[v.id]||{}).some(d=>d.startsWith(ano))
       );
       if(!temAno){
@@ -22436,7 +22492,7 @@ function buscarHistLoja(){
   const ate    = document.getElementById('rh-ate')?.value;
   if(!de||!ate){ showToast('Selecione o período','err'); return; }
 
-  const vends  = D.vendedoras.filter(v=>v.loja===lid && (!vendId||v.id===vendId));
+  const vends  = vendsReais(lid).filter(v=>!vendId||v.id===vendId);   // [R158] sem VRLL
   const mLoja  = getMetas(lid)||{};
 
   // Coletar todos os dias no período com vendas
@@ -22630,7 +22686,7 @@ function renderRankingLoja() {
 
   // ── Ranking TM por vendedora da loja
   // [FIX BUG 2] Filtrar inativas — não devem aparecer no ranking TM
-  const vendsTM = D.vendedoras.filter(v=>v.loja===lid && v.ativa!==false).map(v=>{
+  const vendsTM = vendsAtivas(lid).map(v=>{   // [R158] VRLL não disputa TM
     const fat   = calcVendPer(v.id, perV);
     const tm    = calcTMVend(v.id, perV);
     const vd    = D.vendasVend[v.id]||{};
@@ -23080,7 +23136,7 @@ function iniciarAutoRefresh(){
           if(!D.vendas[lid2]) D.vendas[lid2]={};
           const excDias = D._vendasExcluidas?.[lid2] || [];
           // [FIX cross-device] Timestamp-aware
-          Object.entries(remoto.vendas[lid2]).forEach(([dt6,dados])=>{
+          Object.entries(remoto.vendas[lid2]).forEach(([dt,dados])=>{
             if(excDias.includes(dt)) return;
             const _lvSL = D.vendas[lid2][dt];
             const _lTsSL = (_lvSL && _lvSL._savedAt) || 0;
@@ -23534,7 +23590,7 @@ function exportarRelatorioRanking(){
   const ldExp = LOJAS.map(l=>{
     const m=getMetas(l.id);
     const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const _progG = per==='hoje' ? metaDiaLojaProgressiva(l.id, _hjG) : null;
+    const _progG = per==='hoje' ? metaDiaLojaProgressiva(l.id, hj) : null;   // [R158] era _hjG, inexistente
     const meta=per==='hoje'?(_progG?.dia||m.dia):per==='semana'?getMetaSemLoja(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
     const tm=calcTMLoja(l.id,perV);
@@ -25018,7 +25074,7 @@ function exportarPDFRelatorio() {
   // Lançamentos diários do mês para a loja
   const mes2 = hj.slice(0,7);
   const diasMap = {};
-  const vendsLoja = D.vendedoras.filter(v=>isAdmin()||v.loja===lid);
+  const vendsLoja = D.vendedoras.filter(v=>(isAdmin()||v.loja===lid) && v.cargo!=='VRLL');   // [R158]
   vendsLoja.forEach(v=>{
     Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,vd])=>{
       if(!dt.startsWith(mes2)) return;
@@ -25832,7 +25888,7 @@ async function buscarHistoricoLoja(){
   if(!isAdmin() && !lid){ showToast('Loja não identificada','err'); return; }
 
   // Verificar se há dados no período em D — se não, buscar do Firebase
-  const vends = lid ? D.vendedoras.filter(v=>v.loja===lid) : D.vendedoras.filter(()=>true);
+  const vends = lid ? vendsReais(lid) : D.vendedoras.filter(v=>v.cargo!=='VRLL');   // [R158]
   const temDadosPeriodo = vends.some(v =>
     Object.keys(D.vendasVend[v.id]||{}).some(d => d>=de && d<=ate)
   ) || Object.keys(D.vendas[lid]||{}).some(d => d>=de && d<=ate);
@@ -30904,7 +30960,7 @@ function renderCalendarioLanc(){
 
   // Fatura por dia — vendasVend (por vendedora) OU D.vendas (consolidado)
   const fatPorDia = {};
-  D.vendedoras.filter(v => v.loja === lid).forEach(v => {
+  vendsReais(lid).forEach(v => {   // [R158] sem VRLL
     Object.entries(D.vendasVend[v.id] || {}).forEach(([dt, dd]) => {
       if(dt.startsWith(mesRef)){
         fatPorDia[dt] = (fatPorDia[dt] || 0) + (Number(dd.val) || 0);
