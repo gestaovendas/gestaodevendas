@@ -669,10 +669,13 @@ window._mesMenos = function(mesRef, n){
 // ══════════════════════════════════════════════════════════════════════
 
 /** Campos de valor único: o remoto com conteúdo vale; vazio não apaga. */
-window._CAMPOS_SIMPLES = ['arquivos','metasProd','realProd','configCom',
-  'diasAbertosOverride','saldosOverride','precosOverride','produtosExtras',
-  'excelDados','_excelImportacoes','_estqImportacoes','_excelImportInfo',
-  'campanhas','campObjetivos'];
+// [R166] saíram também campObjetivos (por id + lápide), o estoque e as
+// planilhas antigas do CRM (carimbados). Ficam só campos sem editor.
+// [R165] 'arquivos' e 'diasAbertosOverride' saíram: são editados pelo admin
+// e passaram a ser carimbados (_mergeCarimbado, em _mesclarRemotoComum)
+// [R166] saíram também campObjetivos (por id + lápide), o estoque e as
+// planilhas antigas do CRM (carimbados). Ficam só campos sem editor.
+window._CAMPOS_SIMPLES = ['metasProd','realProd','configCom', 'campanhas'];
 
 /** Lápides: listas de id. União — exclusão feita em qualquer máquina vale. */
 window._LAPIDES_LISTA = ['_vendsExcluidas','_campExcluidos'];
@@ -793,7 +796,7 @@ window._metasParaDocLoja = function(metasLocais, lid, metasRemotas){
 };
 
 /** Histórico: mês que só existe no servidor não pode sumir. */
-window._historicoParaDocLoja = function(histLocal, lid, histRemoto){
+window._historicoParaDocLoja = function(histLocal, lid, histRemoto, lapides){
   const _l = (histLocal  && histLocal[lid])  || null;
   const _r = (histRemoto && histRemoto[lid]) || null;
   // ══════════════════════════════════════════════════════════════════
@@ -807,8 +810,10 @@ window._historicoParaDocLoja = function(histLocal, lid, histRemoto){
   // ══════════════════════════════════════════════════════════════════
   if(Array.isArray(_l) || Array.isArray(_r)){
     const porChave = new Map();
+    const _cont = {_histLojasExcluidas: lapides || {}};
     const põe = p => {
       if(!p || p.chave === undefined) return;
+      if(window._histLojaBarrada(_cont, lid, p)) return;   // [R165] excluído não volta
       const ant = porChave.get(p.chave);
       if(!ant || (Number(p.ts)||0) > (Number(ant.ts)||0)) porChave.set(p.chave, p);
     };
@@ -1002,6 +1007,209 @@ window._mesclarVendasSobDemanda = function(remoto, opts){
   return n;
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R165] HISTÓRICO LANÇADO SÓ CHEGAVA NUM F5.
+//
+// historicoMeses e historicoLojas eram mesclados apenas no boot. O mês de
+// histórico lançado pelo admin numa máquina nunca aparecia nas outras já
+// abertas — os pulls de 30s/60s não os olhavam. É a mesma regra de
+// antes, agora num lugar só: mês a mês (e período a período) pelo `ts`;
+// nada local é removido.
+// ══════════════════════════════════════════════════════════════════════
+/**
+ * [R165] Lápide do histórico por período: {'loja|chave': ts da exclusão}.
+ * Excluir um período só o tirava do array — e toda gravação juntava de
+ * volta os períodos do servidor (_historicoParaDocLoja, merge do
+ * principal): a exclusão nunca pegava. Período gravado DEPOIS da
+ * exclusão (ts maior) é relançamento e passa.
+ */
+window._histLojaBarrada = function(cont, lid, p){
+  const t = cont && cont._histLojasExcluidas && p && cont._histLojasExcluidas[lid + '|' + p.chave];
+  if(t === undefined || t === null || t === false) return false;   // só "sem lápide" libera — carimbo 0 ainda barra
+  return (Number(p.ts) || 0) <= Number(t);
+};
+/** União de dois mapas de lápide, ficando o carimbo mais novo. */
+window._uniaoLapidesHist = function(a, b){
+  const out = Object.assign({}, a || {});
+  Object.entries(b || {}).forEach(([k, t]) => { if(!(Number(out[k]) >= Number(t))) out[k] = Number(t) || 0; });
+  return out;
+};
+
+window._mesclarHistorico = function(remoto){
+  if(!remoto) return 0;
+  let n = 0;
+  // [R165] as lápides vêm primeiro: a exclusão feita em outra máquina
+  // precisa valer antes de qualquer período entrar
+  if(remoto._histLojasExcluidas)
+    D._histLojasExcluidas = window._uniaoLapidesHist(D._histLojasExcluidas, remoto._histLojasExcluidas);
+  if(remoto.historicoMeses){
+    if(!D.historicoMeses) D.historicoMeses = {};
+    Object.entries(remoto.historicoMeses).forEach(([lidH, meses])=>{
+      if(/^\d{4}-\d{2}$/.test(lidH)){ // formato antigo vindo do remoto
+        if(!D.historicoMeses['_legado']) D.historicoMeses['_legado'] = {};
+        if(!D.historicoMeses['_legado'][lidH]){ D.historicoMeses['_legado'][lidH] = meses; n++; }
+        return;
+      }
+      if(!D.historicoMeses[lidH]) D.historicoMeses[lidH] = {};
+      Object.entries(meses||{}).forEach(([mr,obj])=>{
+        const loc = D.historicoMeses[lidH][mr];
+        if(!loc || (obj?.ts||0) > (loc?.ts||0)){ D.historicoMeses[lidH][mr] = obj; n++; }
+      });
+    });
+  }
+  if(remoto.historicoLojas){
+    if(!D.historicoLojas) D.historicoLojas = {};
+    Object.entries(remoto.historicoLojas).forEach(([lidH, periodos])=>{
+      if(!Array.isArray(periodos)) return;
+      if(!Array.isArray(D.historicoLojas[lidH])) D.historicoLojas[lidH] = [];
+      periodos.forEach(p=>{
+        if(window._histLojaBarrada(D, lidH, p)) return;   // [R165] excluído não volta
+        const i = D.historicoLojas[lidH].findIndex(x=>x.chave===p.chave);
+        if(i<0){ D.historicoLojas[lidH].push(p); n++; }
+        else if((p?.ts||0) > (D.historicoLojas[lidH][i]?.ts||0)){ D.historicoLojas[lidH][i] = p; n++; }
+      });
+    });
+  }
+  // [R165] e o que foi excluído em outra máquina sai daqui também
+  if(D._histLojasExcluidas && D.historicoLojas){
+    Object.keys(D.historicoLojas).forEach(lidH => {
+      if(!Array.isArray(D.historicoLojas[lidH])) return;
+      const antes = D.historicoLojas[lidH].length;
+      D.historicoLojas[lidH] = D.historicoLojas[lidH].filter(p => !window._histLojaBarrada(D, lidH, p));
+      if(D.historicoLojas[lidH].length !== antes) n++;
+    });
+  }
+  return n;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// [R166] OBJETIVOS DE CAMPANHA: POR ID, COM LÁPIDE.
+//
+// campObjetivos era substituído INTEIRO pelo servidor (_CAMPOS_SIMPLES) e
+// gravado inteiro no principal. Excluir um objetivo só deixava lápide nos
+// lançamentos ligados (_campExcluidos), nunca no próprio objetivo: um
+// pull com cópia velha, ou um segundo computador de admin gravando a dele,
+// o trazia de volta. Agora: une por id, o objetivo com lápide (daqui ou do
+// servidor) fica de fora, e entre duas versões vence o _savedAt maior —
+// sem carimbo dos dois lados, o servidor, como sempre foi.
+// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// [R167] ANTES DE GRAVAR, AS LÁPIDES DO SERVIDOR.
+//
+// Na LEITURA toda lápide é união (nunca encolhe). Na GRAVAÇÃO, quase todas
+// saíam só com a cópia local: um segundo computador — da mesma loja, ou do
+// admin — que ainda não tinha puxado uma exclusão gravava a lápide velha
+// por cima e o item excluído voltava junto (o lançamento de venda, o
+// contato, o fluxo, a vendedora). O R166 tinha corrigido só as de campanha.
+//
+// _unirLapidesEm(alvo, fonte) une TODAS as lápides de `fonte` em `alvo`,
+// cada uma na sua forma, mexendo nos objetos do próprio `alvo` (quem já
+// guardou a referência enxerga a união). Quem grava une com o documento
+// do servidor e só então filtra os dados.
+// ══════════════════════════════════════════════════════════════════════
+window._unirLapidesEm = function(alvo, fonte){
+  if(!alvo || !fonte || typeof fonte !== 'object') return alvo;
+  // lista de ids
+  if(Array.isArray(fonte._vendsExcluidas)){
+    if(!Array.isArray(alvo._vendsExcluidas)) alvo._vendsExcluidas = [];
+    fonte._vendsExcluidas.forEach(id => { if(!alvo._vendsExcluidas.includes(id)) alvo._vendsExcluidas.push(id); });
+  }
+  // campanha: lista antiga ou mapa
+  if(fonte._campExcluidos)
+    alvo._campExcluidos = window._uniaoLapideCamp(alvo._campExcluidos, fonte._campExcluidos);
+  // mapas {chave: ts} — o carimbo mais novo
+  (window._LAPIDES_MAPA || []).forEach(c => {
+    const f = fonte[c];
+    if(!f || typeof f !== 'object' || Array.isArray(f)) return;
+    if(!alvo[c] || typeof alvo[c] !== 'object' || Array.isArray(alvo[c])) alvo[c] = {};
+    Object.entries(f).forEach(([k, t]) => { if(!(Number(alvo[c][k]) >= Number(t))) alvo[c][k] = t; });
+  });
+  // dias excluídos por loja / por vendedora: {chave: [datas]}
+  ['_vendasExcluidas','_vendasVendExcluidas'].forEach(c => {
+    const f = fonte[c];
+    if(!f || typeof f !== 'object') return;
+    if(!alvo[c] || typeof alvo[c] !== 'object') alvo[c] = {};
+    Object.entries(f).forEach(([k, dias]) => {
+      if(!Array.isArray(dias)) return;
+      if(!Array.isArray(alvo[c][k])) alvo[c][k] = [];
+      dias.forEach(d => { if(!alvo[c][k].includes(d)) alvo[c][k].push(d); });
+    });
+  });
+  if(fonte._histLojasExcluidas)
+    alvo._histLojasExcluidas = window._uniaoLapidesHist(alvo._histLojasExcluidas, fonte._histLojasExcluidas);
+  return alvo;
+};
+/**
+ * [R167] _lapideBarra para o que vem da cópia LOCAL na gravação: só a
+ * lápide COM carimbo barra. A sem carimbo (anterior ao R130) "barra
+ * sempre" — na gravação isso descartava em silêncio um relançamento
+ * legítimo daquele dia (achado da auditoria). O que vem do SERVIDOR segue
+ * com _lapideBarra, como antes do R167.
+ */
+window._lapideBarraLocal = function(cont, tipo, chave, dt, val){
+  const mapaTs = tipo === 'venda' ? (cont && cont._vendasExcluidasTs) : (cont && cont._vendasVendExcluidasTs);
+  const tsExc = Number((mapaTs && mapaTs[chave + '|' + dt]) || 0);
+  if(!tsExc) return false;
+  return window._lapideBarra(cont, tipo, chave, dt, val);
+};
+/** [R167] O lançamento/objetivo de campanha tem lápide em `cont`? (lista ou mapa) */
+window._campMortoEm = function(cont, id){
+  const l = cont && cont._campExcluidos;
+  if(!l) return false;
+  return Array.isArray(l) ? l.includes(id) : !!l[id];
+};
+
+/** [R166] União de duas lápides de campanha (array legado ou {id: ts}) em {id: ts}. */
+window._uniaoLapideCamp = function(a, b){
+  const out = {};
+  const leg = typeof window._TS_LAPIDE_LEGADA === 'function' ? window._TS_LAPIDE_LEGADA() : 1;
+  [a, b].forEach(x => {
+    if(Array.isArray(x)) x.forEach(id => { if(id && !out[id]) out[id] = leg; });
+    else if(x && typeof x === 'object') Object.entries(x).forEach(([id, t]) => {
+      if(!(Number(out[id]) >= Number(t))) out[id] = Number(t) || leg;
+    });
+  });
+  return out;
+};
+
+window._mesclarCampObjetivos = function(local, remotos, lapRemota){
+  const morto = id => (typeof _isCampExcluido === 'function' && _isCampExcluido(id))
+    || !!(lapRemota && (Array.isArray(lapRemota) ? lapRemota.includes(id) : lapRemota[id]));
+  const ts = o => Number(o && o._savedAt) || 0;
+  const porId = new Map();
+  // Transição: objetivo SEM carimbo que só existe aqui, com o servidor tendo
+  // lista, segue o servidor — como antes do R166. Os excluídos antes dele
+  // não têm lápide, e a união os devolveria de uma cópia velha. Objetivo
+  // novo já nasce com _savedAt e fica até a gravação levá-lo.
+  const _idsRem = new Set((Array.isArray(remotos) ? remotos : []).map(o => o && o.id));
+  const _remTem = _idsRem.size > 0;
+  (Array.isArray(local) ? local : []).forEach(o => {
+    if(!o || !o.id || morto(o.id)) return;
+    if(_remTem && !_idsRem.has(o.id) && !ts(o)) return;
+    porId.set(o.id, o);
+  });
+  (Array.isArray(remotos) ? remotos : []).forEach(o => {
+    if(!o || !o.id || morto(o.id)) return;
+    const l = porId.get(o.id);
+    if(!l || ts(o) > ts(l) || (!ts(o) && !ts(l))) porId.set(o.id, o);
+  });
+  return [...porId.values()];
+};
+
+// [R166] Estoque e planilhas antigas do CRM: editados só pelo admin, saíram
+// da substituição cega para _mergeCarimbado. Cada edição marca SÓ os campos
+// que toca — marcar o grupo inteiro faria esta máquina ignorar a edição de
+// outra num campo que ela nem mexeu (achado da auditoria). Importar ou
+// desfazer importação de estoque e limpar as planilhas mexem em todos.
+window._CAMPOS_ESTOQUE = ['saldosOverride','precosOverride','produtosExtras','_estqImportacoes'];
+window._CAMPOS_EXCEL   = ['excelDados','_excelImportacoes','_excelImportInfo'];
+window._marcarGrupoEditado = function(campos){
+  const agora = Date.now();
+  (campos || []).forEach(c => { D[c + 'Ts'] = agora; window._marcarCampoEditado(c); });
+};
+window._marcarEstoqueEditado = () => window._marcarGrupoEditado(window._CAMPOS_ESTOQUE);
+window._marcarExcelEditado   = () => window._marcarGrupoEditado(window._CAMPOS_EXCEL);
+
 window._mesclarRemotoComum = function(remoto){
   if(!remoto || typeof remoto !== 'object') return 0;
   let n = 0;
@@ -1101,9 +1309,31 @@ window._mesclarRemotoComum = function(remoto){
   if(typeof window._mergeCarimbado === 'function'){
     window._mergeCarimbado('_metasGrupo',      remoto._metasGrupo,      remoto._metasGrupoTs);
     window._mergeCarimbado('_superMetaAno',    remoto._superMetaAno,    remoto._superMetaAnoTs);
+    window._mergeCarimbado('_vrllSuperPct',    remoto._vrllSuperPct,    remoto._vrllSuperPctTs);   // [R164]
     window._mergeCarimbado('configFollowUp',   remoto.configFollowUp,   null);
     window._mergeCarimbado('_lojasArquivadas', remoto._lojasArquivadas, remoto._lojasArquivadasTs);
+    // [R165] editáveis pelo admin: saíram de _CAMPOS_SIMPLES (substituição
+    // cega) — um pull ou uma segunda máquina desfazia a edição recém-feita
+    window._mergeCarimbado('arquivos',            remoto.arquivos,            remoto.arquivosTs);
+    window._mergeCarimbado('diasAbertosOverride', remoto.diasAbertosOverride,
+                           remoto.diasAbertosOverrideTs || remoto._diasAbertosTs);
+    // [R166] estoque e planilhas antigas do CRM
+    let _estqMudou = false;
+    window._CAMPOS_ESTOQUE.concat(window._CAMPOS_EXCEL).forEach(c => {
+      if(window._mergeCarimbado(c, remoto[c], remoto[c + 'Ts']) && window._CAMPOS_ESTOQUE.includes(c)) _estqMudou = true;
+    });
+    // o catálogo em tela (PRODUTOS) é montado a partir dos overrides: sem
+    // reaplicar, o pull de 30/60 s mudava o saldo e a tela seguia velha
+    if(_estqMudou && typeof window.aplicarOverridesProdutos === 'function'){
+      try{ window.aplicarOverridesProdutos(D); }catch(eA){ console.warn('[R166] aplicar estoque:', eA.message); }
+    }
   }
+  // [R166] objetivos de campanha: por id, com lápide (as lápides já foram
+  // unidas acima, em _LAPIDES_LISTA)
+  if(Array.isArray(remoto.campObjetivos))
+    D.campObjetivos = window._mesclarCampObjetivos(D.campObjetivos, remoto.campObjetivos, remoto._campExcluidos);
+  // [R165] histórico lançado: chegava só no F5
+  if(typeof window._mesclarHistorico === 'function') window._mesclarHistorico(remoto);
   if(remoto.configModalidades && typeof window.mergeConfigModalidades === 'function')
     window.mergeConfigModalidades(remoto.configModalidades);
   return n;
@@ -1594,13 +1824,35 @@ try{
           const atual = await _lerDocObj(db, doc, getDoc, "principal");
           _principalRemoto = atual; _principalLido = true;
           if(atual){
+            // [R167] TODAS as lápides do servidor, e os dados do principal
+            // filtrados por elas (vendedora/fluxo/contato/prospecção
+            // excluídos em outra máquina não voltam pela cópia velha daqui)
+            window._unirLapidesEm(D2, atual);
+            if(Array.isArray(D2.vendedoras) && Array.isArray(D2._vendsExcluidas))
+              D2.vendedoras = D2.vendedoras.filter(v => !D2._vendsExcluidas.includes(v.id));
+            if(Array.isArray(D2.fluxo) && D2._fluxoExcluidos)
+              D2.fluxo = D2.fluxo.filter(r => !D2._fluxoExcluidos[r.id]);
+            [['contatos','_contatosExcluidos'], ['prospeccoes','_prospeccoesExcluidas']].forEach(([c, l]) => {
+              if(Array.isArray(D2[c]) && D2[l]) D2[c] = D2[c].filter(x => !(x && D2[l][x.id]));
+            });
+            // [R166] Lápides de campanha: a cópia daqui pode ser velha. Gravar
+            // só a local apagava do servidor a lápide feita em outra máquina —
+            // e o objetivo/lançamento excluído voltava. União primeiro.
+            if(atual._campExcluidos || D2._campExcluidos)
+              D2._campExcluidos = window._uniaoLapideCamp(D2._campExcluidos, atual._campExcluidos);
+            const _campMorto = id => !!(D2._campExcluidos && D2._campExcluidos[id]);
             if(atual.campRealizados && atual.campRealizados.length){
               if(!D2.campRealizados) D2.campRealizados = [];
               atual.campRealizados.forEach(r=>{
+                if(_campMorto(r.id)) return;   // [R166] excluído não volta pelo servidor
                 const ja = D2.campRealizados.findIndex(x=>x.id===r.id);
                 if(ja<0) D2.campRealizados.push(r);
               });
             }
+            // [R166] objetivos: por id, com a lápide — um segundo computador de
+            // admin com a cópia velha não sobrescreve nem ressuscita
+            if(Array.isArray(atual.campObjetivos))
+              D2.campObjetivos = window._mesclarCampObjetivos(D2.campObjetivos, atual.campObjetivos, D2._campExcluidos);
             // [FIX 25/07] merge preventivo de historicoMeses e historicoLojas.
             // Se uma loja lançou histórico e o admin gravou antes de sincronizar,
             // o principal reescrito perdia o lançamento da loja.
@@ -1616,12 +1868,15 @@ try{
                 });
               });
             }
+            // [R165] lápides do servidor e daqui juntas, antes da união
+            D2._histLojasExcluidas = window._uniaoLapidesHist(D2._histLojasExcluidas, atual._histLojasExcluidas);
             if(atual.historicoLojas){
               if(!D2.historicoLojas) D2.historicoLojas = {};
               Object.entries(atual.historicoLojas).forEach(([_lidH, _periodos])=>{
                 if(!Array.isArray(_periodos)) return;
                 if(!D2.historicoLojas[_lidH]) D2.historicoLojas[_lidH] = [];
                 _periodos.forEach(_p=>{
+                  if(window._histLojaBarrada(D2, _lidH, _p)) return;   // [R165]
                   const _i = D2.historicoLojas[_lidH].findIndex(x=>x.chave===_p.chave);
                   if(_i < 0) D2.historicoLojas[_lidH].push(_p);
                   else if((Number(_p?.ts)||0) > (Number(D2.historicoLojas[_lidH][_i]?.ts)||0)){
@@ -1660,6 +1915,8 @@ try{
           // [FIX 22/07] histórico NUNCA era gravado — só existia em localStorage
           historicoMeses:D2.historicoMeses|| {},
           historicoLojas:D2.historicoLojas|| {},
+          // [R165] lápide do histórico por período
+          _histLojasExcluidas: D2._histLojasExcluidas || {},
           _vendasExcluidas:    D2._vendasExcluidas     || {},
           _vendasVendExcluidas:D2._vendasVendExcluidas || {},
           // [R130] hora de cada exclusão — sem isto a lápide não sabe se o
@@ -1705,9 +1962,23 @@ try{
           _metasGrupoTs:       D2._metasGrupoTs        || 0,
           _superMetaAno:       D2._superMetaAno        || {},
           _superMetaAnoTs:     D2._superMetaAnoTs      || 0,
+          // [R164] faixa "Super Meta" da comissão do VR Líder (admin)
+          _vrllSuperPct:       D2._vrllSuperPct        || 0,
+          _vrllSuperPctTs:     D2._vrllSuperPctTs      || 0,
           // configFollowUp carrega o carimbo DENTRO dele (_savedAt)
           configFollowUp:      D2.configFollowUp       || {},
-          _diasAbertosTs:      D2._diasAbertosTs       || 0
+          _diasAbertosTs:      D2._diasAbertosTs       || 0,
+          // [R165] carimbos no nome que _mergeCarimbado lê (campo + 'Ts')
+          diasAbertosOverrideTs: D2.diasAbertosOverrideTs || D2._diasAbertosTs || 0,
+          arquivosTs:          D2.arquivosTs           || 0,
+          // [R166] carimbos do estoque e das planilhas antigas do CRM
+          saldosOverrideTs:    D2.saldosOverrideTs     || 0,
+          precosOverrideTs:    D2.precosOverrideTs     || 0,
+          produtosExtrasTs:    D2.produtosExtrasTs     || 0,
+          _estqImportacoesTs:  D2._estqImportacoesTs   || 0,
+          excelDadosTs:        D2.excelDadosTs         || 0,
+          _excelImportacoesTs: D2._excelImportacoesTs  || 0,
+          _excelImportInfoTs:  D2._excelImportInfoTs   || 0
           // INTENCIONALMENTE sem: vendas, vendasVend
           // Essas ficam nos docs loja_* para garantir que lançamentos das lojas nunca se percam
         };
@@ -1962,12 +2233,16 @@ try{
             // por isso que excluir lançamento não colava no perfil admin: o
             // caminho da loja já filtrava (ver excDias, mais abaixo), o do
             // admin não.
+            // [R167] lápides do admin + as do documento da loja: a exclusão
+            // feita na loja e ainda não puxada pelo admin vale aqui também
+            const _contA = window._unirLapidesEm(window._unirLapidesEm({}, D2), remotoA);
             const vendasA = {};
             Object.entries(remotoA.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
-              if(window._lapideBarra(D2, 'venda', lidA, dt, dados)) return;
+              if(window._lapideBarra(_contA, 'venda', lidA, dt, dados)) return;
               vendasA[dt] = dados;
             });
             Object.entries(D2.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
+              if(window._lapideBarraLocal(_contA, 'venda', lidA, dt, dados)) return;   // [R167] local: só lápide com carimbo
               const tsLocal  = Number(dados?._savedAt||0);
               const tsRemoto = Number(vendasA[dt]?._savedAt||0);
               if(!vendasA[dt] || tsLocal >= tsRemoto) vendasA[dt] = dados;
@@ -1978,7 +2253,7 @@ try{
             Object.entries(remotoA.vendasVend || {}).forEach(([vid,dias])=>{
               const manter = {};
               Object.entries(dias||{}).forEach(([dt,d])=>{
-                if(window._lapideBarra(D2, 'vend', vid, dt, d)) return;
+                if(window._lapideBarra(_contA, 'vend', vid, dt, d)) return;
                 manter[dt] = d;
               });
               vendVendA[vid] = manter;
@@ -1988,6 +2263,7 @@ try{
               if(!diasLocais) return;
               if(!vendVendA[v.id]) vendVendA[v.id] = {};
               Object.entries(diasLocais).forEach(([dt,d])=>{
+                if(window._lapideBarraLocal(_contA, 'vend', v.id, dt, d)) return;   // [R167] local: só lápide com carimbo
                 const tsLocal  = Number(d?._savedAt||0);
                 const tsRemoto = Number(vendVendA[v.id][dt]?._savedAt||0);
                 if(!vendVendA[v.id][dt] || tsLocal >= tsRemoto) vendVendA[v.id][dt] = d;
@@ -2207,7 +2483,6 @@ try{
 
         const docId = "loja_"+lid;
         const excDias  = D2._vendasExcluidas?.[lid] || [];
-        const excCamp  = D2._campExcluidos || [];
 
         // ── Montar payload: vendas consolidadas da loja ──────────
         // [FIX TOMBSTONE] Incluir TODOS os dias presentes em D2.vendas
@@ -2240,7 +2515,8 @@ try{
         // [FIX BUG 2] Usar _isCampExcluido (suporta array legado E objeto com timestamp)
         // Antes: excCamp.includes(r.id) só funcionava com array legado, falhava com objeto
         const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !_isCampExcluido(r.id));
-        const _excFluxo = D2._fluxoExcluidos || {};
+        if(!D2._fluxoExcluidos || typeof D2._fluxoExcluidos !== 'object') D2._fluxoExcluidos = {};
+        const _excFluxo = D2._fluxoExcluidos;   // [R167] mesma referência: a união das lápides vale aqui
         const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid && !_excFluxo[r.id]);
 
         // ── Merge com Firebase: preservar histórico não presente localmente ──
@@ -2249,25 +2525,56 @@ try{
         // em toda gravação de loja. O ramo do admin já declarava o
         // equivalente (`remotoA`) fora do bloco; este não.
         let existing = null;
+        // [R166] A LEITURA e a MESCLA têm destinos diferentes quando falham:
+        // sem ler o servidor, adiar (R165); com um erro na mescla, o que já
+        // foi montado segue — como sempre foi —, em vez de travar a gravação
+        // da loja para sempre (era o caso do excCamp.includes num objeto).
         try{
           existing = await _lerDocObj(db, doc, getDoc, docId);
+          // [R167] as lápides do servidor antes de tudo — e refiltrar o que já
+          // foi montado com a cópia local (ela pode não ter a exclusão feita
+          // no outro computador da loja)
+          if(existing){
+            window._unirLapidesEm(D2, existing);
+            Object.keys(vendasLoja).forEach(dt => {
+              if(window._lapideBarraLocal(D2, 'venda', lid, dt, vendasLoja[dt])) delete vendasLoja[dt];
+            });
+            Object.entries(vendasVendLoja).forEach(([vid, dias]) => {
+              Object.keys(dias).forEach(dt => { if(window._lapideBarraLocal(D2, 'vend', vid, dt, dias[dt])) delete dias[dt]; });
+            });
+            for(let i = campLoja.length - 1; i >= 0; i--)
+              if(window._campMortoEm(D2, campLoja[i].id)) campLoja.splice(i, 1);
+            for(let i = fluxoLoja.length - 1; i >= 0; i--)
+              if(D2._fluxoExcluidos && D2._fluxoExcluidos[fluxoLoja[i].id]) fluxoLoja.splice(i, 1);
+          }
+        }catch(e2){
+          console.error("[Avatim] loja: " + docId + " ilegível ("
+            + (e2.code||e2.message) + ") — gravação adiada para não sobrescrever o servidor.");
+          throw new Error('não foi possível ler o documento da loja antes de gravar ('
+            + (e2.code||e2.message) + ') — nada foi sobrescrito; tentando de novo');
+        }
+        try{
           if(existing){
             // Vendas: adicionar dias do Firebase que não existem localmente
+            // [R165] lápide com carimbo (_lapideBarra): a lista sem carimbo
+            // barrava o relançamento feito pelo admin DEPOIS da exclusão, e a
+            // gravação da loja o sobrescrevia
             Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
-              if(!(dt in vendasLoja) && !excDias.includes(dt)) vendasLoja[dt] = dados;
+              if(!(dt in vendasLoja) && !window._lapideBarra(D2, 'venda', lid, dt, dados)) vendasLoja[dt] = dados;
             });
             // vendasVend: adicionar dias do Firebase que não existem localmente
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias]) => {
-              const excDiasV = D2._vendasVendExcluidas?.[vid] || [];
               if(!vendasVendLoja[vid]) vendasVendLoja[vid] = {};
               Object.entries(dias||{}).forEach(([dt,d]) => {
-                if(!(dt in vendasVendLoja[vid]) && !excDiasV.includes(dt)) vendasVendLoja[vid][dt] = d;
+                if(!(dt in vendasVendLoja[vid]) && !window._lapideBarra(D2, 'vend', vid, dt, d)) vendasVendLoja[vid][dt] = d;
               });
             });
             // campRealizados: merge por id
             if(existing.campRealizados?.length){
               existing.campRealizados.forEach(r => {
-                if(!excCamp.includes(r.id) && !campLoja.find(x=>x.id===r.id)) campLoja.push(r);
+                // [R166] _isCampExcluido lê as duas formas da lápide (lista antiga e
+                // mapa {id: ts}); .includes quebrava com o mapa
+                if(!window._campMortoEm(D2, r.id) && !campLoja.find(x=>x.id===r.id)) campLoja.push(r);   // [R167] lápide unida
               });
             }
             // fluxo: merge por id — [R127] excluído não volta.
@@ -2280,8 +2587,10 @@ try{
               });
             }
           }
-        }catch(e2){
-          console.warn("[Avatim] merge preventivo ignorado:", e2.code||e2.message);
+        }catch(eM){
+          // [R165] a falha de LEITURA adia (acima); esta é a da mescla
+          console.error("[Avatim] loja: merge preventivo com erro (" + (eM.message||eM)
+            + ") — gravando com o que foi montado.");
         }
 
         // [FIX CRÍTICO] Incluir vendedoras e metasLoja no doc da loja
@@ -2299,7 +2608,8 @@ try{
         const _metasDaLoja     = () => window._metasParaDocLoja(
           D2.metasLoja, lid, existing && existing.metasLoja);
         const _historicoDaLoja = (campo) => window._historicoParaDocLoja(
-          D2[campo], lid, existing && existing[campo]);
+          D2[campo], lid, existing && existing[campo],
+          window._uniaoLapidesHist(D2._histLojasExcluidas, existing && existing._histLojasExcluidas));   // [R165]
         // [R157] a escolha da lápide foi para DENTRO da função pura:
         // aqui no invólucro ela era inalcançável por teste, e inverter
         // o ternário reintroduziria o defeito da prospecção sem que
@@ -2634,6 +2944,7 @@ try{
                 if(!Array.isArray(_periodos)) return;
                 if(!base.historicoLojas[_lidH]) base.historicoLojas[_lidH] = [];
                 _periodos.forEach(_p=>{
+                  if(window._histLojaBarrada(base, _lidH, _p)) return;   // [R165]
                   const _i = base.historicoLojas[_lidH].findIndex(x=>x.chave===_p.chave);
                   if(_i < 0) base.historicoLojas[_lidH].push(_p);
                   else if((Number(_p?.ts)||0) > (Number(base.historicoLojas[_lidH][_i]?.ts)||0)){
@@ -4070,7 +4381,7 @@ body:not(.logado) #appScreen{display:none!important}
   <!-- KPIs da loja (todos veem — cada perfil vê os dados da SUA loja) -->
   <div class="kgrid">
     <div class="kcard ouro"><div class="kl">Meta</div><div class="kv" id="m-meta">--</div><div class="ks" id="m-per">Hoje</div></div>
-    <div class="kcard roxo"><div class="kl">Super Meta</div><div class="kv" id="m-smeta">--</div><div class="ks">+25% acima</div></div>
+    <div class="kcard roxo"><div class="kl">Super Meta</div><div class="kv" id="m-smeta">--</div><div class="ks" id="m-smeta-s">acima da meta</div></div>
     <div class="kcard verde"><div class="kl">Realizado</div><div class="kv" id="m-real">R$ 0</div><div class="kbadge up" id="m-rpct">0%</div></div>
     <div class="kcard verm"><div class="kl">GAP</div><div class="kv" id="m-gap">--</div><div class="ks" id="m-gap-s">Diferença</div></div>
     <div class="kcard azul"><div class="kl">Necessário/dia</div><div class="kv" id="m-ndp">--</div><div class="ks" id="m-ndp-s">Para bater meta</div></div>
@@ -4291,6 +4602,17 @@ body:not(.logado) #appScreen{display:none!important}
     <div style="font-size:10px;color:var(--muted);line-height:1.8">
       ⚠️ <strong>Bonus em Produto:</strong> somente quem atingiu meta individual E tem min. 80% das vendas com nome de cliente. Retirar ate dia 5 do mes seguinte.<br>
       🗓️ <strong>Folgas:</strong> a combinar com a gerencia, nao comprometer funcionamento da loja. Usar no mes subsequente.
+    </div>
+  </div>
+  <!-- [R164] limiar da faixa Super Meta do VR Líder — padrão 125%, admin ajusta -->
+  <div class="sc admin-only" style="display:none">
+    <div class="st">Comissão do VR Líder — faixa Super Meta</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="ig" style="margin:0"><label>A partir de (% da meta da loja)</label>
+        <input type="text" inputmode="decimal" id="com-vrll-super" placeholder="125" style="width:120px">
+      </div>
+      <button class="btn-p" onclick="salvarVrllSuperPct()">Salvar</button>
+      <div style="font-size:11px;color:var(--muted);max-width:360px">Padrão 125%. A faixa anterior (1,90%) vai de 110% até abaixo deste valor.</div>
     </div>
   </div>
   <!-- Calculadora -->
@@ -7002,7 +7324,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-23e';
+window.AVATIM_BUILD = '2026-09-24d';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -7256,6 +7578,8 @@ window.AVATIM_RECURSOS = {
   pendenteNaoDerruba:    () => typeof _persistirPendente === 'function',
   prazoPorPerfil:        () => typeof window._prazoGravacao === 'function',
   lapideComHora:         () => typeof window._lapideBarra === 'function',
+  // [R167] antes de gravar, as lápides do servidor (loja, principal e propagação)
+  lapidesUnidasNaGravacao: () => typeof window._unirLapidesEm === 'function' && typeof window._lapideBarraLocal === 'function',
   gravacaoSerializada:   () => typeof window._gravFilaEstado === 'function',
   // [R132] planilha de estoque: subir e desfazer
   estoquePlanilha:       () => typeof window.estqAplicarPlanilha === 'function'
@@ -8806,9 +9130,12 @@ window.debugMeta = async function(lid){
 
   // CAMADA 3 e 4: ler DIRETO do Firestore SEM merge
   try{
-    const fbMod = await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
+    // [R164] as funções vêm do MESMO módulo que criou o banco (10.7.1, no
+    // boot). Importar a 10.12.4 aqui aplicava funções de uma versão sobre
+    // o Firestore de outra.
+    const fbMod = window._fbMod || await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
     const { getDoc, doc } = fbMod;
-    const _db = window._fbDb || (await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js")).getFirestore();
+    const _db = window._fbDb || fbMod.getFirestore();
 
     console.log("\n📍 CAMADA 3: Firestore — doc 'principal' (admin grava aqui)");
     const snapP = await getDoc(doc(_db, "avatim", "principal"));
@@ -9114,12 +9441,26 @@ window.fsGravarComPrazo = async function(json, ms){
   return true;
 };
 
+/**
+ * [R164] Prazo para uma gravação avulsa. Sem ele, com o Firestore sem
+ * alcançar o servidor, a promessa fica pendente para sempre — o motivo do
+ * gravarRemotoComPrazo (R124). Rejeita com mensagem clara ao estourar.
+ */
+window._comPrazo = function(promessa, oque, ms){
+  const prazo = ms || (typeof window._prazoGravacao === 'function' ? window._prazoGravacao() : 20000);
+  let timer;
+  const estouro = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error('o servidor não confirmou ' + (oque||'a gravação')
+      + ' em ' + Math.round(prazo/1000) + 's')), prazo);
+  });
+  return Promise.race([promessa, estouro]).finally(() => clearTimeout(timer));
+};
+
 // Função auxiliar: forçar gravação só da meta da loja no principal
 window.forcarMetaPrincipal = async function(lid, valorMes){
   const mr = mesAtual();
-  const fbMod = await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
-  const { getDoc, setDoc, doc } = fbMod;
-  const _db = window._fbDb;
+  // [R164] tirado: um import da 10.12.4 cujas funções nunca eram usadas —
+  // a leitura e a gravação vão pelos ajudantes do boot (10.7.1)
 
   const principal = await window._avatimLerDoc("principal");   // [R125] remonta os pedaços
   if(!principal){ console.error("❌ Doc principal não existe ou está ilegível"); return; }
@@ -9142,7 +9483,8 @@ window.forcarMetaPrincipal = async function(lid, valorMes){
 
   // [R125] grava fatiado: escrever cru aqui apagaria a contagem de pedaços e
   // deixaria o documento ilegível para todo mundo.
-  await window._avatimGravarDoc("principal", principal, { por: window._currentUser?.email || "debug" });
+  await window._comPrazo(window._avatimGravarDoc("principal", principal,
+    { por: window._currentUser?.email || "debug" }), 'o principal');   // [R164] com prazo
   console.log("✅ Meta forçada no principal:", lid, mr, valorMes);
   console.log("   Agora recarregue a página em todas as máquinas");
 };
@@ -9215,7 +9557,7 @@ async function _bkListarDocs(mod, db){
 async function _bkFirestore(){
   // Usa o módulo carregado no boot; só baixa de novo se não houver.
   const mod = window._fbMod
-    || await import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js");
+    || await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");   // [R164] a versão do boot
   const db = window._fbDb || (mod.getFirestore && mod.getFirestore());
   if(!db) throw new Error('Firestore indisponível — verifique a conexão.');
   return {mod, db};
@@ -9331,6 +9673,12 @@ window.backupInspecionar = function(event){
       if(!d) return {nome, estado:'ausente no backup', kb:0, resumo:'—'};
       if(d._erroLeitura) return {nome, estado:'erro na leitura', kb:0, resumo:d._erroLeitura};
       let resumo = '—', dias = null;
+      // [R164] o índice do CRM não tem `dados` — é coordenação, e aparecia
+      // como "sem conteúdo reconhecido", parecendo documento quebrado
+      if(nome === CRM_INDICE){
+        const nConj = Object.values(d.carimbos || {}).reduce((s2, o) => s2 + Object.keys(o || {}).length, 0);
+        return {nome, estado:'ok', kb:0, dias:null, resumo:'índice do CRM — ' + nConj + ' conjunto(s) loja/ano'};
+      }
       try{
         const obj = JSON.parse(d.dados || '{}');
         const partes = [];
@@ -9809,11 +10157,13 @@ window.backupRestaurar = async function(){
       try{
         const d = pacote.docs[nome];
         const _tsR = Date.now();
-        await setDoc(doc(db, 'avatim', nome), {
+        // [R164] com prazo: sem ele um documento que não chega ao servidor
+        // travava a restauração inteira, sem erro e sem aviso
+        await window._comPrazo(setDoc(doc(db, 'avatim', nome), {
           dados: d.dados || '{}',
           ts: _tsR,
           por: (window._currentUser?.email || 'restauracao') + ' (restaurado)'
-        });
+        }), nome);
         ok++;
         const _m = /^crm_([a-z0-9]+)_(\d{4})$/.exec(nome);
         if(_m){ (_carimbos[_m[1]] = _carimbos[_m[1]] || {})[_m[2]] = _tsR; }
@@ -12703,37 +13053,15 @@ async function loadFromFirestore(){
       // antes do fsGravar terminar (race condition)
       if(remoto.metasLoja) window.mergeMetasLoja(remoto.metasLoja);
       if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
-      if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
+      // [R166] por id, com lápide
+      if(Array.isArray(remoto.campObjetivos))
+        D.campObjetivos = window._mesclarCampObjetivos(D.campObjetivos, remoto.campObjetivos, remoto._campExcluidos);
       // [FIX 21/07] histórico NUNCA era mesclado do remoto — em outro
       // dispositivo, ou após limpar cache, os meses lançados sumiam.
-      if(remoto.historicoMeses){
-        if(!D.historicoMeses) D.historicoMeses = {};
-        Object.entries(remoto.historicoMeses).forEach(([lidH, meses])=>{
-          if(/^\d{4}-\d{2}$/.test(lidH)){ // formato antigo vindo do remoto
-            if(!D.historicoMeses['_legado']) D.historicoMeses['_legado'] = {};
-            if(!D.historicoMeses['_legado'][lidH]) D.historicoMeses['_legado'][lidH] = meses;
-            return;
-          }
-          if(!D.historicoMeses[lidH]) D.historicoMeses[lidH] = {};
-          Object.entries(meses||{}).forEach(([mr,obj])=>{
-            const loc = D.historicoMeses[lidH][mr];
-            if(!loc || (obj?.ts||0) > (loc?.ts||0)) D.historicoMeses[lidH][mr] = obj;
-          });
-        });
-      }
-      if(remoto.historicoLojas){
-        if(!D.historicoLojas) D.historicoLojas = {};
-        Object.entries(remoto.historicoLojas).forEach(([lidH, periodos])=>{
-          if(!Array.isArray(periodos)) return;
-          if(!D.historicoLojas[lidH]) D.historicoLojas[lidH] = [];
-          periodos.forEach(p=>{
-            const i = D.historicoLojas[lidH].findIndex(x=>x.chave===p.chave);
-            if(i<0) D.historicoLojas[lidH].push(p);
-            else if((p?.ts||0) > (D.historicoLojas[lidH][i]?.ts||0)) D.historicoLojas[lidH][i] = p;
-          });
-        });
-      }
-      if(_aceitaRemoto(D.arquivos, remoto.arquivos)) D.arquivos = remoto.arquivos;
+      // [R165] a mescla virou window._mesclarHistorico, usada também nos pulls
+      window._mesclarHistorico(remoto);
+      // [R165] arquivos: carimbado — ver _mesclarRemotoComum
+      window._mergeCarimbado('arquivos', remoto.arquivos, remoto.arquivosTs);
       if(_aceitaRemoto(D.metasProd, remoto.metasProd)) D.metasProd = remoto.metasProd;
       if(_aceitaRemoto(D.realProd, remoto.realProd)) D.realProd = remoto.realProd;
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
@@ -12822,20 +13150,16 @@ async function loadFromFirestore(){
       // [R155] Array.isArray([]) é TRUE — era por aqui que um vazio
       // vindo do servidor apagava a planilha que esta máquina tinha.
       // _aceitaRemoto existe exatamente para isso (ver R121).
-      if(Array.isArray(remoto.excelDados) && _aceitaRemoto(D.excelDados, remoto.excelDados)){
-        D.excelDados = remoto.excelDados;
-        if(_aceitaRemoto(D._excelImportInfo, remoto._excelImportInfo)) D._excelImportInfo = remoto._excelImportInfo;
-      }
-      if(_aceitaRemoto(D._excelImportacoes, remoto._excelImportacoes))
-        D._excelImportacoes = remoto._excelImportacoes;
-      if(_aceitaRemoto(D._estqImportacoes, remoto._estqImportacoes))
-        D._estqImportacoes = remoto._estqImportacoes;
+      // [R166] planilhas antigas do CRM e estoque: carimbados (ver
+      // _CAMPOS_EXCEL/_CAMPOS_ESTOQUE). Vazio sem carimbo continua não apagando.
+      window._CAMPOS_ESTOQUE.concat(window._CAMPOS_EXCEL).forEach(c =>
+        window._mergeCarimbado(c, remoto[c], remoto[c + 'Ts']));
       if(_aceitaRemoto(D.configCom, remoto.configCom)) D.configCom = remoto.configCom;
       if(remoto.configModalidades) window.mergeConfigModalidades(remoto.configModalidades);
-      if(_aceitaRemoto(D.diasAbertosOverride, remoto.diasAbertosOverride)) D.diasAbertosOverride = remoto.diasAbertosOverride;
-      if(_aceitaRemoto(D.saldosOverride, remoto.saldosOverride)) D.saldosOverride = remoto.saldosOverride;
-      if(_aceitaRemoto(D.precosOverride, remoto.precosOverride)) D.precosOverride = remoto.precosOverride;
-      if(_aceitaRemoto(D.produtosExtras, remoto.produtosExtras)) D.produtosExtras = remoto.produtosExtras;
+      // [R165] carimbado — o _diasAbertosTs era gravado e nunca lido
+      window._mergeCarimbado('diasAbertosOverride', remoto.diasAbertosOverride,
+                             remoto.diasAbertosOverrideTs || remoto._diasAbertosTs);
+      // [R166] saldosOverride/precosOverride/produtosExtras: carimbados, acima
       // ══════════════════════════════════════════════════════════════
       // [R155] Gravar sem ler de volta não resolve nada: o campo sobe,
       // mas a carga seguinte não o traz e a tela continua com o que
@@ -12855,6 +13179,7 @@ async function loadFromFirestore(){
       if(typeof window._mergeCarimbado === 'function'){
         window._mergeCarimbado('_metasGrupo',   remoto._metasGrupo,   remoto._metasGrupoTs);
         window._mergeCarimbado('_superMetaAno', remoto._superMetaAno, remoto._superMetaAnoTs);
+        window._mergeCarimbado('_vrllSuperPct', remoto._vrllSuperPct, remoto._vrllSuperPctTs);   // [R164]
         window._mergeCarimbado('configFollowUp',remoto.configFollowUp, null);
         // ══════════════════════════════════════════════════════════
         // [R156] _lojasArquivadas SUBIA e NUNCA VOLTAVA.
@@ -13389,7 +13714,8 @@ function setDiasAbertos(lid, mesRef, dias){
   } else {
     D.diasAbertosOverride[lid][mesRef] = Math.min(31, Math.max(1, Math.round(n)));
   }
-  D._diasAbertosTs = Date.now();
+  D._diasAbertosTs = D.diasAbertosOverrideTs = Date.now();   // [R165] lido agora
+  window._marcarCampoEditado('diasAbertosOverride');
 }
 
 /** Dias trabalhados por um(a) vendedor(a) no mês. Padrão: mês inteiro. */
@@ -13502,7 +13828,9 @@ function _superPctVend(vid, per){
     });
     return _superPctDe(m, sm);
   }
-  return _superPctDe(window.metaVendDoMes(vid), window.superMetaVendDoMes(vid));
+  // mês EXPLÍCITO: sem ele, metaVendDoMes usa o mês navegado em Metas (_mesMeta)
+  const _m = mesAtual();
+  return _superPctDe(window.metaVendDoMes(vid, _m), window.superMetaVendDoMes(vid, _m));
 }
 /** Limiar da REDE: soma das lojas no mês; no ano, o alvo anual do grupo se houver. */
 function _superPctRede(per){
@@ -14344,7 +14672,9 @@ function nav(pg){
             if(json){
               const remoto = JSON.parse(json);
               // Atualizar campObjetivos (vem do doc principal)
-              if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
+              // [R166] por id, com lápide
+              if(Array.isArray(remoto.campObjetivos))
+                D.campObjetivos = window._mesclarCampObjetivos(D.campObjetivos, remoto.campObjetivos, remoto._campExcluidos);
               // Merge campRealizados desta loja
               if(remoto.campRealizados && remoto.campRealizados.length){
                 if(!D.campRealizados) D.campRealizados=[];
@@ -16573,6 +16903,9 @@ function renderMetas(){
   // KPIs
   document.getElementById("m-meta").textContent=fmt(meta);
   document.getElementById("m-smeta").textContent=fmt(superMeta);
+  // [R164] o texto era fixo em 25% no HTML — errado com super cadastrada diferente
+  const _smS=document.getElementById("m-smeta-s");
+  if(_smS) _smS.textContent = meta>0&&superMeta>0 ? '+'+Math.round((superMeta/meta-1)*100)+'% acima da meta' : 'acima da meta';
   document.getElementById("m-per").textContent=lbl;
   document.getElementById("m-real").textContent=fmt(real);
   document.getElementById("m-rpct").textContent=pct.toFixed(0)+"%";
@@ -16797,9 +17130,8 @@ function toggleFormFluxo(){
   if(opening){
     // [R123] Abrir o formulário para o próximo cliente libera o botão na hora,
     // sem esperar o temporizador da trava anti-duplicidade.
-    // O carimbo de abertura é o que separa clique repetido de relançamento
-    // deliberado: quem reabriu e redigitou passa; clique enfileirado, não.
-    window._fxAberturaTs = Date.now();
+    // [R165] saiu um window._fxAberturaTs que era gravado e nunca lido — a
+    // trava é o próprio botão: reabrir o formulário o reabilita.
     const _b=document.getElementById("fx-btn-salvar");
     if(_b){ _b.disabled=false; _b.textContent="Salvar"; }
     document.getElementById("fx-data").value=hoje();
@@ -17928,9 +18260,10 @@ function buscarHistVend(){
   // KPIs
   const kpis = document.getElementById('hist-vend-kpis');
   // KPI % da meta mensal no período
-  const _nMeses = new Set(dias.map(d=>d.slice(0,7))).size;
-  const _metaPerMes = Number(v.metaMes)||0;
-  const _metaPeriodo = _metaPerMes * _nMeses;
+  // [R164] a meta DE CADA MÊS com lançamento no período — era a de hoje
+  // multiplicada pelo número de meses
+  const _metaPeriodo = [...new Set(dias.map(d=>d.slice(0,7)))]
+    .reduce((s2, m) => s2 + (window.metaVendDoMes(v.id, m) || 0), 0);
   const _pctMeta = _metaPeriodo>0 ? fatTotal/_metaPeriodo*100 : 0;
   const _corPct = _pctMeta>=100?'var(--verde)':_pctMeta>=70?'var(--ouro)':_pctMeta>0?'var(--verm)':'var(--muted)';
   if(kpis) kpis.innerHTML = [
@@ -18262,13 +18595,63 @@ const TABELA_COM = {
 
 function getComConfig(cargo){return TABELA_COM[cargo]||TABELA_COM.ESP;}
 
+// ══════════════════════════════════════════════════════════════════════
+// [R164] FAIXA "SUPER META" DA COMISSÃO DO VR LÍDER — CONFIGURÁVEL.
+//
+// Decisão do dono (2026-09-23): padrão 125% da meta da loja, ajustável
+// pelo admin. É regra de PAGAMENTO, por isso não segue a super meta
+// cadastrada da loja (R163): muda só quando o admin muda. Fica num campo
+// próprio e carimbado (_vrllSuperPct), no padrão do _superMetaAno — dentro
+// do configCom, que é substituído inteiro, um segundo computador de admin
+// com a cópia velha desfaria a mudança ao gravar.
+// ══════════════════════════════════════════════════════════════════════
+const VRLL_SUPER_PADRAO = 125;
+/** A partir de quantos % da meta da loja o VR Líder entra na faixa Super Meta. */
+function vrllSuperPct(){
+  const n = Number(D._vrllSuperPct);
+  return (n > 110 && n <= 500) ? n : VRLL_SUPER_PADRAO;
+}
+window.vrllSuperPct = vrllSuperPct;
+/** Rótulos das faixas do VR Líder, com o limiar em vigor. */
+function _vrllRotulos(){
+  const L = vrllSuperPct();
+  const ateL = Number.isInteger(L) ? (L - 1) + '%' : 'menos de ' + L + '%';
+  return {
+    curtos: [['abaixo90','Abaixo de 90%'],['f90a99','90% a 99%'],['f100a109','100% a 109%'],
+             ['f110a124','110% a ' + ateL],['f125plus', L + '%+ (Super Meta)']],
+    longos: {abaixo90:'Abaixo de 90% da meta loja', f90a99:'90% a 99% da meta loja',
+             f100a109:'100% a 109% da meta loja', f110a124:'110% a ' + ateL + ' da meta loja',
+             f125plus: L + '%+ — Super Meta da loja'}
+  };
+}
+/** Admin grava o limiar. Acima de 110% (a faixa anterior começa em 110%). */
+function salvarVrllSuperPct(){
+  if(!isAdmin()){ showToast('Só o administrador configura a comissão.','err'); return; }
+  const n = parseBR(document.getElementById('com-vrll-super')?.value);
+  if(!(n > 110 && n <= 500)){
+    showToast('Informe um percentual acima de 110% (padrão: ' + VRLL_SUPER_PADRAO + '%).','err'); return;
+  }
+  D._vrllSuperPct   = n;
+  D._vrllSuperPctTs = Date.now();
+  window._marcarCampoEditado('_vrllSuperPct');   // sem isto o pull devolveria o antigo
+  save();
+  showToast('Comissão do VR Líder: faixa Super Meta a partir de ' + n + '% da meta da loja.');
+  if(document.getElementById('com-vend')?.value) calcularComissao();
+  renderRankComissao();
+}
+/** Mostra o valor em vigor no campo (sem atropelar quem está digitando). */
+function _vrllPreencherCampo(){
+  const i = document.getElementById('com-vrll-super');
+  if(i && document.activeElement !== i) i.value = vrllSuperPct();
+}
+
 // Calcula comissão VRLL — baseada no faturamento da loja
 function calcComissaoVRLL(v, fatLoja, metaLoja){
   const tbl  = TABELA_COM.VRLL;
   const faixa= tbl.faixas[0];
   const pctLoja = metaLoja>0 ? fatLoja/metaLoja*100 : 0;
   let nivel, faixaDados;
-  if     (pctLoja>=125){ nivel='f125plus';  faixaDados=faixa.f125plus;  }
+  if     (pctLoja>=vrllSuperPct()){ nivel='f125plus';  faixaDados=faixa.f125plus;  }   // [R164] configurável
   else if(pctLoja>=110){ nivel='f110a124';  faixaDados=faixa.f110a124;  }
   else if(pctLoja>=100){ nivel='f100a109';  faixaDados=faixa.f100a109;  }
   else if(pctLoja>=90) { nivel='f90a99';    faixaDados=faixa.f90a99;    }
@@ -18277,11 +18660,22 @@ function calcComissaoVRLL(v, fatLoja, metaLoja){
   return {pctLoja, nivel, taxa:faixaDados.pct, bonus_prod:faixaDados.bonus_prod||0, folgas:faixaDados.folgas||0, comissao, fatLoja};
 }
 
-function calcComissaoVend(v, vendas, lojaAtingiu){
+function calcComissaoVend(v, vendas, lojaAtingiu, mesRef){
   const tbl  = getComConfig(v.cargo||'ESP');
   const faixa= tbl.faixas[0];
-  const pct  = v.metaMes>0 ? vendas/v.metaMes*100 : 0;
-  const smPct= v.superMetaMes>0 ? vendas/v.superMetaMes*100 : 0;
+  // [R164] a meta e a super meta DO MÊS da comissão (decisão do dono:
+  // período personalizado usa o mês do período). Para o mês corrente é o
+  // mesmo número de antes (metaVendDoMes cai no campo atual).
+  const _mr    = mesRef || mesAtual();
+  const _achou = !!(v.id && (D.vendedoras||[]).some(x => x.id === v.id));
+  const metaM  = _achou ? (window.metaVendDoMes(v.id, _mr) || 0) : (Number(v.metaMes) || 0);
+  const supCad = _achou ? (window.superMetaVendDoMes(v.id, _mr) || 0) : (Number(v.superMetaMes) || 0);
+  const pct  = metaM>0 ? vendas/metaM*100 : 0;
+  // [R164] sem super cadastrada vale o padrão (R163: meta × 1,25). Sem
+  // isto a vendedora nunca chegava à faixa supermeta, enquanto o painel
+  // já a mostrava em Super Meta.
+  const _smVal = supCad > 0 ? supCad : metaM * window.SUPER_META_PADRAO;
+  const smPct= _smVal>0 ? vendas/_smVal*100 : 0;
   let nivel, faixaDados;
   if(smPct>=100 && lojaAtingiu){    nivel="supermeta_loja";  }
   else if(smPct>=100){              nivel="supermeta";       }
@@ -18316,6 +18710,7 @@ function toggleComCustom(){
 }
 
 function calcularComissao(){
+  _vrllPreencherCampo();   // [R164]
   const id      = document.getElementById("com-vend").value;
   const valInput= parseBR(document.getElementById("com-val")?.value)||0;
   const per     = document.getElementById("com-per")?.value||"mes";
@@ -18325,6 +18720,7 @@ function calcularComissao(){
 
   // Calcular vendas conforme período
   let vendas=0, periodoLabel="";
+  let _mesCom = mesAtual();   // [R164] mês cujas metas valem para esta comissão
   if(valInput>0){
     vendas=valInput; periodoLabel="(valor manual)";
   } else if(per==="semana"){
@@ -18333,6 +18729,13 @@ function calcularComissao(){
     const ini=document.getElementById("com-data-ini")?.value;
     const fim=document.getElementById("com-data-fim")?.value;
     if(!ini||!fim){document.getElementById("com-resultado").innerHTML="<div style='color:var(--muted);font-size:12px;text-align:center;padding:20px'>Selecione as datas do período.</div>";return;}
+    // [R164] comissão é mensal: o período personalizado usa as metas e a
+    // loja DAQUELE mês (decisão do dono). Cruzando meses não há mês a usar.
+    if(ini.slice(0,7) !== fim.slice(0,7)){
+      document.getElementById("com-resultado").innerHTML="<div style='color:var(--ouro);font-size:12px;text-align:center;padding:20px'>A comissão é mensal: escolha um período dentro de um mesmo mês.</div>";
+      return;
+    }
+    _mesCom = ini.slice(0,7);
     // Soma todas as vendas do vendedor no intervalo
     const vendMap=D.vendasVend[id]||{};
     Object.entries(vendMap).forEach(([dt,d])=>{if(dt>=ini&&dt<=fim)vendas+=Number(d.val)||0;});
@@ -18340,20 +18743,25 @@ function calcularComissao(){
   } else {
     vendas=calcVendPer(id,"mes"); periodoLabel="Este Mês";
   }
-  const lojaM    = getMetas(v.loja);
-  const lojaReal = calcMes(v.loja);
+  // [R164] a loja no MÊS da comissão. Mês fechado pela fonte que vale
+  // (R160: planilha do CRM); o corrente, pelo lançamento, como sempre foi.
+  const lojaM    = getMetas(v.loja, _mesCom);
+  const lojaReal = _mesCom === mesAtual() ? calcMes(v.loja)
+                 : (window.fatDoMes(v.loja, _mesCom).valor || 0);
   const lojaOk   = lojaM.mes>0 && lojaReal/lojaM.mes>=1;
   const lojaSM   = lojaM.superMes>0 && lojaReal/lojaM.superMes>=1;
   const lojaAting= lojaSM||lojaOk;
   // ── VRLL: comissão sobre faturamento da loja ─────────
   if(v.cargo==='VRLL'){
-    const fatLoja  = calcMes(v.loja);
+    const fatLoja  = lojaReal;   // [R164] a loja do mês da comissão
     const metaLoja = lojaM.mes||0;
     const r2 = calcComissaoVRLL(v, fatLoja, metaLoja);
-    const cor2 = r2.pctLoja>=125?'var(--roxo)':r2.pctLoja>=100?'var(--verde)':r2.pctLoja>=90?'var(--ouro)':'var(--verm)';
+    const cor2 = r2.pctLoja>=vrllSuperPct()?'var(--roxo)':r2.pctLoja>=100?'var(--verde)':r2.pctLoja>=90?'var(--ouro)':'var(--verm)';
     const tbl2 = TABELA_COM.VRLL;
-    const nivelLabelsVRLL={abaixo90:'Abaixo de 90% da meta loja',f90a99:'90% a 99% da meta loja',f100a109:'100% a 109% da meta loja',f110a124:'110% a 124% da meta loja',f125plus:'125%+ — Super Meta da loja'};
-    const tabelaVRLL=[['abaixo90','Abaixo de 90%'],['f90a99','90% a 99%'],['f100a109','100% a 109%'],['f110a124','110% a 124%'],['f125plus','125%+ (Super Meta)']];
+    // [R164] rótulos com o limiar em vigor
+    const _rotV = _vrllRotulos();
+    const nivelLabelsVRLL = _rotV.longos;
+    const tabelaVRLL = _rotV.curtos;
     document.getElementById("com-resultado").innerHTML=
       '<div style="background:rgba(201,168,76,.07);border:1px solid '+cor2+';border-radius:12px;padding:16px;margin-bottom:14px">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">'
@@ -18394,7 +18802,7 @@ function calcularComissao(){
     return;
   }
   // ── Cargos normais ─────────────────────────────────
-    const r = calcComissaoVend(v, vendas, lojaAting);
+    const r = calcComissaoVend(v, vendas, lojaAting, _mesCom);   // [R164] metas do mês da comissão
   const cor = r.nivel.startsWith("super")?"var(--roxo)":r.nivel==="sem_meta"?"var(--verm)":r.nivel.includes("loja")?"var(--azul)":"var(--verde)";
   const tbl = getComConfig(v.cargo||'ESP');
   const faixa=tbl.faixas[0];
@@ -18439,12 +18847,13 @@ function calcularComissao(){
       </table></div>
     </div>
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">
-      Falta ${fmt(Math.max(0,(v.metaMes||0)-vendas))} para meta &bull;
-      Falta ${fmt(Math.max(0,(v.superMetaMes||0)-vendas))} para super meta
+      Falta ${fmt(Math.max(0,(window.metaVendDoMes(v.id,_mesCom)||0)-vendas))} para meta &bull;
+      Falta ${fmt(Math.max(0,((window.superMetaVendDoMes(v.id,_mesCom)||0)||(window.metaVendDoMes(v.id,_mesCom)||0)*window.SUPER_META_PADRAO)-vendas))} para super meta
     </div>`;
 }
 
 function renderRankComissao(){
+  _vrllPreencherCampo();   // [R164]
   const lid=lojaId();
   // [FIX CRÍTICO] Isolar vendedoras por loja MESMO para admin
   // Antes: isAdmin() || v.loja===lid causava curto-circuito
@@ -18470,7 +18879,9 @@ function renderRankComissao(){
     <div style="overflow-x:auto"><table class="dtable">
       <thead><tr><th>#</th><th>Vendedor(a)</th><th>Cargo</th><th>Loja</th><th>Vendas Mes</th><th>% Meta</th><th>Taxa</th><th>Bonus Prod</th><th>Comissao</th></tr></thead>
       <tbody>${ranked.map((v,i)=>{
-        const c=v.pct>=(v.cargo==='VRLL'?_superPctLoja(v.loja):_superPctVend(v.id))?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--verm)";
+        // [R164] VR Líder: roxo = a faixa Super Meta que ele RECEBE (limiar
+        // configurável), não a super meta cadastrada da loja (R163)
+        const c=(v.cargo==='VRLL'?v.nivel==='f125plus':v.pct>=_superPctVend(v.id))?"var(--roxo)":v.pct>=100?"var(--verde)":v.pct>=70?"var(--ouro)":"var(--verm)";
         const tbl=getComConfig(v.cargo||'ESP');
         return `<tr><td>${["🥇","🥈","🥉"][i]||i+1}</td><td><strong>${v.nome}</strong></td><td style="font-size:10px;color:var(--muted)">${tbl.nome}</td><td style="font-size:11px;color:var(--muted)">${LOJAS.find(l=>l.id===v.loja)?.nome||v.loja}</td><td>${fmt(v.vm)}</td><td style="color:${c};font-weight:700">${v.pct.toFixed(0)}%</td><td>${v.taxa}%</td><td style="color:var(--laranja)">${v.bonus_prod>0?fmt(v.bonus_prod):"—"}</td><td style="font-weight:700;color:var(--ouro)">${fmt(v.comissao)}</td></tr>`;
       }).join("")}</tbody>
@@ -18910,6 +19321,7 @@ function salvarNovoProd(){
   PRODUTOS.push(novo);
   if(!D.produtosExtras) D.produtosExtras=[];
   D.produtosExtras.push(novo);
+  window._marcarGrupoEditado(['produtosExtras']);   // [R166] só o campo tocado
   save();
   showToast('Produto adicionado!');
   fecharFormNovoProd();
@@ -18959,6 +19371,7 @@ function atualizarPrecoProd(cod, valorStr){
   PRODUTOS[idx].v = novoPreco;
   if(!D.precosOverride) D.precosOverride={};
   D.precosOverride[cod] = novoPreco;
+  window._marcarGrupoEditado(['precosOverride']);   // [R166] só o campo tocado
   save();
   showToast('Preço atualizado: '+fmt(novoPreco));
 }
@@ -18987,6 +19400,7 @@ function atualizarSaldoProd(cod){
   // Salvar em D.saldosOverride para persistir no Firebase
   if(!D.saldosOverride) D.saldosOverride={};
   D.saldosOverride[cod] = novoSaldo;
+  window._marcarGrupoEditado(['saldosOverride']);   // [R166] só o campo tocado
   save();
   showToast('Saldo atualizado!');
   renderEstqCritico();
@@ -19279,6 +19693,7 @@ window.estqProcessarUpload = function(event){
 
       D._estqImportacoes = D._estqImportacoes || [];
       D._estqImportacoes.push(imp);
+      window._marcarEstoqueEditado();   // [R166]
       save();
 
       showToast('✅ ' + imp.atualizados + ' produto(s) atualizado(s)'
@@ -19369,6 +19784,7 @@ window.estqExcluirImportacao = function(impId){
   });
 
   D._estqImportacoes = lista.filter(i => i.id !== impId);
+  window._marcarEstoqueEditado();   // [R166]
   // [R157] Desfazer uma importação remove de uma vez TODOS os produtos
   // que ela criou. Se forem os únicos do catálogo, `produtosExtras`
   // cai de N>1 para zero — e a trava anti-apagamento recusa a
@@ -20213,6 +20629,8 @@ function fecharFormCampObj(){
 let _editandoCampObjId = null; // id da campanha sendo editada
 
 function salvarCampObj(){
+  // [R166] trava por dentro também — só o botão era admin-only
+  if(!isAdmin()){ showToast('Apenas a gestão cria ou edita campanhas.','warn'); return; }
   initCampData();
   const tipo  = document.getElementById('camp-tipo-obj').value;
   const nome  = document.getElementById('camp-nome-obj').value.trim();
@@ -20238,7 +20656,7 @@ function salvarCampObj(){
     if(idx>=0){
       D.campObjetivos[idx] = {...D.campObjetivos[idx], tipo, nome, ini, fim,
         metaRede, metasPorLoja, obs, produtos:[..._campProdsObj],
-        editadoEm: hoje()};
+        editadoEm: hoje(), _savedAt: Date.now()};   // [R166] decide entre duas versões
     }
     _editandoCampObjId = null;
     document.getElementById('camp-form-titulo').textContent = 'Novo Objetivo de Campanha';
@@ -20249,7 +20667,7 @@ function salvarCampObj(){
       id: 'obj_'+Date.now(), tipo, nome, ini, fim,
       metaRede, metasPorLoja, obs,
       produtos: [..._campProdsObj],
-      criadoEm: hoje(), criadoPor: 'admin'
+      criadoEm: hoje(), criadoPor: 'admin', _savedAt: Date.now()   // [R166]
     };
     D.campObjetivos.push(obj);}
   save();
@@ -20825,7 +21243,9 @@ window.restaurarCampanhasDoBackup = function(){
       + 'SOMENTE as campanhas são trazidas — vendas, lançamentos e todo o resto '
       + 'ficam exatamente como estão.')) return;
 
-  novas.forEach(o => D.campObjetivos.push(o));
+  // [R166] carimbo: sem ele, a regra de transição do _mesclarCampObjetivos
+  // descartaria o restaurado se o pull chegasse antes da gravação
+  novas.forEach(o => { o._savedAt = Date.now(); D.campObjetivos.push(o); });
   _persistirLocal();
   if(typeof renderCampLista === 'function') renderCampLista();
   if(typeof window.renderCfgCampOrfas === 'function') window.renderCfgCampOrfas();
@@ -20886,7 +21306,7 @@ window.recuperarCampanhas = function(){
          + 'Renomeie e informe a meta.',
       produtos: [],
       criadoEm: hoje(), criadoPor: 'recuperacao',
-      _recuperada: true
+      _recuperada: true, _savedAt: Date.now()   // [R166] ver restaurarCampanhasDoBackup
     });
   });
   save();
@@ -21208,6 +21628,9 @@ function excluirCampObj(id){
   if(!isAdmin()){ showToast('Apenas a gestão pode excluir campanhas.','warn'); return; }
   if(!confirm('Excluir este objetivo? Os realizados vinculados também serão removidos.')) return;
   D.campObjetivos = D.campObjetivos.filter(o=>o.id!==id);
+  // [R166] lápide no PRÓPRIO objetivo — só os lançamentos a tinham, e a
+  // cópia velha de qualquer máquina trazia o objetivo de volta
+  window._marcarCampExcluido(id);
   // [FIX Bug2] Registrar tombstone para cada realizado excluído com o objetivo
   // [R158] pela função única — ver _marcarCampExcluido
   D.campRealizados.filter(r=>r.campId===id).forEach(r=>{ window._marcarCampExcluido(r.id); });
@@ -21224,6 +21647,7 @@ function arquivarCampObj(id){
   const acao = obj.arquivada ? 'Reativar' : 'Arquivar';
   if(!confirm(acao+' esta campanha?')) return;
   obj.arquivada = !obj.arquivada;
+  obj._savedAt = Date.now();   // [R166]
   save();
   showToast(obj.arquivada ? '📦 Campanha arquivada.' : '✅ Campanha reativada.');
   renderCampLista();
@@ -21374,7 +21798,7 @@ function renderMetasLojas(){
             <input type="text" inputmode="decimal" id="ml-mes-${loja.id}" value="${m.mes||""}" placeholder="Ex: 50000" oninput="calcPrevLoja('${loja.id}')" class="ml-inp">
           </div>
           <div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">SUPER META MENSAL</div>
-            <input type="text" inputmode="decimal" id="ml-smes-${loja.id}" value="${m.superMes||""}" placeholder="Auto: +25%" oninput="this.dataset.manual='1';calcPrevLoja('${loja.id}')" class="ml-inp" style="border-color:rgba(139,92,246,.3)">
+            <input type="text" inputmode="decimal" id="ml-smes-${loja.id}" value="${m.superMes||""}" placeholder="Auto: +${Math.round((window.SUPER_META_PADRAO-1)*100)}%" oninput="this.dataset.manual='1';calcPrevLoja('${loja.id}')" class="ml-inp" style="border-color:rgba(139,92,246,.3)">
           </div>
         </div>
         <div style="margin-bottom:8px">
@@ -21736,7 +22160,7 @@ function renderMetasVendSection(lid){
         </div>
         <div>
           <div style="font-size:8px;color:var(--roxo);font-weight:600;margin-bottom:3px">SUPER META (R$)</div>
-          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${window.superMetaVendDoMes(v.id, _mrDias)||''}" oninput="this.dataset.manual='1'" placeholder="Auto +25%"
+          <input type="text" inputmode="decimal" id="mv-smes-${v.id}" value="${window.superMetaVendDoMes(v.id, _mrDias)||''}" oninput="this.dataset.manual='1'" placeholder="Auto +${Math.round((window.SUPER_META_PADRAO-1)*100)}%"
             style="width:100%;background:var(--cinza);border:1px solid rgba(139,92,246,.3);border-radius:5px;padding:6px 8px;color:var(--roxo);font-size:12px;font-weight:700;outline:none;box-sizing:border-box"
             onfocus="this.style.borderColor='var(--roxo)'" onblur="this.style.borderColor='rgba(139,92,246,.3)'">
         </div>
@@ -22250,9 +22674,12 @@ function enviarArquivo(){
   const desc=document.getElementById("arq-desc").value.trim()||"Arquivo compartilhado",cat=document.getElementById("arq-cat").value;
   const inp=document.getElementById("file-inp");const nomes=inp.files.length?Array.from(inp.files).map(f=>f.name):["arquivo.doc"];
   nomes.forEach(nome=>D.arquivos.push({id:"a"+Date.now()+Math.random(),nome,desc,cat,data:hoje(),autor:"Admin"}));
+  D.arquivosTs = Date.now(); window._marcarCampoEditado('arquivos');   // [R165]
   save();showToast("Arquivo compartilhado!");renderArquivos(_tabArq);document.getElementById("arq-desc").value="";inp.value="";
 }
-function excluirArq(id){D.arquivos=D.arquivos.filter(a=>a.id!==id);save();renderArquivos(_tabArq);}
+function excluirArq(id){D.arquivos=D.arquivos.filter(a=>a.id!==id);
+  D.arquivosTs=Date.now(); window._marcarCampoEditado('arquivos');   // [R165]
+  save();renderArquivos(_tabArq);}
 function renderArquivos(cat){
   let arqs=D.arquivos;if(cat!=="todos")arqs=arqs.filter(a=>a.cat===cat);
   const ico=n=>{const e=(n.split(".").pop()||"").toLowerCase();return["pdf"].includes(e)?"📄":["xls","xlsx","csv"].includes(e)?"📊":["png","jpg","jpeg"].includes(e)?"🖼":"📎";};
@@ -22489,7 +22916,17 @@ function metaAno(lid){
 function metaVendAno(vid){
   const v = D.vendedoras.find(v2=>v2.id===vid);
   if(!v) return 0;
-  return (Number(v.metaMes)||0) * 12;
+  // [R164] Era sempre "meta de hoje × 12". Agora a meta cadastrada de cada
+  // mês do ano (R148); o mês sem cadastro entra com a meta atual, como
+  // estimativa — zerá-lo inflaria o % anual (o ano inteiro de vendas contra
+  // a meta de poucos meses).
+  const ano = hoje().slice(0,4), atual = Number(v.metaMes) || 0;
+  let t = 0;
+  for(let i = 1; i <= 12; i++){
+    const pm = v.metasMes && v.metasMes[ano + '-' + String(i).padStart(2,'0')];
+    t += (pm && Number(pm.mes) > 0) ? Number(pm.mes) : atual;
+  }
+  return t;
 }
 
 function renderRankings(tab) {
@@ -22686,6 +23123,30 @@ function renderRankings(tab) {
 
 
 // ─── helpers: valor ideal e gap ───────────────────────
+// [R164] Valor ideal de um período com a meta DE CADA MÊS. O período é
+// cortado mês a mês; cada pedaço usa a meta do seu mês. Antes as telas
+// passavam a meta de HOJE para períodos passados (a caçada achou nove).
+function _mesesDoPeriodo(de, ate){
+  const out = []; if(!de || !ate || de > ate) return out;
+  let m = de.slice(0,7); const fimM = ate.slice(0,7);
+  while(m <= fimM && out.length < 240){
+    out.push(m);
+    const [y, mm] = m.split('-').map(Number);
+    const d = new Date(y, mm, 1);
+    m = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+  return out;
+}
+function valorIdealPeriodoPorMes(metaDoMesFn, de, ate){
+  let t = 0;
+  _mesesDoPeriodo(de, ate).forEach(m => {
+    const [y, mm] = m.split('-').map(Number);
+    const ini = m + '-01', fim = m + '-' + String(new Date(y, mm, 0).getDate()).padStart(2,'0');
+    t += valorIdealPeriodo(Number(metaDoMesFn(m)) || 0, de > ini ? de : ini, ate < fim ? ate : fim);
+  });
+  return t;
+}
+
 function valorIdealPeriodo(metaMes, de, ate){
   // Retorna o valor que deveria ter sido realizado no período dado
   // baseado na proporção de dias úteis
@@ -22812,10 +23273,10 @@ function buscarHistLoja(){
     inativTotal+=diasMap[d].inativ;
   });
   const tmMedio      = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
-  const metaRef      = vendId
-    ? (D.vendedoras.find(v=>v.id===vendId)?.metaMes||0)
-    : (mLoja.mes||0);
-  const valorIdeal   = valorIdealPeriodo(metaRef, de, ate);
+  // [R164] meta de cada mês do período (vendedora ou loja), não a de hoje
+  const _metaRefDoMes = vendId ? (m => window.metaVendDoMes(vendId, m) || 0)
+                               : (m => metaDoMes(lid, m).valor || 0);
+  const valorIdeal   = valorIdealPeriodoPorMes(_metaRefDoMes, de, ate);
   const gap          = fatTotal - valorIdeal;
   const pctIdeal     = valorIdeal>0 ? fatTotal/valorIdeal*100 : 0;
   const corGap       = gap>=0?'var(--verde)':'var(--verm)';
@@ -22842,7 +23303,7 @@ function buscarHistLoja(){
       <tbody>${dias.map(d=>{
         const r=diasMap[d];
         const tm2=r.trans>0?r.fat/r.trans:r.fat>0?r.fat:0;
-        const du=diasUteisNoMes(); const idealDia=du>0?(metaRef/du):0;
+        const du=diasUteisNoMes(); const idealDia=du>0?(_metaRefDoMes(d.slice(0,7))/du):0;
         const g2=r.fat-idealDia; const cg=g2>=0?'var(--verde)':'var(--verm)';
         const cf=r.fat>=idealDia?'var(--verde)':'var(--verm)';
         return `<tr>
@@ -22875,8 +23336,7 @@ function buscarHistLoja(){
         aniv2+=Number(r.aniv||0); inativ2+=Number(r.inativ||0);
       });
       const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
-      const metaV=v.metaMes||0;
-      const idealV=valorIdealPeriodo(metaV,de,ate);
+      const idealV=valorIdealPeriodoPorMes(m => window.metaVendDoMes(v.id, m) || 0, de, ate);   // [R164]
       const gapV=fat2-idealV;
       return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,idealV,gapV};
     }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
@@ -23075,7 +23535,8 @@ function renderRankingAdmin() {
         <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};border-radius:4px"></div>
       </div>
       ${vends.slice(0,5).map((v,i) => {
-        const _mvMes = Number(v.metaMes)||0;
+        // [R164] no ano, a meta ANUAL — era a de um mês contra o ano de vendas
+        const _mvMes = per==='ano' ? metaVendAno(v.id) : (window.metaVendDoMes(v.id, mesAtual())||0);
         const _mvPer = per==='hoje'
           ? metaDiaProgressivaVend(v.id, hj)
           : per==='semana' ? (()=>{const _sw=semanaDoMes(hoje());return parseFloat((_mvMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})() : _mvMes;
@@ -23111,13 +23572,13 @@ function _buildPodio(items, getInfo) {
       const h   = heights[displayIdx];
       const med = medals[displayIdx];
       const brd = bordas[displayIdx];
-      const cor = info.pct>=(info.superPct??125)?'var(--roxo)':info.pct>=100?'var(--verde)':info.pct>=70?'var(--ouro)':'var(--verm)';
-      const bgPct = info.pct>=(info.superPct??125)?'rgba(139,92,246,.08)':info.pct>=100?'rgba(46,204,135,.06)':info.pct>=70?'rgba(201,168,76,.06)':'rgba(255,71,87,.05)';
+      const cor = info.pct>=(info.superPct??window.SUPER_META_PADRAO*100)?'var(--roxo)':info.pct>=100?'var(--verde)':info.pct>=70?'var(--ouro)':'var(--verm)';
+      const bgPct = info.pct>=(info.superPct??window.SUPER_META_PADRAO*100)?'rgba(139,92,246,.08)':info.pct>=100?'rgba(46,204,135,.06)':info.pct>=70?'rgba(201,168,76,.06)':'rgba(255,71,87,.05)';
       return `<div style="flex:1;max-width:220px;min-height:${h};background:${bgPct};border:1px solid ${brd};border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;transition:all .2s">
         <div style="font-size:32px;margin-bottom:6px">${med}</div>
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">${info.titulo}</div>
         <div style="font-family:Playfair Display,serif;font-size:28px;font-weight:900;color:${cor}">${info.pct.toFixed(0)}%</div>
-        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct>=(info.superPct??125)?'🏆 Super Meta!':info.pct>=100?'✅ Meta!':info.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
+        <div style="font-size:10px;color:${cor};font-weight:600;margin-top:2px">${info.pct>=(info.superPct??window.SUPER_META_PADRAO*100)?'🏆 Super Meta!':info.pct>=100?'✅ Meta!':info.pct>=70?'⚡ Próximo':'🔴 Abaixo'}</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -23418,7 +23879,9 @@ function iniciarAutoRefresh(){
         if(!dadosJSON) return;
         const remoto = JSON.parse(dadosJSON);
         // Atualizar campObjetivos (vem do doc principal — admin gerencia)
-        if(_aceitaRemoto(D.campObjetivos, remoto.campObjetivos)) D.campObjetivos = remoto.campObjetivos;
+        // [R166] por id, com lápide
+        if(Array.isArray(remoto.campObjetivos))
+          D.campObjetivos = window._mesclarCampObjetivos(D.campObjetivos, remoto.campObjetivos, remoto._campExcluidos);
         // [FIX BUG 3] Atualizar D.campanhas (campo legado) junto com campObjetivos
         // Antes: lojas com campo legado não recebiam campanhas criadas pelo admin
         if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
@@ -23866,7 +24329,7 @@ function tabGestao(per, el) {
 
 function exportarRelatorioRanking(){
   const per = _rankPerAdmin || 'hoje';
-  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':per==='ano'?'Ano '+hoje().slice(0,4):'Este Mês';   // [R164] a aba Ano existe
   const hj = hoje();
   let csv = 'RELATÓRIO DE RANKINGS AVATIM\n';
   csv += 'Gerado em: '+hj+'\nPeríodo: '+perLabel+'\n\n';
@@ -23877,11 +24340,11 @@ function exportarRelatorioRanking(){
   const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const ldExp = LOJAS.map(l=>{
     const m=getMetas(l.id);
-    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id);
     const _progG = per==='hoje' ? metaDiaLojaProgressiva(l.id, hj) : null;   // [R158] era _hjG, inexistente
-    const meta=per==='hoje'?(_progG?.dia||m.dia):per==='semana'?getMetaSemLoja(l.id):m.mes;
+    const meta=per==='hoje'?(_progG?.dia||m.dia):per==='semana'?getMetaSemLoja(l.id):per==='ano'?metaAno(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
-    const tm=calcTMLoja(l.id,perV);
+    const tm=per==='ano'?calcTMAno(l.id):calcTMLoja(l.id,perV);   // [R164] aba Ano
     return {nome:l.nome,fat,meta,pct,tm};
   }).sort((a,b)=>b.pct-a.pct||b.fat-a.fat);
   ldExp.forEach((l,i)=>{
@@ -23895,7 +24358,7 @@ function exportarRelatorioRanking(){
   const vendsExp = D.vendedoras.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
-    const mMes=Number(v.metaMes)||0;
+    const mMes=per==='ano'?metaVendAno(v.id):(window.metaVendDoMes(v.id, mesAtual())||0);   // [R164] ano = meta anual
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, hj2):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,mPer,pct};
@@ -23910,7 +24373,7 @@ function exportarRelatorioRanking(){
 
 function compartilharWhatsApp(){
   const per = _gestaoPer || 'hoje';
-  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':per==='ano'?'Ano '+hoje().slice(0,4):'Este Mês';   // [R164] a aba Ano existe
   const hj = hoje();
   const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjW = hoje();
@@ -23922,14 +24385,14 @@ function compartilharWhatsApp(){
   txt += `🏪 *RANKING DE LOJAS*\n`;
   const ldW = LOJAS.map(l=>{
     const m=getMetas(l.id);
-    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
     return {nome:l.nome,fat,pct,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
   const medals=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣'];
   ldW.forEach((l,i)=>{
-    const s = l.pct>=_superPctLoja(l.id)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
+    const s = l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'🟣':l.pct>=100?'🟢':l.pct>=70?'🟡':'🔴';
     txt += `${medals[i]||i+1} ${l.nome} — ${s} *${l.pct.toFixed(0)}%*\n`;
   });
 
@@ -23937,22 +24400,22 @@ function compartilharWhatsApp(){
   txt += `\n👩 *TOP VENDEDOR(ES)*\n`;
   const vendsW = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
-    const mMes=Number(v.metaMes)||0;
+    const mMes=per==='ano'?metaVendAno(v.id):(window.metaVendDoMes(v.id, mesAtual())||0);   // [R164] ano = meta anual
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjW):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct,id:v.id};
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,5);
   vendsW.forEach((v,i)=>{
-    const s=v.pct>=_superPctVend(v.id)?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
+    const s=v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'🟣':v.pct>=100?'🟢':v.pct>=70?'🟡':'🔴';
     txt += `${medals[i]} ${v.nome} (${v.loja}) — ${s} *${v.pct.toFixed(0)}%*\n`;
   });
 
   // Totais da rede
-  const totalFat = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)),0);
-  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
+  const totalFat = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id)),0);
+  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes);},0);
   const pctRede = totalMeta>0?totalFat/totalMeta*100:0;
-  const sRede = pctRede>=_superPctRede()?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
+  const sRede = pctRede>=_superPctRede(per==='ano'?'ano':undefined)?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
   txt += `\n📈 *REDE: ${sRede} ${pctRede.toFixed(0)}% da meta*\n`;
   txt += `_Gerado pelo Avatim Gestão_`;
 
@@ -25208,22 +25671,22 @@ function exportarPDFGeral(){
 
 function exportarPDFGestao() {
   const per = _gestaoPer || 'hoje';
-  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':per==='ano'?'Ano '+hoje().slice(0,4):'Este Mês';   // [R164] a aba Ano existe
   const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   const _hjG = hoje();
 
   const ldG = LOJAS.map(l=>{
     const m=getMetas(l.id);
-    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
-    const tm=calcTMLoja(l.id,perV);
+    const tm=per==='ano'?calcTMAno(l.id):calcTMLoja(l.id,perV);   // [R164] aba Ano
     const proj=calcProjecao(l.id);
     return {nome:l.nome,fat,meta,pct,tm,proj:proj?.projecao||0,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
 
   const rowsG = ldG.map((l,i)=>{
-    const badge=l.pct>=_superPctLoja(l.id)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const badge=l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${l.nome}</strong></td>
@@ -25232,13 +25695,13 @@ function exportarPDFGestao() {
       <td>${l.pct.toFixed(0)}%</td>
       <td>${fmt(l.tm)}</td>
       <td>${l.proj>0?fmt(l.proj):'—'}</td>
-      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td>
+      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td>
     </tr>`;
   }).join('');
 
   const vendsG = D.vendedoras.map(v=>{
     const val=calcVendPer(v.id,perV);
-    const mMes=Number(v.metaMes)||0;
+    const mMes=per==='ano'?metaVendAno(v.id):(window.metaVendDoMes(v.id, mesAtual())||0);   // [R164] ano = meta anual
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, _hjG):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     const loja=LOJAS.find(l=>l.id===v.loja);
@@ -25246,13 +25709,13 @@ function exportarPDFGestao() {
   }).filter(v=>v.val>0).sort((a,b)=>b.pct-a.pct).slice(0,10);
 
   const rowsVG = vendsG.map((v,i)=>{
-    const badge=v.pct>=_superPctVend(v.id)?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
+    const badge=v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'roxo':v.pct>=100?'ok':v.pct>=70?'warn':'bad';
     return `<tr>
       <td>${['🥇','🥈','🥉'][i]||i+1}</td>
       <td><strong>${v.nome}</strong></td>
       <td>${v.loja}</td>
       <td>${v.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${v.pct>=_superPctVend(v.id)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
+      <td><span class="badge-${badge}">${v.pct>=_superPctVend(v.id,per==='ano'?'ano':undefined)?'Super!':v.pct>=100?'Meta!':v.pct>=70?'Próximo':'Abaixo'}</span></td>
     </tr>`;
   }).join('');
 
@@ -25265,10 +25728,10 @@ function exportarPDFGestao() {
   const pctRedeG = totMetaG>0?totFatG/totMetaG*100:0;
 
   const rowsFat = ldByFatPDF.map((l,i)=>{
-    const badge=l.pct>=_superPctLoja(l.id)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
+    const badge=l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'roxo':l.pct>=100?'ok':l.pct>=70?'warn':'bad';
     return `<tr><td>${['🥇','🥈','🥉'][i]||i+1}</td><td><strong>${l.nome}</strong></td>
       <td>${fmt(l.fat)}</td><td>${l.pct.toFixed(0)}%</td>
-      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
+      <td><span class="badge-${badge}">${l.pct>=_superPctLoja(l.id,per==='ano'?'ano':undefined)?'Super!':l.pct>=100?'Meta!':l.pct>=70?'Próximo':'Abaixo'}</span></td></tr>`;
   }).join('');
 
   const rowsTM = ldByTMPDF.map((l,i)=>`<tr>
@@ -25297,7 +25760,7 @@ function exportarPDFGestao() {
 
     <h2>🎯 Ranking — Mais Próximo da Meta</h2>
     <table>
-      <thead><tr><th>#</th><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Projeção</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Loja</th><th>Meta</th><th>Realizado</th><th>% Meta</th><th>TM</th><th>Projeção (mês)</th><th>Status</th></tr></thead>
       <tbody>${rowsG}</tbody>
     </table>
 
@@ -25429,22 +25892,22 @@ function exportarPDFRelatorio() {
 
 function exportarRelatorioGestao(){
   const per = _gestaoPer || 'hoje';
-  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':'Este Mês';
+  const perLabel = per==='hoje'?'Hoje':per==='semana'?'Esta Semana':per==='ano'?'Ano '+hoje().slice(0,4):'Este Mês';   // [R164] a aba Ano existe
   const hj = hoje();
   let csv = 'RELATÓRIO PAINEL DE GESTÃO AVATIM\n';
   csv += 'Gerado em: '+hj+'\nPeríodo: '+perLabel+'\n\n';
 
   // Status de lojas
   csv += 'STATUS DAS LOJAS\n';
-  csv += 'Loja,Faturamento,Meta,% Meta,TM,Atendimentos,Projeção\n';
+  csv += 'Loja,Faturamento,Meta,% Meta,TM,Atendimentos,Projeção (mês)\n';
   const perV = per==='hoje'?'dia':per==='ano'?'ano':per;
   LOJAS.forEach(l=>{
     const m=getMetas(l.id);
-    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
-    const tm=calcTMLoja(l.id,perV);
-    const nat=calcNAtend(l.id,perV);
+    const tm=per==='ano'?calcTMAno(l.id):calcTMLoja(l.id,perV);   // [R164] aba Ano
+    const nat=per==='ano'?calcNAtendAno(l.id):calcNAtend(l.id,perV);
     const proj=calcProjecao(l.id);
     csv += l.nome+','+fat.toFixed(2)+','+meta.toFixed(2)+','+pct.toFixed(1)+'%,'+tm.toFixed(2)+','+nat+','+(proj?proj.projecao.toFixed(2):'--')+'\n';
   });
@@ -25455,7 +25918,7 @@ function exportarRelatorioGestao(){
   D.vendedoras.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const val=calcVendPer(v.id,perV);
-    const mMes=Number(v.metaMes)||0;
+    const mMes=per==='ano'?metaVendAno(v.id):(window.metaVendDoMes(v.id, mesAtual())||0);   // [R164] ano = meta anual
     const mPer=per==='hoje'?metaDiaProgressivaVend(v.id, hj):per==='semana'?(()=>{const _sw=semanaDoMes(hoje());return parseFloat((mMes*(_sw===1?PERC_SEM[1]:_sw===2?PERC_SEM[2]:_sw===3?PERC_SEM[3]:PERC_SEM[4])).toFixed(2));})():mMes;
     const pct=mPer>0?val/mPer*100:0;
     return {nome:v.nome,loja:loja?.nome||v.loja,val,pct};
@@ -26377,7 +26840,7 @@ async function buscarHistoricoLoja(){
         aniv2+=Number(r.aniv||0); inativ2+=Number(r.inativ||0);
       });
       const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
-      const metaV=valorIdealPeriodo(v.metaMes||0,de,ate);
+      const metaV=valorIdealPeriodoPorMes(m => window.metaVendDoMes(v.id, m) || 0, de, ate);   // [R164]
       return {...v,fat:fat2,trans:trans2,aniv:aniv2,inativ:inativ2,tm:tm2,ideal:metaV};
     }).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
 
@@ -27953,6 +28416,10 @@ function excluirLancamentoPerloja(lojaId, chave){
   if(D.historicoLojas[lojaId]){
     D.historicoLojas[lojaId] = D.historicoLojas[lojaId].filter(p=>p.chave !== chave);
   }
+  // [R165] lápide: sem ela a próxima gravação juntava o período de volta do
+  // servidor, e a sincronização o devolvia — a exclusão nunca pegava
+  if(!D._histLojasExcluidas) D._histLojasExcluidas = {};
+  D._histLojasExcluidas[lojaId + '|' + chave] = Date.now();
   save();
   renderHistoricoLoja();
   showToast('Período excluído');
@@ -28218,7 +28685,7 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
         vReal = realizado / vendsAtivas(loja.id).length;
       } else {
         vReal = calcVendPer(v.id, dataIni.slice(0, 7)) || 0;
-        vMeta = v.metaMes || 0;
+        vMeta = window.metaVendDoMes(v.id, dataIni.slice(0, 7)) || 0;   // [R164] mesmo mês da loja
       }
       return {
         id: v.id,
@@ -29062,7 +29529,7 @@ function renderPerformance(){
       if(vendId){
         // Vendedora individual
         const vObj = D.vendedoras.find(v => v.id === vendId) || {};
-        meta = Number(vObj.metaMes) || 0;
+        meta = window.metaVendDoMes(vendId, mr) || 0;   // [R164] a meta DAQUELE mês, como a loja
         real = calcVendPer(vendId, mr);
         // Peças e atendimentos da vendedora naquele mês
         let itens = 0, atend = 0;
@@ -31711,10 +32178,12 @@ window._rkMontarRankings = function(per, ref){
   const dadosVend = vends.map(v => {
     const at = _rkSomaVend(v.id, iv.ini, iv.fim);
     const an = _rkSomaVend(v.id, iv.iniAnt, iv.fimAnt);
-    const metaV = per==='mes' ? Number(v.metaMes||0)
-                : per==='semana' ? Number(v.metaMes||0)/4.3
-                : per==='hoje' ? Number(v.metaMes||0)/26
-                : Number(v.metaMes||0)*12;
+    // [R164] a meta do mês ESCOLHIDO no seletor (a loja já fazia assim)
+    const _mvRef = window.metaVendDoMes(v.id, iv.ini.slice(0,7)) || 0;
+    const metaV = per==='mes' ? _mvRef
+                : per==='semana' ? _mvRef/4.3
+                : per==='hoje' ? _mvRef/26
+                : metaVendAno(v.id);
     return {
       id:v.id, nome:v.nome, loja:nomeLoja(v.loja),
       fat:at.fat, tm:at.tm, trans:at.trans, fatAnt:an.fat,
@@ -34500,6 +34969,7 @@ window.excelProcessarUpload = function(event){
 
       // Registro da importação (para a Gestão de Importações)
       if(!D._excelImportacoes) D._excelImportacoes = [];
+      window._marcarGrupoEditado(['_excelImportacoes','_excelImportInfo']);   // [R166] o que a importação toca
       D._excelImportacoes.push({
         id: _importIdGerar(),
         arquivo: file.name,
@@ -34722,8 +35192,9 @@ window.excelLimparDados = async function(){
     D.crm = {};
     // [R161] sem cubo local, não há o que proteger da recarga pelo índice
     window._crmNaoEnviados = {};
-    D._excelImportInfo = null;
+    D._excelImportInfo = {};   // [R166] {} e não null: null nunca é mesclado (regra do R155)
     D._excelImportacoes = [];
+    window._marcarExcelEditado();   // [R166] vazio COM carimbo: chega às outras
     // [R155] a trava agora pesa os dados de planilha; esta limpeza foi
     // pedida e confirmada, então ela é autorizada a zerar. A flag é
     // ligada só aqui, depois de todo return antecipado, e desligada em
@@ -34740,8 +35211,9 @@ window.excelLimparDados = async function(){
   D.excelDados = [];
   D.crm = {};
   window._crmNaoEnviados = {};   // [R161] ver acima
-  D._excelImportInfo = null;
+  D._excelImportInfo = {};   // [R166] ver acima
   D._excelImportacoes = [];
+  window._marcarExcelEditado();   // [R166]
   // [R155] ver acima: limpeza confirmada tem passe pela trava, e só ela
   window._limpezaDeliberada = true;
   try{ save(); } finally { window._limpezaDeliberada = false; }
@@ -34857,7 +35329,7 @@ window._excelRenderLegado = function(){
       const info = D._excelImportInfo;
       statusEl.innerHTML = `
         <div style="color:var(--verde);font-weight:600;margin-bottom:4px">${D.excelDados.length} linhas na base</div>
-        ${info ? `<div style="font-size:10px;color:var(--muted)">Última importação: <strong>${info.arquivo}</strong></div>
+        ${info && info.arquivo ? `<div style="font-size:10px;color:var(--muted)">Última importação: <strong>${info.arquivo}</strong></div>
         <div style="font-size:10px;color:var(--muted)">${new Date(info.importadoEm).toLocaleString('pt-BR')}</div>` : ''}
       `;
     }
@@ -35765,6 +36237,7 @@ window.excelExcluirImportacao = function(impId){
   if(!confirm(`Excluir a importação "${imp.arquivo}" (${imp.linhas} linhas de ${imp.refMes || '?'})? Esta ação não pode ser desfeita.`)) return;
   D.excelDados = (D.excelDados || []).filter(r => r._importId !== impId);
   D._excelImportacoes = (D._excelImportacoes || []).filter(i => i.id !== impId);
+  window._marcarGrupoEditado(['excelDados','_excelImportacoes']);   // [R166] o que a exclusão toca
   const removidas = antes - D.excelDados.length;
   save();
   showToast('🗑️ Importação excluída — '+removidas+' linhas removidas.','ok');
@@ -38268,6 +38741,9 @@ window.salvarFollowUp = function(sufixo){
     }
   });
   D.configFollowUp._savedAt = Date.now();
+  // [R165] sem a marca, o _mergeCarimbado tratava esta máquina como quem
+  // NÃO editou e o servidor sempre vencia — o pull desfazia a edição
+  window._marcarCampoEditado('configFollowUp');
   save();
   // as duas telas refletem: quem mudou aqui vê lá também
   if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
