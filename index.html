@@ -4221,7 +4221,7 @@ body:not(.logado) #appScreen{display:none!important}
 
   <div id="lanc-metas-box" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
     <div style="background:var(--card2);border:1px solid rgba(201,168,76,.25);border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Meta do Dia</div>
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px" id="lanc-meta-dia-lbl">Meta do Dia</div>
       <div style="font-size:20px;font-weight:700;color:var(--ouro)" id="lanc-meta-dia">—</div>
     </div>
     <div style="background:var(--card2);border:1px solid rgba(46,204,135,.2);border-radius:10px;padding:12px;text-align:center">
@@ -4237,10 +4237,18 @@ body:not(.logado) #appScreen{display:none!important}
   <!-- [R49] Ritmo da meta: o que deveria ter sido vendido até a data vigente -->
   <div class="sc" id="lanc-ritmo-box" style="margin-bottom:16px;border-left:3px solid var(--ouro)"></div>
 
-  <!-- CARDS VENDEDOR(ES) DO DIA -->
+  <!-- CARDS VENDEDOR(ES) DO DIA — os campos de lançamento (carregarVendsForm) -->
   <div class="sc">
-    <div class="st" style="margin-bottom:12px">🔥 Vendedor(es) — Realizado</div>
+    <div class="st" style="margin-bottom:12px">🔥 Vendedor(es) — Lançamento</div>
     <div id="vend-lanc-grid"></div>
+  </div>
+  <!-- [R171] Realizado por período (abas Hoje/Semana/Mês — renderPainelDia).
+       Tinha o MESMO container dos campos de lançamento: trocar de aba,
+       lançar uma venda ou receber uma sincronização trocava as caixas de
+       lançamento por estes cards, e a caixa "sumia". -->
+  <div class="sc">
+    <div class="st" style="margin-bottom:12px">📊 Vendedor(es) — Realizado <span id="vend-realizado-per" style="font-size:11px;color:var(--muted);font-weight:500"></span></div>
+    <div id="vend-realizado-grid"></div>
   </div>
 
   <!-- BARRA DE SALVAR -->
@@ -5567,8 +5575,55 @@ body:not(.logado) #appScreen{display:none!important}
       <div class="ps">Acompanhamento dos contatos feitos pela equipe</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-s" onclick="window.toggleDivulgacaoContatos()" style="font-size:12px;padding:8px 14px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="Ranking de quem mais contatou e de quem mais converteu em compra — PDF para publicar com a equipe">📢 Divulgação</button>
       <button class="btn-s" onclick="exportarPDFContatos()" style="font-size:12px;padding:8px 14px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Exportar PDF do que está no filtro atual">📄 Exportar PDF</button>
       <button class="btn-p" onclick="abrirFormContato()">+ Registrar Contato</button>
+    </div>
+  </div>
+
+  <!-- [R172] LOJA E PERÍODO — valem para a página inteira (KPIs, contatos do
+       mês, lembretes, calendário, ranking, registros, PDF e divulgação).
+       Os ids ct-filtro-loja / ct-filtro-de / ct-filtro-ate são os mesmos de
+       antes: quem os lia continua lendo, agora a partir daqui. -->
+  <div class="sc" id="ct-barra" style="margin-bottom:14px;border:1px solid rgba(201,168,76,.35)">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <select id="ct-filtro-loja" onchange="window.ctAplicarPeriodo()" class="admin-only"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:7px 10px;color:var(--texto);font-size:12px;font-weight:600">
+        <option value="">🏪 Todas as lojas</option>
+      </select>
+      <span id="ct-loja-nome" style="font-size:12px;font-weight:700;color:var(--ouro)"></span>
+      <div class="tabs" style="margin:0" id="ct-per-tabs">
+        <button class="tab" data-per="dia" onclick="window.ctSetPer('dia')">Dia</button>
+        <button class="tab" data-per="semana" onclick="window.ctSetPer('semana')">Semana</button>
+        <button class="tab active" data-per="mes" onclick="window.ctSetPer('mes')">Mês</button>
+        <button class="tab" data-per="ano" onclick="window.ctSetPer('ano')">Ano</button>
+        <button class="tab" data-per="periodo" onclick="window.ctSetPer('periodo')">Período</button>
+      </div>
+      <input type="date" id="ct-per-data" onchange="window.ctAplicarPeriodo()" title="Dia (ou a semana que o contém)"
+        style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+      <input type="month" id="ct-per-mes" onchange="window.ctAplicarPeriodo()"
+        style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+      <select id="ct-per-ano" onchange="window.ctAplicarPeriodo()"
+        style="display:none;background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px"></select>
+      <span id="ct-per-livre" style="display:none;align-items:center;gap:6px">
+        <input type="date" id="ct-filtro-de" onchange="window.ctAplicarPeriodo()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+        <span style="color:var(--muted);font-size:11px">até</span>
+        <input type="date" id="ct-filtro-ate" onchange="window.ctAplicarPeriodo()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:6px 10px;color:var(--texto);font-size:12px">
+      </span>
+      <span id="ct-per-lbl" style="font-size:12px;font-weight:700;color:var(--ouro)"></span>
+    </div>
+  </div>
+
+  <!-- [R172] Painel de divulgação: quem mais contatou e quem mais converteu -->
+  <div class="sc" id="ct-div-painel" style="display:none;margin-bottom:14px;border:1px solid rgba(201,168,76,.45)">
+    <div class="st">📢 Divulgação — Contatos</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Usa a loja, o período e o tipo escolhidos. O material sai sem valores em R$ — só posição, nome e indicador.</div>
+    <div id="ct-div-preview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-p" onclick="window.gerarDivulgacaoContatos()" style="font-size:12px;padding:9px 18px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700">📢 Gerar PDF de Divulgação</button>
+      <button class="btn-s" onclick="window.toggleDivulgacaoContatos()" style="font-size:12px">Fechar</button>
     </div>
   </div>
 
@@ -5697,10 +5752,7 @@ body:not(.logado) #appScreen{display:none!important}
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <label style="font-size:11px;color:var(--muted);letter-spacing:.5px">FILTRAR:</label>
 
-      <select id="ct-filtro-loja" onchange="renderContatos()"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" class="admin-only">
-        <option value="">🏪 Todas as lojas</option>
-      </select>
+      <!-- [R172] loja e datas subiram para a barra do topo -->
 
       <select id="ct-filtro-vend" onchange="renderContatos()"
         style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px">
@@ -5718,11 +5770,6 @@ body:not(.logado) #appScreen{display:none!important}
         <option value="outro">💬 Outros</option>
       </select>
 
-      <input type="date" id="ct-filtro-de"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" onchange="renderContatos()">
-      <span style="color:var(--muted);font-size:11px">até</span>
-      <input type="date" id="ct-filtro-ate"
-        style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 10px;color:var(--texto);font-size:12px" onchange="renderContatos()">
 
       <button class="btn-s" onclick="limparFiltrosContatos()" style="font-size:10px;padding:6px 10px">Limpar</button>
     </div>
@@ -7328,7 +7375,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-24f';
+window.AVATIM_BUILD = '2026-09-24i';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -9832,7 +9879,9 @@ window.instalarGatilhosSync = function(){
 
 const _RENDER_PAGINA = {
   dash:        () => carregarDash(),
-  lanc:        () => { renderPainelDia(); renderHistoricoLanc?.(); },
+  // [R171] e os campos de lançamento, na ordem do nav (carregarVendsForm
+  // não redesenha sob quem digita e devolve o que já foi digitado — R124)
+  lanc:        () => { renderPainelDia(); carregarVendsForm(); },
   performance: () => renderPerformance(),
   metas:       () => renderMetas(),
   vendedoras:  () => { renderVendRanking(_tabVend); renderTabelaVend(); },
@@ -13429,22 +13478,49 @@ function _mesAnteriorDe(mesRef){
 // isso mais provável, não menos.
 // ══════════════════════════════════════════════════════════════════════
 // Meta diária progressiva da LOJA (consolidado das vendedoras)
+// ══════════════════════════════════════════════════════════════════════
+// [R171] ALVO PROGRESSIVO — batida a meta, o alvo é a SUPER META.
+//
+// O alvo do dia (e da semana) é o que falta ÷ o que resta. Batida a meta
+// do mês, o que faltava ia a zero e o Painel do Dia deixava de dizer
+// quanto a loja e cada vendedora devem vender (decisão do dono: "ao
+// atingir a meta deve usar a super meta"). Batidas as duas, o ritmo base
+// da super meta — o alvo nunca some. O [FIX 6] tentava evitar o zero, mas
+// só valia sem dias restantes.
+//
+// Devolve null sem dias restantes: aí cada chamador segue o seu fim de mês.
+// ══════════════════════════════════════════════════════════════════════
+window._alvoProgressivo = function(meta, superMeta, acum, restantes, totais){
+  meta = Number(meta) || 0;
+  superMeta = Number(superMeta) || 0;
+  if(!(superMeta > 0)) superMeta = meta * window.SUPER_META_PADRAO;
+  if(!(restantes > 0)) return null;
+  const r2 = x => parseFloat(x.toFixed(2));
+  const resMeta  = Math.max(0, meta - acum);
+  const resSuper = Math.max(0, superMeta - acum);
+  if(resMeta > 0)  return {valor: r2(resMeta / restantes),  superValor: r2(resSuper / restantes), alvo: 'meta'};
+  if(resSuper > 0) return {valor: r2(resSuper / restantes), superValor: r2(resSuper / restantes), alvo: 'super'};
+  const base = totais > 0 ? r2(superMeta / totais) : 0;
+  return {valor: base, superValor: base, alvo: 'superBatida'};
+};
+
 function metaDiaLojaProgressiva(lid, dataRef){
   const m = getMetas(lid);
-  if(!m || m.mes<=0) return {dia:0, super:0};
+  if(!m || m.mes<=0) return {dia:0, superDia:0, alvo:'meta'};   // [R173] a mesma chave do caminho normal
   dataRef = dataRef || hoje();
   // Usar dias úteis restantes respeitando calendário da loja (seg-sab vs 7 dias)
   const diasRestantes = diasAbertosRestantes(lid);
   const acumulado = calcMesAte(lid, dataRef);
   const restante  = Math.max(0, m.mes - acumulado);
-  // [FIX 6] Quando meta já batida, mostrar meta dia BASE (não 0)
-  // Isso evita que a tela mostre "Meta dia: R$0" parecendo erro
+  // Sem dias restantes: a meta dia BASE (não 0)
   const diaBase   = m.dia || (m.du>0 ? m.mes/m.du : m.mes/26);
-  const dia       = diasRestantes > 0 ? parseFloat((restante / diasRestantes).toFixed(2)) : diaBase;
-  const resSuper  = Math.max(0, (m.superMes||m.mes*window.SUPER_META_PADRAO) - acumulado);
   const superDiaBase = m.superDia || (m.du>0 ? (m.superMes||m.mes*window.SUPER_META_PADRAO)/m.du : m.mes*window.SUPER_META_PADRAO/26);
-  const superDia  = diasRestantes > 0 ? parseFloat((resSuper / diasRestantes).toFixed(2)) : superDiaBase;
-  return {dia, superDia, diasRestantes, acumulado, restante};
+  // [R171] batida a meta, o alvo do dia é a super meta
+  const _du = m.du > 0 ? m.du : diasAbertosNoMes(lid);
+  const a = window._alvoProgressivo(m.mes, m.superMes, acumulado, diasRestantes, _du);
+  const dia       = a ? a.valor : diaBase;
+  const superDia  = a ? a.superValor : superDiaBase;
+  return {dia, superDia, diasRestantes, acumulado, restante, alvo: a ? a.alvo : 'meta'};
 }
 // Vendas acumuladas da loja até uma data (INCLUSIVE — meta do dia recalcula conforme se vende)
 function calcMesAte(lid, dataRef){
@@ -13842,7 +13918,7 @@ function _superPctVend(vid, per){
 function _superPctRede(per){
   const lojas = typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : [];
   if(per === 'ano'){
-    const mAno = lojas.reduce((s, l) => s + (metaAno(l) || 0), 0);
+    const mAno = window.metaGrupoAno(hoje().slice(0,4));   // [R170] a meta anual do grupo
     const sGrupo = typeof window.superMetaAno === 'function' ? (Number(window.superMetaAno(hoje().slice(0,4))) || 0) : 0;
     if(mAno > 0 && sGrupo > 0) return _superPctDe(mAno, sGrupo);
     let m = 0, sm = 0;
@@ -13999,7 +14075,13 @@ function metaSemanaProgressiva(lid, semana){
   }
 
   // Quanto falta para bater a meta do mês
-  const metaRestante = Math.max(0, metaMes - acumAntSem);
+  // [R171] batida a meta, a semana persegue a super meta; batidas as duas,
+  // o peso da semana sobre a super meta — o alvo não vai a zero
+  const _superMesL = Number(m.superMes) > 0 ? Number(m.superMes) : metaMes * window.SUPER_META_PADRAO;
+  const metaRestante = metaMes - acumAntSem > 0 ? metaMes - acumAntSem
+                     : _superMesL - acumAntSem > 0 ? _superMesL - acumAntSem
+                     : null;
+  if(metaRestante === null) return parseFloat((_superMesL * PERC_SEM[semana]).toFixed(2));
 
   // Soma dos percentuais das semanas ainda restantes (incluindo a atual)
   let percTotalRestante = 0;
@@ -14034,7 +14116,10 @@ function metaSemanaProgressivaVend(vendId, semana){
   Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
     if(dt.startsWith(mes) && dt <= fimSemAnt) acum += Number(vd.val||0);
   });
-  const restante = Math.max(0, metaMes - acum);
+  // [R171] batida a meta, a semana persegue a super meta (ver _alvoProgressivo)
+  const superMes = Number(v.superMetaMes) > 0 ? Number(v.superMetaMes) : metaMes * window.SUPER_META_PADRAO;
+  const restante = metaMes - acum > 0 ? metaMes - acum : superMes - acum > 0 ? superMes - acum : null;
+  if(restante === null) return parseFloat((superMes * PERC_SEM[semana]).toFixed(2));
   let percRest = 0;
   for(let s=semana; s<=4; s++) percRest += PERC_SEM[s];
   return percRest > 0 ? parseFloat((restante * PERC_SEM[semana] / percRest).toFixed(2)) : 0;
@@ -14061,12 +14146,29 @@ function metaDiaProgressivaVend(vendId, dataRef){
   Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
     if(dt.startsWith(_mes) && dt < dataRef) acumulado += Number(vd.val||0);
   });
-  const restante = Math.max(0, metaMes - acumulado);
-  // [FIX 6] Quando meta batida, mostrar meta dia BASE (não 0)
+  // Sem dias restantes: a meta dia BASE (não 0)
   const DUv = lid && typeof diasAbertosNoMes==='function' ? diasAbertosNoMes(lid) : 26;
   const diaBaseV = DUv>0 ? metaMes/DUv : 0;
-  return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : parseFloat(diaBaseV.toFixed(2));
+  // [R171] batida a meta, o alvo do dia é a super meta
+  const a = window._alvoProgressivo(metaMes, v.superMetaMes, acumulado, diasRest, DUv);
+  return a ? a.valor : parseFloat(diaBaseV.toFixed(2));
 }
+
+/** [R171] O alvo do dia da vendedora é a meta ou já a super meta? */
+window.alvoDiaVend = function(vendId, dataRef){
+  const v = D.vendedoras.find(vv=>vv.id===vendId);
+  const metaMes = Number(v?.metaMes)||0;
+  if(!v || !metaMes) return 'meta';
+  dataRef = dataRef || hoje();
+  const lid = v.loja || '';
+  const diasRest = lid ? diasAbertosRestantes(lid) : 1;
+  let acum = 0;
+  Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
+    if(dt.startsWith(dataRef.slice(0,7)) && dt < dataRef) acum += Number(vd.val||0);
+  });
+  const a = window._alvoProgressivo(metaMes, v.superMetaMes, acum, diasRest, 1);
+  return a ? a.alvo : 'meta';
+};
 
 function superMetaDiaProgressivaVend(vendId, dataRef){
   const v = D.vendedoras.find(vv=>vv.id===vendId);
@@ -14085,8 +14187,10 @@ function superMetaDiaProgressivaVend(vendId, dataRef){
   Object.entries(D.vendasVend[vendId]||{}).forEach(([dt,vd])=>{
     if(dt.startsWith(_mesSup) && dt < dataRef) acum += Number(vd.val||0);
   });
-  const restante = Math.max(0, superMes - acum);
-  return diasRest > 0 ? parseFloat((restante/diasRest).toFixed(2)) : 0;
+  // [R171] batida também a super meta, o ritmo base dela — não zero
+  const DUs = lid && typeof diasAbertosNoMes==='function' ? diasAbertosNoMes(lid) : 26;
+  const a = window._alvoProgressivo(Number(v.metaMes)||0, superMes, acum, diasRest, DUs);
+  return a ? a.superValor : 0;
 }
 
 // Super meta semanal progressiva por vendedora
@@ -14104,6 +14208,7 @@ function superMetaSemProgressivaVend(vendId, semana){
     if(dt.startsWith(mes) && dt <= fimSemAnt) acum += Number(vd.val||0);
   });
   const restante = Math.max(0, superMes - acum);
+  if(!(restante > 0)) return parseFloat((superMes * PERC_SEM[semana]).toFixed(2));   // [R171] batida: o peso da semana
   let percRest = 0;
   for(let s=semana; s<=4; s++) percRest += PERC_SEM[s];
   return percRest > 0 ? parseFloat((restante * PERC_SEM[semana] / percRest).toFixed(2)) : 0;
@@ -14321,6 +14426,9 @@ function calcVendPer(id,per){
 
 // TM individual da vendedora no período
 function calcTMVend(id, per){
+  // [R173] 'ano' caía no mês corrente: TM do mês ao lado do faturamento do
+  // ano. O ano sai mês a mês pela fonte de cada mês (fatAtendVendAno).
+  if(per==='ano' && typeof window.fatAtendVendAno === 'function') return window.fatAtendVendAno(id).tm;
   const vd = D.vendasVend[id]||{};
   let fat=0, trans=0;
   if(per==='dia'){
@@ -15766,12 +15874,16 @@ function renderPainelDia(){
   const metaSem = document.getElementById('lanc-meta-sem');
   const metaMes = document.getElementById('lanc-meta-mes');
   if(metaDia) metaDia.textContent = fmt(_progPainel.dia>0 ? _progPainel.dia : (m.dia||0));
+  window._rotuloMetaDia(_progPainel.alvo);   // [R171]
   if(metaSem) metaSem.textContent = fmt(m.sem||0);
   if(metaMes) metaMes.textContent = fmt(m.mes||0);
   if(typeof window.renderRitmoMeta === 'function') window.renderRitmoMeta(lid);
 
-  // Renderizar cards das vendedoras no período
-  const grid = document.getElementById('vend-lanc-grid');
+  // Renderizar cards das vendedoras no período — no container PRÓPRIO
+  // [R171] (antes era o dos campos de lançamento, que sumiam)
+  const _perLbl = document.getElementById('vend-realizado-per');
+  if(_perLbl) _perLbl.textContent = per==='hoje' ? '· Hoje' : per==='semana' ? '· Semana' : '· Mês';
+  const grid = document.getElementById('vend-realizado-grid');
   if(grid){
     const vends = vendsAtivas(lid);   // [R158] sem card fantasma do VRLL
     if(!vends.length){
@@ -15806,9 +15918,9 @@ function renderPainelDia(){
                 <div style="font-size:9px;color:var(--muted);margin-top:1px">${v.cargo||'ESP'}</div>
               </div>
               <div style="text-align:right">
-                <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Meta ${_lblPer}</div>
+                <div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${per==='hoje' && window.alvoDiaVend(v.id) !== 'meta' ? '🚀 Super meta' : 'Meta'} ${_lblPer}</div>
                 <div style="font-size:14px;font-weight:800;color:var(--ouro)">${meta>0?fmt(meta):'—'}</div>
-                ${superMeta>0?`<div style="font-size:9px;color:var(--roxo);font-weight:600">Super: ${fmt(superMeta)}</div>`:''}
+                ${superMeta>meta?`<div style="font-size:9px;color:var(--roxo);font-weight:600">Super: ${fmt(superMeta)}</div>`:''}
               </div>
             </div>
             <div style="font-size:24px;font-weight:800;color:${cor};margin-bottom:2px;font-family:'Playfair Display',serif">${fmt(val)}</div>
@@ -15821,7 +15933,7 @@ function renderPainelDia(){
               <div style="position:absolute;left:0;top:0;height:100%;background:${cor};border-radius:3px;width:${Math.min(100,pct)}%;transition:width .4s"></div>
               ${superMeta>0&&meta>0?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99,meta/superMeta*100)}%;width:2px;background:var(--roxo);opacity:.8"></div>`:''}
             </div>
-            ${superMeta>0?`<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-top:3px"><span>Meta: ${fmt(meta)}</span><span style="color:var(--roxo)">${pctSuper.toFixed(0)}% super (${fmt(superMeta)})</span></div>`:''}
+            ${superMeta>meta?`<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-top:3px"><span>Meta: ${fmt(meta)}</span><span style="color:var(--roxo)">${pctSuper.toFixed(0)}% super (${fmt(superMeta)})</span></div>`:''}
           </div>`;
         }).join('') + "</div>";
     }
@@ -15831,6 +15943,15 @@ function renderPainelDia(){
   renderConsolidadoLanc(lid);
   renderHistoricoLanc();
 }
+
+/** [R171] Batida a meta do mês, a caixa diz que o alvo do dia é a super meta. */
+window._rotuloMetaDia = function(alvo){
+  const el = document.getElementById('lanc-meta-dia-lbl');
+  if(!el) return;
+  el.innerHTML = alvo === 'super' ? '🚀 Super meta do dia <span style="color:var(--verde)">· meta batida</span>'
+               : alvo === 'superBatida' ? '🏆 Ritmo da super meta <span style="color:var(--roxo)">· super batida</span>'
+               : 'Meta do Dia';
+};
 
 function carregarVendsForm(lidOverride){
   // [R47] Os itens acumulados pertencem a UMA data. Ao trocar a data do
@@ -15941,6 +16062,8 @@ function carregarVendsForm(lidOverride){
   const elSem=document.getElementById("lanc-meta-sem");
   const elMes=document.getElementById("lanc-meta-mes");
   if(elDia) elDia.textContent = _mDia>0 ? fmt(_mDia) : "—";
+  // [R171] rótulo: na loja, o alvo dela; na soma da rede, "Meta do Dia"
+  window._rotuloMetaDia(isAdmin() && !lidOverride ? 'meta' : metaDiaLojaProgressiva(lid, hj).alvo);
   if(elSem) elSem.textContent = _mSem>0 ? fmt(_mSem) : "—";
   if(elMes) elMes.textContent = _mMes>0 ? fmt(_mMes) : "—";
 
@@ -15990,6 +16113,7 @@ function carregarVendsForm(lidOverride){
       const valFmt = ''; // sempre vazio: novo lançamento = novo ticket
       const badge  = '<span class="sbadge '+(tblMap[v.cargo||'ESP']||'ok')+'" style="font-size:9px">'+(v.cargo||'ESP')+'</span>';
       const semNome= ['','1ª','2ª','3ª','4ª'][_sw]||_sw+'ª';
+      const _alvoV = window.alvoDiaVend(v.id, hj);   // [R171] meta ou já a super meta
 
       // Helper: formata bloco de objetivo
       const blocoObj = (label, valor, super_, corTxt) => `
@@ -16026,7 +16150,7 @@ function carregarVendsForm(lidOverride){
           ${valAtual>0
             ? `<div style="text-align:right">
                 <div style="font-size:20px;font-weight:800;color:${corDia};font-family:'Playfair Display',serif">${fmt(valAtual)}</div>
-                <div style="font-size:10px;color:${corDia};font-weight:600">${pctDia.toFixed(0)}% da meta dia</div>
+                <div style="font-size:10px;color:${corDia};font-weight:600">${pctDia.toFixed(0)}% da ${_alvoV==='meta' ? 'meta' : 'super meta'} dia</div>
               </div>`
             : '<div style="font-size:11px;color:var(--muted);margin-top:6px">sem vendas hoje</div>'}
         </div>
@@ -16036,8 +16160,8 @@ function carregarVendsForm(lidOverride){
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🎯 Objetivos</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-            ${blocoObj('Hoje',          metaDia,  superDia,  'var(--ouro)')}
-            ${blocoObj(semNome+' sem',  metaSem,  superSem,  'var(--azul)')}
+            ${blocoObj(_alvoV==='meta' ? 'Hoje' : '🚀 Hoje · super', metaDia,  _alvoV==='meta' ? superDia : 0,  'var(--ouro)')}
+            ${blocoObj(semNome+' sem',  metaSem,  superSem>metaSem ? superSem : 0,  'var(--azul)')}
             ${blocoObj('Mês',           metaMes,  superMes,  'var(--verde)')}
           </div>
         </div>
@@ -18466,8 +18590,8 @@ function renderVendRanking(per){
         <div style="width:${max>0?v.val/max*100:0}%;height:100%;background:${c};border-radius:4px"></div>
         ${v.superMetaMes>0&&v.metaMes>0?`<div style="position:absolute;top:0;bottom:0;left:${Math.min(99,v.metaMes/v.superMetaMes*100)}%;width:2px;background:var(--roxo)"></div>`:""}
       </div>
-      <div style="font-size:9px;color:${c}">${pct.toFixed(0)}% meta | ${spct.toFixed(0)}% super</div>
-      <div style="font-size:9px;color:var(--muted);margin-top:2px">Meta: ${fmt(v.metaPerV)} | Super: ${fmt(v.superPerV||0)}</div>
+      <div style="font-size:9px;color:${c}">${v.superPerV>v.metaPerV ? pct.toFixed(0)+'% meta | '+spct.toFixed(0)+'% super' : pct.toFixed(0)+'% do alvo'}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px">${v.superPerV>v.metaPerV ? 'Meta: '+fmt(v.metaPerV)+' | Super: '+fmt(v.superPerV) : v.superPerV>0 ? '🚀 Alvo (super): '+fmt(v.metaPerV) : 'Meta: '+fmt(v.metaPerV)}</div>
     </div>`;
   }).join(""):"<div style='color:var(--muted);font-size:12px'>Sem vendedor(es).</div>";
 }
@@ -19934,6 +20058,8 @@ function renderRelCamp(){
     document.getElementById('rel-camp-kpis').innerHTML='<div style="color:var(--muted);font-size:12px">Nenhuma campanha encontrada.</div>';
     document.getElementById('rel-camp-ranking').innerHTML='';
     document.getElementById('rel-camp-tbody').innerHTML='';
+    // [R173] o ranking de vendedoras é irmão: ficava o da campanha anterior
+    const _rv = document.getElementById('rel-camp-rank-vend'); if(_rv) _rv.innerHTML='';
     return;
   }
 
@@ -20929,7 +21055,15 @@ function renderHistoricoCamp(campId, lid){
   const lancs = (D.campRealizados||[])
     .filter(r=>r.campId===campId && r.lojaId===lids)
     .sort((a,b)=>b.data.localeCompare(a.data));
-  if(!lancs.length){ wrap.style.display='none'; return; }
+  if(!lancs.length){
+    wrap.style.display='none';
+    // [R172] o ranking é um bloco IRMÃO: sem isto, trocar para uma
+    // campanha/loja sem lançamentos (ou excluir o último) deixava na tela
+    // o ranking da campanha anterior, sob o nome da nova
+    const _rv = document.getElementById('camp-rank-vend-wrap');
+    if(_rv){ _rv.style.display='none'; _rv.innerHTML=''; }
+    return;
+  }
   const total = lancs.reduce((s,r)=>s+_fatLancamento(r),0);
   wrap.style.display = '';
   lista.innerHTML = lancs.map(l=>{
@@ -22888,6 +23022,24 @@ window.itensAtendVendDoMes = function(vid, mesRef){
   return lanc();
 };
 
+/**
+ * [R173] Faturamento e atendimentos de um(a) vendedor(a) no ANO, mês a mês
+ * pela fonte de cada mês (fatVendDoMes / itensAtendVendDoMes) — a mesma
+ * base do calcVendAno. O TM anual somava o lançamento cru (Rankings) ou
+ * dividia o ano pelos atendimentos de UM mês (PDF de Ranking).
+ */
+window.fatAtendVendAno = function(vid, ano){
+  ano = ano || hoje().slice(0,4);
+  const ult = ano === hoje().slice(0,4) ? Number(hoje().slice(5,7)) : 12;
+  let fat = 0, atend = 0;
+  for(let m = 1; m <= ult; m++){
+    const mr = ano + '-' + String(m).padStart(2,'0');
+    fat   += Number(window.fatVendDoMes(vid, mr).valor) || 0;
+    atend += Number(window.itensAtendVendDoMes(vid, mr).atend) || 0;
+  }
+  return {fat, atend, tm: atend > 0 ? fat / atend : 0};
+};
+
 window.fatVendDoMes = function(vid, mesRef){
   const v = (D.vendedoras||[]).find(x => x.id === vid);
   const lanc = () => {
@@ -22999,7 +23151,8 @@ function renderRankings(tab) {
   });
 
   const totRede   = ld.reduce((s,l)=>s+l.v, 0);
-  const metaTotal = ld.reduce((s,l)=>s+l.meta, 0);
+  // [R170] no ano, a meta da REDE é a meta anual do grupo (soma das 12 metas do grupo)
+  const metaTotal = per==='ano' ? window.metaGrupoAno() : ld.reduce((s,l)=>s+l.meta, 0);
   const pctRede   = metaTotal>0 ? totRede/metaTotal*100 : 0;
   const cr        = pctRede>=_superPctRede(per==='ano'?'ano':undefined)?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
 
@@ -23087,7 +23240,7 @@ function renderRankings(tab) {
       : per==='ano' ? metaVendAno(v.id)
       : mMes;
     const pct   = mPer>0 ? val/mPer*100 : 0;
-    const tm    = per==='ano' ? (()=>{ const vd=D.vendasVend[v.id]||{}; const ano=hoje().slice(0,4); let f=0,t=0; Object.entries(vd).forEach(([d,r])=>{ if(d.startsWith(ano)){f+=Number(r.val||0);t+=Number(r.trans||0);} }); return t>0?f/t:0; })() : calcTMVend(v.id, perV);
+    const tm    = per==='ano' ? window.fatAtendVendAno(v.id).tm : calcTMVend(v.id, perV);   // [R173] fonte de cada mês
     const trans = (() => {
       const vd=D.vendasVend[v.id]||{};
       let t=0;
@@ -23323,6 +23476,38 @@ function buscarHistLoja(){
     anivTotal  +=diasMap[d].aniv;
     inativTotal+=diasMap[d].inativ;
   });
+  // ══════════════════════════════════════════════════════════════════
+  // [R173] MÊS FECHADO COBERTO POR INTEIRO VALE A PLANILHA (R160).
+  // Esta tela somava só o lançamento, e o Histórico Anual e o da
+  // Vendedora (R143) mostravam a planilha para o MESMO mês. O total passa
+  // a seguir a regra; a tabela dia a dia continua no lançamento, que é a
+  // única fonte com dia — e a tela avisa.
+  // ══════════════════════════════════════════════════════════════════
+  const _mesesCrm = [];
+  const _crmDoMesInteiro = (m, vid) => {
+    const [yy, mm] = m.split('-').map(Number);
+    const fim = m + '-' + String(new Date(yy, mm, 0).getDate()).padStart(2,'0');
+    if(!(de <= m + '-01' && ate >= fim && m < mesAtual())) return null;
+    if(vid){
+      const f = window.fatVendDoMes(vid, m);
+      return f.origem === 'crm' ? {fat: Number(f.valor)||0, trans: Number(window.itensAtendVendDoMes(vid, m).atend)||0} : null;
+    }
+    const f = window.fatDoMes(lid, m);
+    return f.origem === 'crm' ? {fat: Number(f.valor)||0, trans: Number(window.atendDoMes(lid, m))||0} : null;
+  };
+  const _mesesPer = [];
+  for(let _m = de.slice(0,7); _m <= ate.slice(0,7); ){
+    _mesesPer.push(_m);
+    const [yy, mm] = _m.split('-').map(Number);
+    _m = mm === 12 ? (yy+1) + '-01' : yy + '-' + String(mm+1).padStart(2,'0');
+  }
+  _mesesPer.forEach(m => {
+    const c = _crmDoMesInteiro(m, vendId || null);
+    if(!c) return;
+    _mesesCrm.push(m);
+    dias.filter(d => d.startsWith(m)).forEach(d => { fatTotal -= diasMap[d].fat; transTotal -= diasMap[d].trans; });
+    fatTotal += c.fat; transTotal += c.trans;
+  });
   const tmMedio      = transTotal>0 ? fatTotal/transTotal : (dias.length>0?fatTotal/dias.length:0);
   // [R164] meta de cada mês do período (vendedora ou loja), não a de hoje
   const _metaRefDoMes = vendId ? (m => window.metaVendDoMes(vendId, m) || 0)
@@ -23346,8 +23531,11 @@ function buscarHistLoja(){
 
   // Tabela dia a dia
   const tab=document.getElementById('rh-tabela');
+  const _avisoCrm = _mesesCrm.length
+    ? `<div style="font-size:11px;color:var(--azul);margin-bottom:8px">📊 O total acima usa a <strong>planilha do CRM</strong> em ${_mesesCrm.map(m=>m.split('-').reverse().join('/')).join(', ')} (mês fechado inteiro). A tabela dia a dia mostra o lançamento diário — a planilha não tem dia.</div>`
+    : '';
   if(tab) tab.innerHTML=dias.length
-    ?`<div style="overflow-x:auto"><table class="dtable">
+    ?_avisoCrm+`<div style="overflow-x:auto"><table class="dtable">
       <thead><tr>
         <th>Data</th><th>Realizado</th><th>Ideal/dia</th><th>Gap</th><th>TM</th><th>Atend.</th><th>Aniv.</th><th>Inativos</th><th style="width:70px"></th>
       </tr></thead>
@@ -23373,7 +23561,7 @@ function buscarHistLoja(){
         </tr>`;
       }).join('')}</tbody>
     </table></div>`
-    :`<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
+    :_avisoCrm+`<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Nenhum lançamento neste período.</div>`;
 
   // Performance por vendedora
   const pv=document.getElementById('rh-por-vend');
@@ -23385,6 +23573,13 @@ function buscarHistLoja(){
         if(d<de||d>ate) return;
         fat2+=Number(r.val||0); trans2+=Number(r.trans||0);
         aniv2+=Number(r.aniv||0); inativ2+=Number(r.inativ||0);
+      });
+      // [R173] mês fechado inteiro: a planilha, como no total da loja
+      _mesesPer.forEach(m => {
+        const c = _crmDoMesInteiro(m, v.id);
+        if(!c) return;
+        Object.entries(vd).forEach(([d,r])=>{ if(d.startsWith(m) && d>=de && d<=ate){ fat2-=Number(r.val||0); trans2-=Number(r.trans||0); } });
+        fat2 += c.fat; trans2 += c.trans;
       });
       const tm2=trans2>0?fat2/trans2:fat2>0?fat2:0;
       const idealV=valorIdealPeriodoPorMes(m => window.metaVendDoMes(v.id, m) || 0, de, ate);   // [R164]
@@ -23426,6 +23621,9 @@ function renderRankingLoja() {
     const h=document.getElementById('rank-loja-header');
     if(t) t.textContent='Selecione uma loja';
     if(h) h.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px">Selecione uma loja no filtro acima.</div>';
+    // [R173] os blocos irmãos também — senão ficam os da loja anterior
+    ['rank-podio-vends','tbody-rank-loja'].forEach(id=>{ const e=document.getElementById(id); if(e) e.innerHTML=''; });
+    const _tm=document.getElementById('rank-tm-vends-loja'); if(_tm) _tm.innerHTML='--';
     return;
   }
 
@@ -23502,6 +23700,8 @@ function renderRankingLoja() {
       const diff=hd.getDay()===0?6:hd.getDay()-1;
       const seg=new Date(hd);seg.setDate(hd.getDate()-diff);
       for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd){trans+=Number(vd[d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')]?.trans||0);}}
+    } else if(perV==='ano'){
+      trans = window.fatAtendVendAno(v.id).atend;   // [R173] o ano, não o mês corrente
     } else {
       const mes=hj.slice(0,7);
       Object.entries(vd).forEach(([d,vd2])=>{if(d.startsWith(mes))trans+=Number(vd2.trans||0);});
@@ -24464,7 +24664,8 @@ function compartilharWhatsApp(){
 
   // Totais da rede
   const totalFat = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id)),0);
-  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes);},0);
+  // [R170] no ano, a meta anual do grupo
+  const totalMeta = per==='ano' ? window.metaGrupoAno() : LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
   const pctRede = totalMeta>0?totalFat/totalMeta*100:0;
   const sRede = pctRede>=_superPctRede(per==='ano'?'ano':undefined)?'🟣':pctRede>=100?'🟢':pctRede>=70?'🟡':'🔴';
   txt += `\n📈 *REDE: ${sRede} ${pctRede.toFixed(0)}% da meta*\n`;
@@ -24553,8 +24754,9 @@ function exportarPDFRanking() {
   // Ranking de lojas
   const ldR = LOJAS.map(l=>{
     const m=getMetas(l.id);
-    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id);
-    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:m.mes;
+    // [R170] aba Ano: o ano (antes caía no mês com o rótulo "Este Ano")
+    const fat=per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id);
+    const meta=per==='hoje'?m.dia:per==='semana'?m.sem:per==='ano'?metaAno(l.id):m.mes;
     const pct=meta>0?fat/meta*100:0;
     return {nome:l.nome,fat,meta,pct,id:l.id};
   }).sort((a,b)=>b.pct-a.pct);
@@ -24592,8 +24794,9 @@ function exportarPDFRanking() {
   }).join('');
 
   // Total da rede
-  const totalFat  = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):calcMes(l.id)),0);
-  const totalMeta = LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
+  const totalFat  = LOJAS.reduce((s,l)=>s+(per==='hoje'?calcDia(l.id):per==='semana'?calcSem(l.id):per==='ano'?calcAno(l.id):calcMes(l.id)),0);
+  const totalMeta = per==='ano' ? window.metaGrupoAno()   // [R170]
+                  : LOJAS.reduce((s,l)=>{const m=getMetas(l.id);return s+(per==='hoje'?m.dia:per==='semana'?m.sem:m.mes);},0);
   const pctRede   = totalMeta>0?totalFat/totalMeta*100:0;
 
   // Rankings adicionais
@@ -24614,6 +24817,7 @@ function exportarPDFRanking() {
       const vd=D.vendasVend[v.id]||{};let t=0;
       if(perV==='dia') t=Number(vd[hj]?.trans||0);
       else if(perV==='semana'){ const hd=new Date();hd.setHours(0,0,0,0);const diff=hd.getDay()===0?6:hd.getDay()-1;const seg=new Date(hd);seg.setDate(hd.getDate()-diff);for(let i=0;i<7;i++){const d=new Date(seg);d.setDate(seg.getDate()+i);if(d<=hd)t+=Number(vd[d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')]?.trans||0);} }
+      else if(perV==='ano') t=window.fatAtendVendAno(v.id).atend;   // [R173] o ano, não o mês corrente
       else { const mes2=hj.slice(0,7);Object.entries(vd).forEach(([d,r])=>{if(d.startsWith(mes2))t+=Number(r.trans||0);}); }
       return t;
     })();
@@ -24767,7 +24971,13 @@ function renderGestaoAnual(){
   });
 
   const totalFat  = lojasDados.reduce((s,l)=>s+l.fat,0);
-  const totalMeta = lojasDados.reduce((s,l)=>s+l.meta,0);
+  // [R170] a meta do ano do GRUPO é a soma das doze metas do bloco "Meta do
+  // Grupo" — inclusive os meses futuros já definidos. A tabela por loja
+  // continua com a meta de cada loja (l.meta).
+  const metaGrupoMes = [];
+  for(let m=1;m<=12;m++) metaGrupoMes.push(window.metaGrupoDoMes(ano+'-'+String(m).padStart(2,'0')));
+  const totalMeta = metaGrupoMes.reduce((s,v)=>s+v,0);
+  const _somaMetasLojas = lojasDados.reduce((s,l)=>s+l.meta,0);
   const totalPct  = totalMeta>0 ? totalFat/totalMeta*100 : 0;
   const mediaPct  = lojasDados.reduce((s,l)=>s+l.pct,0) / lojasDados.length;
   const totalTM   = lojasDados.reduce((s,l)=>s+l.tm,0) / lojasDados.filter(l=>l.tm>0).length || 0;
@@ -24790,7 +25000,7 @@ function renderGestaoAnual(){
     const cor = totalPct>=100?'var(--verde)':totalPct>=70?'var(--ouro)':'var(--verm)';
     kpiEl.innerHTML = [
       {ic:'💰',lab:'Faturado no Ano', val:fmt(totalFat), sub:ano},
-      {ic:'🎯',lab:'Meta Anual do Grupo', val:fmt(totalMeta), sub:'soma das metas definidas'},
+      {ic:'🎯',lab:'Meta Anual do Grupo', val:fmt(totalMeta), sub:'soma das 12 metas do grupo'},
       {ic:'📊',lab:'% da Meta Anual', val:totalPct.toFixed(1)+'%', sub:totalPct>=100?'✅ Meta atingida!':totalPct>=70?'⚡ Em andamento':'🔴 Abaixo da meta', cor},
       {ic:'🎫',lab:'Ticket Médio Grupo', val:fmt(totalTM), sub:'média das lojas'},
       {ic:'🛒',lab:'Total Atendimentos', val:totalNat.toLocaleString('pt-BR'), sub:'no ano'},
@@ -24820,8 +25030,10 @@ function renderGestaoAnual(){
     // à parte: comparar meio mês com a meta cheia acusaria um atraso
     // que não existe.
     const fechados   = mesAtualNum - 1;
-    const somaAte = (campo, ateMes) => lojasDados.reduce((s,l) =>
-      s + l.porMes.slice(0, ateMes).reduce((x,p) => x + (p[campo]||0), 0), 0);
+    // [R170] a meta acumulada é a do GRUPO mês a mês (a mesma da meta anual)
+    const somaAte = (campo, ateMes) => campo === 'meta'
+      ? metaGrupoMes.slice(0, ateMes).reduce((x,v) => x + v, 0)
+      : lojasDados.reduce((s,l) => s + l.porMes.slice(0, ateMes).reduce((x,p) => x + (p[campo]||0), 0), 0);
 
     const realFech   = somaAte('fat',  fechados);
     const metaFech   = somaAte('meta', fechados);
@@ -24947,7 +25159,7 @@ function renderGestaoAnual(){
     for(let m=1;m<=12;m++){
       const mr=ano+'-'+String(m).padStart(2,'0');
       const mFat  = lojasDados.reduce((s,l)=>s+(l.porMes[m-1]?.fat||0),0);
-      const mMeta = lojasDados.reduce((s,l)=>s+(l.porMes[m-1]?.meta||0),0);
+      const mMeta = metaGrupoMes[m-1];   // [R170] a meta do grupo daquele mês
       const isFut = m > mesAtualNum;
       dadosMes.push({m, mr, fat:mFat, meta:mMeta, isFut, nome:meses[m-1]});
     }
@@ -24996,7 +25208,8 @@ function renderGestaoAnual(){
     const gap = l.meta>0 ? l.fat-l.meta : 0;
     const gapStr = gap>=0 ? `<span style="color:var(--verde);font-size:9px">+${fmt(gap)}</span>`
                           : `<span style="color:var(--verm);font-size:9px">${fmt(gap)}</span>`;
-    const impacto = l.meta>0 ? Math.abs(l.fat - l.meta)/totalMeta*100 : 0;
+    // [R170] base = soma das metas das LOJAS (a de l.meta), não a meta do grupo
+    const impacto = l.meta>0 && _somaMetasLojas>0 ? Math.abs(l.fat - l.meta)/_somaMetasLojas*100 : 0;
     return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:8px">
@@ -25034,7 +25247,6 @@ function renderGestaoAnual(){
   // ── Meta do Grupo por mês (tabela editável) ──────────────────
   const metaGrupoEl = document.getElementById('gestao-metas-grupo');
   if(metaGrupoEl){
-    const metasGrupo = D._metasGrupo || {};
     metaGrupoEl.innerHTML = meses.map((nm,mi)=>{
       const mr=ano+'-'+String(mi+1).padStart(2,'0');
       // Calcular meta total de todas as lojas neste mês
@@ -25043,7 +25255,7 @@ function renderGestaoAnual(){
         return s+mm;
       },0);
       const realizado = lojasDados.reduce((s,l)=>s+(l.porMes[mi]?.fat||0),0);
-      const metaGr    = metasGrupo[mr] || metaLojas;
+      const metaGr    = window.metaGrupoDoMes(mr);   // [R170] a mesma da meta anual
       const pctGr     = metaGr>0 ? realizado/metaGr*100 : 0;
       const cor       = pctGr>=100?'var(--verde)':pctGr>=70?'var(--ouro)':pctGr>0?'var(--verm)':'var(--borda)';
       const isFut     = mi+1 > mesAtualNum;
@@ -25107,11 +25319,34 @@ function renderGestaoAnual(){
 // ══════════════════════════════════════════════════════════════════════
 // [R155] SUPER META DO ANO
 //
-// A meta anual é a soma das metas mensais das lojas — ela sai do que já
-// foi pactuado mês a mês. A super meta do ano é outra coisa: um alvo
+// A meta anual do grupo é a soma das doze metas do grupo (R170:
+// metaGrupoAno) — ela sai do que foi pactuado mês a mês. A super meta do ano é outra coisa: um alvo
 // único que a direção define para o grupo (14 milhões, no caso), e que
 // não tem como ser derivado das metas mensais.
 // ══════════════════════════════════════════════════════════════════════
+/**
+ * [R170] Meta do GRUPO num mês: a que a gestão digitou no bloco "Meta do
+ * Grupo — Todos os Meses do Ano" e, sem ela, a soma das metas das lojas.
+ * É exatamente o número que o bloco mostra naquele mês.
+ */
+window.metaGrupoDoMes = function(mr){
+  const g = Number((D._metasGrupo || {})[mr]) || 0;
+  if(g > 0) return g;
+  return LOJAS.reduce((s, l) => s + (Number(((D.metasLoja || {})[l.id] || {})[mr]?.mes) || 0), 0);
+};
+/**
+ * [R170] Meta ANUAL do grupo = soma das doze metas do grupo (decisão do
+ * dono). Antes era a soma das metas cadastradas nas lojas, que costumam
+ * estar lançadas só até o mês corrente — os meses futuros definidos no
+ * bloco ficavam fora da meta do ano.
+ */
+window.metaGrupoAno = function(ano){
+  ano = ano || hoje().slice(0,4);
+  let t = 0;
+  for(let m = 1; m <= 12; m++) t += window.metaGrupoDoMes(ano + '-' + String(m).padStart(2,'0'));
+  return t;
+};
+
 window.superMetaAno = function(ano){
   ano = ano || hoje().slice(0,4);
   const v = Number((D._superMetaAno || {})[ano] || 0);
@@ -25145,6 +25380,14 @@ function salvarMetasGrupo(){
     const el=document.getElementById('mg-'+mr);
     if(el){
       const val=parseBR(el.value)||0;
+      // [R170] O campo vem preenchido com a soma das lojas quando o mês não
+      // tem meta do grupo. Gravar esse valor "congelava" a soma: a meta do
+      // grupo (e a anual, que a soma) deixava de acompanhar a mudança de meta
+      // de uma loja. Só grava o que a gestão decidiu: mês que já tinha meta
+      // do grupo, ou valor diferente da soma das lojas.
+      const _jaTinha = Number(D._metasGrupo[mr]) > 0;
+      const _somaL = LOJAS.reduce((s,l)=>s+(Number(((D.metasLoja||{})[l.id]||{})[mr]?.mes)||0),0);
+      if(!_jaTinha && Math.abs(val - _somaL) < 0.005) continue;
       D._metasGrupo[mr]=val;
       if(val>0) salvos++;
     }
@@ -25190,7 +25433,8 @@ function exportarPDFAnual(){
   });
 
   const totalFat=lojasDados.reduce((s,l)=>s+l.fat,0);
-  const totalMeta=lojasDados.reduce((s,l)=>s+l.meta,0);
+  // [R170] a meta anual do grupo, como no Painel Gestão
+  const totalMeta=window.metaGrupoAno(ano);
   const totalPct=totalMeta>0?totalFat/totalMeta*100:0;
   const mediaPct=lojasDados.reduce((s,l)=>s+l.pct,0)/lojasDados.length;
   const sortPct=[...lojasDados].sort((a,b)=>b.pct-a.pct);
@@ -25201,7 +25445,7 @@ function exportarPDFAnual(){
   const rowsAnual = meses.map((nm,mi)=>{
     const mr=ano+'-'+String(mi+1).padStart(2,'0');
     const mFat=lojasDados.reduce((s,l)=>s+(l.porMes[mi]?.fat||0),0);
-    const mMeta=lojasDados.reduce((s,l)=>s+(l.porMes[mi]?.meta||0),0);
+    const mMeta=window.metaGrupoDoMes(mr);   // [R170] a meta do grupo do mês
     const pct=mMeta>0?mFat/mMeta*100:0;
     const cor=pct>=100?'#2ecc87':pct>=70?'#c9a84c':pct>0?'#e74c3c':'#999';
     const isFut=mi+1>mesAtualNum;
@@ -25815,7 +26059,7 @@ function exportarPDFGestao() {
   const ldByTMPDF  = [...ldG].filter(l=>l.tm>0).sort((a,b)=>b.tm-a.tm);
   // Total rede
   const totFatG  = ldG.reduce((s,l)=>s+l.fat,0);
-  const totMetaG = ldG.reduce((s,l)=>s+l.meta,0);
+  const totMetaG = per==='ano' ? window.metaGrupoAno() : ldG.reduce((s,l)=>s+l.meta,0);   // [R170]
   const pctRedeG = totMetaG>0?totFatG/totMetaG*100:0;
 
   const rowsFat = ldByFatPDF.map((l,i)=>{
@@ -29342,6 +29586,7 @@ function perfPlanoDoDia(lid, vendId){
 
   return {
     metaDia, tmRef, falta,
+    alvo: prog.alvo || 'meta',   // [R171] 'super' = a meta do mês já foi batida
     fatHoje: hojeAg.fat, atendHoje: hojeAg.atend, itensHoje: hojeAg.itens,
     tmHoje: hojeAg.tm, paHoje: hojeAg.pa,
     clientesFaltam, atendPrevisto, tmNecessario,
@@ -29397,9 +29642,19 @@ function renderPerformance(){
     acaoDetalhe   = 'Peça para a gestão cadastrar a meta do mês para esta loja.';
     acaoCor       = 'var(--muted)';
   } else if(plano.falta<=0){
-    acaoPrincipal = '🎉 Meta do dia batida!';
-    acaoDetalhe   = `Já são ${fmt(plano.fatHoje)} de ${fmt(plano.metaDia)}. Cada venda a mais vira super meta.`;
-    acaoCor       = 'var(--verde)';
+    // [R171] com a meta do mês batida, o alvo do dia já é a super meta
+    acaoPrincipal = plano.alvo === 'meta' ? '🎉 Meta do dia batida!' : '🚀 Super meta do dia batida!';
+    acaoDetalhe   = `Já são ${fmt(plano.fatHoje)} de ${fmt(plano.metaDia)}. `
+                  + (plano.alvo === 'meta' ? 'Cada venda a mais vira super meta.' : 'A meta do mês já foi batida — agora é super meta.');
+    acaoCor       = plano.alvo === 'meta' ? 'var(--verde)' : 'var(--roxo)';
+  } else if(plano.alvo !== 'meta'){
+    acaoPrincipal = (plano.alvo === 'superBatida' ? '🏆 Super meta do mês batida! Faltam ' : '🚀 Meta do mês batida! Faltam ')
+                  + `${fmt(plano.falta)} para o ritmo de super meta do dia`
+                  + (plano.clientesFaltam!==null ? ` — cerca de ${plano.clientesFaltam} ${plano.clientesFaltam===1?'cliente':'clientes'}` : '');
+    acaoDetalhe   = plano.alvo === 'superBatida'
+      ? `O alvo de hoje (${fmt(plano.metaDia)}) é o ritmo da super meta — ela já foi superada no mês.`
+      : `O alvo de hoje (${fmt(plano.metaDia)}) é o que falta da super meta do mês dividido pelos dias abertos que restam.`;
+    acaoCor       = 'var(--roxo)';
   } else if(plano.clientesFaltam!==null){
     acaoPrincipal = `Faltam ${fmt(plano.falta)} — cerca de ${plano.clientesFaltam} ${plano.clientesFaltam===1?'cliente':'clientes'}`;
     acaoDetalhe   = `Com o ticket médio de ${fmt(plano.tmRef)}, são ~${plano.clientesFaltam} atendimentos convertidos para fechar o dia.`;
@@ -30708,9 +30963,12 @@ function _relAnoMesAMes(lojas, ano){
     const mrB = (y-1) + '-' + String(mm).padStart(2,'0');
     const A = _relAgregar(lojas, mr);
     const B = _relAgregar(lojas, mrB);
+    // [R170] a REDE inteira (admin sem loja escolhida): a meta do grupo do
+    // mês, a mesma do Painel Gestão — e o total do ano fecha com a Meta Anual
+    const _rede = isAdmin() && !window._relLojaSel;
     linhas.push({
       mm, mr, mrB,
-      real: A.real, atend: A.atend, tm: A.tm, meta: A.meta, fonte: A.fonte,
+      real: A.real, atend: A.atend, tm: A.tm, meta: _rede ? window.metaGrupoDoMes(mr) : A.meta, fonte: A.fonte,
       realAnt: B.real,
       delta: _relDelta(A.real, B.real)
     });
@@ -31712,9 +31970,14 @@ function _relProjecao(){
   const linhas = lojas.map(l=>{
     const meta = metaDoMes(l.id, mesAtual).valor || 0;
     const real = _relReal(l.id, mesAtual).valor || 0;
-    const dp = diasAbertosPassados(l.id);
-    const dr = diasAbertosRestantes(l.id);
-    const du = diasAbertosNoMes(l.id);
+    // [R173] os dias do mês ESCOLHIDO. diasAbertosPassados/Restantes só
+    // conhecem o mês de hoje: num mês fechado a "projeção" saía com a média
+    // de um mês dividida pelos dias de outro. Mês fechado: todos os dias
+    // passaram e nenhum resta (projeção = realizado); mês futuro: nenhum passou.
+    const _hjMes = hj.slice(0,7);
+    const du = diasAbertosNoMes(l.id, mesAtual);
+    const dp = mesAtual === _hjMes ? diasAbertosPassados(l.id) : mesAtual < _hjMes ? du : 0;
+    const dr = mesAtual === _hjMes ? diasAbertosRestantes(l.id) : mesAtual < _hjMes ? 0 : du;
     // Ritmo atual
     const mediaAtual = dp > 0 ? real / dp : 0;
     const projAtu    = real + (mediaAtual * dr);
@@ -33051,13 +33314,16 @@ function marcarRetornoContato(id, retorno){
 }
 
 // ── FILTRAR ─────────────────────────────────────────────────────────
-function _filtrarContatos(){
+// [R172] opts.semData: o calendário tem o próprio mês; opts.semVend: a
+// divulgação ranqueia TODAS as vendedoras da loja/período escolhidos
+function _filtrarContatos(opts){
   if(!D.contatos) return [];
+  opts = opts || {};
   const fLoja = document.getElementById('ct-filtro-loja')?.value  || '';
-  const fVend = document.getElementById('ct-filtro-vend')?.value  || '';
+  const fVend = opts.semVend ? '' : (document.getElementById('ct-filtro-vend')?.value  || '');
   const fTipo = document.getElementById('ct-filtro-tipo')?.value  || '';
-  const fDe   = document.getElementById('ct-filtro-de')?.value    || '';
-  const fAte  = document.getElementById('ct-filtro-ate')?.value   || '';
+  const fDe   = opts.semData ? '' : (document.getElementById('ct-filtro-de')?.value    || '');
+  const fAte  = opts.semData ? '' : (document.getElementById('ct-filtro-ate')?.value   || '');
 
   return D.contatos.filter(c => {
     // Loja: admin com filtro OU loja logada
@@ -33075,17 +33341,200 @@ function _filtrarContatos(){
 }
 
 function limparFiltrosContatos(){
-  ['ct-filtro-loja','ct-filtro-vend','ct-filtro-tipo','ct-filtro-de','ct-filtro-ate'].forEach(id=>{
+  ['ct-filtro-loja','ct-filtro-vend','ct-filtro-tipo'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.value = '';
   });
-  renderContatos();
+  // [R172] o período volta ao mês corrente (antes: sem data = todo o histórico)
+  const _m = document.getElementById('ct-per-mes'); if(_m) _m.value = hoje().slice(0,7);
+  window.ctSetPer('mes');
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// [R172] BARRA DE LOJA E PERÍODO — Clientes Contatados
+//
+// A loja e o período escolhidos aqui valem para a página inteira. O
+// período (Dia/Semana/Mês/Ano) vira as datas de ct-filtro-de/ct-filtro-ate
+// — os mesmos campos que os KPIs, o ranking, os registros e o PDF já
+// liam; no "Período" as datas são livres (vazias = todo o histórico).
+// Dia/Semana/Mês/Ano usam _rkIntervalo, o mesmo recorte dos Rankings.
+// ══════════════════════════════════════════════════════════════════════
+window._ctPer = window._ctPer || {tipo:'mes'};
+
+window._ctIntervalo = function(){
+  const tipo = window._ctPer.tipo, hj = hoje();
+  const f = d => d.split('-').reverse().join('/');
+  if(tipo === 'periodo'){
+    const de  = document.getElementById('ct-filtro-de')?.value  || '';
+    const ate = document.getElementById('ct-filtro-ate')?.value || '';
+    return {ini:de, fim:ate,
+            label: (de || ate) ? (de ? f(de) : 'início') + ' a ' + (ate ? f(ate) : 'hoje') : 'Todo o histórico'};
+  }
+  const ref = tipo === 'mes' ? ((document.getElementById('ct-per-mes')?.value || hj.slice(0,7)) + '-01')
+            : tipo === 'ano' ? ((document.getElementById('ct-per-ano')?.value || hj.slice(0,4)) + '-01-01')
+            : (document.getElementById('ct-per-data')?.value || hj);
+  const iv = window._rkIntervalo(tipo === 'dia' ? 'hoje' : tipo, ref);
+  return {ini: iv.ini, fim: iv.fim, label: iv.label};
+};
+
+window._ctBarraIniciar = function(){
+  const hj = hoje();
+  const selAno = document.getElementById('ct-per-ano');
+  if(selAno){
+    const anos = new Set([hj.slice(0,4)]);
+    (D.contatos || []).forEach(c => { if(/^\d{4}/.test(c.data || '')) anos.add(c.data.slice(0,4)); });
+    const lista = [...anos].sort().reverse();
+    const atual = selAno.value || hj.slice(0,4);
+    if(selAno.dataset.assinatura !== lista.join('|')){
+      selAno.innerHTML = lista.map(a => '<option value="'+a+'">'+a+'</option>').join('');
+      selAno.dataset.assinatura = lista.join('|');
+    }
+    selAno.value = lista.includes(atual) ? atual : hj.slice(0,4);
+  }
+  if(window._ctBarraPronta) return;
+  window._ctBarraPronta = true;
+  const m = document.getElementById('ct-per-mes');  if(m && !m.value) m.value = hj.slice(0,7);
+  const d = document.getElementById('ct-per-data'); if(d && !d.value) d.value = hj;
+  // primeira abertura: o mês corrente (as datas precisam existir ANTES do
+  // primeiro _filtrarContatos, senão a primeira tela sai com o histórico todo)
+  const iv = window._ctIntervalo();
+  const de = document.getElementById('ct-filtro-de'), ate = document.getElementById('ct-filtro-ate');
+  if(de && ate && !de.value && !ate.value){ de.value = iv.ini; ate.value = iv.fim; }
+  window._ctBarraVisual();
+};
+
+// Mostra o seletor do tipo escolhido e o rótulo do intervalo
+window._ctBarraVisual = function(){
+  const tipo = window._ctPer.tipo;
+  document.querySelectorAll('#ct-per-tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.per === tipo));
+  const vis = (id, on, modo) => { const e = document.getElementById(id); if(e) e.style.display = on ? (modo || '') : 'none'; };
+  vis('ct-per-data', tipo === 'dia' || tipo === 'semana');
+  vis('ct-per-mes',  tipo === 'mes');
+  vis('ct-per-ano',  tipo === 'ano');
+  vis('ct-per-livre', tipo === 'periodo', 'inline-flex');
+  const lbl = document.getElementById('ct-per-lbl');
+  if(lbl) lbl.textContent = '→ ' + window._ctIntervalo().label;
+  const ln = document.getElementById('ct-loja-nome');
+  if(ln) ln.textContent = isAdmin() ? '' : ('🏪 ' + (LOJAS.find(l => l.id === lojaId())?.nome || ''));
+};
+
+window.ctSetPer = function(tipo){
+  window._ctPer.tipo = tipo;
+  window.ctAplicarPeriodo();
+};
+
+window.ctAplicarPeriodo = function(){
+  window._ctBarraIniciar();
+  const tipo = window._ctPer.tipo;
+  if(tipo !== 'periodo'){
+    const iv = window._ctIntervalo();
+    const de = document.getElementById('ct-filtro-de'), ate = document.getElementById('ct-filtro-ate');
+    if(de) de.value = iv.ini;
+    if(ate) ate.value = iv.fim;
+  }
+  // o calendário e os contatos do mês acompanham o mês do período
+  if(tipo === 'dia' || tipo === 'semana' || tipo === 'mes'){
+    const ini = (document.getElementById('ct-filtro-de')?.value || hoje());
+    window._ctCalMes = ini.slice(0,7);
+    window._ctAlertaMes = {ano: Number(ini.slice(0,4)), mes: Number(ini.slice(5,7))};
+  }
+  window._ctBarraVisual();
+  window.renderContatos();
+  if(document.getElementById('ct-div-painel')?.style.display !== 'none') window._ctDivRenderPreview();
+};
+
+// ── Divulgação: quem mais contatou e quem mais converteu em compra ──
+window._ctDivDados = function(){
+  const contatos = _filtrarContatos({semVend:true});
+  const porVend = {};
+  contatos.forEach(c => {
+    const k = c.vendId || '—';
+    if(!porVend[k]) porVend[k] = {total:0, comprou:0};
+    porVend[k].total++;
+    if(c.retorno === 'comprou') porVend[k].comprou++;
+  });
+  const linhas = Object.entries(porVend).map(([vid, st]) => {
+    const v = (D.vendedoras || []).find(x => x.id === vid);
+    return {vid, nome: v?.nome || vid, loja: LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '',
+            total: st.total, comprou: st.comprou, taxa: st.total > 0 ? st.comprou / st.total * 100 : 0};
+  });
+  const contatou  = [...linhas].sort((a,b) => b.total - a.total || b.comprou - a.comprou || a.nome.localeCompare(b.nome));
+  const converteu = linhas.filter(l => l.comprou > 0)
+    .sort((a,b) => b.comprou - a.comprou || b.taxa - a.taxa || a.nome.localeCompare(b.nome));
+  const fLoja = isAdmin() ? (document.getElementById('ct-filtro-loja')?.value || '') : lojaId();
+  const alvo  = fLoja ? (LOJAS.find(l => l.id === fLoja)?.nome || fLoja) : 'Rede Completa';
+  const tipo  = document.getElementById('ct-filtro-tipo')?.value || '';
+  const tipoLbl = tipo && typeof CT_TIPOS !== 'undefined' && CT_TIPOS[tipo] ? CT_TIPOS[tipo].label : '';
+  return {contatou, converteu, total: contatos.length, compras: contatos.filter(c => c.retorno === 'comprou').length,
+          alvo, tipoLbl, intervalo: window._ctIntervalo()};
+};
+
+window._ctDivRenderPreview = function(){
+  const el = document.getElementById('ct-div-preview');
+  if(!el) return;
+  const d = window._ctDivDados();
+  const lista = (rot, arr, fn) => '<div style="background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:12px">'
+    + '<div style="font-size:11px;font-weight:700;color:var(--ouro);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">' + rot + '</div>'
+    + (arr.length ? arr.slice(0, 10).map((l, i) =>
+        '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)">'
+        + '<span>' + (['🥇','🥈','🥉'][i] || (i+1) + 'º') + ' ' + l.nome + ' <span style="color:var(--muted);font-size:10px">' + l.loja + '</span></span>'
+        + '<strong>' + fn(l) + '</strong></div>').join('')
+      : '<div style="font-size:11px;color:var(--muted)">Ninguém no período.</div>')
+    + '</div>';
+  el.innerHTML = lista('📞 Quem mais contatou', d.contatou, l => l.total + ' contato' + (l.total === 1 ? '' : 's'))
+    + lista('🛒 Quem mais converteu em compra', d.converteu, l => l.comprou + ' compra' + (l.comprou === 1 ? '' : 's') + ' · ' + l.taxa.toFixed(0) + '%');
+};
+
+window.toggleDivulgacaoContatos = function(){
+  const p = document.getElementById('ct-div-painel');
+  if(!p) return;
+  const abrir = p.style.display === 'none';
+  p.style.display = abrir ? '' : 'none';
+  if(abrir) window._ctDivRenderPreview();
+};
+
+window.gerarDivulgacaoContatos = function(){
+  const d = window._ctDivDados();
+  if(!d.total){ showToast('Nenhum contato no período para divulgar.','err'); return; }
+  const destaque = (valor, rotulo) =>
+    '<div style="flex:1 1 165px;min-width:165px;max-width:230px;background:#fff;border:2px solid #c9a84c;border-radius:14px;padding:18px 12px;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.06)">'
+    + '<div style="font-family:\'Playfair Display\',Georgia,serif;font-size:40px;font-weight:800;color:#c9a84c;line-height:1.05">' + valor + '</div>'
+    + '<div style="font-size:13.5px;color:#8a7f5f;letter-spacing:.6px;text-transform:uppercase;font-weight:700;margin-top:8px">' + rotulo + '</div></div>';
+  const demais = (arr, fn) => arr.length > 3
+    ? '<table style="margin:10px auto 0;border-collapse:collapse;font-size:13px;min-width:320px">'
+      + arr.slice(3, 10).map((l, i) => '<tr><td style="padding:5px 10px;color:#8a7f5f">' + (i + 4) + 'º</td>'
+          + '<td style="padding:5px 10px;font-weight:600">' + l.nome + '</td>'
+          + '<td style="padding:5px 10px;color:#8a7f5f">' + l.loja + '</td>'
+          + '<td style="padding:5px 10px;text-align:right">' + fn(l) + '</td></tr>').join('')
+      + '</table>' : '';
+  const fC = l => l.total + ' contato' + (l.total === 1 ? '' : 's');
+  const fV = l => l.comprou + ' compra' + (l.comprou === 1 ? '' : 's') + ' · ' + l.taxa.toFixed(0) + '% de conversão';
+  let body = '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:8px auto 30px">'
+    + destaque(d.total, 'Contatos feitos')
+    + destaque(d.compras, 'Viraram compra')
+    + destaque((d.total > 0 ? (d.compras / d.total * 100) : 0).toFixed(0) + '%', 'Conversão')
+    + destaque(d.contatou.length, 'Vendedor(es) contatando')
+    + '</div>';
+  body += '<h2>Quem mais contatou</h2>' + _htmlPodio(d.contatou.map(l => ({nome: l.nome, info: fC(l) + '<br>' + l.loja})))
+        + demais(d.contatou, fC);
+  body += '<h2>Quem mais converteu em compra</h2>'
+        + (d.converteu.length
+            ? _htmlPodio(d.converteu.map(l => ({nome: l.nome, info: fV(l) + '<br>' + l.loja}))) + demais(d.converteu, fV)
+            : '<p style="text-align:center;color:#8a7f5f">Nenhum contato virou compra no período.</p>');
+  const dArq = t => String(t).replace(/[\/\s]/g,'-');
+  _abrirJanelaDivulgacao(
+    'Clientes Contatados',
+    d.alvo + ' — ' + d.intervalo.label + (d.tipoLbl ? ' — ' + d.tipoLbl : ''),
+    body,
+    'Divulgacao — Contatos — ' + d.alvo + ' — ' + dArq(d.intervalo.label)
+  );
+};
 
 // ── RENDER ──────────────────────────────────────────────────────────
 function renderContatos(){
   if(!D.contatos) D.contatos = [];
   if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
+  window._ctBarraIniciar();   // [R172]
 
   // Popular selects
   const selLoja = document.getElementById('ct-filtro-loja');
@@ -33279,6 +33728,16 @@ function renderContatos(){
     }
   }
 
+  // [R172] Blocos que dependem do filtro — ANTES da lista. Ficavam no fim
+  // da função, depois do "return" da lista vazia: um filtro sem contatos
+  // deixava ranking, por loja, lembretes e calendário com os números do
+  // filtro anterior.
+  if(typeof _renderLembretes === 'function') _renderLembretes();
+  if(typeof _renderCalendarioContatos === 'function') _renderCalendarioContatos();
+  if(typeof _renderContatosPorLoja === 'function') _renderContatosPorLoja(contatos);
+  if(typeof _renderContatosRanking === 'function') _renderContatosRanking(contatos);
+  window._ctBarraVisual();
+
   // ── Lista de registros
   const tbody = document.getElementById('contatos-tbody');
   const vazio = document.getElementById('contatos-vazio');
@@ -33338,13 +33797,6 @@ function renderContatos(){
       </td>
     </tr>${linhaObs}`;
   }).join('');
-
-  // [NEW 12/08] Renderizar blocos novos
-  if(typeof _renderLembretes === 'function') _renderLembretes();
-  if(typeof _renderCalendarioContatos === 'function') _renderCalendarioContatos();
-  // [NEW 13/08] Por Loja (admin) + Ranking
-  if(typeof _renderContatosPorLoja === 'function') _renderContatosPorLoja(contatos);
-  if(typeof _renderContatosRanking === 'function') _renderContatosRanking(contatos);
 }
 
 
@@ -33622,7 +34074,9 @@ function _calcularLembretes(){
 
   const isAd = isAdmin();
   const _lidUser = lojaId();
-  const _matchLoja = (obj) => isAd ? true : (obj.loja === _lidUser);
+  // [R172] o admin vê a loja escolhida na barra (vazia = todas)
+  const _fLojaCt = document.getElementById('ct-filtro-loja')?.value || '';
+  const _matchLoja = (obj) => isAd ? (!_fLojaCt || obj.loja === _fLojaCt) : (obj.loja === _lidUser);
 
   // ── (1) Retorno programado venceu ──
   const programados = contatos.filter(c =>
@@ -33841,7 +34295,10 @@ function _renderCalendarioContatos(){
   const diasNoMes = new Date(y, m, 0).getDate();
   const primeiroDiaSem = new Date(y, m-1, 1).getDay();
 
-  const contatos = (typeof _filtrarContatos === 'function' ? _filtrarContatos() : (D.contatos || []))
+  // [R172] o mês do calendário manda (ele tem navegação própria); loja,
+  // vendedora e tipo continuam valendo. Com as datas do filtro, navegar para
+  // um mês fora do período mostrava o calendário vazio.
+  const contatos = (typeof _filtrarContatos === 'function' ? _filtrarContatos({semData:true}) : (D.contatos || []))
     .filter(c => c.data && c.data.startsWith(mesRef));
 
   // Agregar por dia (contatos feitos)
@@ -37670,6 +38127,10 @@ window._calcularRitmoMeta = function(lid, mesRef, dataRef){
     : _idRealizadoAte(lid, mesRef, dataLim);
   const dif       = realizado - ideal;
   const falta     = Math.max(0, meta - realizado);
+  // [R171] batida a meta, o que falta para a SUPER META
+  const _gm = (typeof getMetas === 'function' ? getMetas(lid, mesRef) : null) || {};
+  const superMeta = Number(_gm.superMes) > 0 ? Number(_gm.superMes) : meta * window.SUPER_META_PADRAO;
+  const faltaSuper = Math.max(0, superMeta - realizado);
 
   return {
     meta, ideal, realizado, dif,
@@ -37678,6 +38139,8 @@ window._calcularRitmoMeta = function(lid, mesRef, dataRef){
     diasTotais, diasPassados, diasRestantes,
     falta,
     porDia: diasRestantes > 0 ? falta / diasRestantes : 0,
+    superMeta, faltaSuper,
+    porDiaSuper: diasRestantes > 0 ? faltaSuper / diasRestantes : 0,
     dataRef: dataLim, mesRef, ehMesFechado
   };
 };
@@ -37723,11 +38186,17 @@ window._calcularRitmoVend = function(vendId, mesRef, dataRef){
 
   const ideal = diasTotais > 0 ? meta * (diasPassados / diasTotais) : 0;
   const falta = Math.max(0, meta - realizado);
+  // [R171] batida a meta, o que falta para a SUPER META
+  const _sv = typeof window.superMetaVendDoMes === 'function' ? Number(window.superMetaVendDoMes(vendId, mesRef)) || 0 : 0;
+  const superMeta = _sv > 0 ? _sv : meta * window.SUPER_META_PADRAO;
+  const faltaSuper = Math.max(0, superMeta - realizado);
   return {
     meta, ideal, realizado, dif: realizado - ideal,
     pctIdeal: ideal > 0 ? (realizado/ideal*100) : null,
     diasTotais, diasPassados, diasRestantes, falta,
     porDia: diasRestantes > 0 ? falta/diasRestantes : 0,
+    superMeta, faltaSuper,
+    porDiaSuper: diasRestantes > 0 ? faltaSuper/diasRestantes : 0,
     dataRef: dataLim, mesRef, ehMesFechado
   };
 };
@@ -37773,7 +38242,12 @@ window._htmlRitmoVend = function(vendId){
       + '<div style="font-size:10.5px;font-weight:700;color:' + cor + '">'
         + (noRitmo ? '✅ ' + fmt(Math.abs(r.dif)) + ' acima do ritmo' : '⚠️ ' + fmt(Math.abs(r.dif)) + ' abaixo do ritmo')
         + (r.diasRestantes > 0
-            ? '<span style="font-weight:400;color:var(--muted)"> · faltam ' + fmt(r.falta) + ' em ' + r.diasRestantes + 'd = <strong style="color:var(--texto)">' + fmt(r.porDia) + '/dia</strong></span>'
+            ? (r.falta > 0
+                ? '<span style="font-weight:400;color:var(--muted)"> · faltam ' + fmt(r.falta) + ' em ' + r.diasRestantes + 'd = <strong style="color:var(--texto)">' + fmt(r.porDia) + '/dia</strong></span>'
+                // [R171] meta batida: o alvo agora é a super meta
+                : r.faltaSuper > 0
+                  ? '<span style="font-weight:400;color:var(--muted)"> · meta batida! 🚀 super meta: faltam ' + fmt(r.faltaSuper) + ' em ' + r.diasRestantes + 'd = <strong style="color:var(--roxo)">' + fmt(r.porDiaSuper) + '/dia</strong></span>'
+                  : '<span style="font-weight:400;color:var(--roxo)"> · 🏆 super meta batida</span>')
             : '')
       + '</div>'
     + '</div>';
@@ -37849,7 +38323,15 @@ window.renderRitmoMeta = function(lidArg){
       + (noRitmo ? 'background:rgba(46,204,135,.08);border-left:3px solid var(--verde)'
                  : 'background:rgba(220,53,69,.08);border-left:3px solid var(--verm)') + '">'
       + (r.diasRestantes > 0
-          ? (noRitmo
+          ? (r.falta <= 0
+              // [R171] meta batida: o alvo agora é a super meta — antes a
+              // frase dizia "faltam R$ 0,00 — R$ 0,00/dia"
+              ? (r.faltaSuper > 0
+                  ? '🏆 Meta do mês batida! Rumo à <strong style="color:var(--roxo)">super meta (' + fmt(r.superMeta) + ')</strong>: '
+                    + 'faltam <strong>' + fmt(r.faltaSuper) + '</strong> em ' + r.diasRestantes + ' dia(s) aberto(s) — '
+                    + '<strong style="color:var(--roxo)">' + fmt(r.porDiaSuper) + '/dia</strong>.'
+                  : '🚀 Super meta do mês batida (' + fmt(r.superMeta) + ') — ' + fmt(r.realizado - r.superMeta) + ' acima.')
+            : noRitmo
               ? '✅ No ritmo: <strong>' + fmt(Math.abs(r.dif)) + '</strong> acima do esperado para hoje. '
                 + 'Faltam <strong>' + fmt(r.falta) + '</strong> em ' + r.diasRestantes + ' dia(s) aberto(s) — '
                 + '<strong>' + fmt(r.porDia) + '/dia</strong>.'
@@ -38569,9 +39051,12 @@ function _crmRenderMelhores(v){
  * última compra verdadeira. Loja e vendedor(a) continuam filtrando; ano e
  * mês não, por definição — "sem comprar há N dias" é pergunta sobre hoje.
  */
-window.crmClientesTodosAnos = function(){
-  const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
-  const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+window.crmClientesTodosAnos = function(over){
+  // [R172] over.loja / over.vend: quem chama de outra página passa os seus
+  // filtros, em vez de herdar os da página CRM Clientes
+  over = over || {};
+  const fLoja = over.loja !== undefined ? over.loja : (document.getElementById('excel-filtro-loja')?.value || '');
+  const fVend = over.vend !== undefined ? over.vend : (document.getElementById('excel-filtro-vend')?.value || '');
   let lojas = window.crmLojasVisiveis();
   if(fLoja) lojas = lojas.filter(l => l === fLoja);
   if(!lojas.length) return [];
@@ -38989,8 +39474,19 @@ window.renderInativos180 = function(){
     return;
   }
 
+  // [R172] A base de TODOS os anos (a mesma do painel de inativos do CRM,
+  // R149), na loja escolhida AQUI. crmVisao() lia os filtros da página CRM
+  // Clientes: com um ano escolhido lá, quem parou no ano anterior — o caso
+  // que a régua existe para achar — sumia desta lista; e a compra lançada na
+  // Origem do Fluxo (R115) não tirava o cliente da régua.
+  const _fLojaCt = isAdmin() ? (document.getElementById('ct-filtro-loja')?.value || '') : '';
+  // Sem base (planilha antiga, sem cubos): o recorte de sempre — pior, mas
+  // nunca uma tela vazia (mesmo recurso do _crmRenderInativos).
   let v;
-  try{ v = window.crmVisao(); }
+  try{
+    const _base = window.crmClientesTodosAnos({loja: _fLojaCt, vend: ''});
+    v = _base.length ? {clientes: _base} : window.crmVisao();
+  }
   catch(e){ el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px">Não foi possível ler a base do CRM.</div>'; return; }
 
   let inativos = (v.clientes||[])
