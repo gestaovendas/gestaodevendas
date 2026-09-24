@@ -1160,6 +1160,47 @@ window._campMortoEm = function(cont, id){
 };
 
 /** [R166] União de duas lápides de campanha (array legado ou {id: ts}) em {id: ts}. */
+/**
+ * [R175] Merge de lançamentos de campanha (campRealizados) num lugar só.
+ * Havia SEIS cópias: boot, pull da loja, pull do admin, montagem do admin a
+ * partir dos docs das lojas e os dois ramos da aba Estoque. Todas trocavam
+ * o local pelo remoto sem olhar a data — a edição ainda não confirmada
+ * voltava à versão antiga — e as duas da aba Estoque nem olhavam a lápide:
+ * abrir a aba ressuscitava o lançamento excluído, e a próxima gravação o
+ * devolvia à rede. Agora: lápide sempre; o remoto só substitui o local se
+ * não for mais velho (sem carimbo dos dois lados = como antes).
+ */
+window._mesclarCampRealizadosEm = function(alvo, remotos, lapRemota){
+  if(!Array.isArray(alvo)) return alvo;
+  // A lápide que veio do servidor entra na LOCAL — _isCampExcluido só lê a
+  // daqui. Sem isto, a exclusão feita em outra máquina não barrava nada
+  // aqui, e o lançamento seguia na tela (e voltava na próxima gravação).
+  window._lapideCampRemotaEm(alvo, lapRemota);
+  if(!Array.isArray(remotos)) return alvo;
+  const ts = r => Number(r && r._savedAt) || 0;
+  remotos.forEach(r => {
+    if(!r || !r.id || _isCampExcluido(r.id)) return;
+    const i = alvo.findIndex(x => x && x.id === r.id);
+    if(i < 0) alvo.push(r);
+    else if(ts(r) >= ts(alvo[i])) alvo[i] = r;
+  });
+  return alvo;
+};
+
+/** [R175] Une a lápide de campanha remota à local e tira da lista quem ela matou. */
+window._lapideCampRemotaEm = function(alvo, lapRemota){
+  const n = Array.isArray(lapRemota) ? lapRemota.length : (lapRemota && typeof lapRemota === 'object' ? Object.keys(lapRemota).length : 0);
+  if(!n) return 0;
+  D._campExcluidos = window._uniaoLapideCamp(D._campExcluidos, lapRemota);
+  let tirados = 0;
+  if(Array.isArray(alvo)){
+    for(let i = alvo.length - 1; i >= 0; i--){
+      if(alvo[i] && _isCampExcluido(alvo[i].id)){ alvo.splice(i, 1); tirados++; }
+    }
+  }
+  return tirados;
+};
+
 window._uniaoLapideCamp = function(a, b){
   const out = {};
   const leg = typeof window._TS_LAPIDE_LEGADA === 'function' ? window._TS_LAPIDE_LEGADA() : 1;
@@ -1208,6 +1249,45 @@ window._marcarGrupoEditado = function(campos){
   (campos || []).forEach(c => { D[c + 'Ts'] = agora; window._marcarCampoEditado(c); });
 };
 window._marcarEstoqueEditado = () => window._marcarGrupoEditado(window._CAMPOS_ESTOQUE);
+
+// ══════════════════════════════════════════════════════════════════════
+// [R175] NA GRAVAÇÃO DO ADMIN, O CAMPO QUE ESTA MÁQUINA NÃO EDITOU É O DO
+// SERVIDOR.
+//
+// Na leitura a regra já era essa (_mergeCarimbado, R156): quem não editou
+// não tem o que defender. Na gravação, não: o principal saía com a cópia
+// LOCAL de todos estes campos. Duas máquinas de admin — uma ajusta o saldo
+// do produto B e grava; a outra, que ainda não puxou, salva QUALQUER coisa
+// (uma meta) e grava por cima o saldo antigo de B. O ajuste some sem aviso.
+// Mesma regra da leitura, inclusive "vazio sem carimbo é ausência".
+//
+// Limite conhecido: as DUAS máquinas editando itens diferentes do MESMO
+// campo no mesmo intervalo — aí a última gravação vence o campo inteiro
+// (o carimbo é por campo, não por item).
+// ══════════════════════════════════════════════════════════════════════
+window._CAMPOS_CARIMBADOS_ADMIN = ['_metasGrupo','_superMetaAno','_vrllSuperPct','configFollowUp',
+  '_lojasArquivadas','arquivos','diasAbertosOverride'];
+window._carimbadosDoServidorEm = function(D2, atual){
+  if(!D2 || !atual) return 0;
+  const tam = v => Array.isArray(v) ? v.length : (v && typeof v === 'object') ? Object.keys(v).length : (v ? 1 : 0);
+  const ed = window._camposEditadosAqui;
+  let n = 0;
+  window._CAMPOS_CARIMBADOS_ADMIN.concat(window._CAMPOS_ESTOQUE, window._CAMPOS_EXCEL).forEach(c => {
+    if(ed && ed.has(c)) return;                       // editado aqui: vale o daqui
+    const rv = atual[c];
+    if(rv === undefined || rv === null) return;       // o servidor não tem: fica o daqui
+    const tsR = c === 'diasAbertosOverride' ? (atual.diasAbertosOverrideTs || atual._diasAbertosTs)
+              : c === 'configFollowUp' ? (rv && rv._savedAt) : atual[c + 'Ts'];
+    if(tam(rv) === 0 && tam(D2[c]) > 0 && !Number(tsR)) return;   // vazio sem carimbo = ausência
+    D2[c] = rv;
+    if(c === 'diasAbertosOverride'){
+      if(atual.diasAbertosOverrideTs !== undefined) D2.diasAbertosOverrideTs = atual.diasAbertosOverrideTs;
+      if(atual._diasAbertosTs !== undefined) D2._diasAbertosTs = atual._diasAbertosTs;
+    } else if(atual[c + 'Ts'] !== undefined) D2[c + 'Ts'] = atual[c + 'Ts'];
+    n++;
+  });
+  return n;
+};
 window._marcarExcelEditado   = () => window._marcarGrupoEditado(window._CAMPOS_EXCEL);
 
 window._mesclarRemotoComum = function(remoto){
@@ -1220,6 +1300,10 @@ window._mesclarRemotoComum = function(remoto){
   // continuava dizendo "sincronizado".
   const aceita = (typeof _aceitaRemoto === 'function') ? _aceitaRemoto
                : (l, r) => r !== undefined && r !== null;
+
+  // [R175] lápide de campanha feita em outra máquina — mesmo quando o
+  // servidor não traz lançamento nenhum para mesclar
+  if(remoto._campExcluidos) window._lapideCampRemotaEm(D.campRealizados, remoto._campExcluidos);
 
   window._CAMPOS_SIMPLES.forEach(c => {
     if(remoto[c] === undefined || remoto[c] === null) return;
@@ -1828,6 +1912,7 @@ try{
             // filtrados por elas (vendedora/fluxo/contato/prospecção
             // excluídos em outra máquina não voltam pela cópia velha daqui)
             window._unirLapidesEm(D2, atual);
+            window._carimbadosDoServidorEm(D2, atual);   // [R175]
             if(Array.isArray(D2.vendedoras) && Array.isArray(D2._vendsExcluidas))
               D2.vendedoras = D2.vendedoras.filter(v => !D2._vendsExcluidas.includes(v.id));
             if(Array.isArray(D2.fluxo) && D2._fluxoExcluidos)
@@ -2514,7 +2599,8 @@ try{
 
         // [FIX BUG 2] Usar _isCampExcluido (suporta array legado E objeto com timestamp)
         // Antes: excCamp.includes(r.id) só funcionava com array legado, falhava com objeto
-        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !_isCampExcluido(r.id));
+        // [R175] a lápide de D2 (já unida com a do servidor), não a de D
+        const campLoja = (D2.campRealizados||[]).filter(r=>r.lojaId===lid && !window._campMortoEm(D2, r.id));
         if(!D2._fluxoExcluidos || typeof D2._fluxoExcluidos !== 'object') D2._fluxoExcluidos = {};
         const _excFluxo = D2._fluxoExcluidos;   // [R167] mesma referência: a união das lápides vale aqui
         const fluxoLoja = (D2.fluxo||[]).filter(r=>r.loja===lid && !_excFluxo[r.id]);
@@ -2915,11 +3001,7 @@ try{
             // Merge campRealizados desta loja
             if(pedaco.campRealizados && pedaco.campRealizados.length){
               if(!base.campRealizados) base.campRealizados=[];
-              pedaco.campRealizados.forEach(r=>{
-                const idx2 = base.campRealizados.findIndex(x=>x.id===r.id);
-                if(idx2>=0) base.campRealizados[idx2]=r;
-                else base.campRealizados.push(r);
-              });
+              window._mesclarCampRealizadosEm(base.campRealizados, pedaco.campRealizados);   // [R175] lápide + mais novo
             }
             // [FIX 25/07] mesclar historicoMeses e historicoLojas da loja
             // Antes: o admin lia só o doc principal (que tem o histórico já
@@ -3207,13 +3289,8 @@ try{
               // Merge campRealizados desta loja ao base (respeitando tombstones)
               if(pedaco.campRealizados && pedaco.campRealizados.length){
                 if(!base.campRealizados) base.campRealizados=[];
-                pedaco.campRealizados.forEach(r=>{
-                  // [FIX BUG 2] _isCampExcluido suporta array legado E objeto com timestamp
-                  if(_isCampExcluido(r.id)) return; // não trazer de volta excluídos
-                  const rIdx = base.campRealizados.findIndex(x=>x.id===r.id);
-                  if(rIdx>=0) base.campRealizados[rIdx]=r;
-                  else base.campRealizados.push(r);
-                });
+                // [R175] lápide + o mais novo vence (ver _mesclarCampRealizadosEm)
+                window._mesclarCampRealizadosEm(base.campRealizados, pedaco.campRealizados);
               }
               // Merge fluxo desta loja ao base — [R127] respeita a lápide
               if(pedaco._fluxoExcluidos){
@@ -7375,7 +7452,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-24j';
+window.AVATIM_BUILD = '2026-09-24l';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -13364,11 +13441,7 @@ async function loadFromFirestore(){
       // campRealizados: merge por id (inclui lançamentos de todas as lojas)
       if(remoto.campRealizados && remoto.campRealizados.length){
         if(!D.campRealizados) D.campRealizados=[];
-        remoto.campRealizados.forEach(r=>{
-          if(_isCampExcluido(r.id)) return; // [FIX Bug2] tombstone ativo
-          const i = D.campRealizados.findIndex(x=>x.id===r.id);
-          if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-        });
+        window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);   // [R175]
       }
       _persistirLocal();
       console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
@@ -14778,10 +14851,8 @@ function nav(pg){
               // Merge campRealizados das lojas no D local
               if(remoto.campRealizados && remoto.campRealizados.length){
                 if(!D.campRealizados) D.campRealizados=[];
-                remoto.campRealizados.forEach(r=>{
-                  const i=D.campRealizados.findIndex(x=>x.id===r.id);
-                  if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-                });
+                // [R175] a lápide e a data valem aqui também
+                window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);
                 _persistirLocal();
               }
             }
@@ -14803,10 +14874,8 @@ function nav(pg){
               // Merge campRealizados desta loja
               if(remoto.campRealizados && remoto.campRealizados.length){
                 if(!D.campRealizados) D.campRealizados=[];
-                remoto.campRealizados.forEach(r=>{
-                  const i=D.campRealizados.findIndex(x=>x.id===r.id);
-                  if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-                });
+                // [R175] a lápide e a data valem aqui também
+                window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);
                 _persistirLocal();
               }
             }
@@ -20024,10 +20093,8 @@ function toggleRelCamp(){
           const remoto = JSON.parse(json);
           if(remoto.campRealizados && remoto.campRealizados.length){
             if(!D.campRealizados) D.campRealizados=[];
-            remoto.campRealizados.forEach(r=>{
-              const i=D.campRealizados.findIndex(x=>x.id===r.id);
-              if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-            });
+            // [R175] o Relatório de Campanha também ressuscitava o excluído
+            window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);
             _persistirLocal();
           }
         }
@@ -20283,6 +20350,8 @@ function renderRelCamp(){
 }
 
 function exportarRelCamp(){
+  // [R176] a filial não vê meta/resultado de outras filiais nem da rede
+  if(!isAdmin()){ showToast('A exportação de campanhas da rede é da gestão.','err'); return; }
   initCampData();
   const filtroId = document.getElementById('rel-camp-sel')?.value||'';
   let objs = filtroId ? D.campObjetivos.filter(o=>o.id===filtroId) : [...D.campObjetivos];
@@ -20314,6 +20383,8 @@ function exportarRelCamp(){
 }
 
 function exportarPDFCamp(){
+  // [R176] a filial não vê meta/resultado de outras filiais nem da rede
+  if(!isAdmin()){ showToast('O relatório de campanha da rede é da gestão.','err'); return; }
   initCampData();
   const filtroId = document.getElementById('rel-camp-sel')?.value||'';
   const lid = lojaId();
@@ -20869,7 +20940,10 @@ function atualizarObjetivoCamp(){
   if(!obj){ infoEl.style.display='none'; return; }
   const lid = lojaId();
   const metaEstaLoja = (obj.metasPorLoja && obj.metasPorLoja[lid]) || obj.metaLoja || 0;
-  const metaTexto = metaEstaLoja > 0 ? fmt(metaEstaLoja) : (obj.metaRede>0 ? 'Rede: '+fmt(obj.metaRede) : 'não definida');
+  // [R176] a filial vê só a própria meta (decisão do dono) — sem meta
+  // distribuída para ela, "não definida", nunca o número da rede
+  const metaTexto = metaEstaLoja > 0 ? fmt(metaEstaLoja)
+                  : (isAdmin() && obj.metaRede>0 ? 'Rede: '+fmt(obj.metaRede) : 'não definida pela gestão');
   // Calcular total já realizado pela rede e pelas outras lojas
   const reais = (D.campRealizados||[]).filter(r=>r.campId===id);
   // [FIX 20/07] usar _fatLancamento (soma por vendedora) e somar TODOS os dias da loja
@@ -20884,7 +20958,7 @@ function atualizarObjetivoCamp(){
     '<div style="display:flex;flex-wrap:wrap;gap:14px">'
     + '<div><div style="font-size:9px;color:var(--muted)">🎯 SUA META</div><div style="font-weight:700;color:var(--ouro)">' + metaTexto + '</div></div>'
     + (meuReal?'<div><div style="font-size:9px;color:var(--muted)">✅ SEU REALIZADO</div><div style="font-weight:700;color:var(--verde)">'+fmt(meuReal.fat)+' ('+pctMeta+')</div></div>':'')
-    + (obj.metaRede>0?'<div><div style="font-size:9px;color:var(--muted)">🌐 TOTAL REDE</div><div style="font-weight:700;color:var(--azul)">'+fmt(totalRede)+' / '+fmt(obj.metaRede)+' ('+pctRede+')</div></div>':'')
+    + (isAdmin()&&obj.metaRede>0?'<div><div style="font-size:9px;color:var(--muted)">🌐 TOTAL REDE</div><div style="font-weight:700;color:var(--azul)">'+fmt(totalRede)+' / '+fmt(obj.metaRede)+' ('+pctRede+')</div></div>':'')
     + '<div><div style="font-size:9px;color:var(--muted)">📅 PERÍODO</div><div style="font-weight:600">'+fmtData(obj.ini)+' → '+fmtData(obj.fim)+'</div></div>'
     + '</div>'
     + (obj.obs?'<div style="margin-top:8px;font-size:11px;color:var(--muted)">📋 '+obj.obs+'</div>':'');
@@ -21265,7 +21339,8 @@ async function salvarCampReal(){
     vendKits:   _vendData.vendKits, // [NEW] kits por vendedor(a)
     vendNrs:    _vendData.vendNrs,
     vendObss:   _vendData.vendObss,
-    lancadoEm: hoje()
+    lancadoEm: hoje(),
+    _savedAt: Date.now()   // [R175] o merge por item precisa saber qual versão é a mais nova
   };
   // [FIX Bug2] Migrar _campExcluidos legado e remover tombstone ao re-lançar
   // [R158] a migração mora num lugar só — ver _migrarLapideCamp
@@ -21533,7 +21608,7 @@ function renderCampLista(){
     const _metaLojFil  = _campFiltroLoja&&obj.metasPorLoja ? (obj.metasPorLoja[_campFiltroLoja]||0) : 0;
     const _pctLojFil   = _metaLojFil>0 ? _fatLojFil/_metaLojFil*100 : pctRede;
     const _corFil      = _pctLojFil>=100?'var(--verde)':_pctLojFil>=70?'var(--ouro)':'var(--verm)';
-    const corBorda     = (_campFiltroLoja
+    let corBorda       = (_campFiltroLoja
       ? (_pctLojFil>=100?'rgba(46,204,135,.35)':_pctLojFil>=70?'rgba(201,168,76,.35)':'rgba(239,68,68,.2)')
       : (pctRede>=100?'rgba(46,204,135,.25)':pctRede>=70?'rgba(201,168,76,.25)':'var(--borda)'));
     // Agrupar lançamentos diários da loja em um objeto consolidado
@@ -21550,6 +21625,9 @@ function renderCampLista(){
     const metaLoja  = (obj.metasPorLoja&&obj.metasPorLoja[lid]) || obj.metaLoja || 0;
     const pctLoja   = metaLoja>0&&meuReal ? meuReal.fat/metaLoja*100 : 0;
     const corLoja   = pctLoja>=100?'var(--verde)':pctLoja>=70?'var(--ouro)':'var(--verm)';
+    // [R176] a borda do card é um sinal de resultado: para a filial, o DELA —
+    // pintar pelo % da rede revelava, por cor, se a rede bateu a meta
+    if(!isAdmin()) corBorda = pctLoja>=100?'rgba(46,204,135,.25)':pctLoja>=70?'rgba(201,168,76,.25)':'var(--borda)';
 
     // ── CABEÇALHO DO CARD ─────────────────────────────────────
     const header = `
@@ -21561,10 +21639,10 @@ function renderCampLista(){
             <div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">
               <span style="font-size:10px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 10px;border-radius:20px;font-weight:600">${info.label}</span>
               <span style="font-size:10px;color:var(--muted)">📅 ${fmtData(obj.ini)} → ${fmtData(obj.fim)}</span>
-              ${obj.metaRede>0?`<span style="font-size:10px;color:var(--muted)">🎯 Meta rede: <strong style="color:var(--texto)">${fmt(obj.metaRede)}</strong></span>`:''}
+              ${isAdmin()&&obj.metaRede>0?`<span style="font-size:10px;color:var(--muted)">🎯 Meta rede: <strong style="color:var(--texto)">${fmt(obj.metaRede)}</strong></span>`:''}
               ${metaLoja>0?`<span style="font-size:10px;color:var(--muted)">🏪 Meta loja: <strong style="color:var(--texto)">${fmt(metaLoja)}</strong></span>`:''}
             </div>
-            ${_campFiltroLoja&&_metaLojFil>0?`
+            ${isAdmin()&&_campFiltroLoja&&_metaLojFil>0?`
             <div style="margin-top:8px;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.04);border-radius:8px;padding:7px 10px">
               <div>
                 <div style="font-size:9px;color:var(--muted)">${LOJAS.find(l=>l.id===_campFiltroLoja)?.nome||_campFiltroLoja}</div>
@@ -21752,6 +21830,8 @@ function fmtData(d){
 }
 
 function editarCampObj(id){
+  // [R176] a filial não vê meta/resultado de outras filiais nem da rede
+  if(!isAdmin()){ showToast('Apenas a gestão cria ou edita campanhas.','err'); return; }
   initCampData();
   const obj = D.campObjetivos.find(o=>o.id===id);
   if(!obj){ showToast('Campanha não encontrada','err'); return; }
@@ -24216,11 +24296,7 @@ function iniciarAutoRefresh(){
         window._mesclarVendedoras?.(remoto);
         if(remoto.campRealizados?.length){
           if(!D.campRealizados) D.campRealizados=[];
-          remoto.campRealizados.forEach(r=>{
-            if(_isCampExcluido(r.id)) return; // [FIX Bug2]
-            const i=D.campRealizados.findIndex(x=>x.id===r.id);
-            if(i>=0) D.campRealizados[i]=r; else D.campRealizados.push(r);
-          });
+          window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);   // [R175]
         }
         // Merge fluxo: preserva registros locais e adiciona remotos
         // [R127] menos os que foram excluídos — aqui ou em outra máquina.
@@ -24285,11 +24361,7 @@ function iniciarAutoRefresh(){
           _mergeVendasSeguro(remoto); // nunca sobrescreve dados locais existentes
           if(remoto.campRealizados && remoto.campRealizados.length){
             if(!D.campRealizados) D.campRealizados=[];
-            remoto.campRealizados.forEach(r=>{
-              if(_isCampExcluido(r.id)) return; // [FIX Bug2]
-              const idx = D.campRealizados.findIndex(x=>x.id===r.id);
-              if(idx>=0) D.campRealizados[idx]=r; else D.campRealizados.push(r);
-            });
+            window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);   // [R175]
           }
           if(remoto._fluxoExcluidos){
             if(!D._fluxoExcluidos) D._fluxoExcluidos = {};
@@ -25410,6 +25482,7 @@ window.salvarSuperMetaAno = function(){
 };
 
 function salvarMetasGrupo(){
+  if(!isAdmin()){ showToast('Só o administrador define a meta do grupo.','err'); return; }   // [R175]
   const ano = hoje().slice(0,4);
   if(!D._metasGrupo) D._metasGrupo={};
   let salvos=0;
@@ -28628,6 +28701,7 @@ function renderMesAnteriorDashboard(){
 // LANÇAMENTO POR LOJA — entrada de dados por período (loja individual)
 // ════════════════════════════════════════════════════════════════════
 function salvarLancamentoPerloja(){
+  if(!isAdmin()){ showToast('Só o administrador lança o histórico por loja.','err'); return; }   // [R175]
   const loja = document.getElementById('lpl-loja')?.value;
   const dataIni = document.getElementById('lpl-data-ini')?.value;
   const dataFim = document.getElementById('lpl-data-fim')?.value;
@@ -28793,6 +28867,7 @@ function renderHistoricoLoja(){
 }
 
 function excluirLancamentoPerloja(lojaId, chave){
+  if(!isAdmin()){ showToast('Só o administrador exclui o histórico por loja.','err'); return; }   // [R175]
   if(!confirm('Excluir este período?')) return;
   if(D.historicoLojas[lojaId]){
     D.historicoLojas[lojaId] = D.historicoLojas[lojaId].filter(p=>p.chave !== chave);
@@ -33081,6 +33156,8 @@ function exportarModoDivulgacaoFluxo(){
 
 // ── DIVULGAÇÃO — CAMPANHAS ──────────────────────────────────────────
 function exportarModoDivulgacaoCamp(){
+  // [R176] a filial não vê meta/resultado de outras filiais nem da rede
+  if(!isAdmin()){ showToast('A divulgação de campanhas é feita pela gestão.','err'); return; }
   initCampData();
   const filtroId = document.getElementById('rel-camp-sel')?.value || '';
   let objs = D.campObjetivos || [];
