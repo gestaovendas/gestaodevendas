@@ -7328,7 +7328,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-24e';
+window.AVATIM_BUILD = '2026-09-24f';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -13539,8 +13539,10 @@ function diasAbertosRestantes(lid){
 }
 
 // Manter funções genéricas (sem lid) para compatibilidade com admin/rede
-function diasUteisNoMes(){
-  return diasDoMes(mesAtual());
+// [R169] aceita o mês: sem ele, todo período passado era rateado com os
+// dias do mês ATUAL (valor ideal, ideal/dia do histórico)
+function diasUteisNoMes(mesRef){
+  return diasDoMes(mesRef || mesAtual());
 }
 function diasPassadosNoMes(){
   // dias decorridos no mês (lojas abertas todos os dias)
@@ -13927,16 +13929,18 @@ function metaVendPorDias(vendId, mesRef){
   return Math.round(metaDiaLojaBase(v.loja, mesRef) * diasTrabVend(vendId, mesRef));
 }
 
-function calcMetasAuto(mes, ticket, superMes, lid){
+function calcMetasAuto(mes, ticket, superMes, lid, mesRef){
   mes      = Number(mes)||0;
   superMes = Number(superMes)||Math.round(mes*window.SUPER_META_PADRAO);
   // [FIX 3] Evitar divisão por zero/NaN quando chamada sem lid ou em casos de borda
   let DU;
+  // [R169] os dias do mês que está sendo GRAVADO (mesRef): quem salva a
+  // meta de um mês navegado recebia a meta diária rateada pelos dias do
+  // mês atual
   if(lid && typeof diasAbertosNoMes === 'function'){
-    DU = diasAbertosNoMes(lid);
+    DU = diasAbertosNoMes(lid, mesRef || mesAtual());
   } else {
-    // Fallback: dias corridos do mês atual (29-31)
-    const [_y,_m] = mesAtual().split('-').map(Number);
+    const [_y,_m] = (mesRef || mesAtual()).split('-').map(Number);
     DU = new Date(_y, _m, 0).getDate();
   }
   const _DU = Math.max(Number(DU)||0, 1); // nunca zero
@@ -14308,6 +14312,10 @@ function calcVendPer(id,per){
   // [FIX 20/07] aceitar mesRef "YYYY-MM" — antes um mês histórico caía no default
   // e somava o MÊS ATUAL (histórico por vendedora compilado errado)
   const mes = /^\d{4}-\d{2}$/.test(per||'') ? per : hoje().slice(0,7);
+  // [R169] mês FECHADO pedido explicitamente: a fonte do mês (planilha do
+  // CRM quando a vendedora está nela, R160). Os demais ramos seguem iguais.
+  if(mes < hoje().slice(0,7) && typeof window.fatVendDoMes === 'function')
+    return (window.fatVendDoMes(id, mes).valor) || 0;
   return Object.entries(vd).filter(([d])=>d.startsWith(mes)).reduce((s,[,v])=>s+Number(v.val||0),0);
 }
 
@@ -18740,9 +18748,18 @@ function calcularComissao(){
       return;
     }
     _mesCom = ini.slice(0,7);
-    // Soma todas as vendas do vendedor no intervalo
-    const vendMap=D.vendasVend[id]||{};
-    Object.entries(vendMap).forEach(([dt,d])=>{if(dt>=ini&&dt<=fim)vendas+=Number(d.val)||0;});
+    // [R169] Mês FECHADO inteiro: a fonte do mês (planilha do CRM, R160),
+    // a mesma que o resto do sistema mostra para aquele mês. Recorte de
+    // parte do mês só existe no lançamento diário.
+    const [_yc, _mc] = _mesCom.split('-').map(Number);
+    const _fimMes = _mesCom + '-' + String(new Date(_yc, _mc, 0).getDate()).padStart(2,'0');
+    const _inteiro = ini <= _mesCom + '-01' && fim >= _fimMes;
+    if(_inteiro && _mesCom < mesAtual()){
+      vendas = (window.fatVendDoMes(id, _mesCom).valor) || 0;
+    } else {
+      const vendMap=D.vendasVend[id]||{};
+      Object.entries(vendMap).forEach(([dt,d])=>{if(dt>=ini&&dt<=fim)vendas+=Number(d.val)||0;});
+    }
     periodoLabel=ini+" a "+fim;
   } else {
     vendas=calcVendPer(id,"mes"); periodoLabel="Este Mês";
@@ -21814,7 +21831,7 @@ function renderMetasLojas(){
           <input type="number" min="0" id="ml-cli-${loja.id}" value="${m.metaCli||''}" placeholder="Ex: 20" class="ml-inp" style="width:100%;border-color:rgba(46,204,135,.3)">
         </div>
         <div id="ml-prev-${loja.id}" style="display:${m.mes?'block':'none'};margin-bottom:10px">
-          <div style="font-size:9px;color:var(--azul);font-weight:600;margin-bottom:6px;padding:5px 8px;background:rgba(91,141,239,.06);border-radius:5px" id="ml-pdu-${loja.id}">📅 ${diasUteisNoMes()} dias no mês / 4,33 semanas</div>
+          <div style="font-size:9px;color:var(--azul);font-weight:600;margin-bottom:6px;padding:5px 8px;background:rgba(91,141,239,.06);border-radius:5px" id="ml-pdu-${loja.id}">📅 ${diasAbertosNoMes(loja.id, _mesMeta||mesAtual())} dias no mês / 4,33 semanas</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
             <div style="background:var(--card2);border:1px solid rgba(201,168,76,.2);border-radius:6px;padding:9px;text-align:center">
               <div style="font-size:8px;color:var(--muted);margin-bottom:3px">META SEMANAL</div>
@@ -21880,12 +21897,14 @@ function calcPrevLoja(lid){
   const ticket = parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   const prev   = document.getElementById("ml-prev-"+lid);
   if(mes<=0){if(prev)prev.style.display="none";return;}
-  const auto = calcMetasAuto(mes, ticket, smes);
+  // [R169] a previsão é do mês EDITADO, com os mesmos dias abertos que a
+  // gravação vai usar — antes era o mês atual, e a conta não fechava
+  const _mr2 = _mesMeta || mesAtual();
+  const auto = calcMetasAuto(mes, ticket, smes, lid, _mr2);
   if(prev) prev.style.display="block";
   const nv = vendsAtivas(lid).length;
   const el = id => document.getElementById(id);
-  const _mr2 = mesAtual();
-  const _dd  = diasDoMes(_mr2);
+  const _dd  = diasAbertosNoMes(lid, _mr2);
   if(el("ml-pdu-"+lid))   el("ml-pdu-"+lid).textContent = `📅 ${_mr2} · ${_dd} dias no mês · verif: ${fmt(auto.dia)} × ${_dd} = ${fmt(parseFloat((auto.dia*_dd).toFixed(2)))}`;
   if(el("ml-psem-"+lid))  el("ml-psem-"+lid).textContent  = fmt(auto.sem);
   if(el("ml-pdia-"+lid))  el("ml-pdia-"+lid).textContent  = fmt(auto.dia);
@@ -21984,7 +22003,7 @@ function salvarMetasVendedoras(lid){
     // Se já existe, preservar o valor definido pelo usuário em "Salvar Meta da Loja"
     if(!D.metasLoja[lid][_mr] || !D.metasLoja[lid][_mr].mes){
       const ticket=parseBR(document.getElementById("ml-ticket-"+lid)?.value)||350;
-      const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid);
+      const autoMetas=calcMetasAuto(somaMes,ticket,somaSmes,lid,_mr);   // [R169] o mês gravado
       // [R85] Sem carimbo, esta meta nunca venceria em outra máquina e a
       // loja ficaria sem meta lá. É uma gravação real, então carimba.
       autoMetas._savedAt = Date.now();
@@ -22250,7 +22269,7 @@ function salvarMetaLoja(lid){
   const ticket= parseBR(document.getElementById("ml-ticket-"+lid)?.value)||150;
   if(!D.metasLoja[lid]) D.metasLoja[lid]={};
   const _mr = _mesMeta||mesAtual();
-  const autoMetas = calcMetasAuto(mes,ticket,smes,lid);
+  const autoMetas = calcMetasAuto(mes,ticket,smes,lid,_mr);   // [R169] o mês gravado
   // BUG 7 FIX: preservar metaCli existente se o campo estiver vazio
   const _metaCliExist = D.metasLoja[lid]?.[_mr]?.metaCli || 0;
   autoMetas.metaCli = metaCli || _metaCliExist;
@@ -22410,7 +22429,7 @@ function salvarTodasMetas(){
       // Antes: D.metasLoja[loja.id] = calcMetasAuto() destruía meses anteriores
       // e quebrava toda leitura de meta (que espera lm[mr])
       if(!D.metasLoja[loja.id]) D.metasLoja[loja.id] = {};
-      const autoMetas = calcMetasAuto(mes,ticket,smes,loja.id);
+      const autoMetas = calcMetasAuto(mes,ticket,smes,loja.id,_mr);   // [R169] o mês gravado
       autoMetas._savedAt = Date.now(); // timestamp para sync cross-device
       D.metasLoja[loja.id][_mr] = autoMetas;
       // [R157] salvarMetaLoja marca; esta, que salva as SETE de uma vez,
@@ -22841,6 +22860,34 @@ window._crmVendVale = function(lid, mesRef, reg, memo){
   return !!window.crmDoMesPreferido(lid, mesRef);
 };
 
+/**
+ * [R169] Atendimentos e peças de um(a) vendedor(a) no mês, pela MESMA fonte
+ * do fatVendDoMes. Faturamento da planilha dividido por atendimento do
+ * lançamento dava um ticket médio sem sentido.
+ */
+window.itensAtendVendDoMes = function(vid, mesRef){
+  const v = (D.vendedoras||[]).find(x => x.id === vid);
+  const lanc = () => {
+    let itens = 0, atend = 0;
+    Object.entries((D.vendasVend||{})[vid] || {}).forEach(([d, x]) => {
+      if(!d.startsWith(mesRef)) return;
+      itens += Number(x?.itens || 0);
+      const t = Number(x?.trans || 0);
+      atend += t > 0 ? t : ((Number(x?.val) || 0) > 0 ? 1 : 0);
+    });
+    return {itens, atend, origem: 'lancamento'};
+  };
+  if(!v || !v.loja || typeof window.crmVendMesesDaLoja !== 'function') return lanc();
+  try{
+    const mapa = window.crmVendMesesDaLoja(v.loja, mesRef.slice(0,4));
+    const k = _crmNorm(v.nome) + '|' + mesRef;
+    const reg = mapa && mapa.get(k);
+    if(window._crmVendVale(v.loja, mesRef, reg))
+      return {itens: Number(reg.itens) || 0, atend: Number(reg.notas) || 0, origem: 'crm'};
+  }catch(e){}
+  return lanc();
+};
+
 window.fatVendDoMes = function(vid, mesRef){
   const v = (D.vendedoras||[]).find(x => x.id === vid);
   const lanc = () => {
@@ -23155,7 +23202,7 @@ function valorIdealPeriodo(metaMes, de, ate){
   // Retorna o valor que deveria ter sido realizado no período dado
   // baseado na proporção de dias úteis
   if(!metaMes || metaMes<=0) return 0;
-  const du = diasUteisNoMes();
+  const du = diasUteisNoMes(de.slice(0,7));   // [R169] os dias do mês do período
   if(du<=0) return 0;
   // contar dias úteis no período
   let count=0;
@@ -23307,7 +23354,7 @@ function buscarHistLoja(){
       <tbody>${dias.map(d=>{
         const r=diasMap[d];
         const tm2=r.trans>0?r.fat/r.trans:r.fat>0?r.fat:0;
-        const du=diasUteisNoMes(); const idealDia=du>0?(_metaRefDoMes(d.slice(0,7))/du):0;
+        const du=diasUteisNoMes(d.slice(0,7)); const idealDia=du>0?(_metaRefDoMes(d.slice(0,7))/du):0;   // [R169]
         const g2=r.fat-idealDia; const cg=g2>=0?'var(--verde)':'var(--verm)';
         const cf=r.fat>=idealDia?'var(--verde)':'var(--verm)';
         return `<tr>
@@ -25294,10 +25341,9 @@ function exportarPDFDiagnostico(){
     const meses=[];
     for(let i=0;i<4;i++){
       const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
+      // [R169] a fonte do mês por loja (fatDoMes/atendDoMes), como a tela
       let fat2=0,nat2=0;
-      D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
-      }));
+      LOJAS.forEach(l=>{ fat2+=Number(window.fatDoMes(l.id,mStr).valor)||0; nat2+=Number(window.atendDoMes(l.id,mStr))||0; });
       meses.push({label:i===0?'Este mês':i===1?'Mês ant.':mStr,fat:fat2,nat:nat2});
     }
     const cresc=meses.length>=2&&meses[1].fat>0?(meses[0].fat-meses[1].fat)/meses[1].fat*100:0;
@@ -25431,10 +25477,9 @@ function exportarPDFDiagnostico(){
     const meses=[];
     for(let i=0;i<4;i++){
       const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
-      let fat2=0,nat2=0;
-      vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
-      }));
+      // [R169] a fonte do mês (fatDoMes/atendDoMes), como a tela — e com as
+      // vendedoras arquivadas: o que venderam no mês é da loja
+      let fat2=Number(window.fatDoMes(lid,mStr).valor)||0, nat2=Number(window.atendDoMes(lid,mStr))||0;
       meses.push({label:i===0?'Este mês':i===1?'Mês ant.':mStr,fat:fat2,nat:nat2});
     }
     const cresc=meses.length>=2&&meses[1].fat>0?(meses[0].fat-meses[1].fat)/meses[1].fat*100:0;
@@ -25593,18 +25638,16 @@ function exportarPDFGeral(){
     const mStr = window._mesMenos(mes, i);   // [R155] sem new Date(ISO): ver R93
     const mLabel=new Date(mStr+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
     if(_adm){
+      // [R169] a fonte do mês por loja (fatDoMes/atendDoMes), como a tela
       let fat2=0,nat2=0;
-      D.vendedoras.forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
-      }));
+      LOJAS.forEach(l=>{ fat2+=Number(window.fatDoMes(l.id,mStr).valor)||0; nat2+=Number(window.atendDoMes(l.id,mStr))||0; });
       const totM=LOJAS.reduce((s,l)=>{const mm=getMetas(l.id,mStr);return s+(mm.mes||0);},0);
       const pct2=totM>0?fat2/totM*100:0;
       historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:totM,pct:pct2});
     } else {
-      let fat2=0,nat2=0;
-      vendsAtivas(lid).forEach(v=>Object.entries(D.vendasVend[v.id]||{}).forEach(([dt,dd])=>{
-        if(dt.startsWith(mStr)){fat2+=Number(dd.val||0);nat2+=Number(dd.trans||dd.cli||0);}
-      }));
+      // [R169] a fonte do mês (fatDoMes/atendDoMes), como a tela — e com as
+      // vendedoras arquivadas: o que venderam no mês é da loja
+      let fat2=Number(window.fatDoMes(lid,mStr).valor)||0, nat2=Number(window.atendDoMes(lid,mStr))||0;
       const mm=getMetas(lid,mStr);
       historicoMeses.push({label:mLabel,fat:fat2,nat:nat2,meta:mm.mes||0,pct:mm.mes>0?fat2/(mm.mes||1)*100:0});
     }
@@ -27477,7 +27520,7 @@ window.histAlimentarMetas = async function(){
     if(!D.metasLoja) D.metasLoja = {};
     if(!D.metasLoja[x.lid]) D.metasLoja[x.lid] = {};
     const ticket = Number((D.metasLoja[x.lid][x.mes] || {}).ticket) || 350;
-    D.metasLoja[x.lid][x.mes] = calcMetasAuto(Math.round(x.real), ticket, undefined, x.lid);
+    D.metasLoja[x.lid][x.mes] = calcMetasAuto(Math.round(x.real), ticket, undefined, x.lid, x.mes);   // [R169]
     n++;
   });
   if(!n){ showToast('Nada a gravar: as metas já existem.','warn'); return; }
@@ -28720,8 +28763,9 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
     } else {
       // Se não tem lançamento, tentar usar vendas do período
       metaPeriodo = metaDoMes(loja.id, dataIni.slice(0, 7)).valor; // [FIX 21/07] cruza cadastro + histórico
-      realizado = calcMesRef(loja.id, dataIni.slice(0, 7)) || 0;
-      nvendas = countVendasRef(loja.id, dataIni.slice(0, 7)) || 0;
+      // [R169] a fonte do mês (planilha no mês fechado), como o resto
+      realizado = Number(window.fatDoMes(loja.id, dataIni.slice(0, 7)).valor) || 0;
+      nvendas = Number(window.atendDoMes(loja.id, dataIni.slice(0, 7))) || 0;
       tm = nvendas > 0 ? realizado / nvendas : 0;
     }
 
@@ -28736,7 +28780,9 @@ function renderAcompanhamentoGeral(dataIni, dataFim){
         vMeta = metaPeriodo / vendsAtivas(loja.id).length;
         vReal = realizado / vendsAtivas(loja.id).length;
       } else {
-        vReal = calcVendPer(v.id, dataIni.slice(0, 7)) || 0;
+        // [R169] a mesma decisão de fonte do total da loja (fatDoMes), inclusive
+        // no mês corrente sem lançamento — senão total ≠ soma das linhas
+        vReal = Number(window.fatVendDoMes(v.id, dataIni.slice(0, 7)).valor) || 0;
         vMeta = window.metaVendDoMes(v.id, dataIni.slice(0, 7)) || 0;   // [R164] mesmo mês da loja
       }
       return {
@@ -29572,7 +29618,7 @@ function renderPerformance(){
   }
   // [NEW 28/07] Bloco Mês a Mês — meta, realizado, % e P.A. históricos
   // Loja inteira: usa metaDoMes/realizadoDoMes/paDoMes já existentes
-  // Vendedora individual: usa calcVendPer(id, "YYYY-MM") e meta cadastrada da vendedora
+  // Vendedora individual: fatVendDoMes/itensAtendVendDoMes (fonte do mês, R169) e a meta daquele mês
   const _mesesHist = mesesDisponiveis().slice(0, 6); // últimos 6 meses
   let blocoMesAMes = '';
   if(_mesesHist.length){
@@ -29582,16 +29628,10 @@ function renderPerformance(){
         // Vendedora individual
         const vObj = D.vendedoras.find(v => v.id === vendId) || {};
         meta = window.metaVendDoMes(vendId, mr) || 0;   // [R164] a meta DAQUELE mês, como a loja
-        real = calcVendPer(vendId, mr);
-        // Peças e atendimentos da vendedora naquele mês
-        let itens = 0, atend = 0;
-        Object.entries(D.vendasVend[vendId] || {}).forEach(([d, vd]) => {
-          if(d.startsWith(mr)){
-            itens += Number(vd.itens || 0);
-            const t = Number(vd.trans || 0);
-            atend += t > 0 ? t : ((Number(vd.val) || 0) > 0 ? 1 : 0);
-          }
-        });
+        real = (window.fatVendDoMes(vendId, mr).valor) || 0;   // [R169] fonte do mês, como a loja
+        // Peças e atendimentos da vendedora naquele mês — da MESMA fonte
+        const _ia = window.itensAtendVendDoMes(vendId, mr);
+        const itens = _ia.itens, atend = _ia.atend;
         pa = atend > 0 ? itens / atend : 0;
         tm = atend > 0 ? real / atend : 0;
         nAtend = atend;
@@ -29599,11 +29639,16 @@ function renderPerformance(){
         // Loja inteira
         meta = metaDoMes(lid, mr).valor || 0;
         real = window.fatDoMes(lid, mr).valor || 0;
-        const paObj = typeof paDoMes === 'function' ? paDoMes(lid, mr) : {valor:0};
-        pa = paObj.valor || 0;
-        // TM e atendimentos: usar vendasDoMes se existir
-        const atendObj = typeof vendasDoMes === 'function' ? window.atendDoMes(lid, mr) : {valor:0};
-        nAtend = atendObj.valor || 0;
+        // [R169] paDoMes e atendDoMes devolvem NÚMERO — o .valor que se lia
+        // aqui dava sempre undefined, e TM, P.A. e atendimentos da loja
+        // apareciam "--" em todos os meses. P.A. pela mesma fonte do
+        // faturamento: com a planilha valendo, só ela (sem peças nela, sem
+        // P.A.); fora dela, o paDoMes — lançamento e, na falta, o histórico,
+        // a mesma precedência do realizadoDoMes.
+        const _crmM = window.crmDoMesPreferido(lid, mr);
+        pa = _crmM ? ((_crmM.notas > 0 && _crmM.itens > 0) ? Math.round(_crmM.itens / _crmM.notas * 100) / 100 : 0)
+           : (Number(paDoMes(lid, mr)) || 0);
+        nAtend = Number(window.atendDoMes(lid, mr)) || 0;
         tm = nAtend > 0 ? real / nAtend : 0;
       }
       const pct = meta > 0 ? real / meta * 100 : 0;
