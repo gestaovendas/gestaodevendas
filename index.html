@@ -3859,7 +3859,7 @@ body:not(.logado) #appScreen{display:none!important}
     <br/>
     <div style="font-size:10px;color:var(--muted);margin-top:8px;margin-bottom:8px">Dados aparecendo errados? Clique abaixo:</div>
     <button onclick="resetEmergencia()" style="background:none;border:1px solid rgba(231,76,60,.3);color:var(--verm);border-radius:6px;padding:6px 16px;font-size:11px;cursor:pointer">
-      🔄 Limpar dados corrompidos
+      🔄 Recarregar metas do servidor
     </button>
   </div>
   
@@ -6602,7 +6602,7 @@ body:not(.logado) #appScreen{display:none!important}
       </div>
       <button class="btn-s" onclick="navMesMeta(0)" style="font-size:11px;padding:6px 12px">Hoje</button>
       <button class="btn-p" onclick="salvarTodasMetas()">💾 Salvar Todas</button>
-      <button class="btn-s" onclick="limparMetasCorretas()" title="Use se os valores estiverem errados" style="font-size:10px;padding:6px 10px;opacity:.7">🔄 Redefinir</button>
+      <button class="btn-s" onclick="limparMetasCorretas()" title="Descarta a cópia das metas desta máquina e recarrega do servidor — use se os valores estiverem errados" style="font-size:10px;padding:6px 10px;opacity:.7">🔄 Recarregar do servidor</button>
     </div>
   </div>
   <div id="metas-lojas-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:20px">--</div>
@@ -7375,7 +7375,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-24i';
+window.AVATIM_BUILD = '2026-09-24j';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -9125,7 +9125,12 @@ if(!D.historicoLojas) D.historicoLojas={}; // [NEW] Histórico POR LOJA — lan�
 (function limparDadosInvalidos(){
   let corrompidas = 0;
   LOJAS.forEach(l=>{
-    if(!D.metasLoja[l.id]){ D.metasLoja[l.id]={}; return; }
+    // [R174] loja sem metas fica SEM a chave: recriá-la vazia escondia da
+    // trava anti-apagamento uma cópia de metas vazia (ela pesa metasLoja
+    // pelo número de lojas) — num aparelho novo ou depois de "Recarregar do
+    // servidor", uma gravação antes do pull levaria metas vazias. Todo
+    // acesso a D.metasLoja[lid] já tem guarda.
+    if(!D.metasLoja[l.id]) return;
     const lm = D.metasLoja[l.id];
     // Estrutura antiga: objeto plano com mes, dia etc. (sem chave de mês)
     if(typeof lm.mes === "number"){
@@ -18142,6 +18147,7 @@ window.salvarEdicaoVend = function(){
 function excluirVend(id){
   if(!isAdmin()){showToast('Apenas o administrador pode excluir vendedor(es).','err');return;}
   const vObj = D.vendedoras.find(v=>v.id===id);
+  if(window._ultimoDaRede(D.vendedoras, 'a última vendedora')) return;   // [R174]
   if(!confirm('Excluir '+( vObj?.nome||'este(a) vendedor(a)')+'? Os dados históricos serão mantidos mas ela não aparecerá mais no sistema.')) return;
   // Remover da lista
   D.vendedoras = D.vendedoras.filter(v=>v.id!==id);
@@ -22536,21 +22542,53 @@ function salvarMetaLoja(lid){
     }
   })();
 }
-function resetEmergencia(){
-  if(!confirm("Isso vai APAGAR todas as metas salvas e manter apenas os lançamentos de vendas.\n\nUse somente se os valores estiverem aparecendo errados (ex: R$ 6,00 em vez de R$ 6.000,00).\n\nContinuar?")) return;
-  // Manter vendas e vendedoras, limpar só metas corrompidas
-  LOJAS.forEach(l=>{ D.metasLoja[l.id]={}; });
-  _persistirLocal();
-  alert("Metas limpas! Faça login e redefina as metas em Metas por Loja.");
+// ══════════════════════════════════════════════════════════════════════
+// [R174] "LIMPAR METAS" = RECARREGAR AS METAS DO SERVIDOR NESTA MÁQUINA.
+//
+// Os dois botões diziam apagar todas as metas. O da tela de Metas chamava
+// save() com as metas vazias — a trava anti-apagamento recusava (as metas
+// não podem ser apagadas no servidor), mas a tela já dizia "Metas limpas"
+// e o próximo pull trazia tudo de volta. O do login limpava só a cópia
+// local e recarregava: o servidor devolvia as metas, e o aviso dizia para
+// redefini-las. Nos dois o efeito real era o mesmo: a cópia desta máquina
+// é descartada e as metas voltam do servidor. Agora é isso que eles dizem
+// e fazem — sem gravar nada, sem apagar nada no servidor.
+// ══════════════════════════════════════════════════════════════════════
+/**
+ * [R174] O ÚLTIMO item da rede não pode ser excluído (decisão do dono:
+ * não mexer na trava). A trava anti-apagamento recusa a gravação que
+ * deixaria o documento principal com a lista vazia; excluir mesmo assim
+ * fazia o item sumir da tela, a gravação ser recusada e o item voltar no
+ * pull — com uma mensagem de "máquina sem dados carregados" que não
+ * explicava nada. Só o admin grava o principal; a loja não tem essa trava.
+ */
+window._ultimoDaRede = function(lista, rotulo){
+  if(!isAdmin() || (lista || []).length !== 1) return false;
+  showToast('🛡️ Não é possível excluir ' + rotulo + ' que resta na rede: o sistema protege o servidor '
+    + 'contra ficar sem ' + rotulo.replace(/^(o|a) (último|última) /, '') + '. Cadastre outro(a) antes de excluir este(a).', 'err');
+  return true;
+};
+
+window._recarregarMetasDoServidor = function(){
+  if(!confirm("Recarregar as metas do servidor?\n\n"
+    + "A cópia das metas DESTA máquina é descartada e as metas voltam do servidor. "
+    + "Nada é apagado no servidor.\n\n"
+    + "Use se os valores estiverem aparecendo errados (ex.: R$ 6,00 em vez de R$ 6.000,00). "
+    + "Uma meta alterada aqui que ainda não chegou ao servidor será perdida.")) return false;
+  // Vazio de verdade — SEM as chaves das lojas. A trava anti-apagamento pesa
+  // metasLoja pelo número de lojas: com {loja:{}} ela veria o mesmo peso e,
+  // se algo gravasse antes de o pull terminar (aparelho offline no reload),
+  // as metas de todos os meses iriam vazias para o servidor. Com {} ela
+  // enxerga "7 lojas → 0" e recusa.
+  D.metasLoja = {};
+  if(window._metasEditadasAqui && window._metasEditadasAqui.clear) window._metasEditadasAqui.clear();
+  _persistirLocal();   // só local — nada vai ao servidor
+  alert("As metas serão recarregadas do servidor.");
   location.reload();
-}
-function limparMetasCorretas(){
-  if(!confirm("Limpar TODAS as metas salvas e começar do zero?\nUse se os valores estiverem aparecendo errados.")) return;
-  LOJAS.forEach(l=>{ D.metasLoja[l.id]={}; });
-  save();
-  showToast("Metas limpas. Redefina as metas para cada loja.");
-  renderMetasLojas();
-}
+  return true;
+};
+function resetEmergencia(){ window._recarregarMetasDoServidor(); }
+function limparMetasCorretas(){ window._recarregarMetasDoServidor(); }
 function salvarTodasMetas(){
   let n=0;
   const _mr = _mesMeta||mesAtual();
@@ -27765,6 +27803,9 @@ window.histAlimentarMetas = async function(){
     if(!D.metasLoja[x.lid]) D.metasLoja[x.lid] = {};
     const ticket = Number((D.metasLoja[x.lid][x.mes] || {}).ticket) || 350;
     D.metasLoja[x.lid][x.mes] = calcMetasAuto(Math.round(x.real), ticket, undefined, x.lid, x.mes);   // [R169]
+    // [R174] como salvarMetaLoja/salvarTodasMetas: sem a marca, um pull que
+    // chegue antes de a gravação confirmar devolve o mês vazio do servidor
+    window._marcarMetaEditada(x.lid, x.mes);
     n++;
   });
   if(!n){ showToast('Nada a gravar: as metas já existem.','warn'); return; }
@@ -28262,6 +28303,7 @@ function filtroStatusProspec(st, btn){
 }
 
 function excluirProspec(id){
+  if(window._ultimoDaRede(D.prospeccoes, 'a última prospecção')) return;   // [R174]
   if(!confirm('Excluir esta prospec\u00e7\u00e3o?')) return;
   D.prospeccoes = (D.prospeccoes||[]).filter(p=>p.id!==id);
   // [R157] Sem lápide, a exclusão não saía da máquina que a fez: o
@@ -33292,6 +33334,7 @@ function excluirContato(id){
   if(!D.contatos) D.contatos = [];
   const c = D.contatos.find(x => x.id === id);
   if(!c) return;
+  if(window._ultimoDaRede(D.contatos, 'o último contato')) return;   // [R174]
   if(!confirm('Excluir este contato de "' + c.cliente + '"?')) return;
   D.contatos = D.contatos.filter(x => x.id !== id);
   // [FIX 13/08] tombstone: registra que este contato foi excluído
@@ -36889,7 +36932,13 @@ window.excelExcluirImportacao = function(impId){
   D._excelImportacoes = (D._excelImportacoes || []).filter(i => i.id !== impId);
   window._marcarGrupoEditado(['excelDados','_excelImportacoes']);   // [R166] o que a exclusão toca
   const removidas = antes - D.excelDados.length;
-  save();
+  // [R174] Excluir a ÚLTIMA importação esvazia excelDados/_excelImportacoes,
+  // e a trava anti-apagamento recusava a gravação: a tela dizia "excluída",
+  // o servidor não recebia, e o próximo pull a trazia de volta. É a mesma
+  // limpeza deliberada do botão Limpar dados (excelLimparDados) — o caminho
+  // que a própria trava prevê, só para os campos da planilha.
+  window._limpezaDeliberada = true;
+  try{ save(); } finally { window._limpezaDeliberada = false; }
   showToast('🗑️ Importação excluída — '+removidas+' linhas removidas.','ok');
   window.excelRender();
 };
@@ -39781,7 +39830,7 @@ window.exportarInativosExcel = function(){
 
   const slug = alvoVend.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w]+/g,'-').toLowerCase();
   const nome = 'inativos-' + dias + 'dias-' + slug + '-'
-             + new Date().toISOString().slice(0,10) + '.xlsx';
+             + hoje() + '.xlsx';   // [R174] data local — toISOString vira amanhã depois das 21h
   XLSX.writeFile(wb, nome);
   showToast('📊 ' + lista.length.toLocaleString('pt-BR') + ' cliente(s) exportados — ' + nome, 'ok');
 };
@@ -39853,7 +39902,7 @@ window.exportarProdutosExcel = function(){
                      .replace(/[^\w]+/g,'-').toLowerCase().replace(/^-|-$/g,'');
   const nome = 'produtos-' + slug(nomeLoja) + '-' + slug(alvoVend) + '-'
              + (fAno || 'todos') + (fMes ? '-' + fMes : '') + '-'
-             + new Date().toISOString().slice(0,10) + '.xlsx';
+             + hoje() + '.xlsx';   // [R174] data local — toISOString vira amanhã depois das 21h
   XLSX.writeFile(wb, nome);
   showToast('📊 ' + lista.length.toLocaleString('pt-BR') + ' produto(s) exportados — ' + nome, 'ok');
 };
