@@ -7015,6 +7015,8 @@ service cloud.firestore {
   </div>
 
   <!-- KPIs TOPO -->
+  <!-- [R168] acompanhamento: meta e super meta — valor, atingido, falta, % -->
+  <div id="gestao-acomp" style="margin-bottom:14px"></div>
   <div id="gestao-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px"></div>
 
   <!-- RANKINGS LOJAS (3 categorias) -->
@@ -7064,6 +7066,8 @@ service cloud.firestore {
   <!-- ════ PAINEL ANUAL DO GRUPO ════ -->
   <div id="gestao-anual-wrap" style="display:none">
 
+    <!-- [R168] acompanhamento do ano: meta e super meta -->
+    <div id="gestao-anual-acomp" style="margin-bottom:14px"></div>
     <!-- KPIs ANUAIS TOPO -->
     <div id="gestao-anual-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px"></div>
 
@@ -7324,7 +7328,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-24d';
+window.AVATIM_BUILD = '2026-09-24e';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -24307,7 +24311,7 @@ function tabGestao(per, el) {
   if(el) el.classList.add('active');
   // Mostrar/ocultar seções: anual só no modo 'ano'
   const anualWrap = document.getElementById('gestao-anual-wrap');
-  const normalSecs = ['gestao-kpis','gestao-rank-fat-lojas','gestao-rank-meta-lojas',
+  const normalSecs = ['gestao-acomp','gestao-kpis','gestao-rank-fat-lojas','gestao-rank-meta-lojas',
     'gestao-rank-tm-lojas','gestao-status-lojas','gestao-rank-fat-vends',
     'gestao-rank-meta-vends','gestao-rank-tm-vends','gestao-projecao'];
   if(per==='ano'){
@@ -24644,6 +24648,39 @@ function exportarPDFRanking() {
 // DASHBOARD ANUAL DO GRUPO
 // ════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════
+// [R168] ACOMPANHAMENTO DA META — pedido do dono.
+//
+// Os números estavam espalhados em cards. O pedido: para a META e para a
+// SUPER META, lado a lado, o valor, o atingido, quanto falta e o %. Ex.:
+// meta 1.400.000 · atingido 700.000 · falta 700.000 · 50%.
+// ══════════════════════════════════════════════════════════════════════
+window._gestaoBlocoAcomp = function(titulo, meta, superMeta, atingido, nota){
+  meta = Number(meta) || 0; superMeta = Number(superMeta) || 0; atingido = Number(atingido) || 0;
+  const linha = (rotulo, alvo, cor) => {
+    if(!(alvo > 0)) return `<tr><td style="font-weight:700">${rotulo}</td><td colspan="4" style="color:var(--muted)">sem ${rotulo.toLowerCase()} definida no período</td></tr>`;
+    const falta = Math.max(0, alvo - atingido);
+    const pct   = atingido / alvo * 100;
+    return `<tr>
+      <td style="font-weight:700;color:${cor}">${rotulo}</td>
+      <td class="num">${fmt(alvo)}</td>
+      <td class="num">${fmt(atingido)}</td>
+      <td class="num" style="font-weight:700;color:${falta > 0 ? 'var(--verm)' : 'var(--verde)'}">${falta > 0 ? fmt(falta) : '✓ batida'}</td>
+      <td class="num" style="font-weight:800;color:${cor}">${pct.toFixed(1)}%
+        <div style="height:5px;background:var(--cinza);border-radius:5px;overflow:hidden;margin-top:4px;min-width:70px">
+          <div style="width:${Math.min(100, pct)}%;height:100%;background:${cor};border-radius:5px"></div></div></td>
+    </tr>`;
+  };
+  return `<div class="sc" style="padding:14px 16px">
+    <div class="st" style="margin-bottom:8px">📈 Acompanhamento da Meta — ${titulo}</div>
+    <div style="overflow-x:auto"><table class="dtable" style="font-size:12.5px">
+      <thead><tr><th></th><th class="num">Valor</th><th class="num">Atingido</th><th class="num">Falta</th><th class="num">%</th></tr></thead>
+      <tbody>${linha('Meta', meta, 'var(--verde)')}${linha('Super Meta', superMeta, 'var(--roxo)')}</tbody>
+    </table></div>
+    ${nota ? `<div style="font-size:10.5px;color:var(--muted);margin-top:6px">${nota}</div>` : ''}
+  </div>`;
+};
+
 function renderGestaoAnual(){
   const ano = hoje().slice(0,4);
   const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -24690,6 +24727,17 @@ function renderGestaoAnual(){
   const totalNat  = lojasDados.reduce((s,l)=>s+l.nat,0);
 
   // ── KPIs topo ───────────────────────────────────────────────
+  // [R168] acompanhamento do ano: super meta do grupo cadastrada ou, sem
+  // ela, a meta anual pela proporção de super meta da rede (R163)
+  const _acAno = document.getElementById('gestao-anual-acomp');
+  if(_acAno){
+    const _smCad = (typeof window.superMetaAno === 'function') ? (Number(window.superMetaAno(ano)) || 0) : 0;
+    const _smAno = _smCad > 0 ? _smCad : totalMeta * _superPctRede('ano') / 100;
+    _acAno.innerHTML = window._gestaoBlocoAcomp('Ano ' + ano, totalMeta, _smAno, totalFat,
+      _smCad > 0 ? '' : 'Super meta anual <strong>estimada</strong> pelo padrão (meta × '
+        + String(window.SUPER_META_PADRAO).replace('.', ',') + ') — não há super meta do ano cadastrada. '
+        + 'Cadastrando-a no campo abaixo, este bloco passa a usá-la.');
+  }
   const kpiEl = document.getElementById('gestao-anual-kpis');
   if(kpiEl){
     const cor = totalPct>=100?'var(--verde)':totalPct>=70?'var(--ouro)':'var(--verm)';
@@ -25981,6 +26029,10 @@ function renderGestao() {
   const faltaSMRede   = Math.max(0, totSM - totFat);
   const crRede   = pctRede>=_superPctDe(totMeta,totSM)?'var(--roxo)':pctRede>=100?'var(--verde)':pctRede>=70?'var(--ouro)':'var(--verm)';
 
+  // [R168] acompanhamento da meta e da super meta da rede no período
+  const _acEl = document.getElementById('gestao-acomp');
+  if(_acEl) _acEl.innerHTML = window._gestaoBlocoAcomp(
+    per==='hoje' ? 'Hoje' : per==='semana' ? 'Esta Semana' : 'Este Mês', totMeta, totSM, totFat);
   document.getElementById('gestao-kpis').innerHTML = `
     <div class="kcard ouro" style="padding:16px">
       <div class="kl">Faturamento Rede</div>
@@ -31043,6 +31095,44 @@ window._relBenchToggleInativos = function(){
   renderRelatorios();
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// [R168] QUEM MAIS ATINGE A META — NÃO SÓ QUEM MAIS FATURA.
+//
+// Pedido do dono: o Benchmark ordenava tudo por faturamento. Aqui, para
+// cada vendedora, os meses do ano (até o mês escolhido) em que ela tinha
+// meta cadastrada: em quantos bateu a meta, em quantos a super meta, a
+// taxa de acerto e o % da meta somado. Mesmas regras do resto:
+// faturamento pela fonte do mês (fatVendDoMes, R160), meta do próprio mês
+// (metaVendDoMes, R148), super meta pelo VALOR (R163). O mês em curso só
+// entra quando já foi batido — ainda não bater não é errar.
+// ══════════════════════════════════════════════════════════════════════
+window._relBenchAtingimento = function(vends, ano, mesRef){
+  const hojeMes = hoje().slice(0,7);
+  const ultimo  = Number(String(mesRef).slice(5,7)) || 12;
+  const meses   = [];
+  for(let m = 1; m <= ultimo; m++) meses.push(ano + '-' + String(m).padStart(2,'0'));
+  return (vends || []).map(v => {
+    let comMeta = 0, bateu = 0, superB = 0, somaReal = 0, somaMeta = 0;
+    meses.forEach(mes => {
+      const meta = window.metaVendDoMes(v.id, mes) || 0;
+      if(!(meta > 0)) return;                                   // sem meta: não conta
+      const real = ((window.fatVendDoMes(v.id, mes) || {}).valor) || 0;
+      const sup  = window.superMetaVendDoMes(v.id, mes) || meta * window.SUPER_META_PADRAO;
+      const bateuMes = real >= meta;
+      if(mes === hojeMes && !bateuMes) return;                  // em curso, ainda não bateu
+      comMeta++; somaReal += real; somaMeta += meta;
+      if(bateuMes) bateu++;
+      if(real >= sup) superB++;
+    });
+    const lj = (typeof LOJAS !== 'undefined') ? LOJAS.find(l => l.id === v.loja) : null;
+    return {id: v.id, nome: v.nome, loja: v.loja, lojaNome: (lj && lj.nome) || v.loja,
+            ativa: v.ativa, comMeta, bateu, superB,
+            taxa: comMeta > 0 ? bateu / comMeta * 100 : 0,
+            pct:  somaMeta > 0 ? somaReal / somaMeta * 100 : 0};
+  }).filter(r => r.comMeta > 0)
+    .sort((a,b) => b.bateu - a.bateu || b.superB - a.superB || b.taxa - a.taxa || b.pct - a.pct);
+};
+
 function _relBenchVends(){
   const lojas    = _relLojasVisiveis();
   const mesAtual = _relRef('benchvends');
@@ -31059,8 +31149,12 @@ function _relBenchVends(){
   const anual   = window._relBenchApurar(vends, ano + '-01', mesAtual);
   const sem     = window._relBenchSemana(mesAtual);
   const semanal = window._relBenchSemanal(vends, sem.de, sem.ate);
+  // [R168] quem mais atinge a meta: no mês (por %) e no ano (quantas vezes)
+  const atingMes = mensal.filter(v => v.meta > 0).slice()
+    .sort((a,b) => b.pct - a.pct || b.real - a.real);
+  const atingAno = window._relBenchAtingimento(vends, ano, mesAtual);
 
-  window._relBenchDados = {mesAtual, ano, mensal, anual, semanal,
+  window._relBenchDados = {mesAtual, ano, mensal, anual, semanal, atingMes, atingAno,
     semDe: sem.de, semAte: sem.ate, verInativos,
     lojaNome: window._relLojaSel
       ? ((LOJAS.find(l => l.id === window._relLojaSel)?.nome) || window._relLojaSel)
@@ -31207,6 +31301,41 @@ function _relBenchVends(){
     </div>
 
     <div class="sc" style="margin-top:12px">
+      <div class="st">🎯 Ranking do mês por atingimento da meta — ${_relMesLabel(mesAtual)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Ordenado pelo <strong>% da meta</strong>, não pelo faturamento: quem mais se
+        aproximou (ou passou) da própria meta. Só quem tem meta cadastrada no mês.</div>
+      ${tabelaMeta(atingMes, 'Ninguém com meta cadastrada neste mês.')}
+    </div>
+
+    <div class="sc" style="margin-top:12px">
+      <div class="st">🏅 Quem mais bateu a meta — ${ano} (jan até ${_relMesLabel(mesAtual)})</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        Em quantos meses cada vendedora bateu a meta (e a super meta), entre os meses em
+        que tinha meta cadastrada. O mês em curso só conta quando já foi batido.</div>
+      ${atingAno.length ? `
+      <div style="overflow-x:auto;margin-top:8px">
+        <table class="rel-tabela">
+          <thead><tr>
+            <th>POS.</th><th>VENDEDOR(A)</th><th>LOJA</th>
+            <th class="num">MESES C/ META</th><th class="num">BATEU A META</th>
+            <th class="num">BATEU A SUPER</th><th class="num">TAXA</th><th class="num">% DA META</th>
+          </tr></thead>
+          <tbody>${atingAno.map((v,i) => `<tr>
+            <td>${_pos(i+1)}</td>
+            <td><strong>${_esc(v.nome)}</strong>${_inat(v)}</td>
+            <td>${_esc(v.lojaNome)}</td>
+            <td class="num">${v.comMeta}</td>
+            <td class="num" style="font-weight:700;color:var(--verde)">${v.bateu}</td>
+            <td class="num" style="color:var(--roxo)">${v.superB}</td>
+            <td class="num" style="color:${_corPct(v.taxa)};font-weight:600">${v.taxa.toFixed(0)}%</td>
+            <td class="num" style="color:${_corPct(v.pct)}">${v.pct.toFixed(0)}%</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : `<div style="color:var(--muted);font-size:12px;padding:14px">Nenhuma vendedora com meta cadastrada no ano.</div>`}
+    </div>
+
+    <div class="sc" style="margin-top:12px">
       <div class="st">🗓️ Ranking anual — ${ano} (jan até ${_relMesLabel(mesAtual)})</div>
       <div style="font-size:11px;color:var(--muted);margin-top:6px">
         Meta somada mês a mês, cada uma a do mês correspondente. Mês sem meta
@@ -31272,6 +31401,13 @@ window.relBenchVendsCSV = function(){
   };
   bloco('RANKING MENSAL — ' + _relMesLabel(d.mesAtual), d.mensal, true);
   bloco('RANKING ANUAL — ' + d.ano + ' (jan a ' + _relMesLabel(d.mesAtual) + ')', d.anual, true);
+  // [R168] quem mais atinge a meta
+  bloco('RANKING DO MÊS POR ATINGIMENTO DA META — ' + _relMesLabel(d.mesAtual), d.atingMes || [], true);
+  L.push('');
+  L.push('QUEM MAIS BATEU A META — ' + d.ano + ' (jan a ' + _relMesLabel(d.mesAtual) + ')');
+  L.push('Posição;Vendedor(a);Loja;Meses com meta;Bateu a meta;Bateu a super meta;Taxa;% da meta');
+  (d.atingAno || []).forEach((v,i) => L.push([i+1, asp(v.nome), asp(v.lojaNome), v.comMeta,
+    v.bateu, v.superB, n2(v.taxa), n2(v.pct)].join(';')));
   bloco('RANKING SEMANAL — ' + d.semDe.split('-').reverse().join('/') + ' a '
         + d.semAte.split('-').reverse().join('/') + ' (só lançamento diário)', d.semanal, false);
 
@@ -31344,6 +31480,18 @@ window.relBenchVendsPDF = function(){
     + '<h2>Ranking mensal — ' + _relMesLabel(d.mesAtual) + '</h2>'
     + '<table><thead>' + cab + '</thead><tbody>' + (linhasMeta(d.mensal)
         || '<tr><td colspan="9">Ninguém com faturamento neste mês.</td></tr>') + '</tbody></table>'
+    + '<h2>Ranking do mês por atingimento da meta — ' + _relMesLabel(d.mesAtual) + '</h2>'
+    + '<table><thead>' + cab + '</thead><tbody>' + (linhasMeta(d.atingMes || [])
+        || '<tr><td colspan="9">Ninguém com meta cadastrada neste mês.</td></tr>') + '</tbody></table>'
+    + '<h2>Quem mais bateu a meta — ' + d.ano + '</h2>'
+    + '<table><thead><tr><th>Pos.</th><th>Vendedor(a)</th><th>Loja</th>'
+        + '<th class="n">Meses c/ meta</th><th class="n">Bateu a meta</th><th class="n">Bateu a super</th>'
+        + '<th class="n">Taxa</th><th class="n">% da meta</th></tr></thead><tbody>'
+        + ((d.atingAno || []).map((v,i) => '<tr><td>' + pos(i+1) + '</td><td>' + esc(v.nome) + '</td><td>'
+            + esc(v.lojaNome) + '</td><td class="n">' + v.comMeta + '</td><td class="n">' + v.bateu
+            + '</td><td class="n">' + v.superB + '</td><td class="n">' + v.taxa.toFixed(0) + '%</td><td class="n">'
+            + v.pct.toFixed(0) + '%</td></tr>').join('')
+          || '<tr><td colspan="8">Nenhuma vendedora com meta cadastrada no ano.</td></tr>') + '</tbody></table>'
     + '<h2>Ranking anual — ' + d.ano + '</h2>'
     + '<table><thead>' + cab + '</thead><tbody>' + (linhasMeta(d.anual)
         || '<tr><td colspan="9">Ninguém com faturamento neste ano.</td></tr>') + '</tbody></table>'
