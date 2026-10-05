@@ -5428,6 +5428,36 @@ body:not(.logado) #appScreen{display:none!important}
 .dtable th{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:500;padding:8px 12px;text-align:left;border-bottom:1px solid var(--borda)}
 .dtable td{padding:10px 12px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.03)}
 .dtable tr:hover td{background:rgba(255,255,255,.02)}
+
+/* N001 — histórico de compras usa os componentes do tema sem afetar outros diálogos. */
+.n001-hist-dialog{
+  margin:auto;width:min(900px,calc(100% - 32px));max-height:90vh;max-height:90dvh;overflow:auto;
+  background:var(--card);color:var(--texto);border:1px solid var(--borda);border-radius:12px;
+  padding:18px;box-shadow:0 18px 70px rgba(0,0,0,.6);font:12px/1.5 "DM Sans",sans-serif
+}
+.n001-hist-dialog::backdrop{background:rgba(10,10,10,.72)}
+.n001-hist-dialog header>div{flex:1;min-width:0}
+.n001-hist-dialog h2{margin:0 0 4px;color:var(--texto);font:700 20px/1.25 "Playfair Display",serif;overflow-wrap:anywhere}
+.n001-hist-dialog .n001-hist-sub{color:var(--muted);font-size:11px}
+.n001-hist-dialog .n001-hist-status{color:var(--muted);font-size:12px;line-height:1.5}
+.n001-hist-dialog .n001-hist-loja-wrap,.n001-hist-dialog .n001-hist-filtro-wrap{
+  align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px
+}
+.n001-hist-dialog select{
+  flex:1 1 220px;width:100%;min-width:0;max-width:100%;padding:9px 12px;
+  background:var(--cinza);border:1px solid var(--borda);border-radius:8px;color:var(--texto);
+  font:13px "DM Sans",sans-serif;outline:none;transition:all .2s
+}
+.n001-hist-dialog select:focus{border-color:var(--ouro);box-shadow:0 0 0 2px rgba(201,168,76,.1)}
+.n001-hist-dialog select option{background:var(--card2);color:var(--texto)}
+.n001-hist-dialog .n001-hist-fechar{
+  display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;padding:0;
+  background:var(--cinza);border:1px solid var(--borda);border-radius:8px;color:var(--ouro);
+  font:24px/1 "DM Sans",sans-serif;cursor:pointer
+}
+.n001-hist-dialog .n001-hist-fechar:hover{border-color:var(--ouro);color:var(--ouro2)}
+.n001-hist-dialog .n001-hist-fechar:focus-visible{outline:2px solid var(--ouro);outline-offset:2px}
+.n001-hist-dialog .n001-hist-corpo{max-width:100%;overflow-x:auto}
 .sbadge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
 .sbadge.ok{background:rgba(46,204,135,.12);color:var(--verde)}.sbadge.warn{background:rgba(255,140,66,.12);color:var(--laranja)}
 .sbadge.bad{background:rgba(255,71,87,.12);color:var(--verm)}.sbadge.gold{background:rgba(201,168,76,.12);color:var(--ouro)}
@@ -9070,7 +9100,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-05b';
+window.AVATIM_BUILD = '2026-10-05c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -43436,8 +43466,7 @@ window.abrirHistoricoComprasContato=function(lid,nome,origem){
   const modal=document.createElement('dialog');
   modal.className='n001-hist-dialog';
   modal.setAttribute('aria-labelledby','n001-hist-titulo');
-  modal.style.cssText='width:min(900px,calc(100% - 32px));max-height:90vh;overflow:auto;background:var(--painel,#17191e);color:var(--texto,#f5f5f5);border:1px solid var(--borda,#444);border-radius:12px;padding:18px;box-shadow:0 18px 70px #0009';
-  modal.innerHTML='<header style="display:flex;align-items:start;justify-content:space-between;gap:12px"><div><h2 id="n001-hist-titulo" style="margin:0 0 4px"></h2><div class="n001-hist-sub" style="color:var(--muted)"></div></div><button type="button" class="n001-hist-fechar" aria-label="Fechar histórico" style="font-size:22px;background:none;border:0;color:inherit;cursor:pointer">×</button></header><label class="n001-hist-loja-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Loja <select class="n001-hist-loja" aria-label="Escolher loja do histórico" style="max-width:100%;padding:6px"></select></label><div class="n001-hist-status" role="status" style="margin:12px 0"></div><label class="n001-hist-filtro-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Filtrar produto <select class="n001-hist-filtro" style="max-width:100%;padding:6px"></select></label><div class="n001-hist-corpo"></div>';
+  modal.innerHTML='<header style="display:flex;align-items:start;justify-content:space-between;gap:12px"><div><h2 id="n001-hist-titulo"></h2><div class="n001-hist-sub"></div></div><button type="button" class="n001-hist-fechar" aria-label="Fechar histórico">×</button></header><label class="n001-hist-loja-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Loja <select class="n001-hist-loja" aria-label="Escolher loja do histórico"></select></label><div class="n001-hist-status" role="status" style="margin:12px 0"></div><label class="n001-hist-filtro-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Filtrar produto <select class="n001-hist-filtro"></select></label><div class="n001-hist-corpo"></div>';
   document.body.appendChild(modal);modal.showModal();
   _n001HistoricoModal=modal;_n001HistoricoFoco=origem||document.activeElement;
   const fecha=()=>_n001FecharHistoricoCompras(true);
