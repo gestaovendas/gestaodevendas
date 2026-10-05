@@ -1885,7 +1885,7 @@ window._marcarEstoqueEditado = function(antes){
 // (o carimbo é por campo, não por item).
 // ══════════════════════════════════════════════════════════════════════
 window._CAMPOS_CARIMBADOS_ADMIN = ['_metasGrupo','_superMetaAno','_vrllSuperPct','configFollowUp',
-  '_lojasArquivadas','arquivos','diasAbertosOverride'];
+  '_lojasArquivadas','painelLancamentoAtivo','arquivos','diasAbertosOverride'];
 window._carimbadosDoServidorEm = function(D2, atual){
   if(!D2 || !atual) return 0;
   const tam = v => Array.isArray(v) ? v.length : (v && typeof v === 'object') ? Object.keys(v).length : (v ? 1 : 0);
@@ -2114,6 +2114,12 @@ window._mesclarRemotoComum = function(remoto){
     window._mergeCarimbado('_vrllSuperPct',    remoto._vrllSuperPct,    remoto._vrllSuperPctTs);   // [R164]
     window._mergeCarimbado('configFollowUp',   remoto.configFollowUp,   null);
     window._mergeCarimbado('_lojasArquivadas', remoto._lojasArquivadas, remoto._lojasArquivadasTs);
+    const permissoes=remoto.painelLancamentoAtivo;
+    if(permissoes && typeof permissoes==='object' && !Array.isArray(permissoes)){
+      const lid=typeof lojaId==='function'?lojaId():window._userLoja?.loja;
+      const escopo=isAdmin()?permissoes:{[lid]:permissoes[lid]===true};
+      if(window._mergeCarimbado('painelLancamentoAtivo',escopo,remoto.painelLancamentoAtivoTs)) n++;
+    }
     n+=window._b007MesclarVigenciaEm?.(D,remoto)||0;
     // [R165] editáveis pelo admin: saíram de _CAMPOS_SIMPLES (substituição
     // cega) — um pull ou uma segunda máquina desfazia a edição recém-feita
@@ -3128,6 +3134,8 @@ window.fbGetToken = async function(operacao){
           // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
           _lojasArquivadas:    D2._lojasArquivadas     || [],
           _lojasArquivadasTs:  D2._lojasArquivadasTs   || 0,
+          painelLancamentoAtivo: D2.painelLancamentoAtivo || {},
+          painelLancamentoAtivoTs: D2.painelLancamentoAtivoTs || 0,
           // B007: vigência histórica explícita por loja/mês. Não é enviada
           // ao documento da loja, pois apenas a gestão confirma esse estado.
           _lojasVigencia:      D2._lojasVigencia       || {},
@@ -4922,6 +4930,10 @@ window.fbGetToken = async function(operacao){
       }
 
       if(!_s012Valido()) return null;
+      if(!isAdm && base.painelLancamentoAtivo){
+        const lid=_s012Ctx.loja;
+        base.painelLancamentoAtivo={[lid]:base.painelLancamentoAtivo[lid]===true};
+      }
       return JSON.stringify(base);
     }catch(e){
       if(!_s012Valido()) return null;
@@ -5772,8 +5784,14 @@ body:not(.logado) #appScreen{display:none!important}
     <button onclick="lancHistIrHoje()" style="background:rgba(78,201,255,.15);border:1px solid rgba(78,201,255,.5);color:#4ec9ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:11px;font-weight:600">Voltar ao mês atual</button>
   </div>
 
+  <!-- B045: autorização administrativa por loja, desativada por padrão. -->
+  <div class="sc admin-only" id="b045-admin-controle" style="display:none">
+    <label><input type="checkbox" id="b045-liberar" onchange="window.b045DefinirLancamento(this.checked)">
+      Liberar o bloco Lançar Venda para <strong id="b045-loja-nome"></strong></label>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">A liberação vale para a loja selecionada no painel. Os campos diários por vendedor continuam disponíveis.</div>
+  </div>
   <!-- FORMULÁRIO DE LANÇAMENTO -->
-  <div class="sc">
+  <div class="sc" id="lanc-venda-manual" style="display:none">
     <div class="st">Lançar Venda</div>
     <div class="gr">
       <div class="ig"><label>Data <span style="color:var(--verm)">*</span></label>
@@ -9052,7 +9070,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-09-30t';
+window.AVATIM_BUILD = '2026-10-05b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -21198,6 +21216,7 @@ function showApp(){
   document.querySelectorAll(".admin-only-inline").forEach(e=>{
     e.style.display = adminMode ? "" : "none";
   });
+  window.b045RenderLancamento(isAdmin()?LOJAS[0]?.id:lojaId());
   // loja-only: visível APENAS para lojas (oculto para admin)
   document.querySelectorAll(".loja-only").forEach(e=>{
     e.style.display = adminMode ? "none" : (e.tagName==="BUTTON"||e.tagName==="A" ? "flex" : "block");
@@ -22634,12 +22653,40 @@ function tabPainel(per, el){
   renderPainelDia();
 }
 
+// B045: somente o bloco manual Adicionar Venda depende desta liberação.
+// Os campos diários por vendedor e seu salvamento continuam operacionais.
+window.b045PodeLancarManual=function(lid){
+  return isAdmin() || (!!lid && lid===lojaId() && D.painelLancamentoAtivo?.[lid]===true);
+};
+window.b045RenderLancamento=function(lid){
+  const form=document.getElementById('lanc-venda-manual');
+  if(form) form.style.display=window.b045PodeLancarManual(lid)?'':'none';
+  const controle=document.getElementById('b045-admin-controle');
+  if(controle) controle.style.display=isAdmin()?'':'none';
+  const caixa=document.getElementById('b045-liberar');
+  if(caixa) caixa.checked=D.painelLancamentoAtivo?.[lid]===true;
+  const nome=document.getElementById('b045-loja-nome');
+  if(nome) nome.textContent=LOJAS.find(l=>l.id===lid)?.nome||'';
+};
+window.b045DefinirLancamento=function(ativo){
+  if(!isAdmin()) return false;
+  const lid=document.getElementById('lanc-loja-sel')?.value||LOJAS[0]?.id;
+  if(!LOJAS.some(l=>l.id===lid)) return false;
+  const valor=ativo===true;
+  if(D.painelLancamentoAtivo?.[lid]===valor) return true;
+  D.painelLancamentoAtivo=Object.assign({},D.painelLancamentoAtivo,{[lid]:valor});
+  window._marcarGrupoEditado(['painelLancamentoAtivo']);
+  save();window.b045RenderLancamento(lid);
+  return true;
+};
+
 function renderPainelDia(){
   // Admin usa a loja selecionada no dropdown; loja usa a sua própria — nunca "admin"
   const selLoja = document.getElementById("lanc-loja-sel");
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
+  window.b045RenderLancamento(lid);
   const per = _painelPer;
 
   // Metas — usa a loja selecionada (progressiva para o dia)
@@ -22794,6 +22841,13 @@ function carregarVendsForm(lidOverride){
   const _dataEl = document.getElementById("l-data");
   const hj = (_dataEl?.value && /^\d{4}-\d{2}-\d{2}$/.test(_dataEl.value)) ? _dataEl.value : hoje();
   const vends=vendsAtivas(lid);
+  // B045: o formulário manual usa a mesma equipe ativa desenhada no painel.
+  const manualVend=document.getElementById('l-vend');
+  if(manualVend){
+    const escolhido=manualVend.value;
+    manualVend.replaceChildren(new window.Option('Selecione um(a) vendedor(a)...',''),...vends.map(v=>new window.Option(v.nome,v.id)));
+    if(vends.some(v=>v.id===escolhido)) manualVend.value=escolhido;
+  }
   // [R124] Trocou de loja: o digitado é de outra equipe e não pode reaparecer.
   if(window._lancLojaRef !== undefined && window._lancLojaRef !== lid){
     window._lancDigitado = {};
@@ -23165,18 +23219,19 @@ function limparVend(vendId){
   if(lid2) carregarVendsForm(lid2);
 }
 
-function limparCamposLanc(){
+function limparCamposLanc(limparCards=true){
   const selLoja = document.getElementById("lanc-loja-sel");
   const lid = isAdmin()
     ? (selLoja && selLoja.value && selLoja.value !== 'admin' ? selLoja.value : LOJAS[0].id)
     : lojaId();
-  D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
+  if(limparCards) D.vendedoras.filter(v=>v.loja===lid).forEach(v=>{
     const el = document.getElementById("vlanc_"+v.id);
     const at = document.getElementById("vatend_"+v.id);
     const it = document.getElementById("vitens_"+v.id); // [FIX 21/07] peças
     if(el) el.value='';
     if(at) at.value='';
     if(it) it.value='';
+    [el,at,it].forEach(window._lancMarcarDigitado);
   });
   atualizarSomaDia();
   // Limpar também o formulário novo
@@ -23203,6 +23258,10 @@ function calcPAForm(){
 }
 
 function adicionarVenda(){
+  if(!window.b045PodeLancarManual(lojaId())){
+    showToast('Este lançamento manual precisa ser liberado pelo admin para a loja.','err');
+    return;
+  }
   const data = document.getElementById('l-data')?.value;
   const lojaVal = document.getElementById('l-loja')?.value;
   const vendVal = document.getElementById('l-vend')?.value;
@@ -23256,6 +23315,7 @@ function adicionarVenda(){
   }
   if(_ca) _ca.value = (parseInt(_ca.value)||0) + atendimentos;
   if(_ci) _ci.value = (parseInt(_ci.value)||0) + itens;
+  [_cv,_ca,_ci].forEach(window._lancMarcarDigitado);
 
   // [R47] Acumular os itens informados por vendedora. Somam-se as quantidades
   // quando o mesmo produto entra em lançamentos parciais do mesmo dia.
@@ -23272,7 +23332,7 @@ function adicionarVenda(){
   }
   if(typeof atualizarSomaDia === 'function') atualizarSomaDia();
 
-  limparCamposLanc();
+  limparCamposLanc(false);
   showToast(_cv ? 'Venda adicionada ao card do(a) vendedor(a) — clique em Salvar Lançamento' : 'Venda adicionada!');
 }
 
@@ -43371,11 +43431,13 @@ function _n001FecharHistoricoCompras(devolverFoco=true){
 window.fecharHistoricoComprasContato=_n001FecharHistoricoCompras;
 window.abrirHistoricoComprasContato=function(lid,nome,origem){
   _n001FecharHistoricoCompras(false);
+  const ehAdmin=typeof isAdmin==='function'&&isAdmin();
+  let lojaAtiva=ehAdmin?(lid||''):(typeof lojaId==='function'?lojaId():'');
   const modal=document.createElement('dialog');
   modal.className='n001-hist-dialog';
   modal.setAttribute('aria-labelledby','n001-hist-titulo');
   modal.style.cssText='width:min(900px,calc(100% - 32px));max-height:90vh;overflow:auto;background:var(--painel,#17191e);color:var(--texto,#f5f5f5);border:1px solid var(--borda,#444);border-radius:12px;padding:18px;box-shadow:0 18px 70px #0009';
-  modal.innerHTML='<header style="display:flex;align-items:start;justify-content:space-between;gap:12px"><div><h2 id="n001-hist-titulo" style="margin:0 0 4px"></h2><div class="n001-hist-sub" style="color:var(--muted)"></div></div><button type="button" class="n001-hist-fechar" aria-label="Fechar histórico" style="font-size:22px;background:none;border:0;color:inherit;cursor:pointer">×</button></header><div class="n001-hist-status" role="status" style="margin:12px 0"></div><label class="n001-hist-filtro-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Filtrar produto <select class="n001-hist-filtro" style="max-width:100%;padding:6px"></select></label><div class="n001-hist-corpo"></div>';
+  modal.innerHTML='<header style="display:flex;align-items:start;justify-content:space-between;gap:12px"><div><h2 id="n001-hist-titulo" style="margin:0 0 4px"></h2><div class="n001-hist-sub" style="color:var(--muted)"></div></div><button type="button" class="n001-hist-fechar" aria-label="Fechar histórico" style="font-size:22px;background:none;border:0;color:inherit;cursor:pointer">×</button></header><label class="n001-hist-loja-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Loja <select class="n001-hist-loja" aria-label="Escolher loja do histórico" style="max-width:100%;padding:6px"></select></label><div class="n001-hist-status" role="status" style="margin:12px 0"></div><label class="n001-hist-filtro-wrap" style="display:none;gap:8px;align-items:center;margin:10px 0">Filtrar produto <select class="n001-hist-filtro" style="max-width:100%;padding:6px"></select></label><div class="n001-hist-corpo"></div>';
   document.body.appendChild(modal);modal.showModal();
   _n001HistoricoModal=modal;_n001HistoricoFoco=origem||document.activeElement;
   const fecha=()=>_n001FecharHistoricoCompras(true);
@@ -43389,20 +43451,46 @@ window.abrirHistoricoComprasContato=function(lid,nome,origem){
   window.addEventListener('keydown',_n001HistoricoTecla);
   _n001HistoricoAtualizacao=e=>{
     if(_n001HistoricoModal!==modal)return;
-    if(!(e.detail?.pares||[]).some(p=>p.lid===lid))return;
+    if(!lojaAtiva||!(e.detail?.pares||[]).some(p=>p.lid===lojaAtiva))return;
     render();
   };
   window.addEventListener('crm-atualizado',_n001HistoricoAtualizacao);
   const titulo=modal.querySelector('#n001-hist-titulo');
   titulo.textContent='Compras de '+String(nome||'').trim();
-  const lojaNome=(typeof LOJAS!=='undefined'?LOJAS:[]).find(l=>l.id===lid)?.nome||lid;
-  modal.querySelector('.n001-hist-sub').textContent=lojaNome+' · histórico disponível até '+hoje().split('-').reverse().join('/');
+  const subtitulo=modal.querySelector('.n001-hist-sub');
   const status=modal.querySelector('.n001-hist-status'), corpo=modal.querySelector('.n001-hist-corpo');
+  const lojaWrap=modal.querySelector('.n001-hist-loja-wrap'), lojaSelect=modal.querySelector('.n001-hist-loja');
   const filtroWrap=modal.querySelector('.n001-hist-filtro-wrap'), filtro=modal.querySelector('.n001-hist-filtro');
+  const normalizarNome=s=>String(s||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  if(ehAdmin&&!lojaAtiva){
+    lojaWrap.style.display='flex';
+    const primeira=document.createElement('option');primeira.value='';primeira.textContent='Selecione uma loja';lojaSelect.appendChild(primeira);
+    const lojasComCliente=(window.crmLojasVisiveis?.()||[]).filter(id=>{
+      if(!(typeof LOJAS!=='undefined'?LOJAS:[]).some(l=>l.id===id))return false;
+      const cubos=Object.values((D.crm||{})[id]||{}).filter(Boolean);
+      return cubos.some(c=>(c.clientes||[]).some(r=>normalizarNome(r?.[0])===normalizarNome(nome)));
+    });
+    lojasComCliente.forEach(id=>{
+      const op=document.createElement('option');op.value=id;
+      op.textContent=(LOJAS.find(l=>l.id===id)?.nome)||id;lojaSelect.appendChild(op);
+    });
+    lojaSelect.addEventListener('change',()=>{lojaAtiva=lojaSelect.value;identidade='';render();});
+  }
   let identidade='';
   function render(){
-    const resultado=window.crmResolverComprasCliente(lid,nome,identidade||undefined);
+    const lojaNome=(typeof LOJAS!=='undefined'?LOJAS:[]).find(l=>l.id===lojaAtiva)?.nome||lojaAtiva;
+    subtitulo.textContent=lojaAtiva
+      ?lojaNome+' · histórico disponível até '+hoje().split('-').reverse().join('/')
+      :'Selecione a loja para consultar o histórico.';
     status.replaceChildren();corpo.replaceChildren();filtroWrap.style.display='none';
+    if(!lojaAtiva){
+      status.textContent=lojaSelect.options.length>1
+        ?'Escolha a loja em que deseja consultar este cliente.'
+        :'Nenhuma loja com CRM carregado contém este cliente.';
+      return;
+    }
+    const resultado=window.crmResolverComprasCliente(lojaAtiva,nome,identidade||undefined);
     if(resultado.estado==='bloqueado'){
       status.textContent='A loja deste contato não está disponível para a sessão atual.';return;
     }
@@ -43470,7 +43558,7 @@ window.abrirHistoricoComprasContato=function(lid,nome,origem){
     }
     filtro.onchange=preencher;preencher();
   }
-  modal.querySelector('.n001-hist-fechar').focus();render();
+  (ehAdmin&&!lid?lojaSelect:modal.querySelector('.n001-hist-fechar')).focus();render();
 };
 window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
 window._s012AoTrocarSessao.push(()=>_n001FecharHistoricoCompras(false));
@@ -49693,6 +49781,24 @@ window.renderInativos180 = function(){
   if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
   const el = document.getElementById('ct-inativos180');
   if(!el) return;
+  if(!el.dataset.histClienteBound){
+    el.addEventListener('click',e=>{
+      const botao=e.target.closest?.('button[data-ct-inat-action]');
+      if(!botao||!el.contains(botao))return;
+      const cliente=window._ctInatLista?.[Number(botao.dataset.ctInatIndex)];
+      if(!cliente)return;
+      if(botao.dataset.ctInatAction==='contatar'){
+        window._ctContatarInativo(cliente.nome,cliente.telefone);
+        return;
+      }
+      if(botao.dataset.ctInatAction!=='historico')return;
+      const lid=typeof isAdmin==='function'&&isAdmin()
+        ?(document.getElementById('ct-filtro-loja')?.value||'')
+        :(typeof lojaId==='function'?lojaId():'');
+      window.abrirHistoricoComprasContato(lid,cliente.nome,botao);
+    });
+    el.dataset.histClienteBound='1';
+  }
   const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
   const fVend = document.getElementById('ct-inat-vend')?.value || '';
   const lbl = document.getElementById('ct-inat-dias-lbl');
@@ -49916,12 +50022,12 @@ window.renderInativos180 = function(){
         + _ctTh('Vendedor(a)','vendedora')
         + _ctTh('Último contato','contato')
         + '<th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
-      + inativos.slice(0,50).map(c => {
+      + inativos.slice(0,50).map((c,i) => {
           const ct = contatados.get(_norm(c.nome));
           const corD = c.dias > 365 ? 'var(--verm)' : c.dias > 270 ? 'var(--ouro)' : 'var(--muted)';
-          const nomeEsc = String(c.nome||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
           return '<tr>'
-            + '<td><strong>' + c.nome + '</strong>'
+            + '<td><strong><button type="button" data-ct-inat-action="historico" data-ct-inat-index="' + i + '" aria-label="Ver histórico de compras de ' + _n001EscHtml(c.nome) + '" '
+              + 'style="background:none;border:0;color:inherit;text-decoration:underline;text-align:left;font:inherit;padding:0;cursor:pointer">' + _n001EscHtml(c.nome) + '</button></strong>'
               + (c.documento ? '<div style="font-size:9.5px;color:var(--muted)">' + (typeof _crmDocFmt==='function'?_crmDocFmt(c.documento):c.documento) + '</div>' : '') + '</td>'
             + '<td style="text-align:center;color:' + corD + ';font-weight:700">' + c.dias + 'd</td>'
             + '<td style="text-align:right">' + fmt(c.total||0) + '</td>'
@@ -49931,7 +50037,7 @@ window.renderInativos180 = function(){
             + '<td style="font-size:11px;color:' + (ct?'var(--verde)':'var(--muted)') + '">'
               + (ct ? (ct.data||'').split('-').reverse().join('/') : 'nunca') + '</td>'
             + '<td style="text-align:center">'
-              + '<button onclick="window._ctContatarInativo(&quot;' + nomeEsc + '&quot;,&quot;' + String(c.telefone||'').replace(/"/g,'') + '&quot;)" '
+              + '<button type="button" data-ct-inat-action="contatar" data-ct-inat-index="' + i + '" '
               + 'style="background:rgba(122,199,79,.15);border:1px solid rgba(122,199,79,.5);color:#7ac74f;padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">📞 Contatar</button>'
             + '</td></tr>';
         }).join('')
