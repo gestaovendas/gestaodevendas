@@ -7190,6 +7190,13 @@ body:not(.logado) #appScreen{display:none!important}
           <option value="180">180 dias</option>
           <option value="365">1 ano</option>
         </select>
+        <label for="excel-inativo-doc" style="font-size:11px;color:var(--muted)">Documento:</label>
+        <select id="excel-inativo-doc" onchange="window.excelRender()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:3px 8px;color:var(--texto);font-size:11px">
+          <option value="todos" selected>Todos</option>
+          <option value="cpf">CPF</option>
+          <option value="cnpj">CNPJ</option>
+        </select>
       </div>
       <!-- [R114b] Mesmo controle de follow-up, aqui no CRM Clientes.
            É a MESMA configuração (D.configFollowUp) — mudar aqui vale lá e
@@ -7371,6 +7378,13 @@ body:not(.logado) #appScreen{display:none!important}
         <select id="ct-inat-vend" onchange="window.renderInativos180()"
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px;max-width:190px">
           <option value="">👥 Todos(as) vendedor(es)</option>
+        </select>
+        <label for="ct-inat-doc" style="font-size:11px;color:var(--muted)">Documento:</label>
+        <select id="ct-inat-doc" onchange="window.renderInativos180()"
+          style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:4px 8px;color:var(--texto);font-size:11px">
+          <option value="todos" selected>Todos</option>
+          <option value="cpf">CPF</option>
+          <option value="cnpj">CNPJ</option>
         </select>
         <!-- [R117] Busca por cliente: a régua passa de centenas de linhas e a
              vendedora precisa achar UMA pessoa. Sem isto, só rolando. -->
@@ -9100,7 +9114,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-15c';
+window.AVATIM_BUILD = '2026-10-15e';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -10299,7 +10313,8 @@ function _s012RetencaoEnvelope(ret){
     if(Array.isArray(preparado?._crmPendenciasSnapshot?.ops))
       crmPendencias=preparado._crmPendenciasSnapshot.ops;
   }catch(e){}
-  return {versao:1,owner:ret.owner,dados:_s012Clone(ret.dados),
+  // O snapshot de entrada já é privado; este envelope só será serializado abaixo.
+  return {versao:1,owner:ret.owner,dados:ret.dados===undefined?{}:ret.dados,
     liberada:ret.liberada===true,
     crmPendencias:_s012Clone(crmPendencias),s004Raw:ret.s004Raw??null,
     pending:_s012Clone(ret.pending),pendingJson:ret.pendingJson??null,
@@ -17475,13 +17490,25 @@ window._s012GravarRetencaoIdb=function(ctx){
             catch(e){ignorado=true;reject(e);try{tx.abort();}catch(_){};}
           };
           rq.onerror=()=>{ignorado=true;reject(rq.error||new Error('leitura antes do snapshot IDB falhou'));try{tx.abort();}catch(_){}};
-          tx.oncomplete=()=>resolve(gravou&&!ignorado);
+          tx.oncomplete=()=>{
+            const confirmada=gravou&&!ignorado;
+            // O Promise.race acima pode já ter devolvido o timeout enquanto esta
+            // transação readwrite continuou aguardando o store. Ao completar,
+            // registre apenas a revisão nativa que de fato foi gravada para este
+            // owner; isso atualiza o CAS, mas não confirma nem aposenta a retenção.
+            if(confirmada&&Number.isSafeInteger(record.revision)
+                &&record.owner===ctx.owner&&record.retencao?.owner===ctx.owner){
+              const conhecida=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
+              if(record.revision>conhecida)
+                _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
+            }
+            resolve(confirmada);
+          };
           tx.onerror=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB falhou'));};
           tx.onabort=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB abortada'));};
         }catch(e){reject(e);}
       }),'gravação do snapshot owner');
       if(!commit) return false;
-      _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
       const confirmado=await _s012RetencaoIdbLer(db,key);
       if(confirmado!==recordRaw||_s012RetencaoIdbSequencia.get(ctx.owner)!==seq) return false;
       if(window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
@@ -50524,6 +50551,20 @@ function _crmDocFmt(d){
   return s;
 }
 
+const _crmDocTipo = d => {
+  const n = String(d||'').replace(/\D/g,'').length;
+  return n === 11 ? 'cpf' : n === 14 ? 'cnpj' : '';
+};
+
+window._s012AoTrocarSessao = window._s012AoTrocarSessao || [];
+window._s012AoTrocarSessao.push(()=>{
+  ['excel-inativo-doc','ct-inat-doc'].forEach(id=>{
+    const sel = document.getElementById(id);
+    if(sel) sel.value = 'todos';
+  });
+  window._ctInatLista = [];
+});
+
 function _crmTabela(cols, linhas, vazio){
   if(!linhas.length) return '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'+(vazio||'Sem dados.')+'</div>';
   return '<div style="overflow-x:auto"><table class="dtable" style="min-width:'+(cols.length*110)+'px;font-size:12px"><thead><tr>'
@@ -50812,6 +50853,7 @@ function _crmRenderInativos(v){
   const el = document.getElementById('excel-inativos');
   if(!el) return;
   const dias = parseInt(document.getElementById('excel-inativo-dias')?.value || '60', 10);
+  const tipoDoc = document.getElementById('excel-inativo-doc')?.value || 'todos';
   // [R149] Base de TODOS os anos — ver crmClientesTodosAnos. Se falhar,
   // cai no recorte de sempre: pior, mas nunca uma tela quebrada.
   let base = [];
@@ -50826,6 +50868,7 @@ function _crmRenderInativos(v){
   const inativos = base
     .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
     .filter(c => c.dias !== null && c.dias > dias)
+    .filter(c => tipoDoc === 'todos' || _crmDocTipo(c.documento) === tipoDoc)
     .sort((a,b) => b.total - a.total);
 
   const linhas = inativos.slice(0,50).map(c =>
@@ -51197,6 +51240,7 @@ function _renderFollowUpEm(sufixo){
 }
 
 window.renderInativos180 = function(){
+  window._ctInatLista = [];
   if(typeof window.renderFollowUpConfig === 'function') window.renderFollowUpConfig();
   const el = document.getElementById('ct-inativos180');
   if(!el) return;
@@ -51220,6 +51264,7 @@ window.renderInativos180 = function(){
   }
   const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
   const fVend = document.getElementById('ct-inat-vend')?.value || '';
+  const tipoDoc = document.getElementById('ct-inat-doc')?.value || 'todos';
   const lbl = document.getElementById('ct-inat-dias-lbl');
   if(lbl) lbl.textContent = dias;
 
@@ -51243,7 +51288,11 @@ window.renderInativos180 = function(){
     const _base = window.crmClientesTodosAnos({loja: _fLojaCt, vend: ''});
     v = _base.length ? {clientes: _base} : window.crmVisao();
   }
-  catch(e){ el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px">Não foi possível ler a base do CRM.</div>'; return; }
+  catch(e){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:14px">Não foi possível ler a base do CRM.</div>';
+    const c0 = document.getElementById('ct-inat-count'); if(c0) c0.textContent = '0';
+    return;
+  }
 
   let inativos = (v.clientes||[])
     .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
@@ -51265,6 +51314,7 @@ window.renderInativos180 = function(){
   }
   if(fVend === '__sem__')      inativos = inativos.filter(c => !c.vendedora);
   else if(fVend)               inativos = inativos.filter(c => c.vendedora === fVend);
+  if(tipoDoc !== 'todos')      inativos = inativos.filter(c => _crmDocTipo(c.documento) === tipoDoc);
 
   // Cruzar com quem já foi contatado — a régua não pode repetir abordagem
   const _norm = s => String(s||'').trim().toLowerCase()
@@ -51495,6 +51545,7 @@ window.exportarInativosExcel = function(){
 
   const dias  = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
   const fVend = document.getElementById('ct-inat-vend')?.value || '';
+  const tipoDoc = document.getElementById('ct-inat-doc')?.value || 'todos';
   const ord   = window._ctInatOrd || {campo:'total', dir:-1};
   const rotuloOrd = ({nome:'Cliente', dias:'Sem comprar', total:'Já gastou',
                       notas:'Notas', vendedora:'Vendedor(a)', contato:'Último contato'})[ord.campo] || ord.campo;
@@ -51506,6 +51557,7 @@ window.exportarInativosExcel = function(){
   L.push(['CLIENTES INATIVOS']);
   L.push([]);
   L.push(['Critério', 'Sem comprar há mais de ' + dias + ' dias']);
+  L.push(['Documento', tipoDoc === 'cpf' ? 'CPF' : tipoDoc === 'cnpj' ? 'CNPJ' : 'Todos']);
   L.push(['Vendedor(a)', alvoVend]);
   L.push(['Ordenação', rotuloOrd + ' — ' + (ord.dir === 1 ? 'crescente' : 'decrescente')]);
   L.push(['Gerado em', new Date().toLocaleString('pt-BR')]);
