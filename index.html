@@ -9100,7 +9100,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-05c';
+window.AVATIM_BUILD = '2026-10-08b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -12280,13 +12280,14 @@ function _bkAvaliarPacote(pacote, exigirSelo){
       const meses=compras&&compras.meses;
       if(compras&&compras.versao===1&&compras.disponivel===false){
         if(!Array.isArray(meses)||meses.length||((nCompras!==undefined)&&nCompras!==0)
-            ||refCompras!==undefined)
+            ||refCompras!==undefined||compras.chavesVersao!==undefined)
           adicionar('cabeça CRM '+nome+' declara indisponibilidade de detalhe inválida');
         continue;
       }
       if(!compras||compras.versao!==1||compras.disponivel!==true
           ||!Array.isArray(meses)||meses.some(m=>typeof m!=='string'||!/^\d{4}-\d{2}$/.test(m))
           ||new Set(meses).size!==meses.length
+          ||(compras.chavesVersao!==undefined&&compras.chavesVersao!==1)
           ||typeof nCompras!=='number'||!Number.isSafeInteger(nCompras)||nCompras<0||nCompras>totalDocs
           ||!d.gid||refCompras!==_crmCompraPartePrefixo(lid,ano,d.gid)){
         adicionar('cabeça CRM '+nome+' declara detalhe de compras inválido');continue;
@@ -12299,7 +12300,12 @@ function _bkAvaliarPacote(pacote, exigirSelo){
         }
         try{
           const itens=JSON.parse(parte.dados);
-          if(!window._crmComprasClienteValido({versao:1,disponivel:true,meses,itens})) throw new Error('formato inválido');
+          if(compras.chavesVersao===1){
+            if(!window._crmAnexarChavesComprasClienteWire(meses,itens,parte.chaves,lid,ano))
+              throw new Error('chaves paralelas inválidas');
+          }else if(compras.chavesVersao!==undefined
+              ||!window._crmComprasClienteValido({versao:1,disponivel:true,meses,itens}))
+            throw new Error('formato inválido');
         }catch(_e){adicionar('parte CRM '+id+' contém compras ilegíveis');break;}
       }
     }
@@ -13189,6 +13195,7 @@ window.backupRestaurar = async function(){
           const nDetalhe=detalhe._partes;
           if(detalhe.versao!==1||!Number.isSafeInteger(nDetalhe)||nDetalhe<0||nDetalhe>Object.keys(docsBackup).length
               ||!Array.isArray(detalhe.meses)||!cabeca.gid
+              ||(detalhe.chavesVersao!==undefined&&detalhe.chavesVersao!==1)
               ||detalhe._partesRef!==_crmCompraPartePrefixo(lid,ano,cabeca.gid)){
             _familiasPacoteIncompletas.add(n);return;
           }
@@ -13201,6 +13208,13 @@ window.backupRestaurar = async function(){
             let linhasParte;
             try{linhasParte=JSON.parse(parte.dados);}catch(_e){_familiasPacoteIncompletas.add(n);return;}
             if(!Array.isArray(linhasParte)){_familiasPacoteIncompletas.add(n);return;}
+            if(detalhe.chavesVersao===1){
+              if(!window._crmAnexarChavesComprasClienteWire(detalhe.meses,linhasParte,parte.chaves,lid,ano)){
+                _familiasPacoteIncompletas.add(n);return;
+              }
+            }else if(detalhe.chavesVersao!==undefined){
+              _familiasPacoteIncompletas.add(n);return;
+            }
             originaisCompras.push({id:nomeParte,dados:parte,indice:i});
           }
         }else if(detalhe!==undefined&&!(detalhe?.versao===1&&detalhe.disponivel===false)){
@@ -13215,8 +13229,11 @@ window.backupRestaurar = async function(){
         originais.concat(originaisCompras).forEach(p=>{
           _partesAntigasRemapeadas.add(p.id);
           const compra=originaisCompras.includes(p);
+          const dadosNova={dados:p.dados.dados||'[]',gid,loja:lid,ano,parte:p.indice};
+          if(compra&&detalhe?.chavesVersao===1)
+            dadosNova.chaves=JSON.parse(JSON.stringify(p.dados.chaves));
           _partesNovasRestaurar.push({id:compra?_crmDocCompraParte(lid,ano,gid,p.indice):_crmDocParte(lid,ano,gid,p.indice),
-            dados:{dados:p.dados.dados||'[]',gid,loja:lid,ano,parte:p.indice}});
+            dados:dadosNova});
         });
       }catch(_e){_familiasPacoteIncompletas.add(n);}
     });
@@ -13403,7 +13420,7 @@ window.backupRestaurar = async function(){
 // ══════════════════════════════════════════════════════════════════════
 
 window.crmTemCubos = function(){
-  return Object.keys(D.crm || {}).some(l => Object.keys(D.crm[l] || {}).length);
+  return Object.values(D.crm || {}).some(anos => Object.values(anos || {}).some(Boolean));
 };
 
 /** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedor(a). */
@@ -13430,7 +13447,8 @@ window.crmVisao = function(over){
     });
     base = window.crmCombinarDeLinhas(linhas);
   } else {
-    base = window.crmCombinar(lojas, fAno ? [fAno] : null);
+    base = window.crmCombinar(lojas, fAno ? [fAno] : null,
+      fVend ? {incluirComprasCliente:true} : undefined);
   }
 
   return window.crmFiltrar(base, {ano:fAno, mes:fMes, vend:fVend, loja:fLoja});
@@ -13438,7 +13456,9 @@ window.crmVisao = function(over){
 
 /** Adapta linhas cruas legadas para o mesmo formato de cubo. */
 window.crmCombinarDeLinhas = function(linhas){
-  const c = window.crmAgregar(linhas || []);
+  // Registros crus antigos podem não ter identidade suficiente; preserve o
+  // agrupamento histórico só nesta leitura, sem inferir nem persistir reparos.
+  const c = window.crmAgregar(linhas || [], {permitirAmbiguoLegado:true});
   // crmCombinar normaliza o cubo de clientes para objetos; fazer o mesmo aqui
   c.clientes = (c.clientes||[]).map(([n,v,priMi,ult,compras,total,itens,doc,tel]) => ({
     n, doc:doc||'', tel:tel||'', v, pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:''
@@ -13470,11 +13490,52 @@ window.crmFiltrar = function(cubo, f){
   const semRecorte = !f.mes && !f.vend && !f.ano;
 
   let produtos;
+  let produtosIndisponiveis = false;
   // [R86] Com vendedor(a) escolhida, o ranking sai da dimensão vendedor×produto.
   // Cubos importados antes dela existir não a têm — nesse caso avisamos em vez
   // de devolver o ranking da loja inteira fingindo que é da pessoa.
   let produtosSemDimensaoVend = false;
-  if(f.vend){
+  const coberturaVendProd=_crmCoberturaVendProd(cubo);
+  const mesesRequeridos=new Set((cubo.mesVend||[]).filter(r=>{
+    const m=cubo.meses?.[r[0]]||'';
+    return !!m&&(!f.ano||m.slice(0,4)===f.ano)&&(!f.mes||m.slice(5,7)===f.mes);
+  }).map(r=>cubo.meses[r[0]]));
+  const coberturaRecorteCompleta=mesesRequeridos.size>0
+    &&[...mesesRequeridos].every(m=>coberturaVendProd.meses.has(m));
+  const metricasAnuaisDisponiveis=cubo.prodMetricasAnuaisDisponiveis!==false;
+  const anosNoCubo=new Set(window.crmMesesDoCubo(cubo).map(m=>m.slice(0,4)));
+  const anoSelecionadoPresente=!!f.ano&&anosNoCubo.has(f.ano);
+  const escopoAnualSeguro=!f.ano||(anosNoCubo.size===1&&anosNoCubo.has(f.ano));
+  if((f.vend || f.mes || f.ano) && coberturaRecorteCompleta){
+    // Only months explicitly covered by the sparse dimension can answer
+    // period-scoped product questions without annual totals or top-N rows.
+    const acc = new Map();
+    coberturaVendProd.linhas.forEach(([mi,vi,pi,q,val]) => {
+      if(!mesOk(mi) || !vendOk(vi)) return;
+      const a = acc.get(pi) || {qtd:0, valor:0};
+      a.qtd += q||0; a.valor += val||0; acc.set(pi,a);
+    });
+    produtos = [...acc.entries()]
+      .map(([pi,a]) => ({nome:cubo.prods[pi]||'?', qtd:a.qtd, valor:a.valor, clientes:0}))
+      .sort((a,b) => b.valor - a.valor);
+  } else if(f.mes){
+    // An absent month has no product rows; an uncovered present month must
+    // not be represented by annual or top-N values.
+    produtos = [];
+    produtosIndisponiveis = mesesRequeridos.size>0;
+  } else if(!metricasAnuaisDisponiveis){
+    produtos = [];
+    produtosIndisponiveis = true;
+  } else if(f.ano && !anoSelecionadoPresente){
+    // This year contributes no sales to the cube; never reuse another year's
+    // annual product totals as if they belonged to the requested year.
+    produtos = [];
+  } else if(f.ano && !escopoAnualSeguro){
+    // Annual legacy totals are safe only when this cube's complete scope is
+    // exactly the requested year. Multi-year cubes need monthly coverage.
+    produtos = [];
+    produtosIndisponiveis = true;
+  } else if(f.vend){
     const temDim = Array.isArray(cubo.vendProd) && cubo.vendProd.length > 0;
     if(temDim){
       const vi = (cubo.vends||[]).indexOf(f.vend);
@@ -13514,7 +13575,7 @@ window.crmFiltrar = function(cubo, f){
       produtos = [];
       produtosSemDimensaoVend = true;
     }
-  } else if(semRecorte){
+  } else if(semRecorte || (f.ano && escopoAnualSeguro)){
     produtos = (cubo.prodTotal||[]).map(([pi,q,v,ncli]) => ({nome:cubo.prods[pi]||'?', qtd:q, valor:v, clientes:ncli}));
   } else {
     const acc = new Map();
@@ -13571,8 +13632,6 @@ window.crmFiltrar = function(cubo, f){
   };
   clientes = clientes.filter(c => !window._crmAnonimo(c.nome, c.documento));
 
-  if(f.vend) clientes = clientes.filter(c => c.vendedora === f.vend);
-
   // ══════════════════════════════════════════════════════════════
   // [R152] O recorte por MÊS sai da dimensão mês × cliente, não da data
   // da última compra. Pela última compra, quem comprou em julho e voltou
@@ -13583,9 +13642,21 @@ window.crmFiltrar = function(cubo, f){
   // passando por certa.
   // ══════════════════════════════════════════════════════════════
   let clientesRecorteAproximado = false;
-  const _temMesCli = Array.isArray(cubo.mesCli) && cubo.mesCli.length > 0
-                     && Array.isArray(cubo.clis) && cubo.clis.length > 0;
+  const _coberturaCli = window._crmCoberturaMesCli(cubo);
+  const _mesesCliRecorte = new Set((cubo.mesVend||[])
+    .filter(r => mesOk(r[0]))
+    .map(r => cubo.meses?.[r[0]])
+    .filter(Boolean));
+  const _mesCliRecorteCompleto = _mesesCliRecorte.size > 0
+    && [..._mesesCliRecorte].every(m => _coberturaCli.has(m));
+  // Uma dimensão vazia é exata quando a cobertura declara que o mês foi
+  // processado: pode ser um mês apenas de compras sem cliente identificado.
+  // Linhas de outros meses permitem mostrar o recorte disponível, mas não
+  // provam que o mês selecionado está completo.
+  const _temMesCli = Array.isArray(cubo.mesCli) && Array.isArray(cubo.clis)
+    && (cubo.mesCli.length > 0 || [..._mesesCliRecorte].some(m => _coberturaCli.has(m)));
   if(f.mes && _temMesCli){
+    clientesRecorteAproximado = _mesesCliRecorte.size > 0 && !_mesCliRecorteCompleto;
     const _acc = new Map();
     cubo.mesCli.forEach(([mi,ci,compras,total,itens]) => {
       if(!mesOk(mi)) return;
@@ -13613,6 +13684,152 @@ window.crmFiltrar = function(cubo, f){
     if(f.mes) clientesRecorteAproximado = true;
   }
 
+  let clientesAtribuicaoVendIndisponivel = false;
+  let clientesAtribuicaoVendIdentidadeIndisponivel = false;
+  let clientesAtribuicaoVendAproximada = false;
+  if(f.vend){
+    const detalhe=cubo?._comprasCliente;
+    const combinado=Array.isArray(detalhe?.conjuntos)&&Array.isArray(detalhe?.itens);
+    const direto=window._crmComprasClienteValido(detalhe);
+    const _normalizarCliente=x=>String(x||'').trim().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+    const _vendedorAlvo=String(f.vend||'');
+    const _mesNoPeriodo=m=>!!m&&(!f.ano||m.slice(0,4)===String(f.ano))
+      &&(!f.mes||m.slice(5,7)===String(f.mes));
+    const _vendedorCombina=vendedor=>String(vendedor||'')===_vendedorAlvo;
+    const _mesesComVenda=new Set((cubo.mesVend||[]).filter(([mi])=>
+      _mesNoPeriodo(cubo.meses?.[mi])).map(([mi])=>cubo.meses[mi]));
+    const _temDimensaoVend=Array.isArray(cubo.mesVend)&&Array.isArray(cubo.vends);
+    const _vendasPeriodoSemDimensao=!_temDimensaoVend
+      &&((Number(cubo.linhas)||0)>0||_mesesComVenda.size>0);
+    let mesesVendedor=new Set();
+    if(_temDimensaoVend){
+      mesesVendedor=new Set((cubo.mesVend||[]).filter(([mi,vi])=>
+        cubo.vends?.[vi]===_vendedorAlvo
+          &&_mesNoPeriodo(cubo.meses?.[mi]))
+        .map(([mi])=>cubo.meses[mi]));
+    }
+    const _identidadesPorLoja=new Map();
+    const _registrarIdentidadeLoja=lid=>{
+      const loja=String(lid||'');
+      if(!loja||(f.loja&&loja!==String(f.loja))) return;
+      let ids=_identidadesPorLoja.get(loja);
+      if(!ids){ids=new Set();_identidadesPorLoja.set(loja,ids);}
+      if(typeof window._crmDonosRotuloLoja==='function')
+        window._crmDonosRotuloLoja(loja,f.vend).forEach(id=>ids.add(id));
+    };
+    const _identidadesConflitantes=()=>{
+      if([..._identidadesPorLoja.values()].some(ids=>ids.size>1)) return true;
+      if(f.loja||_identidadesPorLoja.size<2) return false;
+      const donos=[..._identidadesPorLoja.values()].filter(ids=>ids.size===1)
+        .map(ids=>[...ids][0]);
+      return donos.length!==_identidadesPorLoja.size||new Set(donos).size>1;
+    };
+
+    if(combinado){
+      const fontesNoPeriodo=(detalhe.conjuntos||[]).filter(fonte=>
+        (!f.loja||String(fonte.loja||'')===String(f.loja))
+          &&(fonte.mesesConjunto||[]).some(_mesNoPeriodo));
+      if(!f.loja&&_mesesComVenda.size&&!fontesNoPeriodo.length)
+        clientesAtribuicaoVendIndisponivel=true;
+      fontesNoPeriodo.forEach(fonte=>{
+        const linhasVendFonte=(fonte.vendedorasMes||[]).filter(([mes,vendedor])=>
+          vendedor===_vendedorAlvo&&_mesNoPeriodo(mes));
+        if(linhasVendFonte.length) _registrarIdentidadeLoja(fonte.loja);
+        if(fonte.vendedorasMesDisponiveis!==true){
+          const mesesFonte=(fonte.mesesConjunto||[]).filter(_mesNoPeriodo);
+          if(!fonte.disponivel||mesesFonte.some(m=>!(fonte.mesesDetalhados||[]).includes(m)))
+            clientesAtribuicaoVendIndisponivel=true;
+          return;
+        }
+        const pares=(fonte.vendedorasMes||[]).filter(([mes,vendedor])=>_mesNoPeriodo(mes));
+        pares.forEach(([mes,vendedor])=>{
+          if(vendedor===_vendedorAlvo
+              &&(!fonte.disponivel||!(fonte.mesesDetalhados||[]).includes(mes)))
+            clientesAtribuicaoVendIndisponivel=true;
+        });
+      });
+      clientesAtribuicaoVendIdentidadeIndisponivel=_identidadesConflitantes();
+      if(clientesAtribuicaoVendIdentidadeIndisponivel)
+        clientesAtribuicaoVendIndisponivel=true;
+    }else if(_vendasPeriodoSemDimensao){
+      const mesesConhecidos=new Set((cubo.meses||[]).filter(_mesNoPeriodo));
+      clientesAtribuicaoVendIndisponivel=!direto||!mesesConhecidos.size
+        ||[...mesesConhecidos].some(m=>!(detalhe.meses||[]).includes(m));
+    }else if(mesesVendedor.size){
+      clientesAtribuicaoVendIndisponivel=!direto
+        ||[...mesesVendedor].some(m=>!(detalhe.meses||[]).includes(m));
+    }
+    if(direto&&!combinado){
+      (detalhe.itens||[]).forEach(r=>{
+        if(r[9]!==_vendedorAlvo||!_mesNoPeriodo(String(r[3]||'').slice(0,7))) return;
+        const chave=typeof r[11]==='string'?r[11]:'';
+        if(!chave.startsWith('[')) return;
+        try{_registrarIdentidadeLoja(JSON.parse(chave)?.[0]);}catch(e){}
+      });
+      clientesAtribuicaoVendIdentidadeIndisponivel=_identidadesConflitantes();
+      if(clientesAtribuicaoVendIdentidadeIndisponivel)
+        clientesAtribuicaoVendIndisponivel=true;
+    }
+    if(!combinado&&!direto&&_temDimensaoVend&&!mesesVendedor.size)
+      clientes=[];
+    if(!combinado&&!direto&&!_temDimensaoVend&&!_vendasPeriodoSemDimensao)
+      clientes=[];
+
+    if(clientesAtribuicaoVendIndisponivel){
+      clientes=[];
+    }else if(combinado||direto){
+      const porCliente=new Map();
+      (detalhe.itens||[]).forEach(r=>{
+        const o=combinado?2:0;
+        const compraKey=r[o+11];
+        const tipoChaveCompra=window._crmTipoChaveCompraCliente(r,o);
+        let loja=combinado?String(r[0]||''):'';
+        if(!loja&&typeof compraKey==='string'&&compraKey.startsWith('[')){
+          try{loja=String(JSON.parse(compraKey)?.[0]||'');}catch(e){}
+        }
+        const ano=combinado?String(r[1]||''):'';
+        const nome=String(r[o+1]||'').trim();
+        const doc=String(r[o+2]||'').replace(/\D/g,'');
+        const data=String(r[o+3]||'');
+        const cupom=String(r[o+4]||'').trim();
+        const quantidade=Number(r[o+7])||0;
+        const valor=Number(r[o+8])||0;
+        const vendedor=String(r[o+9]||'');
+        const telefone=String(r[o+10]||'').replace(/\D/g,'');
+        if(!nome||!data||!_mesNoPeriodo(data.slice(0,7))
+            ||!_vendedorCombina(vendedor)
+            ||window._crmAnonimo(nome,doc)) return;
+        if(compraKey&&!tipoChaveCompra){
+          clientesAtribuicaoVendIndisponivel=true;
+          return;
+        }
+        const chave=doc||_normalizarCliente(nome);
+        if(!chave) return;
+        const compra=tipoChaveCompra==='estavel'
+          ? (combinado?JSON.stringify([loja,ano,compraKey]):compraKey)
+          : JSON.stringify([loja,ano,data,doc||chave,cupom,vendedor]);
+        if(tipoChaveCompra!=='estavel') clientesAtribuicaoVendAproximada=true;
+        let a=porCliente.get(chave);
+        if(!a){
+          a={nome,doc,telefone,primeira:data,ultima:data,compras:new Set(),total:0,itens:0,loja};
+          porCliente.set(chave,a);
+        }
+        if(!a.telefone&&telefone) a.telefone=telefone;
+        if(data<a.primeira) a.primeira=data;
+        if(data>a.ultima) a.ultima=data;
+        a.compras.add(compra);a.total+=valor;a.itens+=quantidade;
+      });
+      clientes=clientesAtribuicaoVendIndisponivel?[]:[...porCliente.values()].map(c=>({
+        nome:c.nome,documento:c.doc,telefone:c.telefone,vendedora:f.vend,
+        primeira:c.primeira,ultima:c.ultima,compras:c.compras.size,
+        total:Math.round(c.total*100)/100,itens:c.itens,loja:c.loja
+      })).sort((a,b)=>b.total-a.total);
+    }
+  }
+
+  const clientesUnicos=clientesAtribuicaoVendIndisponivel?null:clientes.length;
+
   const porVend = new Map();
   mesVend.forEach(([mi,vi,fa,cu,it,cl]) => {
     const nome = cubo.vends[vi] || '(sem vendedor(a))';
@@ -13631,14 +13848,18 @@ window.crmFiltrar = function(cubo, f){
 
   return {
     faturamento, cupons, itens,
-    clientesUnicos: clientes.length,
+    clientesUnicos,
     ticketMedio: cupons > 0 ? faturamento/cupons : 0,
     pa: cupons > 0 ? itens/cupons : 0,
     meses: [...porMes.values()].sort((a,b)=>a.mes.localeCompare(b.mes)),
     mesesCount: mesesUsados.size,
     produtos,
     produtosSemDimensaoVend,
+    produtosIndisponiveis,
     clientesRecorteAproximado,   // [R152] lista de clientes do mês veio da última compra
+    clientesAtribuicaoVendIndisponivel,
+    clientesAtribuicaoVendIdentidadeIndisponivel,
+    clientesAtribuicaoVendAproximada,
     // [R152] meses que o cubo REALMENTE tem, antes do filtro de mês. É o
     // que permite dizer "não há julho na base" em vez de mostrar zeros e
     // deixar quem olha achando que a loja não vendeu.
@@ -13877,6 +14098,17 @@ function _crmLerEstado(ctx){
   try{ return _crmClonarEstado(JSON.parse(localStorage.getItem(chave)||'{}')); }
   catch(e){ return _crmEstadoVazio(); }
 }
+function _crmLerEstadoSeguro(ctx){
+  const chave=window._s012StorageKey?.('crm-state',ctx);
+  if(!chave) return {ok:false,estado:null};
+  try{
+    const bruto=localStorage.getItem(chave);
+    if(bruto==null) return {ok:true,presente:false,estado:_crmEstadoVazio()};
+    const valor=JSON.parse(bruto);
+    if(!valor||typeof valor!=='object'||Array.isArray(valor)) return {ok:false,estado:null};
+    return {ok:true,presente:true,estado:_crmClonarEstado(valor)};
+  }catch(e){ return {ok:false,estado:null}; }
+}
 function _crmSalvarEstado(ctx,estado){
   const chave=window._s012StorageKey?.('crm-state',ctx);
   if(!chave) return false;
@@ -13918,6 +14150,48 @@ function _crmMarcarVisto(lid, ano, ts, gid, ctx){
     const g=estado.visto._geracoes||(estado.visto._geracoes={});
     (g[lid]||(g[lid]={}))[String(ano)]=gid||null;
   });
+}
+function _crmInvalidarVistoAposFalha(lid, ano, ctx, tsEsperado, gidEsperado){
+  const ownerAtivo=window._s012Capturar?.();
+  if(!(Number(tsEsperado)>0)||!window._s012ContextoValido(ctx)
+      ||ownerAtivo?.owner!==ctx.owner) return false;
+  const chave=lid+'|'+ano;
+  if(window.crmPendenciaAtual?.(ctx,lid,ano)||(window._crmNaoEnviados||{})[chave]) return false;
+  const removerDaMemoria=()=>{
+    const atual=window._s012Capturar?.();
+    if(!window._s012ContextoValido(ctx)||atual?.owner!==ctx.owner
+        ||window.crmPendenciaAtual?.(ctx,lid,ano)||(window._crmNaoEnviados||{})[chave]) return false;
+    const visto=window._crmTsVisto||{};
+    const ts=Number(visto[lid]?.[String(ano)])||0;
+    const gid=visto._geracoes?.[lid]?.[String(ano)]??null;
+    if(ts!==Number(tsEsperado)||gid!==(gidEsperado??null)) return false;
+    if(visto[lid]) delete visto[lid][String(ano)];
+    if(visto._geracoes?.[lid]) delete visto._geracoes[lid][String(ano)];
+    return true;
+  };
+  const leitura=_crmLerEstadoSeguro(ctx);
+  if(!leitura.ok){
+    // An unreadable owner state may contain unrelated seen or pending markers.
+    // Leave its bytes untouched and make only this active owner's RAM retryable.
+    return removerDaMemoria();
+  }
+  const estado=leitura.estado;
+  if(estado.naoEnviados?.[chave]) return false;
+  const ts=Number(estado.visto?.[lid]?.[String(ano)])||0;
+  const gid=estado.visto?._geracoes?.[lid]?.[String(ano)]??null;
+  if(!(ts>0)) return removerDaMemoria();
+  if(ts!==Number(tsEsperado)||gid!==(gidEsperado??null)) return false;
+  if(estado.visto[lid]) delete estado.visto[lid][String(ano)];
+  if(estado.visto._geracoes?.[lid]) delete estado.visto._geracoes[lid][String(ano)];
+  const salvo=_crmSalvarEstado(ctx,estado);
+  if(salvo&&window._s012ContextoValido(ctx)&&window._s012Capturar?.()?.owner===ctx.owner){
+    window._crmTsVisto=estado.visto;
+    window._crmNaoEnviados=estado.naoEnviados;
+    return true;
+  }
+  // A failed write also gets a RAM-only CAS retry; never replace unreadable
+  // owner state with the empty fallback returned by _crmLerEstado.
+  return removerDaMemoria();
 }
 window._crmMarcarNaoEnviado=function(ctx,lid,ano,ts=Date.now()){
   return _crmAlterarEstado(ctx,estado=>{ estado.naoEnviados[lid+'|'+ano]=Number(ts)||Date.now(); });
@@ -13970,19 +14244,19 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride){
   const detalheDisponivel=window._crmComprasClienteValido(detalheCompra);
   if(detalheCompra?.disponivel===true&&!detalheDisponivel)
     throw new Error('O detalhe de compras está corrompido; os dados agregados foram preservados e o histórico exige reimportação.');
-  const pedacosCompra=detalheDisponivel
-    ?window.crmFatiarComprasCliente(detalheCompra.itens):[];
   const ts  = Date.now();
   const gid = ts.toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  const por = ctx.email || '?';
+  const pedacosCompra=detalheDisponivel
+    ?window.crmFatiarComprasClienteWire(detalheCompra.itens,{ts,gid,por,loja:lid,ano:String(ano)}):[];
   const leves = Object.assign({}, cubo);
   delete leves.clientes;
   leves._partes = pedacos.length;
   leves._partesRef = _crmPartePrefixo(lid, ano, gid);
   leves._comprasCliente=detalheDisponivel
-    ?{versao:1,disponivel:true,meses:[...new Set(detalheCompra.meses)].sort(),
+    ?{versao:1,disponivel:true,chavesVersao:1,meses:[...new Set(detalheCompra.meses)].sort(),
       _partes:pedacosCompra.length,_partesRef:_crmCompraPartePrefixo(lid,ano,gid)}
     :{versao:1,disponivel:false,meses:[],_partes:0};
-  const por = ctx.email || '?';
 
   // Partes imutáveis formam uma etapa independente. Só depois delas todas
   // confirmarem, publique cabeça+índice juntos: mesmo com 399 partes, o
@@ -13992,7 +14266,7 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride){
     dados: {dados: JSON.stringify(pd), ts, gid, por, loja: lid, ano: String(ano), parte: i}
   })).concat(pedacosCompra.map((pd,i)=>({
     id:_crmDocCompraParte(lid,ano,gid,i),
-    dados:{dados:JSON.stringify(pd),ts,gid,por,loja:lid,ano:String(ano),parte:i}
+    dados:{dados:JSON.stringify(pd.itens),chaves:pd.chaves,ts,gid,por,loja:lid,ano:String(ano),parte:i}
   })));
   const escritaCabeca={id:_crmDocNome(lid,ano),
     dados:{dados:JSON.stringify(leves),ts,gid,por,loja:lid,ano:String(ano)}};
@@ -14038,7 +14312,7 @@ window.crmSincronizar = async function(paresOpt, s012Ctx){
     pares=paresOpt.filter(x=>Array.isArray(x) && ((cubos[x[0]]||{})[x[1]]));
   }else{
     pares=[];
-    Object.keys(cubos).forEach(lid=>Object.keys(cubos[lid]||{}).forEach(ano=>pares.push([lid,ano])));
+    Object.keys(cubos).forEach(lid=>Object.entries(cubos[lid]||{}).forEach(([ano,cubo])=>{if(cubo)pares.push([lid,ano]);}));
   }
   if(!pares.length){ showToast('Nenhum dado de CRM para sincronizar.','warn'); return; }
 
@@ -14088,7 +14362,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
   const anoAtual = Number(hoje().slice(0,4));
   const anos = new Set();
   for(let a = anoAtual; a >= anoAtual - 4; a--) anos.add(String(a));
-  Object.values(dadosAlvo.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
+  Object.values(dadosAlvo.crm||{}).forEach(o => Object.keys(o||{}).forEach(a => anos.add(a)));
 
   if(!dadosAlvo.crm) dadosAlvo.crm = {};
   // [R161] Com `paresOpt` ([[loja, ano], ...]) só esses conjuntos são
@@ -14115,6 +14389,17 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
     const _opCargaInicio=window.crmPendenciaAtual(ctx,lid,ano);
     const _opIdCargaInicio=_opCargaInicio?.opId||null;
     const _markerCargaInicio=window._crmNaoEnviados?.[_chavePendente];
+    const _estadoVistoPersistido=_crmLerEstadoSeguro(ctx);
+    const _ctxAtivoNoInicio=window._s012Capturar?.();
+    const _ramVistoAtivo=window._s012ContextoValido(ctx)&&_ctxAtivoNoInicio?.owner===ctx.owner
+      ?(window._crmTsVisto||{}):_crmEstadoVazio().visto;
+    const _estadoVistoPersistidoInicio=_estadoVistoPersistido.ok?_estadoVistoPersistido.estado.visto:null;
+    const _tsVistoPersistidoInicio=Number(_estadoVistoPersistidoInicio?.[lid]?.[ano])||0;
+    const _usarRamVistoInicio=Number(_ramVistoAtivo?.[lid]?.[ano])>0&&!(_tsVistoPersistidoInicio>0);
+    const _estadoVistoInicio=_usarRamVistoInicio?_ramVistoAtivo
+      :_estadoVistoPersistidoInicio||_crmEstadoVazio().visto;
+    const _tsVistoInicio=Number(_estadoVistoInicio?.[lid]?.[ano])||0;
+    const _gidVistoInicio=_estadoVistoInicio?._geracoes?.[lid]?.[ano]??null;
     const _cuboCargaInicio=(dadosAlvo.crm[lid]||{})[ano];
     const _temLocal=!!_cuboCargaInicio;
     const _pendenciaMudouDuranteCarga=()=>{
@@ -14122,6 +14407,8 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       return (atual?.opId||null)!==_opIdCargaInicio
         || window._crmNaoEnviados?.[_chavePendente]!==_markerCargaInicio;
     };
+    const _invalidarVistoSeFalhou=()=>D!==dadosAlvo||_pendenciaMudouDuranteCarga()?false
+      :_crmInvalidarVistoAposFalha(lid,ano,ctx,_tsVistoInicio,_gidVistoInicio);
     // A fatia B009A só aplica exclusão explícita quando não há gravação local
     // pendente. Marcadores legados sem operação continuam retidos por segurança.
     const _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
@@ -14131,6 +14418,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
       if(!snap.exists()){
         if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
+        _invalidarVistoSeFalhou();
         continue;
       }
       let raw = snap.data(), leituraServidor = false;
@@ -14243,6 +14531,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
           const ref=detalheCabeca._partesRef;
           if(detalheCabeca.disponivel!==true || !Array.isArray(meses)
               || meses.some(m=>!/^\d{4}-\d{2}$/.test(m))
+              ||(detalheCabeca.chavesVersao!==undefined&&detalheCabeca.chavesVersao!==1)
               || typeof n!=='number' || !Number.isSafeInteger(n) || n<0
               || !raw.gid || ref!==_crmCompraPartePrefixo(lid,ano,raw.gid))
             throw new Error('cabeça de detalhe inválida');
@@ -14257,9 +14546,16 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
                 || Number(parte.parte)!==i || typeof parte.dados!=='string')
               throw new Error('parte de compras incompatível: '+i);
             const linhas=JSON.parse(parte.dados);
-            if(!window._crmComprasClienteValido({versao:1,disponivel:true,meses,itens:linhas}))
-              throw new Error('linhas de compras inválidas: '+i);
-            itens.push(...linhas);
+            if(detalheCabeca.chavesVersao===1){
+              const reidratadas=window._crmAnexarChavesComprasClienteWire(meses,linhas,parte.chaves,lid,ano);
+              if(!reidratadas) throw new Error('chaves de compras inválidas: '+i);
+              itens.push(...reidratadas);
+            }else{
+              if(detalheCabeca.chavesVersao!==undefined
+                  ||!window._crmComprasClienteValido({versao:1,disponivel:true,meses,itens:linhas}))
+                throw new Error('linhas de compras inválidas: '+i);
+              itens.push(...linhas);
+            }
           }
           detalheCarregado={versao:1,disponivel:true,meses:[...new Set(meses)].sort(),itens};
         }catch(e){
@@ -14280,6 +14576,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       if(leves._comprasCliente){
         delete leves._comprasCliente._partes;
         delete leves._comprasCliente._partesRef;
+        delete leves._comprasCliente.chavesVersao;
       }
       leves._comprasCliente=detalheCarregado;
       leves.clientes = clientes;
@@ -14296,6 +14593,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
       carregados++;
     }catch(e){
+      _invalidarVistoSeFalhou();
       console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
     }
   }
@@ -14334,8 +14632,8 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
 
 /**
  * [R161] Chamado pelos pulls de 30s/60s: lê o índice do CRM (UMA leitura)
- * e recarrega só os conjuntos cujo carimbo mudou desde que esta máquina
- * os leu ou enviou. Devolve quantos conjuntos foram atualizados ou removidos.
+ * Recarrega pares com carimbo alterado desde o último pull/envio ou sem cópia
+ * local. Devolve quantos conjuntos foram atualizados ou removidos.
  *
  * Sem índice (servidor anterior ao R161) ou sem conseguir lê-lo, não faz
  * nada — fica como era: o cubo novo chega no próximo F5.
@@ -14381,12 +14679,22 @@ window.crmAtualizarSeMudou = async function(opts){
       const gid = revisao && Number(revisao.ts) === Number(ts)
         && typeof revisao.gid === 'string' ? revisao.gid : null;
       const visto = window._crmTsVisto || {};
-      if(Number(ts) === Number((visto[lid] || {})[ano])
-        && (!gid || gid === (((visto._geracoes || {})[lid] || {})[ano]))) return;
-      // conjunto mudado aqui e ainda não confirmado no servidor (envio em
-      // voo, ou que falhou) só existe aqui
+      const mesmoIndice=Number(ts)===Number((visto[lid]||{})[ano])
+        &&(!gid||gid===(((visto._geracoes||{})[lid]||{})[ano]));
+      // O carimbo pode sobreviver à perda do cubo local; só exclusão durável
+      // confirmada da mesma revisão torna a ausência intencional.
+      if(mesmoIndice){
+        const cuboLocal=!!D.crm?.[lid]?.[ano];
+        const op=window.crmPendenciaAtual(ctx,lid,ano);
+        const exclusaoDuravel=op?._duravelRam===true&&op.owner===ctx.owner
+          &&op.lid===lid&&String(op.ano)===String(ano)&&op.tipo==='excluir'
+          &&op.confirmada===true&&Number(op.ts)===Number(ts)
+          &&(op.gid??null)===(gid??null);
+        if(cuboLocal||exclusaoDuravel) return;
+      }
+      // Conjunto alterado ou sem cópia local: o reader preserva pendências
+      // normais e confirma lápides duráveis no servidor.
       if(!window._s012ContextoValido(ctx)) return;
-      // O reader preserva pendências normais e confirma lápides no servidor.
       mudados.push([lid, ano, gid, Number(ts)]);
     }));
     if(!mudados.length) return 0;
@@ -14542,7 +14850,7 @@ window.crmApagar = async function(lid, ano){
  *      e a análise por produto continua fazendo sentido.
  */
 
-window.crmDedup = function(linhas){
+window.crmDedup = function(linhas, opts){
   // [FIX R78] Regra corrigida com a realidade do export da Avatim:
   // CADA LINHA É UM ITEM DA NOTA. Três linhas iguais na mesma NF são três
   // unidades do mesmo produto — não uma duplicata.
@@ -14554,14 +14862,20 @@ window.crmDedup = function(linhas){
   //
   // O total da nota só é tratado como valor único quando a PLANILHA declara
   // isso no nome da coluna ("Valor NF"), caso em que não há adivinhação.
+  opts = opts || {};
   const unicas = (linhas||[]).map(r => Object.assign({}, r));
+  const identidade = window._crmVincularDocumentoVenda(unicas);
+  const chaveLegada = identidade.ambiguo && opts.permitirAmbiguoLegado === true;
+  if(identidade.ambiguo && !chaveLegada)
+    throw new Error('CRM_NF_DOCUMENTO_AMBIGUO: há conflito de identidade de compra; verifique documentos e horários.');
+  opts._usarChaveVendaLegada = chaveLegada;
 
   const porNF = new Map();
   let semNF = 0;
   unicas.forEach(r => {
     const nf = String(r.cupom||'').trim();
     if(!nf){ semNF++; return; }
-    const chave = String(r.data||'') + '|' + nf;
+    const chave = window._crmChaveVenda(r, chaveLegada);
     if(!porNF.has(chave)) porNF.set(chave, []);
     porNF.get(chave).push(r);
   });
@@ -14636,18 +14950,176 @@ window._crmChaveCompra = function(nome, doc, telefone){
   return normalizado?'nome:'+normalizado+(tel?'|tel:'+tel:''):'';
 };
 
+// Chave transitória inclui hora quando a origem fornece uma; mês/dia e detalhe ficam iguais.
+window._crmChaveVenda = function(r, legado=false){
+  const nf=String(r?.cupom||'').trim();
+  if(legado){
+    const data=String(r?.data||'');
+    const nome=(window._crmChaveCompra(r?.cliente,'').replace(/^nome:/,'')||'?');
+    return nf ? data+'|'+nf : 's/nf|'+data+'|'+nome;
+  }
+  const comprador=nf&&window._crmAnonimo(r?.cliente,r?.documento)
+    ? 'anonimo' : window._crmChaveCompra(r?.cliente,r?.documento);
+  return JSON.stringify([
+    String(r?.loja||'').trim().toLowerCase(), String(r?.data||''),
+    nf, String(r?._horaVenda||''),
+    (nf ? comprador
+        : window._crmChaveCompra(r?.cliente,'')) || '?'
+  ]);
+};
+
+window._crmVincularDocumentoVenda = function(linhas,opts){
+  const grupos = new Map();
+  (linhas||[]).forEach(r=>{
+    const nf=String(r?.cupom||'').trim(); if(!nf) return;
+    const chave=JSON.stringify([String(r?.loja||'').trim().toLowerCase(),String(r?.data||''),nf]);
+    let g=grupos.get(chave);
+    if(!g){g={linhas:[],loja:String(r?.loja||'').trim(),data:String(r?.data||''),nf};grupos.set(chave,g);}
+    g.linhas.push(r);
+  });
+  const documentos=[],horarios=[],conflitos=[],chavesConflito=new Set();
+  const MAX_CONFLITOS=4,MAX_LINHAS_CONFLITO=8;
+  let conflitosLimitados=false;
+  let ambiguo=false;
+  const registrarConflito=(g,motivo,origens,hora='')=>{
+    if(!opts?.detalharConflitos) return;
+    const chave=JSON.stringify([g.loja,g.data,g.nf,hora,motivo]);
+    if(chavesConflito.has(chave)){conflitosLimitados=true;return;}
+    if(conflitos.length>=MAX_CONFLITOS){conflitosLimitados=true;return;}
+    chavesConflito.add(chave);
+    const linhasOrigem=[],vistas=new Set();let linhasLimitadas=false;
+    const fonte=typeof origens==='function'?origens():origens||[];
+    for(const r of fonte){
+      const n=Number(r?._linhaOrigem);
+      if(!Number.isInteger(n)||n<1||vistas.has(n)) continue;
+      if(linhasOrigem.length>=MAX_LINHAS_CONFLITO){linhasLimitadas=true;break;}
+      vistas.add(n);linhasOrigem.push(n);
+    }
+    linhasOrigem.sort((a,b)=>a-b);
+    conflitos.push({
+      loja:g.loja,data:g.data,nf:g.nf,hora,linhas:linhasOrigem,motivo,linhasLimitadas
+    });
+  };
+  grupos.forEach(g=>{
+    const doc=r=>String(r?.documento||'').replace(/\D/g,'');
+    const hora=r=>String(r?._horaVenda||'').trim();
+    // No grão de NF, rótulos anonimizados e documentos de fachada não definem
+    // clientes diferentes; use uma identidade transitória comum para inferir
+    // apenas metadados compatíveis, após o bloqueio de conflitos abaixo.
+    const nome=r=>window._crmAnonimo(r?.cliente,doc(r))?'anonimo':window._crmChaveCompra(r?.cliente,'');
+    // CONSUMIDOR FINAL pode carregar documentos de fachada. Se duas linhas
+    // anônimas da mesma NF puderem pertencer ao mesmo horário (ou não trouxerem
+    // hora), documentos diferentes deixam a compra incerta: bloqueie o lote.
+    const anonimas=g.linhas.filter(r=>window._crmAnonimo(r?.cliente,doc(r)));
+    const anonPorHora=new Map(),anonSemHora=new Map();
+    anonimas.forEach(r=>{
+      const d=doc(r);if(!d) return;
+      const h=hora(r),mapa=h?anonPorHora:anonSemHora;
+      let docs=mapa.get(h||'');if(!docs){docs=new Map();mapa.set(h||'',docs);}
+      if(!docs.has(d)) docs.set(d,r);
+    });
+    let conflitoAnonimo=null;
+    anonPorHora.forEach((docs,h)=>{
+      if(conflitoAnonimo||docs.size<2) return;
+      const [a,b]=[...docs.values()].slice(0,2);conflitoAnonimo={a,b,h,motivo:'documentos diferentes em venda anônima no mesmo horário'};
+    });
+    if(!conflitoAnonimo&&anonSemHora.size){
+      const docs=[...anonSemHora.values()][0];
+      if(docs.size>1){
+        const [a,b]=[...docs.values()].slice(0,2);
+        conflitoAnonimo={a,b,h:'',motivo:'documentos diferentes em venda anônima com horário ausente'};
+      }else{
+        const [d,a]=[...docs.entries()][0];
+        anonPorHora.forEach((porHora,h)=>{
+          if(conflitoAnonimo) return;
+          const outro=[...porHora.entries()].find(([doc])=>doc!==d);
+          if(outro) conflitoAnonimo={a,b:outro[1],h:'',motivo:'documentos diferentes em venda anônima com horário ausente'};
+        });
+      }
+    }
+    if(conflitoAnonimo){
+      ambiguo=true;
+      registrarConflito(g,conflitoAnonimo.motivo,[conflitoAnonimo.a,conflitoAnonimo.b],conflitoAnonimo.h);
+    }
+    const porNome=new Map();
+    g.linhas.forEach(r=>{
+      const n=nome(r);let rs=porNome.get(n);if(!rs){rs=[];porNome.set(n,rs);}rs.push(r);
+    });
+    const provisorio=new Map();
+    porNome.forEach(rs=>rs.forEach(r=>{
+      if(doc(r)) return;
+      const h=hora(r),possiveis=new Set(rs.filter(o=>doc(o)&&(!h||!hora(o)||hora(o)===h)).map(doc));
+      if(possiveis.size>1){
+        ambiguo=true;
+        if(opts?.detalharConflitos) registrarConflito(g,'linha sem documento compatível com mais de um CPF/CNPJ',function*(){
+          yield r;for(const o of rs) if(possiveis.has(doc(o))) yield o;
+        },h);
+      }
+      else if(possiveis.size===1) provisorio.set(r,possiveis.values().next().value);
+    }));
+    if(g.linhas.some(r=>hora(r))) g.linhas.forEach(r=>{
+      if(hora(r)) return;
+      const d=doc(r)||provisorio.get(r)||'',n=nome(r),possiveis=new Set(g.linhas
+        .filter(o=>{
+          const od=doc(o)||provisorio.get(o)||'';
+          return hora(o)&&(d?(od===d||(!od&&nome(o)===n)):(!od&&nome(o)===n));
+        }).map(hora));
+      if(possiveis.size>1){
+        ambiguo=true;
+        if(opts?.detalharConflitos) registrarConflito(g,'linha sem horário compatível com mais de um horário',function*(){
+          yield r;for(const o of g.linhas) if(possiveis.has(hora(o))) yield o;
+        },hora(r));
+      }
+      else if(possiveis.size===1) horarios.push([r,possiveis.values().next().value]);
+    });
+    provisorio.forEach((d,r)=>documentos.push([r,d]));
+  });
+  if(ambiguo){
+    const resultado={ambiguo:true,vinculados:0,horariosVinculados:0};
+    if(opts?.detalharConflitos){resultado.conflitos=conflitos;resultado.conflitosLimitados=conflitosLimitados;}
+    return resultado;
+  }
+  documentos.forEach(([r,d])=>{r.documento=d;});
+  horarios.forEach(([r,h])=>{r._horaVenda=h;});
+  return {ambiguo:false,vinculados:documentos.length,horariosVinculados:horarios.length};
+};
+
+window._crmTipoChaveCompraCliente=function(r,offset=0){
+  if(!Array.isArray(r)) return '';
+  const chave=r[offset+11];
+  if(typeof chave!=='string'||!chave) return '';
+  const nome=String(r[offset+1]||'').trim();
+  const documento=String(r[offset+2]||'').replace(/\D/g,'');
+  const data=String(r[offset+3]||'');
+  const nf=String(r[offset+4]||'').trim();
+  const comprador=nf?window._crmChaveCompra(nome,documento)
+    :window._crmChaveCompra(nome,'');
+  try{
+    const partes=JSON.parse(chave);
+    if(Array.isArray(partes)&&partes.length===5&&partes.every(x=>typeof x==='string')
+        &&(partes[3]===''||/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{3})?$/.test(partes[3]))
+        &&partes[1]===data&&partes[2]===nf&&partes[4]===comprador)
+      return 'estavel';
+  }catch(e){}
+  const nomeLegado=(window._crmChaveCompra(nome,'').replace(/^nome:/,'')||'?');
+  const chaveLegada=nf?data+'|'+nf:'s/nf|'+data+'|'+nomeLegado;
+  return chave===chaveLegada?'legada':'';
+};
+
 window._crmComprasClienteValido=function(detalhe){
   if(detalhe?.versao!==1||detalhe.disponivel!==true
       ||!Array.isArray(detalhe.meses)||!Array.isArray(detalhe.itens)) return false;
   const meses=new Set(detalhe.meses);
   if(meses.size!==detalhe.meses.length
       ||[...meses].some(m=>typeof m!=='string'||!/^\d{4}-\d{2}$/.test(m))) return false;
-  return detalhe.itens.every(r=>Array.isArray(r)&&r.length===11
+  return detalhe.itens.every(r=>Array.isArray(r)&&(r.length===11||r.length===12)
     &&[0,1,2,3,4,5,6,9,10].every(i=>typeof r[i]==='string')
     &&typeof r[0]==='string'&&r[0]===window._crmChaveCompra(r[1],r[2],r[10])
     &&typeof r[1]==='string'&&r[1].trim()!==''
     &&typeof r[3]==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r[3])
-    &&meses.has(r[3].slice(0,7))&&Number.isFinite(r[7])&&Number.isFinite(r[8]));
+    &&meses.has(r[3].slice(0,7))&&Number.isFinite(r[7])&&Number.isFinite(r[8])
+    &&(r.length===11||window._crmTipoChaveCompraCliente(r)==='estavel'
+      ||window._crmTipoChaveCompraCliente(r)==='legada'));
 };
 
 /** Nomes tratados como "sem cliente identificado" na base atual — para conferência. */
@@ -14690,7 +15162,7 @@ window._excelProvaValorNota = function(linhas){
   const porNf = new Map();
   (linhas||[]).forEach(r => {
     const nf = String(r && r.cupom || '').trim(); if(!nf) return;
-    const k = (r.data||'') + '|' + nf;
+    const k = window._crmChaveVenda(r);
     let a = porNf.get(k);
     if(!a){ a = {n:0, vals:new Set()}; porNf.set(k, a); }
     a.n++; a.vals.add(Math.round((Number(r.valor)||0) * 100));
@@ -14705,13 +15177,68 @@ window._excelProvaValorNota = function(linhas){
   };
 };
 
+function _crmTopVendProd(vendProd, limite){
+  const porVend=new Map(), saida=[];
+  (vendProd||new Map()).forEach((v,k)=>{
+    const [vi,pi]=String(k).split('|').map(Number);
+    if(!porVend.has(vi)) porVend.set(vi,[]);
+    porVend.get(vi).push([pi,v.q||0,Math.round((v.f||0)*100)/100]);
+  });
+  porVend.forEach((arr,vi)=>arr.sort((x,y)=>y[2]-x[2]).slice(0,limite||120)
+    .forEach(([pi,q,f])=>saida.push([vi,pi,q,f])));
+  return saida;
+}
+
+function _crmCoberturaVendProd(cubo){
+  const meses = new Set(window.crmMesesDoCubo(cubo));
+  const declarados = new Set((Array.isArray(cubo?.mesVendProdCobertura)
+    ? cubo.mesVendProdCobertura : []).filter(m=>typeof m==='string'&&/^\d{4}-\d{2}$/.test(m)));
+  const linhas=[];
+  let invalida=false;
+  (Array.isArray(cubo?.mesVendProd)?cubo.mesVendProd:[]).forEach(r=>{
+    if(!Array.isArray(r)||r.length!==5||!Number.isInteger(r[0])||!Number.isInteger(r[1])
+        ||!Number.isInteger(r[2])||!Number.isFinite(r[3])||!Number.isFinite(r[4])
+        ||!cubo?.meses?.[r[0]]||r[1]<0||r[1]>=(cubo.vends||[]).length
+        ||r[2]<0||r[2]>=(cubo.prods||[]).length){invalida=true;return;}
+    const mes=cubo.meses[r[0]];
+    if(!declarados.has(mes)) return;
+    linhas.push(r);
+  });
+  if(invalida) return {linhas:[], meses:new Set()};
+  // Explicit coverage includes valid months with no product rows.
+  const cobertos=new Set([...declarados].filter(m=>meses.has(m)));
+  return {linhas:linhas.filter(r=>cobertos.has(cubo.meses[r[0]])), meses:cobertos};
+}
+
+function _crmTotaisVendProdMensais(linhas, mesesCobertos, meses){
+  const permitidos=new Set(mesesCobertos||[]), vendedor=new Map(), produto=new Map();
+  (linhas||[]).forEach(([mi,vi,pi,q,f])=>{
+    if(!permitidos.has(meses?.[mi])) return;
+    const kv=vi+'|'+pi, v=vendedor.get(kv)||{q:0,f:0};
+    v.q+=q||0; v.f+=f||0; vendedor.set(kv,v);
+    const p=produto.get(pi)||{q:0,f:0}; p.q+=q||0; p.f+=f||0; produto.set(pi,p);
+  });
+  return {
+    vendProd:_crmTopVendProd(vendedor,120),
+    prodTotal:[...produto.entries()].map(([pi,v])=>[Number(pi),v.q,Math.round(v.f*100)/100,0])
+      .sort((a,b)=>b[2]-a[2])
+  };
+}
+
 window.crmAgregar = function(linhas, opts){
   opts = opts || {};
   // [R65] a menos que o chamador já tenha deduplicado
   if(opts.jaDeduplicado !== true){
-    const dd = window.crmDedup(linhas);
+    const dd = window.crmDedup(linhas, opts);
     linhas = dd.linhas;
     opts._dedup = dd;
+  } else {
+    linhas = (linhas||[]).map(r => Object.assign({}, r));
+    const identidade = window._crmVincularDocumentoVenda(linhas);
+    const chaveLegada = identidade.ambiguo && opts.permitirAmbiguoLegado === true;
+    if(identidade.ambiguo && !chaveLegada)
+      throw new Error('CRM_NF_DOCUMENTO_AMBIGUO: há conflito de identidade de compra; verifique documentos e horários.');
+    opts._usarChaveVendaLegada = chaveLegada;
   }
   const anonNotas = new Set(); let anonFat = 0;   // [R90] vendas sem cliente identificado
   const TOP_PROD_MES = opts.topProdMes || 120;
@@ -14724,6 +15251,7 @@ window.crmAgregar = function(linhas, opts){
 
   const mesVend=new Map();      // mes|vend -> {f,i,cupons:Set,cli:Set}
   const mesProd=new Map();      // mes|prod -> {q,f}
+  const mesVendProd=new Map();  // mes|vend|prod -> {q,f}, sem top-N
   // [R86] vendedor|produto: sem esta dimensão o filtro de vendedor(a) não
   // alcançava os produtos — a tela trocava o filtro e a lista continuava a
   // mesma, mostrando o ranking da loja inteira.
@@ -14768,12 +15296,9 @@ window.crmAgregar = function(linhas, opts){
     const mi=idx(tMes,iMes,mes), vi=idx(tVend,iVend,r.vendedora||''), pi=idx(tProd,iProd,r.produto||'');
     // [FIX R76] Antes: r.cupom || ('#'+k) — sem NF, CADA LINHA virava uma
     // venda, inflando a contagem de cupons e derrubando o ticket médio.
-    // Sem NF, o melhor identificador disponível é cliente + dia: as compras
-    // de uma pessoa num mesmo dia contam como uma venda.
-    const _nfLinha = String(r.cupom||'').trim();
-    const cup = _nfLinha
-      ? (r.data + '|' + _nfLinha)
-      : ('s/nf|' + r.data + '|' + (norm(r.cliente)||'?'));
+    // Sem NF, cliente + dia é o fallback; a hora de origem também diferencia
+    // compras quando existe, e só a ausência dela mantém o grão data-only.
+    const cup = window._crmChaveVenda(r, opts._usarChaveVendaLegada === true);
     fatTotal+=val;
     if(!dtMin||r.data<dtMin) dtMin=r.data;
     if(!dtMax||r.data>dtMax) dtMax=r.data;
@@ -14795,6 +15320,10 @@ window.crmAgregar = function(linhas, opts){
     if(!bv){ bv={q:0,f:0}; vendProd.set(vi+'|'+pi,bv); }
     bv.q+=qt; bv.f+=val;
 
+    let bvm=mesVendProd.get(mi+'|'+vi+'|'+pi);
+    if(!bvm){ bvm={q:0,f:0}; mesVendProd.set(mi+'|'+vi+'|'+pi,bvm); }
+    bvm.q+=qt; bvm.f+=val;
+
     let c=prodTot.get(pi);
     if(!c){ c={q:0,f:0,cli:new Set()}; prodTot.set(pi,c); }
     c.q+=qt; c.f+=val;
@@ -14805,11 +15334,12 @@ window.crmAgregar = function(linhas, opts){
     // melhor cliente da base e o cruzamento de produtos misturava compras de
     // pessoas diferentes.
     if(!anon){
+      // B054: preserve invoice fractions here; client/seller totals round after summing all lines.
       detalhesCompra.push([
         window._crmChaveCompra(r.cliente,docCli,r.telefone), String(r.cliente||'').trim(), docCli,
         String(r.data), String(r.cupom||'').trim(), String(r.produto||'').trim(),
-        String(r.categoria||r.linha||'').trim(), qt, Math.round(val*100)/100,
-        String(r.vendedora||'').trim(), String(r.telefone||'').replace(/\D/g,'')
+        String(r.categoria||r.linha||'').trim(), qt, val,
+        String(r.vendedora||''), String(r.telefone||'').replace(/\D/g,''), cup
       ]);
       let d=cliente.get(cn);
       if(!d){
@@ -14872,17 +15402,12 @@ window.crmAgregar = function(linhas, opts){
     arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_PROD_MES).forEach(a=>cuboMesProd.push([mi,a[0],a[1],a[2]]));
   });
 
-  // Top N por vendedor(a) — mesmo critério do corte por mês, para o cubo
-  // não crescer com vendedores × produtos.
-  const porVend=new Map();
-  [...vendProd.entries()].forEach(([k,v])=>{
-    const [vi,pi]=k.split('|').map(Number);
-    if(!porVend.has(vi)) porVend.set(vi,[]);
-    porVend.get(vi).push([pi,v.q,r2(v.f)]);
-  });
-  const cuboVendProd=[];
-  porVend.forEach((arr,vi)=>{
-    arr.sort((x,y)=>y[2]-x[2]).slice(0,TOP_PROD_MES).forEach(a=>cuboVendProd.push([vi,a[0],a[1],a[2]]));
+  // Annual seller×product remains capped for compatibility; the complete
+  // month dimension below is the source for period-scoped answers.
+  const cuboVendProd=_crmTopVendProd(vendProd,TOP_PROD_MES);
+  const cuboMesVendProd=[...mesVendProd.entries()].map(([k,v])=>{
+    const [mi,vi,pi]=k.split('|').map(Number);
+    return [mi,vi,pi,v.q,r2(v.f)];
   });
 
   const cuboProdTot=[...prodTot.entries()]
@@ -14905,6 +15430,10 @@ window.crmAgregar = function(linhas, opts){
     _porMesCli.get(mi).push([window._crmChaveCli(d.n, d.doc), v.c, r2(v.t), v.i, v.ud||'']);
   });
   const cuboMesCli=[];
+  const mesesCliCompletos=new Set((cuboMesVend||[]).map(r=>tMes[r[0]]).filter(Boolean));
+  if(TOP_CLI_MES>0){
+    _porMesCli.forEach((arr,mi)=>{ if(arr.length>TOP_CLI_MES) mesesCliCompletos.delete(tMes[mi]); });
+  }
   _porMesCli.forEach((arr,mi)=>{
     arr.sort((x,y)=>y[2]-x[2]);
     (TOP_CLI_MES > 0 ? arr.slice(0, TOP_CLI_MES) : arr)
@@ -14933,7 +15462,11 @@ window.crmAgregar = function(linhas, opts){
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     // [R155] sem corte = dá para reconstruir o ano removendo um mês
     mesCliCompleto: TOP_CLI_MES === 0,
+    mesCliCobertura:[...mesesCliCompletos].sort(),
     mesVend:cuboMesVend, mesProd:cuboMesProd, vendProd:cuboVendProd, prodTotal:cuboProdTot,
+    mesVendProd:cuboMesVendProd,
+    mesVendProdCobertura:[...new Set(cuboMesVend.map(r=>tMes[r[0]]).filter(Boolean))].sort(),
+    prodMetricasAnuaisDisponiveis:true, prodTotalClientesAproximados:false,
     mesCli:cuboMesCli,
     clientes:cuboClientes, cross:cuboCross,
     _comprasCliente:{versao:1,disponivel:true,meses:[...mesesDetalhe].sort(),itens:detalhesCompra}
@@ -14989,6 +15522,67 @@ window.crmFatiarComprasCliente=function(itens){
   return partes;
 };
 
+/** Empacota o detalhe CRM em linhas legadas de 11 campos e chaves paralelas. */
+window.crmFatiarComprasClienteWire=function(itens,meta={}){
+  const linhas=Array.isArray(itens)?itens:[];
+  if(!linhas.length)return [];
+  const partes=[];
+  const montar=(rows,keys,indice)=>({
+    dados:JSON.stringify(rows),chaves:keys,ts:Number(meta.ts)||0,
+    gid:String(meta.gid||''),por:String(meta.por||'?'),
+    loja:String(meta.loja||''),ano:String(meta.ano||''),parte:indice
+  });
+  const adicionar=grupo=>{
+    const wire=[],chaves=[];
+    grupo.forEach(linha=>{
+      if(!Array.isArray(linha)||linha.length<11)
+        throw new Error('Um registro de compra está inválido para sincronização.');
+      wire.push(linha.slice(0,11));
+      let chave=null;
+      if(linha.length===12&&window._crmTipoChaveCompraCliente(linha)==='estavel'){
+        const partes=JSON.parse(linha[11]);
+        if(partes[0]!==String(meta.loja||'').trim().toLowerCase()
+            ||partes[1]?.slice(0,4)!==String(meta.ano||''))
+          throw new Error('Uma chave estável de compra não corresponde à loja ou ao ano do conjunto.');
+        chave=linha[11];
+      }
+      chaves.push(chave);
+    });
+    if(_crmBytes(montar(wire,chaves,partes.length))<=CRM_ORC_DOC){
+      partes.push({itens:wire,chaves});
+      return;
+    }
+    if(grupo.length<2)
+      throw new Error('Um registro de compra excede o limite seguro do documento.');
+    const meio=Math.floor(grupo.length/2);
+    adicionar(grupo.slice(0,meio));adicionar(grupo.slice(meio));
+  };
+  window.crmFatiarComprasCliente(linhas).forEach(adicionar);
+  return partes;
+};
+
+/** Valida e reanexa somente as chaves estáveis do transporte CRM atual. */
+window._crmAnexarChavesComprasClienteWire=function(meses,itens,chaves,loja,ano){
+  if(!Array.isArray(itens)||!Array.isArray(chaves)||chaves.length!==itens.length
+      ||itens.some(r=>!Array.isArray(r)||r.length!==11)) return null;
+  const lojaEsperada=String(loja||'').trim().toLowerCase(),anoEsperado=String(ano||'');
+  if(!lojaEsperada||!/^\d{4}$/.test(anoEsperado)) return null;
+  const reidratadas=[];
+  for(let i=0;i<itens.length;i++){
+    const linha=itens[i],chave=chaves[i];
+    if(chave===null){reidratadas.push(linha);continue;}
+    if(typeof chave!=='string'||window._crmTipoChaveCompraCliente([...linha,chave])!=='estavel')
+      return null;
+    try{
+      const partes=JSON.parse(chave);
+      if(partes[0]!==lojaEsperada||partes[1]?.slice(0,4)!==anoEsperado) return null;
+    }catch(e){return null;}
+    reidratadas.push([...linha,chave]);
+  }
+  return window._crmComprasClienteValido({versao:1,disponivel:true,meses,itens:reidratadas})
+    ?reidratadas:null;
+};
+
 /** Divide o cubo de clientes em pedaços que cabem no orçamento. */
 window.crmFatiarClientes = function(clientes){
   const total = _crmBytes(clientes);
@@ -15014,9 +15608,11 @@ window.crmFatiarClientes = function(clientes){
 //
 // Meses distintos não se sobrepõem em NENHUMA dimensão que tenha mês na
 // chave: o cupom carrega a data, e mesVend/mesProd são indexados por
-// mês. Nessas, fundir é concatenar, sem aproximação alguma. As
-// dimensões sem mês (prodTotal, cross, clientes) somam — exatamente a
-// aproximação que crmCombinar já faz entre anos desde o R53.
+// mês. Nessas, fundir é concatenar. A dimensão completa vendedor×produto
+// permite reconstruir produto/vendedor quando todos os meses contribuintes
+// têm cobertura; sem isso, só se conservam os totais anuais legados que ainda
+// estejam marcados como disponíveis. `cross` e clientes seguem as regras
+// legadas aproximadas de crmCombinar.
 // ══════════════════════════════════════════════════════════════════════
 
 /** Meses de fato cobertos por um cubo, em ordem. */
@@ -15031,6 +15627,19 @@ window.crmMesesDoCubo = function(cubo){
   return [...vistos].sort();
 };
 
+/** Meses cuja dimensão cliente×mês tem completude comprovada. */
+window._crmCoberturaMesCli = function(cubo){
+  const meses = new Set(window.crmMesesDoCubo(cubo));
+  if(!Array.isArray(cubo?.mesCli) || !Array.isArray(cubo?.clis)) return new Set();
+  if(Array.isArray(cubo.mesCliCobertura)){
+    return new Set(cubo.mesCliCobertura.filter(m=>
+      typeof m==='string' && /^\d{4}-\d{2}$/.test(m) && meses.has(m)));
+  }
+  // Compatibilidade conservadora: somente cubos antigos que declaram a
+  // dimensão global completa podem afirmar cobertura sem o mapa mensal.
+  return cubo.mesCliCompleto===true ? meses : new Set();
+};
+
 /**
  * [R155] Remove meses inteiros de um cubo, reconstruindo o que depende
  * deles. É o que permite trocar SÓ agosto sem perder janeiro a julho.
@@ -15039,11 +15648,12 @@ window.crmMesesDoCubo = function(cubo){
  * fechado que já tinha sido importado à parte. Até aqui a importação só
  * sabia duas coisas: fundir meses novos, ou trocar o ano inteiro.
  *
- * Exato em tudo que tem mês na chave (mesVend, mesProd, mesCli) e no
- * cubo de clientes, que é RECONSTRUÍDO a partir do mesCli dos meses que
- * ficam — daí a exigência de mesCliCompleto. As duas dimensões sem mês
- * (prodTotal e cross, que são do ano) são reescaladas pela participação
- * do que restou; ficam aproximadas e a tela diz isso.
+ * mesVend e mesCli são reconstruídos dos meses que ficam; clientes vêm de
+ * mesCli, daí a exigência de mesCliCompleto. A dimensão completa
+ * vendedor×produto reconstrói também vendProd/prodTotal quando sua
+ * cobertura declarada contém todos os meses restantes. Em bases antigas,
+ * esses totais de produto ficam indisponíveis; os meses preserváveis ficam.
+ * cross continua proporcional ao faturamento restante.
  *
  * Devolve null quando não dá para fazer direito, e quem chama decide.
  */
@@ -15051,13 +15661,17 @@ window.crmRemoverMeses = function(cubo, mesesFora){
   if(!cubo) return null;
   const fora = new Set(mesesFora || []);
   if(!fora.size) return cubo;
-  if(!cubo.mesCliCompleto || !Array.isArray(cubo.mesCli) || !Array.isArray(cubo.clis)) return null;
+  const coberturaCliAntes=window._crmCoberturaMesCli(cubo);
+  if(!cubo.mesCliCompleto || !Array.isArray(cubo.mesCli) || !Array.isArray(cubo.clis)
+      || window.crmMesesDoCubo(cubo).some(m=>!coberturaCliAntes.has(m))) return null;
 
   const tab = cubo.meses || [];
   const ficam = i => { const m = tab[i]; return m && !fora.has(m); };
+  const coberturaVendProd=_crmCoberturaVendProd(cubo);
 
   const mesVend = (cubo.mesVend||[]).filter(r => ficam(r[0]));
   const mesProd = (cubo.mesProd||[]).filter(r => ficam(r[0]));
+  const mesVendProd = coberturaVendProd.linhas.filter(r => ficam(r[0]));
   const mesCli  = (cubo.mesCli ||[]).filter(r => ficam(r[0]));
   if(!mesVend.length) return null;   // não sobrou nada: quem chama que troque o ano
 
@@ -15093,6 +15707,7 @@ window.crmRemoverMeses = function(cubo, mesesFora){
   const esc = n => Math.round((n||0) * fator);
 
   const mesesFicam = [...new Set(mesVend.map(r => tab[r[0]]).filter(Boolean))].sort();
+  const coberturaCliFica=[...coberturaCliAntes].filter(m=>!fora.has(m)&&mesesFicam.includes(m)).sort();
   const ini = mesesFicam.length ? mesesFicam[0] + '-01' : null;
   const fimMes = mesesFicam.length ? mesesFicam[mesesFicam.length-1] : null;
   const fim = fimMes ? (fimMes + '-' + String(new Date(Number(fimMes.slice(0,4)),
@@ -15107,6 +15722,33 @@ window.crmRemoverMeses = function(cubo, mesesFora){
     itens:(detalheCompra.itens||[]).filter(r=>!fora.has(String(r?.[3]||'').slice(0,7)))
   }) : detalheCompra;
 
+  const coberturaFica=new Set([...coberturaVendProd.meses].filter(m=>!fora.has(m)));
+  const produtoMensalCompleto=mesesFicam.length>0&&mesesFicam.every(m=>coberturaFica.has(m));
+  const totaisMensais=produtoMensalCompleto
+    ? _crmTotaisVendProdMensais(mesVendProd,coberturaFica,tab)
+    : {vendProd:[],prodTotal:[]};
+
+  const mesesDetalhe=new Set(detalheCompra?.meses||[]);
+  const clientesProdCompleto=produtoMensalCompleto&&window._crmComprasClienteValido(detalheCompra)
+    && mesesFicam.every(m=>mesesDetalhe.has(m));
+  const clientesPorProd=new Map();
+  if(clientesProdCompleto){
+    (detalheCompraRestante.itens||[]).forEach(r=>{
+      const pi=(cubo.prods||[]).indexOf(String(r[5]||'')); if(pi<0) return;
+      const chave=String(r[2]||'').replace(/\D/g,'') || String(r[1]||'').trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+      if(!chave) return;
+      if(!clientesPorProd.has(pi)) clientesPorProd.set(pi,new Set());
+      clientesPorProd.get(pi).add(chave);
+    });
+  }
+  const clientesAntigos=new Map((cubo.prodTotal||[]).map(([pi,q,f,ncli])=>[pi,ncli||0]));
+  const prodTotal=produtoMensalCompleto?totaisMensais.prodTotal.map(([pi,q,f])=>[
+    pi,q,f,clientesProdCompleto
+      ? (clientesPorProd.get(pi)?.size||0)
+      : esc(clientesAntigos.get(pi)||0)
+  ]):[];
+
   return Object.assign({}, cubo, {
     ts: Date.now(),
     linhas: Math.round((cubo.linhas||0) * fator),
@@ -15115,10 +15757,12 @@ window.crmRemoverMeses = function(cubo, mesesFora){
     clientesUnicos: clientes.length,
     anonimo: cubo.anonimo ? {notas: esc(cubo.anonimo.notas), fat: r2((cubo.anonimo.fat||0)*fator)} : null,
     fontes,
-    mesVend, mesProd, mesCli, clientes,
-    // [R155] sem mês na chave: reescalados, não medidos
-    prodTotal: (cubo.prodTotal||[]).map(([pi,q,f,ncli]) =>
-                 [pi, esc(q), r2((f||0)*fator), esc(ncli)]).filter(r => r[2] > 0),
+    mesVend, mesProd, mesCli, mesVendProd, clientes,
+    mesCliCobertura:coberturaCliFica,
+    mesVendProdCobertura:[...coberturaFica].sort(),
+    vendProd:totaisMensais.vendProd, prodTotal,
+    prodMetricasAnuaisDisponiveis:produtoMensalCompleto,
+    prodTotalClientesAproximados: produtoMensalCompleto&&!clientesProdCompleto,
     cross: (cubo.cross||[]).map(([a,b,n]) => [a, b, esc(n)]).filter(r => r[2] > 0),
     _comprasCliente: detalheCompraRestante,
     _aproximado: true
@@ -15136,15 +15780,22 @@ window.crmFundirCubos = function(a, b){
   const tMes=[], iMes=new Map(), tVend=[], iVend=new Map(), tProd=[], iProd=new Map();
   const idx=(t,m,v)=>{ if(v===undefined||v===null) v=''; let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
 
-  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), prodTot=new Map(), cross=new Map();
+  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), mesVendProd=new Map(), prodTot=new Map(), cross=new Map();
+  const fontesCoberturaVendProd=[];
+  const fontesCoberturaMesCli=[];
   const cli=new Map();
   const tCli=[], iCli=new Map(), mesCli=new Map();
   let linhas=0, fat=0, ini=null, fim=null, anonNotas=0, anonFat=0, temDedup=false;
   const comprasCliente=[], mesesDetalhe=new Set();
   let temDetalheMarcado=false, temDetalheValido=false;
+  let prodMetricasAnuaisDisponiveis=true;
   const dd={duplicadas:0, nfsCorrigidas:0, valorRemovido:0, notas:0, semNF:0};
 
   [a,b].forEach(c => {
+    if(c.prodMetricasAnuaisDisponiveis===false) prodMetricasAnuaisDisponiveis=false;
+    const coberturaMVP=_crmCoberturaVendProd(c);
+    fontesCoberturaVendProd.push({meses:window.crmMesesDoCubo(c),cobertos:coberturaMVP.meses});
+    fontesCoberturaMesCli.push({meses:window.crmMesesDoCubo(c),cobertos:window._crmCoberturaMesCli(c)});
     const detalhe=c._comprasCliente;
     if(detalhe?.versao===1) temDetalheMarcado=true;
     if(window._crmComprasClienteValido(detalhe)){
@@ -15186,6 +15837,11 @@ window.crmFundirCubos = function(a, b){
       const k=mM[mi]+'|'+mP[pi], o=mesProd.get(k)||{q:0,f:0};
       o.q+=q||0; o.f+=f||0; mesProd.set(k,o);
     });
+    coberturaMVP.linhas.forEach(([mi,vi,pi,q,f])=>{
+      if(mM[mi]===undefined||mV[vi]===undefined||mP[pi]===undefined) return;
+      const k=mM[mi]+'|'+mV[vi]+'|'+mP[pi], o=mesVendProd.get(k)||{q:0,f:0};
+      o.q+=q||0; o.f+=f||0; mesVendProd.set(k,o);
+    });
     (c.vendProd||[]).forEach(([vi,pi,q,f])=>{
       const k=mV[vi]+'|'+mP[pi], o=vendProd.get(k)||{q:0,f:0};
       o.q+=q||0; o.f+=f||0; vendProd.set(k,o);
@@ -15223,12 +15879,7 @@ window.crmFundirCubos = function(a, b){
   // sem eles ele cresce a cada importação até estourar o documento.
   const TOPO_PROD = 120, TOPO_CROSS = 150;
 
-  const porVend = new Map();
-  [...vendProd.entries()].forEach(([k,v])=>{ const [vi,pi]=par(k);
-    if(!porVend.has(vi)) porVend.set(vi,[]); porVend.get(vi).push([pi,v.q,r2(v.f)]); });
-  const outVendProd=[];
-  porVend.forEach((arr,vi)=>{ arr.sort((x,y)=>y[2]-x[2]).slice(0,TOPO_PROD)
-    .forEach(x=>outVendProd.push([vi,x[0],x[1],x[2]])); });
+  const outVendProd=_crmTopVendProd(vendProd,TOPO_PROD);
 
   const porMes = new Map();
   [...mesProd.entries()].forEach(([k,v])=>{ const [mi,pi]=par(k);
@@ -15242,6 +15893,50 @@ window.crmFundirCubos = function(a, b){
     const pi = iMes.has(pm) ? iMes.get(pm) : idx(tMes,iMes,pm);
     return [c.n, c.v, pi, c.ult, c.compras, r2(c.total), c.itens, c.doc, c.tel];
   }).sort((x,y)=>y[5]-x[5]);
+
+  const mesesResultado=[...new Set([...mesVend.keys()].map(k=>tMes[Number(k.split('|')[0])]).filter(Boolean))].sort();
+  const coberturaMesCli=mesesResultado.filter(m=>{
+    const fontes=fontesCoberturaMesCli.filter(s=>s.meses.includes(m));
+    return fontes.length>0&&fontes.every(s=>s.cobertos.has(m));
+  });
+  const coberturaMVP=mesesResultado.filter(m=>{
+    const fontes=fontesCoberturaVendProd.filter(s=>s.meses.includes(m));
+    return fontes.length>0&&fontes.every(s=>s.cobertos.has(m));
+  }).sort();
+  const coberturaMVPSet=new Set(coberturaMVP);
+  const coberturaMVPCompleta=mesesResultado.length>0&&mesesResultado.every(m=>coberturaMVPSet.has(m));
+  const linhasMVP=[...mesVendProd.entries()].map(([k,v])=>{
+    const [mi,vi,pi]=par(k);return [mi,vi,pi,v.q,r2(v.f)];
+  });
+  let vendProdFinal=outVendProd;
+  let prodTotalFinal=[...prodTot.entries()].map(([k,v])=>[Number(k),v.q,r2(v.f),v.cl]).sort((x,y)=>y[2]-x[2]);
+  let prodMetricasFinal=prodMetricasAnuaisDisponiveis;
+  let prodClientesAproximados=true;
+  if(coberturaMVPCompleta){
+    const totais=_crmTotaisVendProdMensais(linhasMVP,coberturaMVP,tMes);
+    vendProdFinal=totais.vendProd;
+    const detalheCompleto=window._crmComprasClienteValido(a._comprasCliente)
+      &&window._crmComprasClienteValido(b._comprasCliente)
+      &&mesesResultado.every(m=>mesesDetalhe.has(m));
+    const cliProd=new Map();
+    if(detalheCompleto){
+      comprasCliente.forEach(r=>{
+        const pi=iProd.get(String(r[5]||'')); if(pi===undefined) return;
+        const chave=String(r[2]||'').replace(/\D/g,'')||String(r[1]||'').trim().toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+        if(!chave) return;
+        if(!cliProd.has(pi)) cliProd.set(pi,new Set());
+        cliProd.get(pi).add(chave);
+      });
+    }
+    prodTotalFinal=totais.prodTotal.map(([pi,q,f])=>[
+      pi,q,f,detalheCompleto?(cliProd.get(pi)?.size||0):(prodTot.get(Number(pi))?.cl||0)
+    ]);
+    prodMetricasFinal=true;
+    prodClientesAproximados=!detalheCompleto;
+  } else if(!prodMetricasAnuaisDisponiveis){
+    vendProdFinal=[]; prodTotalFinal=[]; prodMetricasFinal=false;
+  }
 
   return {
     ts: Date.now(),
@@ -15258,11 +15953,17 @@ window.crmFundirCubos = function(a, b){
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,r2(v.f),v.c,v.i,v.cl];}),
     mesCli:  [...mesCli.entries()].map(([k,v])=>{const[x,y]=par(k);return [x,y,v.c,r2(v.t),v.i,v.ud];}),
-    // só é completo se OS DOIS lados forem — senão a reconstrução mente
-    mesCliCompleto: !!(a.mesCliCompleto && b.mesCliCompleto),
+    // Preserve the established whole-cube guard for month replacement;
+    // per-month coverage is read-only evidence for filtering/display.
+    mesCliCompleto:!!(a.mesCliCompleto && b.mesCliCompleto),
+    mesCliCobertura:coberturaMesCli,
     mesProd: outMesProd,
-    vendProd: outVendProd,
-    prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,r2(v.f),v.cl]).sort((x,y)=>y[2]-x[2]),
+    vendProd: vendProdFinal,
+    mesVendProdCobertura:coberturaMVP,
+    mesVendProd: linhasMVP.filter(r=>coberturaMVPSet.has(tMes[r[0]])),
+    prodMetricasAnuaisDisponiveis:prodMetricasFinal,
+    prodTotalClientesAproximados:prodClientesAproximados,
+    prodTotal: prodTotalFinal,
     clientes: outClientes,
      cross: [...cross.entries()].map(([k,n])=>{const[x,y]=par(k);return [x,y,n];})
             .sort((x,y)=>y[2]-x[2]).slice(0,TOPO_CROSS),
@@ -15279,6 +15980,9 @@ window.crmGuardar = function(lid, ano, cubo){
     throw new Error('O detalhe de compras está inválido; os dados anteriores foram preservados.');
   const partesDetalhe=detalheCompra?.versao===1&&detalheCompra.disponivel===true
     ?window.crmFatiarComprasCliente(detalheCompra.itens):[];
+  // Normaliza cabeças antigas: sem mapa mensal, só o sinal global true
+  // comprova que todos os meses foram agregados por completo.
+  cubo=Object.assign({},cubo,{mesCliCobertura:[...window._crmCoberturaMesCli(cubo)].sort()});
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   if(!D.crm) D.crm = {};
   if(!D.crm[lid]) D.crm[lid] = {};
@@ -15299,21 +16003,35 @@ window.crmGuardar = function(lid, ano, cubo){
   // pedir confirmação. Degradar dizendo o que se perdeu é melhor que
   // gravar um cubo que promete exatidão que não tem.
   // ══════════════════════════════════════════════════════════════════
+  if(Array.isArray(cubo.mesVendProd)&&cubo.mesVendProd.length
+      && _crmBytesCabeca(cubo) > CRM_ORC_DOC){
+    // ponytail: this optional exactness dimension must not evict monthly customers.
+    // Drop it before the existing mesCli fallback and make the loss explicit.
+    cubo=Object.assign({},cubo,{mesVendProd:undefined,mesVendProdCobertura:[]});
+    console.warn('[crm] B048: o conjunto ' + lid + '/' + ano + ' passou do orçamento de '
+      + Math.round(CRM_ORC_DOC/1024) + ' KB com a dimensão mensal vendedor×produto; '
+      + 'a dimensão opcional foi omitida, sem atribuir cobertura mensal aos dados legados.');
+  }
   if(Array.isArray(cubo.mesCli) && cubo.mesCli.length){
     let corte = 0;
+    const coberturaCli=new Set(cubo.mesCliCobertura||[]);
     while(_crmBytesCabeca(cubo) > CRM_ORC_DOC && corte < 12){
       corte++;
       const limite = Math.max(50, Math.floor(400 / corte));   // 400, 200, 133, 100...
       const porMes = new Map();
       const mantidos = [];
+      const mesesReduzidos=new Set();
       // mesCli já sai ordenado por valor decrescente dentro de cada mês
       cubo.mesCli.forEach(r => {
         const n = (porMes.get(r[0]) || 0) + 1;
         porMes.set(r[0], n);
         if(n <= limite) mantidos.push(r);
+        else if(cubo.meses?.[r[0]]) mesesReduzidos.add(cubo.meses[r[0]]);
       });
       if(mantidos.length === cubo.mesCli.length) break;   // não há mais o que podar
-      cubo = Object.assign({}, cubo, {mesCli: mantidos, mesCliCompleto: false});
+      mesesReduzidos.forEach(m=>coberturaCli.delete(m));
+      cubo = Object.assign({}, cubo, {mesCli: mantidos, mesCliCompleto: false,
+        mesCliCobertura:[...coberturaCli].sort()});
     }
     if(cubo.mesCliCompleto === false){
       console.warn('[crm] R155: o conjunto ' + lid + '/' + ano + ' passou do orçamento de '
@@ -15354,7 +16072,7 @@ window.crmAnos = function(lid){
   if(!D.crm) return [];
   const alvo = lid ? [lid] : Object.keys(D.crm);
   const set = new Set();
-  alvo.forEach(l => Object.keys(D.crm[l] || {}).forEach(a => set.add(a)));
+  alvo.forEach(l => Object.entries(D.crm[l] || {}).forEach(([a,c]) => { if(c) set.add(a); }));
   return [...set].sort().reverse();
 };
 
@@ -15362,7 +16080,8 @@ window.crmAnos = function(lid){
 window.crmLojasVisiveis = function(){
   if(!D.crm) return [];
   const todas = Object.keys(D.crm);
-  return isAdmin() ? todas : todas.filter(l => l === lojaId());
+  return isAdmin() ? todas.filter(l => window.crmAnos(l).length || (D.excelDados||[]).some(r => r.loja === l))
+                   : todas.filter(l => l === lojaId());
 };
 
 /**
@@ -15374,10 +16093,13 @@ window.crmCombinar = function(lojas, anos, opcoes){
   const tVend=[], iVend=new Map(), tProd=[], iProd=new Map(), tMes=[], iMes=new Map();
   const idx=(t,m,v)=>{ let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
 
-  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), prodTot=new Map(), cross=new Map();
+  const mesVend=new Map(), mesProd=new Map(), vendProd=new Map(), mesVendProd=new Map(), prodTot=new Map(), cross=new Map();
+  const fontesCoberturaMVP=[];
+  const fontesCoberturaMesCli=[];
   const clientes=new Map();
   const tCli=[], iCli=new Map(), mesCli=new Map();   // [R152] recorte mês × cliente
-  let linhas=0, faturamento=0, ini=null, fim=null;
+  let linhas=0, faturamento=0, ini=null, fim=null, cubosContados=0, prodMetricasAnuaisDisponiveis=true;
+  let prodTotalClientesAproximados=false;
   const incluirCompras=opcoes?.incluirComprasCliente===true;
   const comprasCliente=[], coberturaCompras=[];
 
@@ -15386,9 +16108,24 @@ window.crmCombinar = function(lojas, anos, opcoes){
     (anos && anos.length ? anos : Object.keys(porAno)).forEach(ano => {
       const c = porAno[ano];
       if(!c) return;
+      cubosContados++;
+      const mesesCliCubo=window.crmMesesDoCubo(c);
+      fontesCoberturaMesCli.push({meses:mesesCliCubo,cobertos:window._crmCoberturaMesCli(c)});
+      if(c.prodMetricasAnuaisDisponiveis===false) prodMetricasAnuaisDisponiveis=false;
+      if(c.prodTotalClientesAproximados===true) prodTotalClientesAproximados=true;
+      const coberturaMVP=_crmCoberturaVendProd(c);
+      fontesCoberturaMVP.push({meses:window.crmMesesDoCubo(c),cobertos:coberturaMVP.meses});
       if(incluirCompras){
         const detalhe=c._comprasCliente;
+        const vendedorasMes=[];
+        if(Array.isArray(c.mesVend)&&Array.isArray(c.vends)) c.mesVend.forEach(([mi,vi])=>{
+          const mes=c.meses?.[mi], vendedor=c.vends?.[vi];
+          if(mes&&vendedor&&!vendedorasMes.some(p=>p[0]===mes&&p[1]===vendedor))
+            vendedorasMes.push([mes,vendedor]);
+        });
         coberturaCompras.push({loja:lid,ano:String(ano),mesesConjunto:window.crmMesesDoCubo(c),
+          vendedorasMesDisponiveis:Array.isArray(c.mesVend)&&Array.isArray(c.vends),
+          vendedorasMes,
           mesesDetalhados:detalhe?.versao===1&&detalhe.disponivel===true?(detalhe.meses||[]):[],
           disponivel:window._crmComprasClienteValido(detalhe)});
         if(window._crmComprasClienteValido(detalhe))
@@ -15420,6 +16157,11 @@ window.crmCombinar = function(lojas, anos, opcoes){
         const k = mM[mi]+'|'+mP[pi];
         const a = mesProd.get(k) || {q:0,f:0};
         a.q+=q; a.f+=f; mesProd.set(k,a);
+      });
+      coberturaMVP.linhas.forEach(([mi,vi,pi,q,f])=>{
+        if(mM[mi]===undefined||mV[vi]===undefined||mP[pi]===undefined) return;
+        const k=mM[mi]+'|'+mV[vi]+'|'+mP[pi], a=mesVendProd.get(k)||{q:0,f:0};
+        a.q+=q||0; a.f+=f||0; mesVendProd.set(k,a);
       });
       (c.vendProd||[]).forEach(([vi,pi,q,f])=>{
         const k = mV[vi]+'|'+mP[pi];
@@ -15454,15 +16196,54 @@ window.crmCombinar = function(lojas, anos, opcoes){
   });
 
   const par = k => k.split('|').map(Number);
+  const mesesResultado=new Set([...mesVend.keys()].map(k=>tMes[Number(k.split('|')[0])]).filter(Boolean));
+  const coberturaMesCli=new Set();
+  mesesResultado.forEach(m=>{
+    const fontes=fontesCoberturaMesCli.filter(s=>s.meses.includes(m));
+    if(fontes.length&&fontes.every(s=>s.cobertos.has(m))) coberturaMesCli.add(m);
+  });
+  const mesCliCompletoResultado=mesesResultado.size>0
+    &&[...mesesResultado].every(m=>coberturaMesCli.has(m));
+  const coberturaResultado=new Set();
+  mesesResultado.forEach(m=>{
+    const fontes=fontesCoberturaMVP.filter(s=>s.meses.includes(m));
+    if(fontes.length&&fontes.every(s=>s.cobertos.has(m))) coberturaResultado.add(m);
+  });
+  const linhasMVP=[...mesVendProd.entries()].map(([k,v])=>{
+    const [mi,vi,pi]=par(k);return [mi,vi,pi,v.q,v.f];
+  });
+  const coberturaMVPCompleta=mesesResultado.size>0
+    &&[...mesesResultado].every(m=>coberturaResultado.has(m));
+  let metricasProdutoDisponiveis=prodMetricasAnuaisDisponiveis;
+  let vendProdResultado=metricasProdutoDisponiveis
+    ? [...vendProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}) : [];
+  let prodTotalResultado=metricasProdutoDisponiveis
+    ? [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]) : [];
+  if(coberturaMVPCompleta){
+    const totais=_crmTotaisVendProdMensais(linhasMVP,coberturaResultado,tMes);
+    vendProdResultado=totais.vendProd;
+    prodTotalResultado=totais.prodTotal.map(([pi,q,f])=>[
+      pi,q,f,prodTot.get(Number(pi))?.cli||0
+    ]);
+    metricasProdutoDisponiveis=true;
+  } else if(!metricasProdutoDisponiveis){
+    vendProdResultado=[]; prodTotalResultado=[];
+  }
   return {
     linhas, faturamento: Math.round(faturamento*100)/100,
     periodo:{ini, fim},
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
     mesCli:  [...mesCli.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.c,Math.round(v.t*100)/100,v.i,v.ud];}),
+    mesCliCompleto:mesCliCompletoResultado,
+    mesCliCobertura:[...coberturaMesCli].sort(),
     mesProd: [...mesProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
-    vendProd: [...vendProd.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.q,v.f];}),
-    prodTotal: [...prodTot.entries()].map(([k,v])=>[Number(k),v.q,v.f,v.cli]).sort((a,b)=>b[2]-a[2]),
+    vendProd: vendProdResultado,
+    prodTotal: prodTotalResultado,
+    prodMetricasAnuaisDisponiveis:cubosContados>0&&metricasProdutoDisponiveis,
+    prodTotalClientesAproximados,
+    mesVendProdCobertura:[...coberturaResultado].sort(),
+    mesVendProd:linhasMVP.filter(r=>coberturaResultado.has(tMes[r[0]])),
     cross: [...cross.entries()].map(([k,n])=>{const[a,b]=par(k);return [a,b,n];}).sort((x,y)=>y[2]-x[2]),
     clientes: [...clientes.values()].sort((a,b)=>b.total-a.total),
     ...(incluirCompras ? {_comprasCliente:{versao:1,conjuntos:coberturaCompras,itens:comprasCliente}} : {}),
@@ -15630,8 +16411,8 @@ window._histRenderConciliacao = function(elId, lancPorMes, crmPorMes, de, ate){
     </tr></tfoot>` : ''}
   </table></div>
   <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">
-    O <strong>lançado</strong> é o que a loja registrou no sistema; o <strong>faturado</strong> vem da
-    planilha importada em CRM Clientes. O lançamento continua sendo a fonte oficial — o CRM é conferência.
+    Na consolidação do histórico, os meses fechados com cobertura usam o CRM; o mês corrente usa os
+    lançamentos diários. Sem CRM, permanece a fonte histórica disponível.
     ${nParciais ? 'Meses marcados como <strong>PARCIAL</strong> não são comparáveis (o CRM tem grão mensal e o período não cobre o mês inteiro), então ficam fora do total.' : ''}
   </div>`;
 };
@@ -45191,6 +45972,11 @@ function _excelDetectarColunas(headers){
              || normH.find(h => /data|emissao/.test(h.norm));
   if(dataC) map.data = dataC.idx;
 
+  // ── HORA (quando existir, sem inventar horário para linhas sem origem)
+  const horaC = normH.find(h => /^(hora|horario|time)$/.test(h.norm)
+                              || /^(hora|horario|time)_/.test(h.norm));
+  if(horaC) map.hora = horaC.idx;
+
   // ── CLIENTE
   const clC = normH.find(h => /^(cliente|nome|nome_cliente|customer|comprador)$/.test(h.norm))
            || normH.find(h => /cliente|comprador/.test(h.norm));
@@ -45234,22 +46020,34 @@ function _excelDetectarColunas(headers){
   // Valor" — o erro de cabeçalho relatado. Agora eles são aceitos e tratados
   // pelo que são, registrando o TIPO do valor para a apuração usar direito.
   const valorItem = normH.find(h => /valor.*(item)/.test(h.norm) || /^valor_item$/.test(h.norm));
-  const valorTotalVenda = !valorItem && normH.find(h => /valor.*(total|venda)/.test(h.norm) && !/nf$|unit/.test(h.norm));
-  const totalGenerico = !valorItem && !valorTotalVenda && normH.find(h => /^total$/.test(h.norm));
-  const valorSozinho = !valorItem && !valorTotalVenda && !totalGenerico &&
-                       normH.find(h => /^(valor|vlr|preco|price)$/.test(h.norm));
-  // total da NOTA: vale uma vez por nota, não por linha
-  const valorNF = !valorItem && !valorTotalVenda && !totalGenerico && !valorSozinho &&
-                  normH.find(h => /^(valor|vlr|vl)_?(total_?)?nf$|nota_?fiscal$|^valor_nota$/.test(h.norm)
+  const valorTotalVenda = normH.find(h => /valor.*(total|venda)/.test(h.norm) && !/nf$|unit/.test(h.norm));
+  const totalGenerico = normH.find(h => /^total$/.test(h.norm));
+  const valorSozinho = normH.find(h => /^(valor|vlr|preco|price)$/.test(h.norm));
+  // Mantém o reconhecedor histórico para o modo automático. Os candidatos
+  // manuais abaixo exigem rótulo monetário e excluem identificadores/itens.
+  const valorNF = normH.find(h => /^(valor|vlr|vl)_?(total_?)?nf$|nota_?fiscal$|^valor_nota$/.test(h.norm)
                                   || (/valor|vlr|^vl_/.test(h.norm) && /nf$|nota$/.test(h.norm)));
+  const ehValorNota = h => !/(?:^|_)(?:item|unit|unitario)(?:_|$)/.test(h.norm)
+    && (/^(valor|vlr|vl_).*(?:nf|nota(?:_?fiscal)?)$/.test(h.norm)
+        || /^total.*(?:nf|nota(?:_?fiscal)?)$/.test(h.norm));
+  const valorNotaManual = normH.find(ehValorNota);
   // valor UNITÁRIO: precisa multiplicar pela quantidade
-  const valorUnit = !valorItem && !valorTotalVenda && !totalGenerico && !valorSozinho && !valorNF &&
-                    normH.find(h => /unit/.test(h.norm) && /valor|vlr|^vl_|preco/.test(h.norm));
+  const valorUnit = normH.find(h => /unit/.test(h.norm) && /valor|vlr|^vl_|preco/.test(h.norm));
+  const valorLinhaAuto = valorItem || valorTotalVenda || totalGenerico || valorSozinho;
+  const valorLinha = normH.find(h => !ehValorNota(h)
+    && (/valor.*item/.test(h.norm) || /^valor_item$/.test(h.norm)))
+    || normH.find(h => !ehValorNota(h)
+      && /valor.*(total|venda)/.test(h.norm) && !/nf$|unit/.test(h.norm))
+    || totalGenerico
+    || normH.find(h => !ehValorNota(h) && /^(valor|vlr|preco|price)$/.test(h.norm));
 
-  const escolhido = valorItem || valorTotalVenda || totalGenerico || valorSozinho || valorNF || valorUnit;
+  if(valorNotaManual) map.valorNota = valorNotaManual.idx;
+  if(valorLinha) map.valorLinha = valorLinha.idx;
+  if(valorUnit) map.valorUnitario = valorUnit.idx;
+  const escolhido = valorLinhaAuto || valorNF || valorUnit;
   if(escolhido){
     map.valor = escolhido.idx;
-    map.valorTipo = valorNF ? 'nf' : valorUnit ? 'unitario' : 'linha';
+    map.valorTipo = valorLinhaAuto ? 'linha' : valorNF ? 'nf' : 'unitario';
   }
 
   // ── CUPOM/NF (aceita "N° NFE", "NFE", "NF", "CUPOM")
@@ -45293,6 +46091,12 @@ function _excelParseNumero(v){
   return window._numBR(v);
 }
 
+function _excelDataCalendarioValido(ano, mes, dia){
+  const data=new Date(0);
+  data.setUTCFullYear(ano,mes-1,dia);
+  return data.getUTCFullYear()===ano && data.getUTCMonth()+1===mes && data.getUTCDate()===dia;
+}
+
 // Converter data → "YYYY-MM-DD"
 function _excelParseData(v){
   if(!v && v !== 0) return '';
@@ -45310,16 +46114,52 @@ function _excelParseData(v){
   let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
   if(m){
     let y = m[3].length === 2 ? '20'+m[3] : m[3];
+    if(!_excelDataCalendarioValido(Number(y), Number(m[2]), Number(m[1]))) return '';
     return y + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
   }
   // YYYY-MM-DD
   m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if(m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  if(m){
+    if(!_excelDataCalendarioValido(Number(m[1]), Number(m[2]), Number(m[3]))) return '';
+    return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  }
   // ISO com hora
   const d = new Date(s);
   if(!isNaN(d.getTime())){
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   }
+  return '';
+}
+
+// Mantém só a hora de origem como dimensão transitória da compra.
+function _excelParseHora(v, embutida=false){
+  const formatar=(h,m,s,ms)=>{
+    h=Number(h);m=Number(m);s=Number(s||0);
+    ms=typeof ms==='string'?Number(ms.padEnd(3,'0').slice(0,3)||0):Number(ms||0);
+    if(!Number.isInteger(h)||h<0||h>23||!Number.isInteger(m)||m<0||m>59
+       ||!Number.isInteger(s)||s<0||s>59||!Number.isInteger(ms)||ms<0||ms>999) return '';
+    return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'
+      +String(s).padStart(2,'0')+'.'+String(ms).padStart(3,'0');
+  };
+  const fracao=n=>{
+    if(!Number.isFinite(n)||n<0||n>=1) return '';
+    let ms=Math.round(n*86400000);if(ms>=86400000)ms=0;
+    return formatar(Math.floor(ms/3600000),Math.floor(ms%3600000/60000),
+      Math.floor(ms%60000/1000),ms%1000);
+  };
+  if(v instanceof Date&&Number.isFinite(v.getTime()))
+    return formatar(v.getHours(),v.getMinutes(),v.getSeconds(),v.getMilliseconds());
+  if(typeof v==='number'){
+    const n=embutida?v-Math.floor(v):v;
+    return embutida&&n===0?'':fracao(n);
+  }
+  const s=String(v??'').trim();if(!s)return '';
+  const padrao=embutida
+    ?/(?:T|\s)(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?$/i
+    :/^(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?$/;
+  const m=s.match(padrao);
+  if(m)return formatar(m[1],m[2],m[3],m[4]);
+  if(!embutida){const n=Number(s);if(Number.isFinite(n))return fracao(n);}
   return '';
 }
 
@@ -45375,17 +46215,46 @@ window.excelProcessarUpload = function(event){
       const firstSheet = workbook.SheetNames[0];
       if(!firstSheet){ showToast('Planilha sem abas.','err'); return; }
       const sheet = workbook.Sheets[firstSheet];
+      // sheet_to_json percorre a faixa declarada em !ref; preserve a linha física da aba.
+      const linhaInicialPlanilha=Number(String(sheet?.['!ref']||'').match(/^\$?[A-Z]{1,3}\$?(\d+)/i)?.[1])||1;
       const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
       if(rows.length < 2){ showToast('Planilha sem dados (só cabeçalho ou vazia).','warn'); return; }
 
       const headers = rows[0];
       const colMap = _excelDetectarColunas(headers);
+      const _modoValor = document.getElementById('excel-modo-valor')?.value || 'auto';
+
+      if(_modoValor === 'nota'){
+        if(colMap.valorNota === undefined){
+          alert('O modo "total da nota" exige uma coluna reconhecida de valor da NF (por exemplo, "Valor NF" ou "Valor Nota").\n\n'
+            + 'O arquivo não será reinterpretado usando outra coluna. Escolha outro modo ou corrija o cabeçalho e tente novamente.');
+          showToast('❌ Modo total da nota: coluna de valor da NF não encontrada.','err');
+          event.target.value = '';
+          return;
+        }
+        colMap.valor = colMap.valorNota;
+        colMap.valorTipo = 'nf';
+      } else if(_modoValor === 'somar'){
+        const _valorSoma = colMap.valorLinha !== undefined
+          ? colMap.valorLinha
+          : (colMap.valorUnitario !== undefined && colMap.qtde !== undefined
+              ? colMap.valorUnitario : undefined);
+        if(_valorSoma === undefined){
+          alert('O modo "somar itens" exige uma coluna de valor por item/linha ou as colunas de valor unitário e quantidade.\n\n'
+            + 'A coluna de valor da NF não será usada neste modo. Escolha outro modo ou corrija o cabeçalho e tente novamente.');
+          showToast('❌ Modo somar: faltou valor por item/linha ou valor unitário com quantidade.','err');
+          event.target.value = '';
+          return;
+        }
+        colMap.valor = _valorSoma;
+        colMap.valorTipo = _valorSoma === colMap.valorUnitario ? 'unitario' : 'linha';
+      }
 
       if(colMap.data === undefined || colMap.valor === undefined){
         const faltando = [];
         if(colMap.data === undefined) faltando.push('Data');
         if(colMap.valor === undefined) faltando.push('Valor');
-        const detectadas = Object.keys(colMap).filter(k=>k!=='valorTipo')
+        const detectadas = Object.keys(colMap).filter(k=>!['valorTipo','valorNota','valorLinha','valorUnitario'].includes(k))
           .map(k => k+' → "'+headers[colMap[k]]+'"').join(' · ') || '(nenhuma)';
         console.error('[excel] Cabeçalhos do arquivo:', headers);
         console.error('[excel] Reconhecidas:', detectadas);
@@ -45399,7 +46268,6 @@ window.excelProcessarUpload = function(event){
         return;
       }
 
-      const _modoValor = document.getElementById('excel-modo-valor')?.value || 'auto';
       console.log('[excel] modo de valor:', _modoValor, '| detectado pelo cabeçalho:', colMap.valorTipo);
       // [R153] Os cabeçalhos só apareciam quando a detecção FALHAVA. Quando
       // ela acerta a coluna errada — havia uma de valor por item com nome
@@ -45434,12 +46302,15 @@ window.excelProcessarUpload = function(event){
         }
         if(!dt || val === 0){ ignoradosDadosVazios++; continue; }
         dadosProcessados.push({
+          _linhaOrigem: linhaInicialPlanilha + i,
           data: dt,
           cliente: String(row[colMap.cliente] || '').trim() || '(sem cliente)',
           // [R67] documento e telefone quando a planilha traz
           documento: colMap.documento !== undefined ? String(row[colMap.documento] || '').replace(/\D/g,'') : '',
           telefone:  colMap.telefone  !== undefined ? String(row[colMap.telefone]  || '').trim() : '',
           loja: colMap.loja !== undefined ? _excelResolverLoja(row[colMap.loja]) : '',
+          _horaVenda: (colMap.hora !== undefined ? _excelParseHora(row[colMap.hora]) : '')
+                    || _excelParseHora(row[colMap.data],true),
           vendedora: String(row[colMap.vendedora] || '').trim(),
           produto: String(row[colMap.produto] || '').trim() || '(sem produto)',
           categoria: String(row[colMap.categoria] || '').trim(),
@@ -45457,50 +46328,6 @@ window.excelProcessarUpload = function(event){
       if(!dadosProcessados.length){
         showToast('Nenhuma linha válida encontrada.','warn');
         return;
-      }
-
-      // ══════════════════════════════════════════════════════════════
-      // [R153] A PROVA ESTÁ NOS DADOS, NÃO NO CABEÇALHO
-      //
-      // O seletor de modo vinha com "somar" por padrão, e "somar" força
-      // _valorNF:false — anulando em silêncio a detecção que o próprio
-      // sistema tinha feito pelo cabeçalho. Uma planilha com o TOTAL DA
-      // NOTA repetido em cada linha de item entrou somando linha a
-      // linha: 22 mil linhas de 2026 renderam R$ 5,45 mi contra os
-      // R$ 1,5 mi reais, e o erro só apareceu porque o faturamento
-      // ficou 3,7x o do lançamento manual.
-      //
-      // Cabeçalho é palpite; a repetição do mesmo valor dentro da mesma
-      // nota é prova. Se em quase toda nota de várias linhas o valor se
-      // repete idêntico, aquela coluna é o total da nota — não importa
-      // como ela se chame.
-      // ══════════════════════════════════════════════════════════════
-      const _provaNota = window._excelProvaValorNota(dadosProcessados);
-      const _jaTrataComoNota = dadosProcessados[0] && dadosProcessados[0]._valorNF === true;
-      console.log('[excel] prova de valor por nota:', _provaNota);
-      if(!_jaTrataComoNota && _provaNota.suspeito){
-        const _pct = Math.round(_provaNota.fracao * 100);
-        const _fator = _provaNota.porNota;
-        const _corrigir = confirm(
-          'Esta planilha parece trazer o TOTAL DA NOTA repetido em cada linha de item.\n\n'
-          + 'Em ' + _provaNota.iguais.toLocaleString('pt-BR') + ' de '
-          + _provaNota.multi.toLocaleString('pt-BR') + ' notas com mais de uma linha ('
-          + _pct + '%), todas as linhas têm exatamente o MESMO valor.\n'
-          + 'A média é de ' + _fator.toFixed(1).replace('.',',') + ' linhas por nota.\n\n'
-          + 'Somando linha a linha, o faturamento sairia cerca de '
-          + _fator.toFixed(1).replace('.',',') + 'x MAIOR que o real.\n\n'
-          + 'OK = contar o valor uma vez por nota (recomendado)\n'
-          + 'Cancelar = somar linha a linha mesmo assim');
-        if(_corrigir){
-          dadosProcessados.forEach(r => { r._valorNF = true; });
-          console.log('[excel] R153: valor tratado como TOTAL DA NOTA —',
-                      _pct + '% das notas multi-linha repetem o mesmo valor');
-          showToast('✅ Valor tratado como total da nota — o faturamento não será multiplicado '
-                    + 'pelo número de itens.', 'ok');
-        } else {
-          console.warn('[excel] R153: o usuário optou por somar linha a linha apesar da prova '
-                       + 'de valor por nota (' + _pct + '% das notas multi-linha repetem o valor)');
-        }
       }
 
       // ══════════════════════════════════════════════════════════════
@@ -45641,6 +46468,61 @@ window.excelProcessarUpload = function(event){
         showToast('Nenhuma linha tem loja definida. Escolha a loja no seletor ao lado do botão e tente de novo.','err');
         event.target.value = '';
         return;
+      }
+
+      // A confirmação automática considera só linhas com loja resolvida que entrarão no cubo.
+      const _dadosParaImportar = dadosProcessados.filter(r => r.loja);
+      const _identidadeNF = window._crmVincularDocumentoVenda(_dadosParaImportar,{detalharConflitos:true});
+      if(_identidadeNF.ambiguo){
+        const _detalhesAmbiguidade = (_identidadeNF.conflitos||[]).slice(0,4).map(c=>{
+          const _contexto = 'Loja ' + (c.loja||'não identificada') + ', data ' + (c.data||'não identificada')
+            + ', ' + (c.hora ? 'horário ' + c.hora : 'horário ausente') + ', NF ' + (c.nf||'não identificada');
+          const _linhas = c.linhas?.length ? 'linhas ' + c.linhas.join(', ')
+            + (c.linhasLimitadas ? ' (amostra)' : '') : 'linhas sem referência';
+          return '• ' + _contexto + ', ' + _linhas + ': ' + c.motivo + '.';
+        }).join('\n');
+        const _amostraAmbiguidadeLimitada = !!_identidadeNF.conflitosLimitados
+          || (_identidadeNF.conflitos||[]).some(c=>c.linhasLimitadas);
+        alert('Há linhas da mesma loja, data e NF cuja associação de CPF/CNPJ ou horário de compra é ambígua.\n\n'
+          + (_detalhesAmbiguidade || 'Revise loja, data, horário, NF e documentos nas linhas de origem.') + '\n\n'
+          + (_amostraAmbiguidadeLimitada ? 'A lista acima é parcial; revise o arquivo inteiro.\n\n' : '')
+          + 'Não importei o arquivo para evitar juntar ou dividir notas de forma incorreta. Confira os documentos e horários nas linhas indicadas. Corrija o arquivo e importe novamente.');
+        showToast('❌ Importação bloqueada: identidade ou horário ambíguo na mesma nota.','err');
+        event.target.value = '';
+        return;
+      }
+      _dadosParaImportar.forEach(r=>delete r._linhaOrigem);
+      if(_identidadeNF.vinculados)
+        console.log('[excel] CPF/CNPJ associado em linhas sem documento:',_identidadeNF.vinculados);
+      if(_modoValor === 'auto'){
+        const _provaNota = window._excelProvaValorNota(_dadosParaImportar);
+        const _jaTrataComoNota = _dadosParaImportar.length
+          && _dadosParaImportar.every(r => r._valorNF === true);
+        console.log('[excel] prova de valor por nota:', _provaNota);
+        if(!_jaTrataComoNota && _provaNota.suspeito){
+          const _pct = Math.round(_provaNota.fracao * 100);
+          const _fator = _provaNota.porNota;
+          const _corrigir = confirm(
+            'Esta planilha parece trazer o TOTAL DA NOTA repetido em cada linha de item.\n\n'
+            + 'Em ' + _provaNota.iguais.toLocaleString('pt-BR') + ' de '
+            + _provaNota.multi.toLocaleString('pt-BR') + ' notas com mais de uma linha ('
+            + _pct + '%), todas as linhas têm exatamente o MESMO valor.\n'
+            + 'A média é de ' + _fator.toFixed(1).replace('.',',') + ' linhas por nota.\n\n'
+            + 'Somando linha a linha, o faturamento sairia cerca de '
+            + _fator.toFixed(1).replace('.',',') + 'x MAIOR que o real.\n\n'
+            + 'OK = contar o valor uma vez por nota (recomendado)\n'
+            + 'Cancelar = somar linha a linha mesmo assim');
+          if(_corrigir){
+            _dadosParaImportar.forEach(r => { r._valorNF = true; });
+            console.log('[excel] R153: valor tratado como TOTAL DA NOTA —',
+                        _pct + '% das notas multi-linha repetem o mesmo valor');
+            showToast('✅ Valor tratado como total da nota — o faturamento não será multiplicado '
+                      + 'pelo número de itens.', 'ok');
+          } else {
+            console.warn('[excel] R153: o usuário optou por somar linha a linha apesar da prova '
+                         + 'de valor por nota (' + _pct + '% das notas multi-linha repetem o valor)');
+          }
+        }
       }
 
       // Agrupar por loja + ano — cada par vira uma unidade independente
@@ -49199,7 +50081,7 @@ window.excelRender = function(){
     box.innerHTML = ''
       + '<div class="kcard verde"><div class="kl">💰 FATURAMENTO</div><div class="kv" style="font-size:18px">'+fmt(v.faturamento)+'</div></div>'
       + '<div class="kcard"><div class="kl">🧾 CUPONS</div><div class="kv" style="font-size:20px">'+v.cupons.toLocaleString('pt-BR')+'</div></div>'
-      + '<div class="kcard azul"><div class="kl">👥 CLIENTES</div><div class="kv" style="font-size:20px">'+v.clientesUnicos.toLocaleString('pt-BR')+'</div></div>'
+      + '<div class="kcard azul"><div class="kl">👥 CLIENTES</div><div class="kv" style="font-size:20px">'+(v.clientesUnicos===null?'—':v.clientesUnicos.toLocaleString('pt-BR'))+'</div></div>'
       + '<div class="kcard laranja"><div class="kl">🎫 TICKET MÉDIO</div><div class="kv" style="font-size:18px">'+fmt(v.ticketMedio)+'</div></div>'
       + '<div class="kcard"><div class="kl">📦 P.A.</div><div class="kv" style="font-size:20px">'+v.pa.toFixed(2).replace('.',',')+'</div></div>'
       + '<div class="kcard roxo"><div class="kl">📅 MESES</div><div class="kv" style="font-size:20px">'+v.mesesCount+'</div></div>';
@@ -49222,10 +50104,21 @@ window.excelRender = function(){
             + 'Suba a planilha desse mês na aba de importação.</div>';
     }
     if(v.clientesRecorteAproximado){
-      _html += '<div class="aviso-crm info">ℹ️ Este conjunto foi importado antes do recorte mensal de '
-            + 'clientes existir. A lista de clientes do mês está saindo pela data da <em>última</em> '
-            + 'compra — quem comprou neste mês e voltou depois não aparece. Reimporte a planilha '
-            + 'para corrigir.</div>';
+      _html += '<div class="aviso-crm info">ℹ️ O recorte mensal de clientes está incompleto ou usa dados legados sem dimensão mensal. '
+            + 'O cálculo legado usa a data da última compra e pode omitir quem comprou neste período e voltou depois; '
+            + 'uma dimensão parcial também pode omitir clientes. Corrija a base e reimporte os dados completos do conjunto '
+            + 'antes de usar o ranking. Faturamento e demais indicadores são calculados separadamente.</div>';
+    }
+    if(v.clientesAtribuicaoVendIndisponivel){
+      _html += v.clientesAtribuicaoVendIdentidadeIndisponivel
+        ? '<div class="aviso-crm warn">⚠️ Este rótulo de vendedor(a) não tem identidade única confirmada nas lojas do recorte. '
+          + 'Selecione uma loja para consultar o ranking. Os demais indicadores mantêm o recorte agregado pelo rótulo importado.</div>'
+        : '<div class="aviso-crm warn">⚠️ Não foi possível calcular clientes para este vendedor(a): falta detalhe de compra '
+          + 'em um ou mais meses com vendas atribuídas. O total de clientes e o ranking ficam indisponíveis até importar '
+          + 'novamente os dados completos; faturamento, cupons e produtos continuam usando seus próprios totais.</div>';
+    }else if(v.clientesAtribuicaoVendAproximada){
+      _html += '<div class="aviso-crm info">ℹ️ As compras deste vendedor(a) foram atribuídas pelas linhas de detalhe, mas a contagem de notas '
+            + 'é aproximada porque o histórico legado não guarda a chave completa da compra.</div>';
     }
     _avBox.innerHTML = _html;
   }
@@ -49273,10 +50166,10 @@ function _crmPopularFiltros(){
   // ══════════════════════════════════════════════════════════════════
   // Ano
   const anos = new Set();
-  Object.values(D.crm||{}).forEach(o => Object.keys(o).forEach(a => anos.add(a)));
+  Object.values(D.crm||{}).forEach(o => Object.entries(o||{}).forEach(([a,c]) => { if(c) anos.add(a); }));
   (D.excelDados||[]).forEach(r => { if(r.data) anos.add(r.data.slice(0,4)); });
   const selA = document.getElementById('excel-filtro-ano');
-  if(selA && anos.size){
+  if(selA){
     const listaA = [...anos].sort().reverse();
     const assA = listaA.join('|');
     if(selA.dataset.assinatura !== assA){
@@ -49315,7 +50208,7 @@ function _crmPopularFiltros(){
     const nomes = new Set();
     lojasConsideradas.forEach(lid => {
       Object.values((D.crm||{})[lid] || {}).forEach(c => {
-        (c.vends||[]).forEach(n => { if(n) nomes.add(n); });
+        (c?.vends||[]).forEach(n => { if(n) nomes.add(n); });
       });
     });
     // base antiga em linhas cruas
@@ -49356,7 +50249,9 @@ function _crmRenderMelhores(v){
     + '<td style="font-size:10.5px;color:var(--muted)">'+(c.ultima||'').split('-').reverse().join('/')+'</td></tr>');
   el.innerHTML = _crmTabela(
     [{t:'#'},{t:'Cliente'},{t:'Vendedor(a)'},{t:'Notas',dir:'center'},{t:'Total',dir:'right'},{t:'Ticket',dir:'right'},{t:'Telefone'},{t:'Última'}],
-    linhas, 'Nenhum cliente no filtro atual.')
+    linhas, v.clientesAtribuicaoVendIndisponivel
+      ? 'Dado não disponível para cálculo neste filtro de vendedor(a).'
+      : 'Nenhum cliente no filtro atual.')
     + (v.clientes.length>50?'<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Top 50 de '+v.clientes.length.toLocaleString('pt-BR')+'</div>':'');
   // [R100] Transparência: o valor sem cliente identificado não sumiu — ele
   // continua no faturamento e no ranking de vendedor(a); só não vira "pessoa".
@@ -49442,6 +50337,12 @@ function _crmRenderInativos(v){
   // cai no recorte de sempre: pior, mas nunca uma tela quebrada.
   let base = [];
   try{ base = window.crmClientesTodosAnos(); }catch(e){}
+  if(!base.length&&v.clientesAtribuicaoVendIndisponivel){
+    el.innerHTML = '<div class="aviso-crm warn">⚠️ A base histórica de clientes não está disponível para este filtro '
+      + 'de vendedor(a); não é possível concluir que não há clientes inativos. A carteira e a régua de inatividade '
+      + 'continuam usando o vendedor(a) da última compra.</div>';
+    return;
+  }
   if(!base.length) base = v.clientes || [];
   const inativos = base
     .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
@@ -49502,7 +50403,16 @@ function _crmRenderProdutos(v){
     try{ v = window.crmVisao({vend: vendEscolhida}); }
     catch(e){ console.warn('[R86] filtro de produtos por vendedor(a):', e.message); }
   }
-  window._crmProdutosVisiveis = {linhas: v.produtos || [], vend: vendEscolhida};
+  window._crmProdutosVisiveis = {linhas: v.produtos || [], vend: vendEscolhida,
+    indisponivel:!!v.produtosIndisponiveis};
+
+  if(v.produtosIndisponiveis){
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
+      + 'O detalhamento de produtos não está disponível para este período porque a base não '
+      + 'tem cobertura completa vendedor×produto. Os demais indicadores continuam disponíveis.'
+      + '</div>';
+    return;
+  }
 
   if(v.produtosSemDimensaoVend){
     el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">'
@@ -49632,8 +50542,9 @@ function _crmRenderConjuntos(){
   if(!el) return;
   const linhas = [];
   Object.keys(D.crm||{}).sort().forEach(lid => {
-    Object.keys(D.crm[lid]).sort().reverse().forEach(ano => {
+    Object.keys(D.crm[lid]||{}).sort().reverse().forEach(ano => {
       const c = D.crm[lid][ano];
+      if(!c) return;
       const nome = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
       const cob = _crmCobertura(c);
       const _fontes = [...new Set(Object.values(c.fontes || {}))].filter(Boolean);
@@ -50158,6 +51069,12 @@ window.exportarInativosExcel = function(){
  * recalcular abriria espaço para o arquivo divergir do que está na tela.
  */
 window.exportarProdutosExcel = function(){
+  if(typeof window.excelRender === 'function') window.excelRender();
+  const info  = window._crmProdutosVisiveis || {};
+  if(info.indisponivel){
+    showToast('A exportação foi bloqueada: o detalhamento de produtos não está disponível para este período.','warn');
+    return;
+  }
   if(typeof XLSX === 'undefined'){
     const sc = document.createElement('script');
     sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
@@ -50169,15 +51086,14 @@ window.exportarProdutosExcel = function(){
   }
 
   // Garantir que a lista reflete os controles atuais
-  if(typeof window.excelRender === 'function') window.excelRender();
-  const info  = window._crmProdutosVisiveis || {};
   const lista = info.linhas || [];
   if(!lista.length){ showToast('Nenhum produto na seleção atual.','warn'); return; }
 
   const fAno  = document.getElementById('excel-filtro-ano')?.value  || '';
   const fMes  = document.getElementById('excel-filtro-mes')?.value  || '';
   const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
-  const nomeLoja = fLoja ? (LOJAS.find(l => l.id === fLoja)?.nome || fLoja) : 'Todas as lojas';
+  const lojaExport = isAdmin() ? fLoja : lojaId();
+  const nomeLoja = lojaExport ? (LOJAS.find(l => l.id === lojaExport)?.nome || lojaExport) : 'Todas as lojas';
   const alvoVend = info.vend || 'Todos(as) vendedor(es)';
   const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho',
                  'Agosto','Setembro','Outubro','Novembro','Dezembro'];
