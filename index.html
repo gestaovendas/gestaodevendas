@@ -9100,7 +9100,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-08b';
+window.AVATIM_BUILD = '2026-10-15c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -9137,6 +9137,7 @@ window.avatimDiagnosticarCrm = function(){
         de: meses[0] || '—',
         ate: meses[meses.length-1] || '—',
         linhas: c.linhas || 0,
+        linhasAproximadas: _crmLinhasAproximadas(c),
         faturamento: fmt(c.faturamento || 0),
         arquivo: c.arquivo || '—'
       });
@@ -9284,6 +9285,7 @@ window.avatimCrmNoServidor = async function(){
         loja: (LOJAS.find(l=>l.id===lid)?.nome) || lid,
         ano, estado,
         linhas: leves.linhas || 0,
+        linhasAproximadas: _crmLinhasAproximadas(leves),
         partes: Number(leves._partes) || 0,
         gravadoEm: raw.ts ? new Date(raw.ts).toLocaleString('pt-BR') : '—',
         por: raw.por || '—',
@@ -10105,12 +10107,14 @@ window._s012BrowserValido=function(email){
   return !!atual&&!!_s012TokenBrowser&&atual.token===_s012TokenBrowser
     &&atual.email===String(email||'').trim().toLowerCase();
 };
+window._s012BrowserRevisionAtual=function(){ return Number(_s012LerBrowser()?.revision)||0; };
 window._s012AutorizarBrowser=function(email){
   const e=String(email||'').trim().toLowerCase();
   if(!e) throw new Error('Sessão sem usuário. Entre novamente.');
   const atual=_s012LerBrowser();
   const token=atual?.email===e?atual.token:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
-  const bruto=JSON.stringify({email:e,token});
+  const revision=Math.max(Date.now(),(Number(atual?.revision)||0)+1);
+  const bruto=JSON.stringify({email:e,token,revision});
   try{
     localStorage.setItem(_S012_BROWSER_KEY,bruto);
     sessionStorage.setItem(_S012_TAB_KEY,token);
@@ -10125,8 +10129,11 @@ window._s012EncerrarBrowser=function(){
   // Uma aba já expirada não pode encerrar a conta nova de outra aba.
   let confirmado=true;
   try{
-    if(atual&&atual.token===_s012TokenBrowser)
-      localStorage.setItem(_S012_BROWSER_KEY,JSON.stringify({email:'',token:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}));
+    if(atual&&atual.token===_s012TokenBrowser){
+      const revision=Math.max(Date.now(),(Number(atual.revision)||0)+1);
+      localStorage.setItem(_S012_BROWSER_KEY,JSON.stringify({email:'',
+        token:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),revision}));
+    }
   }catch(_e){ confirmado=false; }
   _s012TokenBrowser=null;
   try{ sessionStorage.removeItem(_S012_TAB_KEY); }catch(_e){}
@@ -10158,6 +10165,9 @@ document.addEventListener('visibilitychange',()=>{
 let _s012SessaoAtiva = null, _s012Geracao = 0, _s012EstadoBase = null;
 const _s012RetencoesPorOwner=new Map();
 const _s012CrmDuravelPorOwner=new Map();
+const _s012RetencoesIdbDuraveisPorOwner=new Map();
+const _s012RetencoesIdbRevisaoPorOwner=new Map();
+const _s012RetencoesIdbEstadoPorOwner=new Map();
 const _S012_PREFIXO = 'avatim_s012_v1:';
 function _s012PerfilValidado(){
   const email=String(window._currentUser?.email||'').trim().toLowerCase();
@@ -10174,7 +10184,10 @@ function _s012Clone(valor){
 window._s012ContextoAtual=function(){
   const p=_s012PerfilValidado(), s=_s012SessaoAtiva;
   if(!p || !s || p.owner!==s.owner || !window._s012BrowserValido(p.email)) return null;
-  return {owner:s.owner,email:s.email,perfil:s.perfil,loja:s.loja,geracao:s.geracao};
+  s.browserToken=_s012TokenBrowser;
+  s.browserRevision=window._s012BrowserRevisionAtual();
+  return {owner:s.owner,email:s.email,perfil:s.perfil,loja:s.loja,geracao:s.geracao,
+    browserToken:s.browserToken,browserRevision:s.browserRevision};
 };
 window._s012Capturar=function(){
   const c=window._s012ContextoAtual();
@@ -10267,11 +10280,130 @@ window._s012RetencaoAtiva=function(ctx){
   const ret=_s012RetencoesPorOwner.get(ctx.owner);
   return ret&&ret.owner===ctx.owner?ret:null;
 };
+window._s012RetencaoLer=function(ctx){
+  if(!ctx || !window._s012ContextoValido?.(ctx)) return null;
+  const ret=_s012RetencoesPorOwner.get(ctx.owner);
+  return ret&&ret.owner===ctx.owner?ret:null;
+};
 window._s012RetencaoStatus=function(ctx){
-  return {destaIdentidade:!!(ctx&&_s012RetencoesPorOwner.has(ctx.owner)),
-    outraIdentidade:[..._s012RetencoesPorOwner.keys()].some(owner=>!ctx||owner!==ctx.owner)};
+  const pendentes=[..._s012RetencoesPorOwner.entries()].filter(([,ret])=>!_s012RetencaoIdbCobre(ret.ctx,ret)).map(([owner])=>owner);
+  return {destaIdentidade:!!(ctx&&pendentes.includes(ctx.owner)),
+    outraIdentidade:pendentes.some(owner=>!ctx||owner!==ctx.owner)};
 };
 function _s012JsonSeguro(v){ try{ return JSON.stringify(v); }catch(e){ return null; } }
+function _s012RetencaoEnvelope(ret){
+  if(!ret||typeof ret!=='object'||!ret.owner) return null;
+  let crmPendencias=ret.crmPendencias||[];
+  try{
+    const preparado=window._crmPrepararSnapshotLocal?.(ret.ctx||{owner:ret.owner},ret.dados);
+    if(Array.isArray(preparado?._crmPendenciasSnapshot?.ops))
+      crmPendencias=preparado._crmPendenciasSnapshot.ops;
+  }catch(e){}
+  return {versao:1,owner:ret.owner,dados:_s012Clone(ret.dados),
+    liberada:ret.liberada===true,
+    crmPendencias:_s012Clone(crmPendencias),s004Raw:ret.s004Raw??null,
+    pending:_s012Clone(ret.pending),pendingJson:ret.pendingJson??null,
+    pendingRaw:ret.pendingRaw??null,pendingLegacy:ret.pendingLegacy===true,pendingTs:ret.pendingTs||null,
+    marcas:_s012Clone(ret.marcas||{marcas:[],lojas:[],pendentes:[]}),
+    crmStatus:_s012Clone(ret.crmStatus||{visto:{},naoEnviados:{}}),
+    s024:_s012Clone(ret.s024||{localOnly:null,intencoes:[],intencoesRaw:null}),
+    remoteAck:ret.remoteAck||null,pendingAck:ret.pendingAck===true};
+}
+function _s012RetencaoEnvelopeRaw(ret){
+  const envelope=_s012RetencaoEnvelope(ret);
+  return envelope?_s012JsonSeguro(envelope):null;
+}
+function _s012RetencaoIdbCobre(ctx,ret){
+  if(!ctx?.owner||!ret||ret.owner!==ctx.owner) return false;
+  return _s012RetencoesIdbDuraveisPorOwner.get(ctx.owner)===_s012RetencaoEnvelopeRaw(ret)
+    &&_s012RetencoesIdbEstadoPorOwner.get(ctx.owner)===(ret.liberada===true?'resolvida':'ativa');
+}
+window._s012RetencaoIdbRaw=function(ctx){
+  if(!ctx?.owner) return null;
+  return _s012RetencaoEnvelopeRaw(_s012RetencoesPorOwner.get(ctx.owner));
+};
+window._s012RetencaoSidecarRaw=function(ctx,tipo){
+  if(!ctx?.owner||tipo!=='s004-sales') return {encontrado:false,raw:null};
+  const ret=_s012RetencoesPorOwner.get(ctx.owner);
+  return ret&&ret.owner===ctx.owner&&Object.prototype.hasOwnProperty.call(ret,'s004Raw')
+    ?{encontrado:true,raw:ret.s004Raw}:{encontrado:false,raw:null};
+};
+window._s012RetencaoAtualizarS004=function(ctx,raw,criar=false){
+  if(!ctx?.owner||!(raw===null||typeof raw==='string')) return false;
+  let ret=_s012RetencoesPorOwner.get(ctx.owner);
+  if(!ret&&criar&&window._s012ContextoValido?.(ctx)){
+    window._s012RegistrarRetencao?.(ctx,D);
+    ret=_s012RetencoesPorOwner.get(ctx.owner);
+  }
+  if(!ret||ret.owner!==ctx.owner) return false;
+  const anterior=_s012RetencaoEnvelopeRaw(ret);
+  ret.s004Raw=raw;
+  if(ret.liberada===true) ret.liberada=false;
+  if(_s012RetencaoEnvelopeRaw(ret)!==anterior||!_s012RetencaoIdbCobre(ctx,ret))
+    window._s012GravarRetencaoIdb?.(ctx);
+  return true;
+};
+window._s012MarcarRetencaoIdbDuravel=function(ctx,envelope,raw){
+  if(!ctx?.owner||envelope?.versao!==1||envelope.owner!==ctx.owner
+      ||typeof raw!=='string'||_s012JsonSeguro(envelope)!==raw) return false;
+  _s012RetencoesIdbDuraveisPorOwner.set(ctx.owner,raw);
+  _s012RetencoesIdbEstadoPorOwner.set(ctx.owner,envelope.liberada===true?'resolvida':'ativa');
+  const ret=_s012RetencoesPorOwner.get(ctx.owner);
+  if(ret&&_s012RetencaoEnvelopeRaw(ret)===raw)
+    window._s012ResolverRetencao?.(ctx,{retencaoIdbRaw:raw});
+  return true;
+};
+window._s012RestaurarRetencaoIdb=function(ctx,envelope,raw,dadosAtuais){
+  if(!ctx?.owner||!window._s012ContextoValido?.(ctx)||envelope?.versao!==1
+      ||envelope.owner!==ctx.owner||typeof raw!=='string'||_s012JsonSeguro(envelope)!==raw) return false;
+  const existente=_s012RetencoesPorOwner.get(ctx.owner);
+  if(existente){
+    if(_s012RetencaoEnvelopeRaw(existente)!==raw) return false;
+    _s012RetencoesIdbDuraveisPorOwner.set(ctx.owner,raw);
+    _s012RetencoesIdbEstadoPorOwner.set(ctx.owner,existente.liberada===true?'resolvida':'ativa');
+    if(existente.liberada!==true) window._s012ResolverRetencao?.(ctx,{retencaoIdbRaw:raw});
+    return true;
+  }
+  const dadosBase=dadosAtuais===undefined?envelope.dados:dadosAtuais;
+  let s004Raw=envelope.s004Raw??null;
+  const s004Local=_s012LerRawOwner('s004-sales',ctx);
+  const s004LocalInfo=window._s004VendasRawInfo?.(s004Local,ctx.owner);
+  const s004RetInfo=window._s004VendasRawInfo?.(s004Raw,ctx.owner);
+  // A sidecar may have advanced after this retention record was committed.
+  // Keep the newer owner-scoped revision; never restore an older S004 copy
+  // over a confirmed local write.
+  if(s004LocalInfo?.valido&&s004RetInfo?.valido){
+    if(s004LocalInfo.revision>s004RetInfo.revision) s004Raw=s004Local;
+    else if(s004LocalInfo.revision===s004RetInfo.revision&&s004Local!==s004Raw) return false;
+  }else if(s004Local!==null&&s004Raw!==null&&(!s004LocalInfo?.valido||!s004RetInfo?.valido)) return false;
+  const ret={owner:ctx.owner,ctx:Object.assign({},ctx),dados:_s012Clone(dadosBase),
+    crmPendencias:_s012Clone(envelope.crmPendencias||[]),s004Raw,
+    pending:_s012Clone(envelope.pending),pendingJson:envelope.pendingJson??null,
+    pendingRaw:envelope.pendingRaw??null,pendingLegacy:envelope.pendingLegacy===true,pendingTs:envelope.pendingTs||null,
+    marcas:_s012Clone(envelope.marcas||{marcas:[],lojas:[],pendentes:[]}),
+    crmStatus:_s012Clone(envelope.crmStatus||{visto:{},naoEnviados:{}}),
+    s024:_s012Clone(envelope.s024||{localOnly:null,intencoes:[],intencoesRaw:null}),
+    remoteAck:envelope.remoteAck||null,pendingAck:envelope.pendingAck===true,
+    liberada:envelope.liberada===true};
+  const dados=_s012Clone(ret.dados)||{};
+  const crmRestore=Object.assign({},_s012Clone(envelope.dados),
+    ret.crmPendencias.length?{_crmPendenciasSnapshot:{owner:ctx.owner,ops:_s012Clone(ret.crmPendencias)}}:{});
+  window._crmRestaurarSnapshotLocal?.(ctx,crmRestore);
+  _s012RetencoesPorOwner.set(ctx.owner,ret);
+  if(_s012RetencaoEnvelopeRaw(ret)===raw){
+    _s012RetencoesIdbDuraveisPorOwner.set(ctx.owner,raw);
+    _s012RetencoesIdbEstadoPorOwner.set(ctx.owner,'ativa');
+  }
+  D=Object.assign({},_s012Clone(_s012EstadoBase),dados);
+  window._pendingLocalData=ret.pendingAck?null:_s012Clone(ret.pending);
+  window._pendingLocalDataTs=ret.pendingAck?null:ret.pendingTs;
+  window._s012AoTrocarSessao?.forEach(fn=>{try{fn(ctx,ret);}catch(e){console.warn('[S012] restauração IDB:',e.message);}});
+  if(typeof window._s024ReconstruirCatalogo==='function') window._s024ReconstruirCatalogo(D);
+  if(ret.liberada!==true) window.addEventListener?.('beforeunload',_s012AvisarRetencaoAntesFechar);
+  if(_s012RetencaoEnvelopeRaw(ret)===raw&&ret.liberada!==true) window._s012ResolverRetencao?.(ctx,{retencaoIdbRaw:raw});
+  else window._s012GravarRetencaoIdb?.(ctx);
+  return true;
+};
 function _s012LerRawOwner(tipo,ctx){
   const key=window._s012StorageKey?.(tipo,ctx);
   try{ return key?localStorage.getItem(key):null; }catch(e){ return null; }
@@ -10298,6 +10430,7 @@ function _s012SnapshotLocalCobre(ctx,dados){
   }
   return _s012JsonSeguro(esperado)===_s012JsonSeguro(salvo);
 }
+window._s012SnapshotLocalCobre= _s012SnapshotLocalCobre;
 function _s012SalvarSnapshotComCacheOwner(ctx,dados){
   const key=window._s012StorageKey?.('state',ctx);
   const crm=dados?.crm||{};
@@ -10315,22 +10448,29 @@ function _s012EstadoRetido(ctx,dados){
   const pending=window._pendingLocalData;
   let pendingJson=null;
   try{ pendingJson=pending==null?null:JSON.stringify(pending); }catch(e){}
-  const pendingKey=window._s012StorageKey?.('pending',ctx);
-  let pendingRaw=null,pendingLegacy=false;
+  let pendingRaw=null,pendingPayload=null,pendingLegacy=false;
   try{ const salvo=window._s005PendingLerArmazenado(ctx);
-    pendingRaw=salvo.payload; pendingLegacy=salvo.legacy; }
-  catch(e){pendingLegacy=true;} // Sem ler o formato, não promover a moderno.
+    pendingRaw=salvo.raw;pendingPayload=salvo.payload;pendingLegacy=salvo.legacy; }
+  catch(e){pendingRaw=_s012LerRawOwner('pending',ctx);pendingLegacy=true;} // Sem ler o formato, preserva os bytes.
   const anterior=_s012RetencoesPorOwner.get(ctx.owner);
   pendingLegacy=pendingLegacy||!!(anterior&&!anterior.pendingAck&&anterior.pendingLegacy);
-  if(pendingJson===null && pendingRaw!==null) pendingJson=pendingRaw;
+  if(pendingJson===null && pendingPayload!==null) pendingJson=pendingPayload;
+  if(pendingJson!==null && pendingPayload!==pendingJson)
+    pendingRaw=JSON.stringify({_avatimPending:1,owner:ctx.owner,payload:pendingJson,legacy:pendingLegacy});
   let pendingData=pending==null?null:_s012Clone(pending);
   if(pendingData===null&&pendingJson){try{pendingData=JSON.parse(pendingJson);}catch(e){}}
+  let crmPendencias=[];
+  try{
+    const preparado=window._crmPrepararSnapshotLocal?.(ctx,dados);
+    if(Array.isArray(preparado?._crmPendenciasSnapshot?.ops)) crmPendencias=preparado._crmPendenciasSnapshot.ops;
+  }catch(e){}
   let s024Intencoes=null;
   try{ s024Intencoes=typeof _s024LerIntencoes==='function'?_s024LerIntencoes(ctx):[]; }
   catch(e){ s024Intencoes=null; }
   return {
     owner:ctx.owner,ctx:Object.assign({},ctx),dados:_s012Clone(dados),
-    pending:pendingData,pendingJson,pendingLegacy,pendingTs:window._pendingLocalDataTs||null,
+    crmPendencias:_s012Clone(crmPendencias),s004Raw:_s012LerRawOwner('s004-sales',ctx),
+    pending:pendingData,pendingJson,pendingRaw,pendingLegacy,pendingTs:window._pendingLocalDataTs||null,
     marcas:window._s012CapturarMarcasVend?.()||{marcas:[],lojas:[],pendentes:[]},
     crmStatus:{visto:_s012Clone(window._crmTsVisto||{}),naoEnviados:_s012Clone(window._crmNaoEnviados||{})},
     s024:{localOnly:_s012Clone(window._s024LocalOnly),intencoes:s024Intencoes,
@@ -10342,17 +10482,39 @@ window._s012RegistrarRetencao=function(ctx,dados){
   if(!ctx?.owner || !window._s012ContextoValido?.(ctx)) return false;
   const anterior=_s012RetencoesPorOwner.get(ctx.owner);
   const ret=_s012EstadoRetido(ctx,dados);
+  ret.liberada=false;
   if(anterior?.owner===ctx.owner){
+    if(Object.prototype.hasOwnProperty.call(anterior,'s004Raw')
+        &&_s012LerRawOwner('s004-sales',ctx)!==anterior.s004Raw) ret.s004Raw=anterior.s004Raw;
     ret.remoteAck=anterior.remoteAck||null;
     ret.pendingAck=anterior.pendingJson===ret.pendingJson&&anterior.pendingAck===true;
   }
   _s012RetencoesPorOwner.set(ctx.owner,ret);
   window.addEventListener?.('beforeunload',_s012AvisarRetencaoAntesFechar);
+  window._s012GravarRetencaoIdb?.(ctx);
+  return true;
+};
+window._s012RetencaoAtualizarPendente=function(ctx,pending,ts){
+  if(!ctx?.owner||!window._s012ContextoValido?.(ctx)) return false;
+  const ret=_s012RetencoesPorOwner.get(ctx.owner);
+  if(!ret||ret.owner!==ctx.owner||pending==null) return false;
+  const json=_s012JsonSeguro(pending);
+  if(json===null) return false;
+  if(ret.liberada===true) ret.liberada=false;
+  if(ret.pendingJson!==json) ret.pendingAck=false;
+  ret.pending=_s012Clone(pending);ret.pendingJson=json;ret.pendingTs=ts||Date.now();
+  try{
+    const salvo=window._s005PendingLerArmazenado(ctx);
+    ret.pendingRaw=salvo.payload===json?salvo.raw:
+      JSON.stringify({_avatimPending:1,owner:ctx.owner,payload:json,legacy:ret.pendingLegacy===true});
+  }catch(e){ ret.pendingRaw=null; }
+  window._s012GravarRetencaoIdb?.(ctx);
   return true;
 };
 function _s012MarcasRetidasVazias(m){
   return !m || !(m.marcas||[]).length && !(m.lojas||[]).length && !(m.pendentes||[]).length
-    && !(m.campos||[]).length && !(m.metasLoja||[]).length;
+    && !(m.campos||[]).length && !(m.metasLoja||[]).length
+    && !(m.metasIntencoesS027||[]).length;
 }
 function _s012StatusCrmRetidoVazio(s){
   return !s || !Object.keys(s.visto||{}).length && !Object.keys(s.naoEnviados||{}).length;
@@ -10373,28 +10535,22 @@ function _s012PersistirPendingRetido(ctx,ret){
 }
 function _s012AuxiliaresRetidosDuraveis(ctx,ret){
   const marksKey=window._s012StorageKey?.('edit-marks',ctx);
-  let marksOk=_s012MarcasRetidasVazias(ret.marcas);
-  if(!marksOk){
-    const raw=marksKey?(()=>{try{return localStorage.getItem(marksKey);}catch(e){return null;}})():null;
-    marksOk=raw===JSON.stringify({owner:ctx.owner,...ret.marcas});
-  }
-  let statusOk=_s012StatusCrmRetidoVazio(ret.crmStatus);
-  if(!statusOk){
-    const raw=_s012LerRawOwner('crm-state',ctx);
-    statusOk=raw===JSON.stringify(ret.crmStatus);
-  }
+  const marksRaw=marksKey?(()=>{try{return localStorage.getItem(marksKey);}catch(e){return null;}})():null;
+  const marksOk=marksRaw===JSON.stringify({owner:ctx.owner,...(ret.marcas||{})})
+    ||(marksRaw===null&&_s012MarcasRetidasVazias(ret.marcas));
+  const statusRaw=_s012LerRawOwner('crm-state',ctx);
+  const statusOk=statusRaw===JSON.stringify(ret.crmStatus)
+    ||(statusRaw===null&&_s012StatusCrmRetidoVazio(ret.crmStatus));
   const localOnlyKey=window._s012StorageKey?.('s024-localonly',ctx);
   let localOnlyRaw=null;
   try{ localOnlyRaw=localOnlyKey?localStorage.getItem(localOnlyKey):null; }catch(e){}
   const esperadoLocal=ret.s024?.localOnly?JSON.stringify(ret.s024.localOnly):null;
   const localOnlyOk=localOnlyRaw===esperadoLocal;
-  const intentsOk=ret.s024?.intencoesRaw==null
-    ? !(Array.isArray(ret.s024?.intencoes)&&ret.s024.intencoes.length)
-    : _s012LerRawOwner('s024',ctx)===ret.s024.intencoesRaw;
-  const salvoPending=window._s005PendingLerArmazenado(ctx);
-  const pendingOk=ret.pendingAck || !ret.pendingJson
-    || (salvoPending.payload===ret.pendingJson && (!ret.pendingLegacy||salvoPending.legacy));
-  return marksOk&&statusOk&&localOnlyOk&&intentsOk&&pendingOk;
+  const intentsOk=_s012LerRawOwner('s024',ctx)===(ret.s024?.intencoesRaw??null);
+  const pendingRawAtual=_s012LerRawOwner('pending',ctx);
+  const pendingOk=pendingRawAtual===(ret.pendingAck?null:ret.pendingRaw);
+  const s004Ok=_s012LerRawOwner('s004-sales',ctx)===(ret.s004Raw??null);
+  return marksOk&&statusOk&&localOnlyOk&&intentsOk&&pendingOk&&s004Ok;
 }
 window._s012ResolverRetencao=function(ctx,prova){
   if(!ctx?.owner) return false;
@@ -10404,14 +10560,23 @@ window._s012ResolverRetencao=function(ctx,prova){
   // recente antes de provar armazenamento/ACK. Uma resposta antiga de outra
   // geração nunca substitui os bytes privados mais novos.
   if(window._s012ContextoValido?.(ctx)){
+    ret.ctx=Object.assign({},ctx);
     ret.dados=_s012Clone(D);
     ret.marcas=window._s012CapturarMarcasVend?.()||ret.marcas;
     ret.crmStatus={visto:_s012Clone(window._crmTsVisto||{}),naoEnviados:_s012Clone(window._crmNaoEnviados||{})};
     const pend=window._pendingLocalData;
-    if(pend!=null){ ret.pending=_s012Clone(pend); ret.pendingJson=_s012JsonSeguro(pend); ret.pendingTs=window._pendingLocalDataTs||null; ret.pendingAck=false; }
+    if(pend!=null){
+      ret.pending=_s012Clone(pend); ret.pendingJson=_s012JsonSeguro(pend); ret.pendingTs=window._pendingLocalDataTs||null; ret.pendingAck=false;
+      try{const salvo=window._s005PendingLerArmazenado(ctx);ret.pendingRaw=salvo.payload===ret.pendingJson?salvo.raw:
+        JSON.stringify({_avatimPending:1,owner:ctx.owner,payload:ret.pendingJson,legacy:ret.pendingLegacy===true});}
+      catch(e){ret.pendingRaw=_s012LerRawOwner('pending',ctx);}
+    }
     else if(!ret.pendingAck){
-      const raw=window._s005PendingLerArmazenado(ctx).payload;
-      ret.pendingJson=raw; ret.pending=raw?(()=>{try{return JSON.parse(raw);}catch(e){return null;}})():null;
+      try{
+        const salvo=window._s005PendingLerArmazenado(ctx);
+        ret.pendingJson=salvo.payload;ret.pendingRaw=salvo.raw;
+        ret.pending=salvo.payload?(()=>{try{return JSON.parse(salvo.payload);}catch(e){return null;}})():null;
+      }catch(e){ret.pendingRaw=_s012LerRawOwner('pending',ctx);}
     }
     ret.s024={localOnly:_s012Clone(window._s024LocalOnly),intencoes:(()=>{try{return _s024LerIntencoes(ctx);}catch(e){return ret.s024?.intencoes||[];}})(),
       intencoesRaw:_s012LerRawOwner('s024',ctx)};
@@ -10427,10 +10592,28 @@ window._s012ResolverRetencao=function(ctx,prova){
   if(prova?.pendingPayload && ret.pendingJson===prova.pendingPayload) ret.pendingAck=true;
   if(ret.remoteAck!==bruto && !window._s012SnapshotLocalCobre(ctx,ret.dados))
     _s012SalvarSnapshotComCacheOwner(ctx,ret.dados);
-  const estadoOk=ret.remoteAck===bruto || window._s012SnapshotLocalCobre(ctx,ret.dados);
-  if(!estadoOk || !_s012AuxiliaresRetidosDuraveis(ctx,ret)) return false;
-  _s012RetencoesPorOwner.delete(ctx.owner);
-  if(!_s012RetencoesPorOwner.size) window.removeEventListener?.('beforeunload',_s012AvisarRetencaoAntesFechar);
+  const localCompleto=window._s012SnapshotLocalCobre(ctx,ret.dados)
+    &&_s012AuxiliaresRetidosDuraveis(ctx,ret);
+  const conhecido=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner);
+  if(localCompleto && !conhecido && !_s012RetencoesIdbDuraveisPorOwner.has(ctx.owner)
+      &&!_s012RetencaoIdbFila.has(ctx.owner)){
+    _s012RetencoesPorOwner.delete(ctx.owner);
+    return true;
+  }
+  // A tombstone is committed before retiring an older fallback. Its full
+  // bytes must match the latest data, ACK and sidecars, not an earlier write.
+  ret.liberada=localCompleto;
+  if(!_s012RetencaoIdbCobre(ctx,ret)){
+    window._s012GravarRetencaoIdb?.(ctx);
+    return false;
+  }
+  if(localCompleto){
+    _s012RetencoesPorOwner.delete(ctx.owner);
+    _s012RetencoesIdbDuraveisPorOwner.delete(ctx.owner);
+    _s012RetencoesIdbEstadoPorOwner.delete(ctx.owner);
+  }
+  if(![..._s012RetencoesPorOwner.values()].some(r=>!_s012RetencaoIdbCobre(r.ctx,r)))
+    window.removeEventListener?.('beforeunload',_s012AvisarRetencaoAntesFechar);
   return true;
 };
 function _s012PersistirOwnerAntesTrocar(ctx,dados){
@@ -10439,10 +10622,17 @@ function _s012PersistirOwnerAntesTrocar(ctx,dados){
   const marcas=window._s012PersistirMarcasVend?.(ctx)===true;
   const status=window._s012PersistirCrmStatusAntesTrocar?.(ctx)===true;
   const s024=window._s012PersistirS024AntesTrocar?.(ctx)===true;
+  const cacheRetido=_s012RetencoesPorOwner.get(ctx.owner);
   ret=_s012EstadoRetido(ctx,dados);
+  if(cacheRetido){
+    ret.s004Raw=cacheRetido.s004Raw;
+    ret.remoteAck=cacheRetido.remoteAck;
+    if(cacheRetido.pendingAck&&cacheRetido.pendingJson===ret.pendingJson) ret.pendingAck=true;
+  }
   const pending=_s012PersistirPendingRetido(ctx,ret);
   const estadoSuficiente=estadoCheio||_s012SnapshotLocalCobre(ctx,dados);
-  if(estadoSuficiente&&marcas&&status&&s024&&pending){
+  if(estadoSuficiente&&marcas&&status&&s024&&pending
+      &&!_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)&&!_s012RetencaoIdbFila.has(ctx.owner)){
     _s012RetencoesPorOwner.delete(ctx.owner);
     return true;
   }
@@ -10455,6 +10645,7 @@ function _s012PersistirOwnerAntesTrocar(ctx,dados){
   // Outra aba já invalidou o token: conferir os bytes do dono capturado,
   // sem reautorizar callbacks nem bloquear por dados que já estão duráveis.
   if(window._s012ResolverRetencao(ctx)) return true;
+  window._s012GravarRetencaoIdb?.(ctx);
   // Escreve o CRM capturado em IDB somente depois de registrar a retenção;
   // o callback só a libera se a leitura posterior provar bytes iguais.
   const crm=ret.dados?.crm||{};
@@ -10464,7 +10655,7 @@ function _s012PersistirOwnerAntesTrocar(ctx,dados){
   return false;
 }
 function _s012AvisarRetencaoAntesFechar(event){
-  if(!_s012RetencoesPorOwner.size) return;
+  if(![..._s012RetencoesPorOwner.values()].some(r=>!_s012RetencaoIdbCobre(r.ctx,r))) return;
   event.preventDefault(); event.returnValue='Há alterações locais pendentes de persistência.';
   return event.returnValue;
 }
@@ -10477,7 +10668,8 @@ window._s012AtivarSessao=function(){
   }
   const anterior=_s012SessaoAtiva&&{
     owner:_s012SessaoAtiva.owner,email:_s012SessaoAtiva.email,
-    perfil:_s012SessaoAtiva.perfil,loja:_s012SessaoAtiva.loja,geracao:_s012SessaoAtiva.geracao};
+    perfil:_s012SessaoAtiva.perfil,loja:_s012SessaoAtiva.loja,geracao:_s012SessaoAtiva.geracao,
+    browserToken:_s012SessaoAtiva.browserToken,browserRevision:_s012SessaoAtiva.browserRevision};
   if(anterior) _s012PersistirOwnerAntesTrocar(anterior,D);
   const geracao=++_s012Geracao;
   _s012SessaoAtiva=null;
@@ -10491,13 +10683,14 @@ window._s012AtivarSessao=function(){
     window._s012BloqueioRetencao='publicacao-em-andamento';
     return null;
   }
-  const outroOwner=[..._s012RetencoesPorOwner.keys()].find(owner=>owner!==p.owner);
+  const outroOwner=[..._s012RetencoesPorOwner.entries()].find(([owner,r])=>owner!==p.owner&&!_s012RetencaoIdbCobre(r.ctx,r))?.[0];
   if(outroOwner){
     window._s012BloqueioRetencao='outro-owner-pendente';
     return null;
   }
   window._s012BloqueioRetencao=null;
-  _s012SessaoAtiva={owner:p.owner,email:p.email,perfil:p.perfil,loja:p.loja,geracao};
+  _s012SessaoAtiva={owner:p.owner,email:p.email,perfil:p.perfil,loja:p.loja,geracao,
+    browserToken:_s012TokenBrowser,browserRevision:window._s012BrowserRevisionAtual()};
   const ctx=window._s012ContextoAtual();
   const ret=_s012RetencoesPorOwner.get(p.owner)||null;
   const local=ret&&ret.owner===p.owner?_s012Clone(ret.dados):window._s012LerSnapshotLocal(ctx,true);
@@ -10515,7 +10708,8 @@ window._s012InvalidarSessao=function(opcoes){
   const persistir=opcoes?.persistir!==false;
   if(_s012SessaoAtiva && persistir){
     const anterior={owner:_s012SessaoAtiva.owner,email:_s012SessaoAtiva.email,
-      perfil:_s012SessaoAtiva.perfil,loja:_s012SessaoAtiva.loja,geracao:_s012SessaoAtiva.geracao};
+      perfil:_s012SessaoAtiva.perfil,loja:_s012SessaoAtiva.loja,geracao:_s012SessaoAtiva.geracao,
+      browserToken:_s012SessaoAtiva.browserToken,browserRevision:_s012SessaoAtiva.browserRevision};
     _s012PersistirOwnerAntesTrocar(anterior,D);
   }
   _s012Geracao++;
@@ -13871,6 +14065,7 @@ window.crmFiltrar = function(cubo, f){
     prodsTabela: cubo.prods || [],
     vendsTabela: cubo.vends || [],
     linhas: cubo.linhas || 0,
+    linhasAproximadas: _crmLinhasAproximadas(cubo),
     // ══════════════════════════════════════════════════════════════
     // [R143] `linhas` e `periodo` são do CUBO, que já vem recortado por
     // ano e loja — mas NÃO por mês nem por vendedor(a). Faturamento,
@@ -13878,7 +14073,7 @@ window.crmFiltrar = function(cubo, f){
     // produz "22.012 linhas analisadas · 01/01 a 31/01", em que o número
     // é do ano inteiro e o período é de janeiro. Os dois campos abaixo
     // dizem o que vale para o RECORTE, e valem null quando não dá para
-    // saber: o cubo conta linhas por ano, não por mês.
+    // saber com filtro de mês ou vendedor(a).
     // ══════════════════════════════════════════════════════════════
     linhasNoRecorte: (f.mes || f.vend) ? null : (cubo.linhas || 0),
     periodoRecorte: (function(){
@@ -14726,7 +14921,7 @@ window.crmApagar = async function(lid, ano){
   if(!cubo){ showToast('Conjunto não encontrado.','warn'); return; }
   const nomeLoja = (LOJAS.find(l=>l.id===lid)?.nome) || lid;
   if(!confirm('Apagar o CRM de ' + nomeLoja + ' / ' + ano + '?\n\n'
-    + (cubo.linhas||0).toLocaleString('pt-BR') + ' linhas · '
+    + (_crmLinhasAproximadas(cubo) ? '≈ ' : '') + (cubo.linhas||0).toLocaleString('pt-BR') + ' linhas · '
     + (cubo.clientesUnicos||0).toLocaleString('pt-BR') + ' clientes.\n\n'
     + 'Isto não afeta vendas, contatos nem fluxo.')) return;
 
@@ -15284,6 +15479,7 @@ window.crmAgregar = function(linhas, opts){
   const nfMes=new Map();        // NF -> indice do mes
   let fatTotal=0, dtMin=null, dtMax=null;
   const detalhesCompra=[], mesesDetalhe=new Set();
+  const linhasPorMes=new Map();
 
   const norm=s=>String(s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
 
@@ -15292,6 +15488,7 @@ window.crmAgregar = function(linhas, opts){
     if(!r.data) continue;
     const val=Number(r.valor)||0, qt=Number(r.qtde)||1;
     const mes=r.data.slice(0,7);
+    linhasPorMes.set(mes,(linhasPorMes.get(mes)||0)+1);
     mesesDetalhe.add(mes);
     const mi=idx(tMes,iMes,mes), vi=idx(tVend,iVend,r.vendedora||''), pi=idx(tProd,iProd,r.produto||'');
     // [FIX R76] Antes: r.cupom || ('#'+k) — sem NF, CADA LINHA virava uma
@@ -15454,6 +15651,9 @@ window.crmAgregar = function(linhas, opts){
 
   return {
     ts:Date.now(), linhas:linhas.length, faturamento:r2(fatTotal),
+    linhasPorMes:[...linhasPorMes.values()].reduce((s,n)=>s+n,0)===linhas.length
+      ? Object.fromEntries(linhasPorMes) : {},
+    _linhasAproximadas:false,
     dedup: opts._dedup ? {duplicadas:opts._dedup.dupExatas, nfsCorrigidas:opts._dedup.nfsCorrigidas,
                           valorRemovido:r2(opts._dedup.valorRemovido), notas:opts._dedup.notas,
                           semNF:opts._dedup.semNF||0} : null,
@@ -15493,8 +15693,9 @@ function _crmBytes(o){
   try{ return new Blob([JSON.stringify(o)]).size; }catch(e){ return JSON.stringify(o).length; }
 }
 
-function _crmBytesCabeca(cubo){
+function _crmBytesCabeca(cubo, semMarcaLinhas=false){
   const leve=Object.assign({},cubo,{clientes:undefined});
+  if(semMarcaLinhas&&typeof leve._linhasAproximadas==='boolean') delete leve._linhasAproximadas;
   if(leve._comprasCliente&&typeof leve._comprasCliente==='object'){
     leve._comprasCliente=Object.assign({},leve._comprasCliente);
     delete leve._comprasCliente.itens;
@@ -15640,6 +15841,22 @@ window._crmCoberturaMesCli = function(cubo){
   return cubo.mesCliCompleto===true ? meses : new Set();
 };
 
+function _crmContagemLinhasMes(cubo, meses){
+  const mapa={};
+  for(const mes of meses){
+    const n=cubo?.linhasPorMes?.[mes];
+    if(Number.isSafeInteger(n)&&n>=0) mapa[mes]=n;
+  }
+  return {mapa,completa:(meses.length>0||Number(cubo?.linhas||0)===0)
+      &&meses.every(m=>Object.prototype.hasOwnProperty.call(mapa,m)),
+    total:Object.values(mapa).reduce((s,n)=>s+n,0)};
+}
+
+function _crmLinhasAproximadas(cubo){
+  return typeof cubo?._linhasAproximadas==='boolean'
+    ? cubo._linhasAproximadas : cubo?._aproximado===true;
+}
+
 /**
  * [R155] Remove meses inteiros de um cubo, reconstruindo o que depende
  * deles. É o que permite trocar SÓ agosto sem perder janeiro a julho.
@@ -15707,6 +15924,7 @@ window.crmRemoverMeses = function(cubo, mesesFora){
   const esc = n => Math.round((n||0) * fator);
 
   const mesesFicam = [...new Set(mesVend.map(r => tab[r[0]]).filter(Boolean))].sort();
+  const contagemLinhas=_crmContagemLinhasMes(cubo,mesesFicam);
   const coberturaCliFica=[...coberturaCliAntes].filter(m=>!fora.has(m)&&mesesFicam.includes(m)).sort();
   const ini = mesesFicam.length ? mesesFicam[0] + '-01' : null;
   const fimMes = mesesFicam.length ? mesesFicam[mesesFicam.length-1] : null;
@@ -15751,7 +15969,9 @@ window.crmRemoverMeses = function(cubo, mesesFora){
 
   return Object.assign({}, cubo, {
     ts: Date.now(),
-    linhas: Math.round((cubo.linhas||0) * fator),
+    linhas: contagemLinhas.completa ? contagemLinhas.total : Math.round((cubo.linhas||0) * fator),
+    linhasPorMes:contagemLinhas.mapa,
+    _linhasAproximadas:!contagemLinhas.completa,
     faturamento: r2(fatDepois),
     periodo: {ini, fim},
     clientesUnicos: clientes.length,
@@ -15777,6 +15997,8 @@ window.crmRemoverMeses = function(cubo, mesesFora){
 window.crmFundirCubos = function(a, b){
   if(!a) return b;
   if(!b) return a;
+  const linhasA=_crmContagemLinhasMes(a,window.crmMesesDoCubo(a));
+  const linhasB=_crmContagemLinhasMes(b,window.crmMesesDoCubo(b));
   const tMes=[], iMes=new Map(), tVend=[], iVend=new Map(), tProd=[], iProd=new Map();
   const idx=(t,m,v)=>{ if(v===undefined||v===null) v=''; let i=m.get(v); if(i===undefined){ i=t.length; t.push(v); m.set(v,i);} return i; };
 
@@ -15940,7 +16162,11 @@ window.crmFundirCubos = function(a, b){
 
   return {
     ts: Date.now(),
-    linhas, faturamento: r2(fat),
+    linhas:linhasA.completa&&linhasB.completa ? linhasA.total+linhasB.total : linhas,
+    linhasPorMes:Object.assign({},linhasA.mapa,linhasB.mapa),
+    _linhasAproximadas:!(linhasA.completa&&linhasB.completa)
+      &&(_crmLinhasAproximadas(a)||_crmLinhasAproximadas(b)),
+    faturamento: r2(fat),
     dedup: temDedup ? {duplicadas:dd.duplicadas, nfsCorrigidas:dd.nfsCorrigidas,
                        valorRemovido:r2(dd.valorRemovido), notas:dd.notas, semNF:dd.semNF} : null,
     periodo:{ini, fim},
@@ -16003,8 +16229,11 @@ window.crmGuardar = function(lid, ano, cubo){
   // pedir confirmação. Degradar dizendo o que se perdeu é melhor que
   // gravar um cubo que promete exatidão que não tem.
   // ══════════════════════════════════════════════════════════════════
+  // Contagem opcional cede espaço antes de dimensões; a marca booleana não deve expulsá-las.
+  if(cubo.linhasPorMes&&_crmBytesCabeca(cubo)>CRM_ORC_DOC)
+    cubo=Object.assign({},cubo,{linhasPorMes:undefined});
   if(Array.isArray(cubo.mesVendProd)&&cubo.mesVendProd.length
-      && _crmBytesCabeca(cubo) > CRM_ORC_DOC){
+      && _crmBytesCabeca(cubo,true) > CRM_ORC_DOC){
     // ponytail: this optional exactness dimension must not evict monthly customers.
     // Drop it before the existing mesCli fallback and make the loss explicit.
     cubo=Object.assign({},cubo,{mesVendProd:undefined,mesVendProdCobertura:[]});
@@ -16015,7 +16244,7 @@ window.crmGuardar = function(lid, ano, cubo){
   if(Array.isArray(cubo.mesCli) && cubo.mesCli.length){
     let corte = 0;
     const coberturaCli=new Set(cubo.mesCliCobertura||[]);
-    while(_crmBytesCabeca(cubo) > CRM_ORC_DOC && corte < 12){
+    while(_crmBytesCabeca(cubo,true) > CRM_ORC_DOC && corte < 12){
       corte++;
       const limite = Math.max(50, Math.floor(400 / corte));   // 400, 200, 133, 100...
       const porMes = new Map();
@@ -16100,6 +16329,7 @@ window.crmCombinar = function(lojas, anos, opcoes){
   const tCli=[], iCli=new Map(), mesCli=new Map();   // [R152] recorte mês × cliente
   let linhas=0, faturamento=0, ini=null, fim=null, cubosContados=0, prodMetricasAnuaisDisponiveis=true;
   let prodTotalClientesAproximados=false;
+  let linhasAproximadas=false;
   const incluirCompras=opcoes?.incluirComprasCliente===true;
   const comprasCliente=[], coberturaCompras=[];
 
@@ -16132,6 +16362,7 @@ window.crmCombinar = function(lojas, anos, opcoes){
           (detalhe.itens||[]).forEach(r=>comprasCliente.push([lid,String(ano),...r]));
       }
       linhas += c.linhas||0; faturamento += c.faturamento||0;
+      if(_crmLinhasAproximadas(c)) linhasAproximadas=true;
       if(c.periodo){
         if(!ini || (c.periodo.ini && c.periodo.ini < ini)) ini = c.periodo.ini;
         if(!fim || (c.periodo.fim && c.periodo.fim > fim)) fim = c.periodo.fim;
@@ -16231,6 +16462,7 @@ window.crmCombinar = function(lojas, anos, opcoes){
   }
   return {
     linhas, faturamento: Math.round(faturamento*100)/100,
+    _linhasAproximadas:linhasAproximadas,
     periodo:{ini, fim},
     meses:tMes, vends:tVend, prods:tProd, clis:tCli,
     mesVend: [...mesVend.entries()].map(([k,v])=>{const[a,b]=par(k);return [a,b,v.f,v.c,v.i,v.cl];}),
@@ -17123,6 +17355,206 @@ function _idbAbrir(){
   });
 }
 
+// S030: a full operational snapshot and its S012 sidecars share one owner-keyed
+// IndexedDB transaction. localStorage remains the synchronous fast path.
+const _s012RetencaoIdbFila=new Map();
+const _s012RetencaoIdbSequencia=new Map();
+const _s012RetencaoStorageTipos=['state','pending','edit-marks','crm-state','s024-localonly','s024','s004-sales'];
+function _s012RetencaoStorageRaw(tipo,ctx){
+  const key=window._s012StorageKey?.(tipo,ctx);
+  try{ return key?localStorage.getItem(key):null; }catch(e){ return null; }
+}
+function _s012RetencaoStorageExpected(envelope,tipo,ctx){
+  if(tipo==='state'){
+    const dados=JSON.parse(JSON.stringify(envelope.dados||{}));
+    if(Array.isArray(envelope.crmPendencias)&&envelope.crmPendencias.length)
+      dados._crmPendenciasSnapshot={owner:ctx.owner,ops:envelope.crmPendencias};
+    return JSON.stringify(dados);
+  }
+  if(tipo==='pending'){
+    if(envelope.pendingAck) return null;
+    if(typeof envelope.pendingRaw==='string') return envelope.pendingRaw;
+    if(envelope.pendingJson==null) return null;
+    return JSON.stringify({_avatimPending:1,owner:ctx.owner,payload:String(envelope.pendingJson),legacy:envelope.pendingLegacy===true});
+  }
+  if(tipo==='edit-marks'){
+    const m=envelope.marcas||{};
+    // The actual marks writer serializes empty arrays too (e.g. logout).
+    // Expected bytes must match that writer, including the empty envelope.
+    return JSON.stringify({owner:ctx.owner,...m});
+  }
+  if(tipo==='crm-state'){
+    const s=envelope.crmStatus||{};
+    return !Object.keys(s.visto||{}).length&&!Object.keys(s.naoEnviados||{}).length
+      ?null:JSON.stringify(s);
+  }
+  if(tipo==='s024-localonly') return envelope.s024?.localOnly?JSON.stringify(envelope.s024.localOnly):null;
+  if(tipo==='s024') return Array.isArray(envelope.s024?.intencoes)&&envelope.s024.intencoes.length
+    ?JSON.stringify(envelope.s024.intencoes):null;
+  if(tipo==='s004-sales') return typeof envelope.s004Raw==='string'?envelope.s004Raw:null;
+  return null;
+}
+function _s012RetencaoIdbLer(db,key){
+  const leitura=new Promise((resolve,reject)=>{
+    let valor=null;
+    try{
+      const tx=db.transaction(_IDB.store,'readonly'),rq=tx.objectStore(_IDB.store).get(key);
+      rq.onsuccess=()=>{valor=rq.result||null;};
+      rq.onerror=()=>reject(rq.error||new Error('leitura do snapshot owner falhou'));
+      tx.oncomplete=()=>resolve(valor);
+      tx.onerror=()=>reject(tx.error||new Error('leitura do snapshot owner falhou'));
+      tx.onabort=()=>reject(tx.error||new Error('leitura do snapshot owner abortada'));
+    }catch(e){ reject(e); }
+  });
+  return _s012RetencaoComPrazo(leitura,'leitura do snapshot owner');
+}
+function _s012RetencaoComPrazo(promise,rotulo){
+  let timer;
+  const prazo=new Promise((_,reject)=>{
+    timer=setTimeout(()=>reject(new Error(rotulo+' excedeu '+_IDB_PRAZO+'ms')), _IDB_PRAZO);
+  });
+  return Promise.race([promise,prazo]).finally(()=>clearTimeout(timer));
+}
+window._s012GravarRetencaoIdb=function(ctx){
+  if(!ctx?.owner) return Promise.resolve(false);
+  const key=window._s012StorageKey?.('state-retention',ctx);
+  const raw=window._s012RetencaoIdbRaw?.(ctx);
+  if(!key||!raw) return Promise.resolve(false);
+  let envelope;
+  try{ envelope=JSON.parse(raw); }catch(e){ return Promise.resolve(false); }
+  const seq=(_s012RetencaoIdbSequencia.get(ctx.owner)||0)+1;
+  _s012RetencaoIdbSequencia.set(ctx.owner,seq);
+  const base={},expected={};
+  _s012RetencaoStorageTipos.forEach(tipo=>{
+    base[tipo]=_s012RetencaoStorageRaw(tipo,ctx);
+    expected[tipo]=_s012RetencaoStorageExpected(envelope,tipo,ctx);
+  });
+  const record={versao:1,owner:ctx.owner,estado:envelope.liberada===true?'resolvida':'ativa',browserToken:ctx.browserToken||null,
+    browserRevision:Number(ctx.browserRevision)||0,geracao:Number(ctx.geracao)||0,
+    sequencia:seq,base,expected,retencao:envelope};
+  let recordRaw;
+  const anterior=_s012RetencaoIdbFila.get(ctx.owner)||Promise.resolve(false);
+  const tarefa=anterior.catch(()=>false).then(async()=>{
+    if(_s012RetencaoIdbSequencia.get(ctx.owner)!==seq
+        ||window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
+    const db=await _idbAbrir();
+    const revisaoBase=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
+    try{
+      let gravou=false;
+      const commit=await _s012RetencaoComPrazo(new Promise((resolve,reject)=>{
+        let ignorado=false;
+        let tx;
+        try{
+          tx=db.transaction(_IDB.store,'readwrite');
+          const os=tx.objectStore(_IDB.store),rq=os.get(key);
+          rq.onsuccess=()=>{
+            let atual=null;
+            if(rq.result!=null){
+              try{ atual=typeof rq.result==='string'?JSON.parse(rq.result):rq.result; }
+              catch(_e){ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;}
+              if(!atual||typeof atual!=='object'||Array.isArray(atual)||atual.versao!==1
+                  ||atual.owner!==ctx.owner||atual.retencao?.owner!==ctx.owner){
+                ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
+              }
+            }
+            if((Number(atual?.revision)||0)!==revisaoBase){
+              ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
+            }
+            if(atual&&Number(atual.browserRevision||0)>Number(ctx.browserRevision||0)){
+              ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
+            }
+            if(atual?.browserToken===ctx.browserToken&&atual?.browserRevision===ctx.browserRevision
+                &&Number(atual.geracao||0)>Number(ctx.geracao||0)){
+              ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
+            }
+            if(_s012RetencaoIdbSequencia.get(ctx.owner)!==seq
+                ||window._s012RetencaoIdbRaw?.(ctx)!==raw){ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;}
+            record.revision=revisaoBase+1;
+            recordRaw=JSON.stringify(record);
+            try{ os.put(recordRaw,key);gravou=true; }
+            catch(e){ignorado=true;reject(e);try{tx.abort();}catch(_){};}
+          };
+          rq.onerror=()=>{ignorado=true;reject(rq.error||new Error('leitura antes do snapshot IDB falhou'));try{tx.abort();}catch(_){}};
+          tx.oncomplete=()=>resolve(gravou&&!ignorado);
+          tx.onerror=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB falhou'));};
+          tx.onabort=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB abortada'));};
+        }catch(e){reject(e);}
+      }),'gravação do snapshot owner');
+      if(!commit) return false;
+      _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
+      const confirmado=await _s012RetencaoIdbLer(db,key);
+      if(confirmado!==recordRaw||_s012RetencaoIdbSequencia.get(ctx.owner)!==seq) return false;
+      if(window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
+      return window._s012MarcarRetencaoIdbDuravel?.(ctx,envelope,raw)===true;
+    }finally{ db.close(); }
+  }).catch(e=>{
+    console.warn('[S012] retenção owner não confirmada no IndexedDB:',e.message||e);
+    return false;
+  });
+  _s012RetencaoIdbFila.set(ctx.owner,tarefa);
+  tarefa.finally(()=>{ if(_s012RetencaoIdbFila.get(ctx.owner)===tarefa) _s012RetencaoIdbFila.delete(ctx.owner); });
+  return tarefa;
+};
+window._s012HidratarRetencaoIdb=async function(ctx){
+  if(!ctx||!window._s012ContextoValido?.(ctx)) return false;
+  const key=window._s012StorageKey?.('state-retention',ctx);
+  if(!key) return false;
+  // Returning to a retained owner refreshes its RAM envelope and may queue
+  // a newer native write. Read only after that queue settles, otherwise an
+  // older IDB record can falsely conflict with the already-restored state.
+  await _s012RetencaoComPrazo((async()=>{
+    let ultima=null;
+    for(;;){
+      if(!window._s012ContextoValido?.(ctx)) return;
+      const pendente=_s012RetencaoIdbFila.get(ctx.owner);
+      if(!pendente||pendente===ultima) break;
+      ultima=pendente;
+      await pendente;
+    }
+  })(),'retenção local antes da abertura');
+  if(!window._s012ContextoValido?.(ctx)) return false;
+  let db,raw;
+  try{
+    db=await _idbAbrir();
+    raw=await _s012RetencaoIdbLer(db,key);
+  }catch(e){
+    if(window._s012RetencaoAtiva?.(ctx)) return true;
+    if(_idbMotivo()==='file://'||_idbMotivo()==='sem suporte no navegador') return null;
+    throw e;
+  }finally{ db?.close(); }
+  if(!window._s012ContextoValido?.(ctx)) return false;
+  if(!raw){_s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,0);return null;}
+  let record;
+  try{ record=JSON.parse(raw); }catch(e){ return false; }
+  const envelope=record?.retencao;
+  if(record.versao!==1||record.owner!==ctx.owner||envelope?.versao!==1||envelope.owner!==ctx.owner
+      ||!Number.isSafeInteger(record.revision)||record.revision<1
+      ||!['ativa','resolvida'].includes(record.estado)
+      ||(record.estado==='resolvida')!==(envelope.liberada===true)) return false;
+  _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
+  // Resolution was committed only after exact local state/sidecar proof.
+  // Future ordinary local writes supersede this inactive fallback.
+  if(record.estado==='resolvida') return null;
+  const atual={};
+  _s012RetencaoStorageTipos.forEach(tipo=>{atual[tipo]=_s012RetencaoStorageRaw(tipo,ctx);});
+  const coerente=_s012RetencaoStorageTipos.every(tipo=>{
+    if(atual[tipo]===record.base?.[tipo]||atual[tipo]===record.expected?.[tipo]) return true;
+    if(tipo!=='s004-sales') return false;
+    const novo=window._s004VendasRawInfo?.(atual[tipo],ctx.owner);
+    const base=window._s004VendasRawInfo?.(record.base?.[tipo]??null,ctx.owner);
+    const esperado=window._s004VendasRawInfo?.(record.expected?.[tipo]??null,ctx.owner);
+    return !!novo?.valido&&!!base?.valido&&!!esperado?.valido
+      &&novo.revision>Math.max(base.revision,esperado.revision);
+  });
+  if(!coerente) return false;
+  const rawSnapshot=atual.state;
+  if(rawSnapshot===record.base?.state)
+    return window._s012RestaurarRetencaoIdb?.(ctx,envelope,_s012JsonSeguro(envelope))===true;
+  if(rawSnapshot!==record.expected?.state
+      &&!window._s012SnapshotLocalCobre?.(ctx,envelope.dados)) return false;
+  return window._s012RestaurarRetencaoIdb?.(ctx,envelope,_s012JsonSeguro(envelope),D)===true;
+};
+
 // O cache CRM é somente leitura/local. A intenção pendente é um registro separado
 // por owner, com payload por loja/ano, para um timer antigo não substituir uma
 // edição que ainda precisa ser confirmada.
@@ -17903,6 +18335,7 @@ window._s005PendingStorageSet = function(valor,ctx){
   if(localStorage.getItem(chave)!==bruto) return false;
   _s005PendingStorageRevision++;
   window._s005PendingStorageRevisionPorChave[chave]=(window._s005PendingStorageRevisionPorChave[chave]||0)+1;
+  window._s012ResolverRetencao?.(ctx);
   return true;
 };
 window._s005PendingStorageRemover = function(){
@@ -17931,9 +18364,13 @@ window._s012PendenteLer=function(ctx){
   ctx=ctx||window._s012ContextoAtual();
   const chave=window._s012StorageKey?.('pending',ctx);
   if(!chave) return null;
+  const ret=window._s012RetencaoAtiva?.(ctx);
+  if(ret){
+    if(ret.pendingAck) return null;
+    if(ret.pendingJson!==null&&ret.pendingJson!==undefined) return ret.pendingJson;
+  }
   try{ const salvo=window._s005PendingLerArmazenado(ctx).payload; if(salvo!==null) return salvo; }
   catch(e){if(e?.code==='s004-pending-envelope')throw e;}
-  const ret=window._s012RetencaoAtiva?.(ctx);
   return ret&&!ret.pendingAck?ret.pendingJson:null;
 };
 window._s005EmailAtivo = function(){
@@ -17945,6 +18382,7 @@ window._s005PendenteCapturar = function(email){
   const marcador = window._pendingLocalData;
   let json = null;
   try{ if(marcador != null) json = JSON.stringify(marcador); }catch(e){}
+  if(ctx&&marcador!=null) window._s012RetencaoAtualizarPendente?.(ctx,marcador,window._pendingLocalDataTs);
   return {email:email === undefined ? (ctx?.email||window._s005EmailAtivo()) : email,
     ctx, storage:window._s005PendingStorageCapturar?.(),
     marcador, ts:window._pendingLocalDataTs, json,
@@ -18002,25 +18440,54 @@ function _s004EstadoNo(root,tipo,id,data){
   return {valor,lapide,lapideTs:ts?.[String(id)+'|'+String(data)]??null};
 }
 window._s004VendasEstado=(tipo,id,data,root=D)=>_s004EstadoNo(root,tipo,id,data);
+function _s004VendasValidarRaw(raw,owner){
+  if(raw===null) return {valido:true,revision:0,valor:{v:1,owner,revision:0,entries:{}}};
+  try{
+    const x=JSON.parse(raw);
+    if(x?.v!==1||x.owner!==owner||!x.entries||typeof x.entries!=='object'||Array.isArray(x.entries)
+        ||!Number.isSafeInteger(Number(x.revision))||Number(x.revision)<0) return {valido:false,revision:null,valor:null};
+    for(const [key,e] of Object.entries(x.entries)){
+      if(!e||!['venda','vend'].includes(e.tipo)||e.id==null||!e.data
+          ||key!==_s004VendaKey(e.tipo,e.id,e.data)||typeof e.opId!=='string'
+          ||!Object.prototype.hasOwnProperty.call(e,'base')
+          ||!Object.prototype.hasOwnProperty.call(e,'depois'))
+        return {valido:false,revision:null,valor:null};
+    }
+    return {valido:true,revision:Number(x.revision)||0,valor:x};
+  }catch(e){ return {valido:false,revision:null,valor:null}; }
+}
+window._s004VendasRawInfo=(raw,owner)=>_s004VendasValidarRaw(raw,owner);
+function _s004VendasPersistir(ctx,state,reterEmFalha=true){
+  const chave=window._s012StorageKey?.('s004-sales',ctx);
+  if(!chave||!ctx?.owner) return false;
+  const bruto=JSON.stringify(state);
+  try{
+    localStorage.setItem(chave,bruto);
+    if(localStorage.getItem(chave)!==bruto) throw new Error('S004 local não confirmado');
+    window._s012RetencaoAtualizarS004?.(ctx,bruto,false);
+    window._s012ResolverRetencao?.(ctx);
+    return true;
+  }catch(e){
+    // O envelope owner-scoped mantém esta revisão até o IDB confirmar cada
+    // byte; uma falha aqui nunca vira confirmação nem libera a troca de perfil.
+    if(reterEmFalha) window._s012RetencaoAtualizarS004?.(ctx,bruto,true);
+    return false;
+  }
+}
 function _s004VendasLer(ctx){
   const chave=window._s012StorageKey?.('s004-sales',ctx);
   if(!chave || !ctx?.owner) return null;
-  try{
-    const bruto=localStorage.getItem(chave);
-    if(bruto===null) return {chave,valor:{v:1,owner:ctx.owner,revision:0,entries:{}}};
-    const x=JSON.parse(bruto);
-    if(x?.v!==1 || x.owner!==ctx.owner || !x.entries
-        || typeof x.entries!=='object' || Array.isArray(x.entries))
-      return {chave,erro:'estado S004 inválido ou de outro proprietário'};
-    for(const [key,e] of Object.entries(x.entries)){
-      if(!e || !['venda','vend'].includes(e.tipo) || e.id==null || !e.data
-          || key!==_s004VendaKey(e.tipo,e.id,e.data) || typeof e.opId!=='string'
-          || !Object.prototype.hasOwnProperty.call(e,'base')
-          || !Object.prototype.hasOwnProperty.call(e,'depois'))
-        return {chave,erro:'operação S004 incompleta'};
-    }
-    return {chave,valor:x};
-  }catch(e){ return {chave,erro:'não foi possível ler a pendência S004'}; }
+  let local=null,ret={encontrado:false,raw:null};
+  try{ local=localStorage.getItem(chave); }catch(e){ return {chave,erro:'não foi possível ler a pendência S004'}; }
+  ret=window._s012RetencaoSidecarRaw?.(ctx,'s004-sales')||ret;
+  const a=_s004VendasValidarRaw(local,ctx.owner),b=ret.encontrado?_s004VendasValidarRaw(ret.raw,ctx.owner):null;
+  if(!a.valido&&local!==null) return {chave,erro:'estado S004 inválido ou de outro proprietário'};
+  if(b&&!b.valido&&ret.raw!==null) return {chave,erro:'estado S004 retido inválido'};
+  if(b&&b.valido&&(!a.valido||b.revision>a.revision))
+    return {chave,valor:b.valor,raw:ret.raw,retido:true};
+  if(b&&b.valido&&a.valido&&b.revision===a.revision&&ret.raw!==local)
+    return {chave,erro:'revisão S004 ambígua'};
+  return {chave,valor:a.valor,raw:local,retido:false};
 }
 window._s004VendasRegistrar=function(ctx,changes){
   if(!ctx?.owner || !window._s012ContextoValido?.(ctx) || !Array.isArray(changes)) return null;
@@ -18044,12 +18511,9 @@ window._s004VendasRegistrar=function(ctx,changes){
     ids.push({key,opId});
   }
   state.revision=(Number(state.revision)||0)+1;
-  try{
-    const bruto=JSON.stringify(state);
-    if(!window._s012ContextoValido(ctx)) return null;
-    localStorage.setItem(l.chave,bruto);
-    if(localStorage.getItem(l.chave)!==bruto) return null;
-  }catch(e){ return null; }
+  // Callers restore D synchronously when registration fails. Retaining the
+  // rejected proposal would resurrect a canceled sale on a later replay.
+  if(!window._s012ContextoValido(ctx)||!_s004VendasPersistir(ctx,state,false)) return null;
   return {owner:ctx.owner,ctx,chave:l.chave,revision:state.revision,ids};
 };
 // Capturar também no boot/retry, onde pode não existir um marcador em RAM.
@@ -18081,11 +18545,7 @@ window._s004VendasAck=function(op,payload){
   });
   if(!mudou) return true;
   l.valor.revision=(Number(l.valor.revision)||0)+1;
-  try{
-    const bruto=JSON.stringify(l.valor);
-    localStorage.setItem(l.chave,bruto);
-    return localStorage.getItem(l.chave)===bruto;
-  }catch(e){ return false; }
+  return _s004VendasPersistir(op.ctx,l.valor);
 };
 window._s004VendasRegistrarObservacao=function(ctx,tipo,id,data,remoteRoot,opId){
   if(!ctx?.owner || !window._s012ContextoValido?.(ctx)) return false;
@@ -18103,12 +18563,8 @@ window._s004VendasRegistrarObservacao=function(ctx,tipo,id,data,remoteRoot,opId)
     entry.observado={opId:entry.opId,estado:remoto};
   }
   l.valor.revision=(Number(l.valor.revision)||0)+1;
-  try{
-    if(!window._s012ContextoValido(ctx)) return false;
-    const bruto=JSON.stringify(l.valor);
-    localStorage.setItem(l.chave,bruto);
-    return localStorage.getItem(l.chave)===bruto;
-  }catch(e){ return false; }
+  if(!window._s012ContextoValido(ctx)) return false;
+  return _s004VendasPersistir(ctx,l.valor);
 };
 window._s004VendasObservarConflito=function(ctx,tipo,id,data,remoteRoot,decisao){
   if(!decisao?.marcada || !decisao.conflito || !decisao.entrada?.opId) return false;
@@ -21969,7 +22425,8 @@ function showLogin(){
   document.getElementById("loginScreen").style.display="flex";
   document.getElementById("appScreen").style.display="none";
 }
-function showApp(){
+async function showApp(){
+  const _s012JaAberta=!!window._s012ContextoAtual?.()&&document.body.classList.contains('logado');
   const _s012Ctx=window._s012AtivarSessao?.();
   if(!_s012Ctx){
     window._s012InvalidarSessao?.();
@@ -21988,6 +22445,28 @@ function showApp(){
     document.getElementById("loginScreen").style.display="flex";
     document.getElementById("appScreen").style.display="none";
     return;
+  }
+  // Quota fallback is asynchronous. Keep the stale localStorage snapshot
+  // hidden and start neither pending replay nor remote hydration until the
+  // owner's complete IDB envelope has been checked.
+  if(!_s012JaAberta){
+  document.body.classList.remove("logado");
+  document.getElementById("loginScreen").style.display="flex";
+  document.getElementById("appScreen").style.display="none";
+  try{
+    const _s012Restaurado=await window._s012HidratarRetencaoIdb?.(_s012Ctx);
+    if(!window._s012ContextoValido(_s012Ctx)) return;
+    if(_s012Restaurado===false) throw new Error('snapshot-owner-inconsistente');
+  }catch(_eSnapshot){
+    if(!window._s012ContextoValido(_s012Ctx)) return;
+    window._s012BloqueioRetencao='snapshot-idb-inconsistente';
+    const _lerrSnapshot=document.getElementById('lerr');
+    if(_lerrSnapshot){
+      _lerrSnapshot.textContent='Não foi possível verificar a cópia local desta sessão. Os dados foram preservados; tente novamente com a mesma conta.';
+      _lerrSnapshot.style.display='block';
+    }
+    return;
+  }
   }
   const _lerr=document.getElementById('lerr');
   if(_lerr){_lerr.textContent='';_lerr.style.display='none';}
@@ -22243,8 +22722,8 @@ async function login(){
         console.warn("[Avatim] Firebase auth falhou, entrando offline:", eFb.message);
       }
     }
+    await showApp();
     if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
-    showApp();
   }catch(e){
     errEl.textContent=e.message||"Erro ao verificar senha. Tente novamente.";
     errEl.style.display="block";
@@ -50139,7 +50618,7 @@ window.excelRender = function(){
     const _dt  = x => x ? x.split('-').reverse().join('/') : '?';
     const _faixa = _dt(_per.ini) + ' a ' + _dt(_per.fim);
     if(v.linhasNoRecorte){
-      sub.textContent = v.linhasNoRecorte.toLocaleString('pt-BR') + ' linhas analisadas · ' + _faixa;
+      sub.textContent = (v.linhasAproximadas ? '≈ ' : '') + v.linhasNoRecorte.toLocaleString('pt-BR') + ' linhas analisadas · ' + _faixa;
     } else if(v.faturamento > 0 || v.cupons > 0){
       sub.textContent = (v.cupons||0).toLocaleString('pt-BR') + ' atendimentos · '
         + fmt(v.faturamento||0) + ' · ' + _faixa;
@@ -50555,7 +51034,7 @@ function _crmRenderConjuntos(){
           + (cob.suspeito
               ? '<div style="color:var(--verm);font-size:9.5px;font-weight:600">⚠️ sem venda em: '+cob.faltandoTxt+'</div>'
               : '') + '</td>'
-        + '<td style="text-align:right">'+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
+        + '<td style="text-align:right">'+(_crmLinhasAproximadas(c)?'≈ ':'')+(c.linhas||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+(c.clientesUnicos||0).toLocaleString('pt-BR')+'</td>'
         + '<td style="text-align:right">'+fmt(c.faturamento||0)+'</td>'
         + '<td style="font-size:10.5px;color:var(--muted)">'+(c.arquivo||'—')
