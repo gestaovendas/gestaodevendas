@@ -2231,7 +2231,7 @@ window._numBR = function(v){
     ]);
     const { initializeApp } = appMod;
     const { initializeAuth, browserSessionPersistence, beforeAuthStateChanged, signInWithEmailAndPassword, signInAnonymously, signOut, onAuthStateChanged } = authMod;
-    const { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp, writeBatch, runTransaction } = storeMod;
+    const { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction } = storeMod;
 
 const firebaseConfig = {
   apiKey:"AIzaSyBysGz90olUSaUx2UOoEx5NXu6umBx_vEw",
@@ -2311,6 +2311,48 @@ try{
 
   window._fbOk   = true;
   window._fbDb   = db;     // exposto para debugMeta() conseguir ler direto do Firestore
+  window._s033MarcadorIndice = function(ctx, dados){
+    if(!ctx || !dados || typeof dados!=='object') return null;
+    const lojas=ctx.perfil==='admin'
+      ? ['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera']
+      : [String(ctx.loja||'')].filter(Boolean);
+    const carimbos=dados.carimbos||{}, geracoes=dados.geracoes||{};
+    return JSON.stringify(lojas.sort().map(lid=>[
+      lid,Object.keys(carimbos[lid]||{}).sort().map(ano=>{
+        const ts=Number(carimbos[lid][ano])||0, rev=geracoes[lid]?.[ano];
+        const gid=rev&&Number(rev.ts)===ts&&typeof rev.gid==='string'?rev.gid:null;
+        return [String(ano),ts,gid];
+      })
+    ]));
+  };
+  window._s033AssinarHead=function(ctx,docId,onNext,onError){
+    if(!ctx || !window._s012ContextoValido?.(ctx) || typeof onSnapshot!=='function')
+      throw new Error('s033-listener-indisponivel');
+    const lojaIds=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
+    const permitidos=new Set(['principal','crm_indice',...(ctx.perfil==='admin'
+      ? lojaIds.map(lid=>'loja_'+lid) : ['loja_'+String(ctx.loja||'')])]);
+    if(!permitidos.has(docId)) throw new Error('s033-head-fora-do-escopo');
+    return onSnapshot(doc(db,'avatim',docId),{includeMetadataChanges:true},{
+      next(snap){
+        if(!window._s012ContextoValido?.(ctx)) return;
+        const metadata=snap?.metadata||{}, existe=!!snap?.exists?.();
+        let revisao=null, marcador=null;
+        if(existe){
+          const dados=snap.data()||{};
+          if(docId==='crm_indice') marcador=window._s033MarcadorIndice(ctx,dados);
+          else{
+            const ts=Number(dados.ts)||0, gid=typeof dados.gid==='string'?dados.gid:null;
+            if(ts>0&&gid) revisao={ts,gid,partes:Number(dados.partes)||1};
+          }
+        }else if(docId==='crm_indice') marcador='missing';
+        onNext?.({docId,exists:existe,
+          serverBacked:metadata.fromCache===false&&metadata.hasPendingWrites===false,
+          fromCache:metadata.fromCache===true,hasPendingWrites:metadata.hasPendingWrites===true,
+          revision:revisao,marker:marcador});
+      },
+      error(error){ if(window._s012ContextoValido?.(ctx)) onError?.(error); }
+    });
+  };
   // [R54] guardar o módulo já carregado — backup e restauração reaproveitam
   // em vez de baixar o SDK de novo a cada operação.
   window._fbMod  = storeMod;
@@ -2535,10 +2577,23 @@ window.fbGetToken = async function(operacao){
    * em vez de JSON truncado: dado pela metade é pior que dado nenhum — a
    * tela cai no localStorage em vez de mostrar número errado.
    */
-  async function _lerDocTexto(db, doc, getDoc, docId){
+  function _s033ResumoLeituraDoc(id,snap,dados,cabeca){
+    const metadata=snap?.metadata||{}, exists=!!snap?.exists?.();
+    const resumo={id,exists,serverBacked:metadata.fromCache===false&&metadata.hasPendingWrites===false};
+    if(cabeca&&exists){
+      const ts=Number(dados?.ts)||0, gid=typeof dados?.gid==='string'?dados.gid:null;
+      resumo.revision=ts>0&&gid?{ts,gid,partes:Number(dados?.partes)||1}:null;
+    }
+    return resumo;
+  }
+  async function _lerDocTexto(db, doc, getDoc, docId, evidencias){
     const snap = await getDoc(doc(db,"avatim",docId));
-    if(!snap.exists()) return null;
-    const d = snap.data();
+    const d=snap.exists()?snap.data():null;
+    const evidencia={head:_s033ResumoLeituraDoc(docId,snap,d,true),parts:[]};
+    if(!snap.exists()){
+      if(Array.isArray(evidencias)) evidencias.push(evidencia);
+      return null;
+    }
     let texto = d.dados || "";
     const n = Number(d.partes) || 1;
     if(n > 1){
@@ -2556,12 +2611,14 @@ window.fbGetToken = async function(operacao){
           throw new Error("pedaco-faltando");
         }
         const _dp = extras[i].data();
+        evidencia.parts.push(_s033ResumoLeituraDoc(ids[i],extras[i],_dp,false));
         // Cabeça e caudas devem ser todas legadas (sem gid) ou da mesma geração.
         if(Boolean(d.gid) !== Boolean(_dp.gid) || (d.gid && _dp.gid !== d.gid))
           throw new Error("gravacao-em-curso");
         texto += _dp.dados || "";
       }
     }
+    if(Array.isArray(evidencias)) evidencias.push(evidencia);
     return texto;
   }
 
@@ -2571,7 +2628,7 @@ window.fbGetToken = async function(operacao){
    *   null    → o documento NÃO existe no servidor
    *   lança   → o documento existe mas não pôde ser remontado
    */
-  async function _lerDocObj(db, doc, getDoc, docId){
+  async function _lerDocObj(db, doc, getDoc, docId, aoLer){
     // [R131] Emenda inconsistente e JSON quebrado quase sempre são uma
     // gravação ACONTECENDO neste instante, não corrupção — e devolver null
     // aqui derruba a tela inteira ("Nenhum dado no Firestore ainda") e ainda
@@ -2583,9 +2640,16 @@ window.fbGetToken = async function(operacao){
     for(let t = 0; t < _esperas.length; t++){
       if(_esperas[t]) await new Promise(r => setTimeout(r, _esperas[t]));
       try{
-        const texto = await _lerDocTexto(db, doc, getDoc, docId);
-        if(!texto) return null;
-        return JSON.parse(texto);
+        const evidencias=[];
+        const texto = await _lerDocTexto(db, doc, getDoc, docId, evidencias);
+        const evidencia=evidencias[evidencias.length-1]||null;
+        if(!texto){
+          if(!evidencia?.head?.exists) aoLer?.(evidencia);
+          return null;
+        }
+        const objeto=JSON.parse(texto);
+        aoLer?.(evidencia);
+        return objeto;
       }catch(e){
         _ultimo = e;
         if(t < _esperas.length - 1){
@@ -4163,15 +4227,18 @@ window.fbGetToken = async function(operacao){
   function _gravRejeitar(item, erro){
     item.aguardando.forEach(a=>a.reject(erro));
   }
-  function _gravProxima(){
+  function _gravProxima(ctxFinalizado){
     const prox=_gravPendente.shift();
     if(prox) _gravRodar(prox);
-    else{ _gravEmCurso=false; _gravAtivo=null; }
+    else{
+      _gravEmCurso=false; _gravAtivo=null;
+      setTimeout(()=>window._s033AoEscritasOciosas?.(ctxFinalizado),0);
+    }
   }
   function _gravRodar(item){
     if(!window._s012ContextoValido?.(item.s012Ctx)){
       _gravRejeitar(item,new Error('s012-sessao-alterada'));
-      _gravProxima();
+      _gravProxima(item.s012Ctx);
       return;
     }
     _gravEmCurso=true;
@@ -4187,7 +4254,7 @@ window.fbGetToken = async function(operacao){
         }else _gravRejeitar(item,new Error('fsGravar não confirmou a gravação remota'));
       },
       e=>_gravRejeitar(item,e)
-    ).finally(()=>_gravProxima());
+    ).finally(()=>_gravProxima(item.s012Ctx));
   }
 
   window.fsGravar = function(dadosJSON, contextoS024, s012Ctx){
@@ -4249,6 +4316,18 @@ window.fbGetToken = async function(operacao){
         ]));
     };
     const _leitura = _leituraSaida && typeof _leituraSaida === 'object' ? _leituraSaida : {};
+    const _s033Ticket=window._s033MainReadStart?.(_s012Ctx)||null;
+    _leitura.s033={owner:_s012Ctx.owner,geracao:_s012Ctx.geracao,ticket:_s033Ticket,heads:{}};
+    const _s033RegistrarHead=docId=>evidencia=>{
+      if(!_s033Ticket||!evidencia||!_s012Valido()) return;
+      const items=[evidencia.head,...(evidencia.parts||[])].filter(Boolean);
+      _leitura.s033.heads[docId]={
+        exists:!!evidencia.head?.exists,
+        serverBacked:items.length>0&&items.every(item=>item.serverBacked===true),
+        revision:evidencia.head?.revision||null,
+        parts:items.length-1
+      };
+    };
     _leitura.identidade = _s012Ctx.owner;
     _leitura.completa = true;
     _leitura.s002Principal = null;
@@ -4285,7 +4364,7 @@ window.fbGetToken = async function(operacao){
             principalServidor=false;
           return snap;
         };
-        base = await _lerDocObj(db, doc, lerPrincipal, "principal");
+        base = await _lerDocObj(db, doc, lerPrincipal, "principal", _s033RegistrarHead("principal"));
         if(principalServidor && base && _s012Valido()){
           const confirmado={};
           for(const c of window._camposEditadosAqui||[]){
@@ -4353,7 +4432,7 @@ window.fbGetToken = async function(operacao){
         const LOJAS_IDS = ["mooca","leopoldina","perdizes","santana","jarpaul","pinheiros","ibirapuera"];
         // [R125] remonta os pedaços de cada loja — o doc pode ter sido fatiado.
         const snaps = await Promise.allSettled(
-          LOJAS_IDS.map(lid => _lerDocObj(db, doc, getDoc, "loja_"+lid))
+          LOJAS_IDS.map(lid => _lerDocObj(db, doc, getDoc, "loja_"+lid, _s033RegistrarHead("loja_"+lid)))
         );
         if(!_s012Valido()) return null;
         snaps.forEach((result, idx) => {
@@ -4703,7 +4782,7 @@ window.fbGetToken = async function(operacao){
         if(!lid) _falhar('loja', 'identidade sem loja mapeada');
         if(lid){
           try{
-            const pedacoLoja = await _lerDocObj(db, doc, getDoc, "loja_"+lid);
+            const pedacoLoja = await _lerDocObj(db, doc, getDoc, "loja_"+lid, _s033RegistrarHead("loja_"+lid));
             if(!_s012Valido()) return null;
             if(!pedacoLoja) _s007RegistrarLeitura(lid,null,null);
             if(pedacoLoja){
@@ -9114,7 +9193,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-15e';
+window.AVATIM_BUILD = '2026-10-16a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -10756,6 +10835,369 @@ window._s012AoTrocarSessao.push(ctx=>{
     window._fbTokenExp=0;
     window._fbTokenOwner=null;
   }
+});
+
+const _S033_LOJAS_SYNC=['mooca','leopoldina','perdizes','santana','jarpaul','pinheiros','ibirapuera'];
+let _s033SyncAtual=null, _s033SyncSeq=0;
+function _s033SyncValido(st){
+  return !!st && _s033SyncAtual===st && window._s012ContextoValido?.(st.ctx);
+}
+function _s033SyncIds(ctx){
+  return ['principal',...(ctx.perfil==='admin'
+    ?_S033_LOJAS_SYNC.map(lid=>'loja_'+lid):['loja_'+String(ctx.loja||'')]),'crm_indice'];
+}
+function _s033SyncAvisar(){
+  try{window._syncRender?.();}catch(e){}
+}
+function _s033SyncAgendar(st,ms=0){
+  if(!_s033SyncValido(st)||st.timer!==null) return;
+  st.timer=setTimeout(()=>{st.timer=null;void _s033SyncDrenar(st);},Math.max(0,ms));
+}
+function _s033SyncEmCurso(st){
+  return !!st&&(st.pulling||st.crmPulling||(Number(st.mainPulls)||0)>0
+    ||st.boots>0||st.recoveries>0);
+}
+function _s033SyncAcordarDrenagem(st,reset=true){
+  if(!_s033SyncValido(st)) return false;
+  if(reset){
+    st.retry=0; st.paused=false;
+    if(st.timer!==null){clearTimeout(st.timer);st.timer=null;}
+  }
+  if(!_s033SyncHasDirty(st,false)&&!_s033SyncHasDirty(st,true)) return true;
+  if(document.hidden||_s033SyncEmCurso(st)||_s033SyncQueuedWrite()) return true;
+  // A new external reason may supersede an older retry delay, but never arms
+  // work while a controller/manual pull owns completion or bounded retry.
+  if(st.timer!==null){clearTimeout(st.timer);st.timer=null;}
+  _s033SyncAgendar(st,0);
+  return true;
+}
+function _s033SyncBackoff(st,progress=false){
+  if(!_s033SyncValido(st)) return;
+  if(progress){
+    st.retry=0;
+    if(st.timer!==null){clearTimeout(st.timer);st.timer=null;}
+    if(!document.hidden&&!_s033SyncEmCurso(st)&&!_s033SyncQueuedWrite()) _s033SyncAgendar(st,0);
+    return;
+  }
+  st.retry++;
+  if(st.retry<=5){
+    const waits=[500,1000,2000,4000,8000];
+    if(!document.hidden&&!_s033SyncEmCurso(st)&&!_s033SyncQueuedWrite())
+      _s033SyncAgendar(st,waits[st.retry-1]);
+  }else{
+    st.paused=true;
+    _s033SyncAvisar();
+    console.warn('[S033] dirty preservado; tentativas automáticas pausadas até evento, reconexão ou ação manual');
+  }
+}
+function _s033SyncTargetFalha(st,target,error){
+  if(!_s033SyncValido(st)||!target) return;
+  try{target.unsubscribe?.();}catch(e){}
+  target.unsubscribe=null; target.active=false; target.degraded=true;
+  target.dirty=true; target.seq++;
+  target.error=String(error?.code||error?.message||'listener-error').slice(0,80);
+  st.retry=0; st.paused=false;
+  _s033SyncAvisar();
+  _s033SyncAcordarDrenagem(st,true);
+  target.subscribeFailures++;
+  if(target.subscribeFailures<=5 && target.retryTimer===null){
+    const delay=Math.min(16000,1000*Math.pow(2,target.subscribeFailures-1));
+    target.retryTimer=setTimeout(()=>{
+      target.retryTimer=null;
+      if(_s033SyncValido(st)&&!target.active) _s033SyncSubscribe(st,target);
+    },delay);
+  }
+}
+function _s033SyncSubscribe(st,target){
+  if(!_s033SyncValido(st)||target.active) return false;
+  if(typeof window._s033AssinarHead!=='function'){
+    _s033SyncTargetFalha(st,target,new Error('s033-listener-indisponivel'));
+    return false;
+  }
+  try{
+    const unsubscribe=window._s033AssinarHead(st.ctx,target.id,
+      notice=>_s033SyncEvento(st,target,notice),error=>_s033SyncTargetFalha(st,target,error));
+    if(typeof unsubscribe!=='function') throw new Error('listener-sem-unsubscribe');
+    target.unsubscribe=unsubscribe; target.active=true; target.error='';
+    _s033SyncAvisar();
+    return true;
+  }catch(error){_s033SyncTargetFalha(st,target,error);return false;}
+}
+function _s033SyncEvento(st,target,notice){
+  if(!_s033SyncValido(st)||!target||notice?.docId!==target.id) return;
+  if(notice.serverBacked!==true){
+    target.fromCache=notice.fromCache===true;
+    target.hasPendingWrites=notice.hasPendingWrites===true;
+    _s033SyncAvisar();
+    return;
+  }
+  target.serverSeen=true; target.degraded=false; target.subscribeFailures=0;
+  target.fromCache=false; target.hasPendingWrites=false; target.error='';
+  target.revision=notice.revision||null;
+  if(target.id==='crm_indice' && notice.marker!==null){
+    // Ignore a duplicate index marker only when no prior event still awaits proof.
+    // A same-marker server transition must retry a target left dirty by a failed read.
+    if(target.lastServerMarker===notice.marker&&!target.dirty){
+      _s033SyncAvisar();
+      return;
+    }
+    target.lastServerMarker=notice.marker;
+    target.marker=notice.marker;
+  }
+  // Some direct writers may change payload without a fresh head revision.
+  // Treat every server-backed callback as dirty; a marker alone cannot
+  // distinguish a duplicate from that valid change.
+  target.seq++; target.dirty=true; st.retry=0; st.paused=false;
+  _s033SyncAvisar();
+  _s033SyncAcordarDrenagem(st,true);
+}
+function _s033SyncHasDirty(st,crm){
+  return [...st.targets.values()].some(t=>t.dirty&&(t.id==='crm_indice')===crm);
+}
+function _s033SyncQueuedWrite(){
+  try{
+    const q=window._gravFilaEstado?.();
+    return !!window._pendingLocalData||!!q?.emCurso||!!q?.pendente;
+  }catch(e){return !!window._pendingLocalData;}
+}
+async function _s033SyncDrenar(st){
+  if(!_s033SyncValido(st)||document.hidden) return;
+  if(st.boots>0||st.recoveries>0||st.pulling||st.crmPulling||(Number(st.mainPulls)||0)>0) return;
+  const temMain=_s033SyncHasDirty(st,false), temCrm=_s033SyncHasDirty(st,true);
+  if(!temMain&&!temCrm){st.retry=0;st.paused=false;_s033SyncAvisar();return;}
+  if(temMain){
+    if(_s033SyncQueuedWrite()){
+      st.waitingWrite=true;
+      return;
+    }
+    if(typeof window._syncPull!=='function'){
+      _s033SyncBackoff(st,false);
+      return;
+    }
+    st.pulling=true; st.waitingWrite=false;
+    const before=new Map([...st.targets].map(([id,t])=>[id,{seq:t.seq,dirty:t.dirty}]));
+    try{await window._syncPull({s033Event:true});}
+    catch(error){console.warn('[S033] pull canônico falhou:',error?.code||error?.message||error);}
+    finally{st.pulling=false;}
+    if(!_s033SyncValido(st)) return;
+    const ainda=_s033SyncHasDirty(st,false);
+    if(ainda){
+      const newer=[...st.targets.values()].some(t=>t.id!=='crm_indice'&&t.dirty
+        &&t.seq>(before.get(t.id)?.seq||0));
+      const limpou=[...st.targets.values()].some(t=>t.id!=='crm_indice'
+        &&before.get(t.id)?.dirty&& !t.dirty);
+      if(_s033SyncQueuedWrite()) st.waitingWrite=true;
+      else if(newer||limpou) _s033SyncBackoff(st,true);
+      else _s033SyncBackoff(st,false);
+    }else if(_s033SyncHasDirty(st,true)){
+      st.retry=0; _s033SyncAcordarDrenagem(st,false);
+    }else{st.retry=0;st.paused=false;_s033SyncAvisar();}
+    return;
+  }
+  if(temCrm){
+    if(typeof window.crmAtualizarSeMudou!=='function'){
+      _s033SyncBackoff(st,false);return;
+    }
+    const target=st.targets.get('crm_indice'), seq=target?.seq, marker=target?.marker;
+    const proof={expectedMarker:marker,indexServerBacked:false,complete:false,pairs:{}};
+    const crmCtx=st.ctx, dadosDrenagem=D;
+    let atualizados=0;
+    st.crmPulling=true;
+    try{atualizados=await window.crmAtualizarSeMudou({forcar:true,ctx:crmCtx,_s033Proof:proof,_s033Coordinated:true});}
+    catch(error){console.warn('[S033] leitura CRM canônica falhou:',error?.code||error?.message||error);}
+    finally{st.crmPulling=false;}
+    if(!_s033SyncValido(st)||!window._s012ContextoValido?.(crmCtx)||D!==dadosDrenagem) return;
+    // crmCarregar updates D and emits the CRM data event, but that event does
+    // not repaint the active page. Reuse the guarded renderer for valid full
+    // or partial pair progress; its focus/manual-report rules remain intact.
+    if(Number(atualizados)>0) window.rerenderPaginaAtiva?.('crm-index-event');
+    if(proof.complete===true&&proof.indexServerBacked===true
+        &&proof.marker===marker&&target?.marker===marker&&target?.seq===seq){
+      target.dirty=false; target.degraded=false; target.error=''; st.retry=0; st.paused=false;
+      _s033SyncAvisar();
+      if(_s033SyncHasDirty(st,false)) _s033SyncAcordarDrenagem(st,false);
+    }else{
+      const newer=target?.seq!==seq;
+      _s033SyncBackoff(st,newer);
+    }
+  }
+}
+window._s033MainReadStart=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return null;
+  return {owner:ctx.owner,geracao:ctx.geracao,seqs:Object.fromEntries(
+    [...st.targets].map(([id,target])=>[id,target.seq]))};
+};
+window._s033MainMerged=function(ctx,leitura){
+  const st=_s033SyncAtual, ticket=leitura?.s033?.ticket;
+  if(!_s033SyncValido(st)||!window._s012ContextoValido?.(ctx)
+      ||ctx.owner!==st.ctx.owner||ctx.geracao!==st.ctx.geracao
+      ||leitura?.s033?.owner!==ctx.owner||leitura?.s033?.geracao!==ctx.geracao
+      ||ticket?.owner!==ctx.owner||ticket?.geracao!==ctx.geracao) return false;
+  let cleared=0;
+  for(const [id,proof] of Object.entries(leitura.s033.heads||{})){
+    const target=st.targets.get(id);
+    if(!target||!proof?.serverBacked||!Object.prototype.hasOwnProperty.call(ticket.seqs||{},id)) continue;
+    const revision=proof.revision||null;
+    const noNewEvent=target.seq===ticket.seqs[id];
+    // Some direct writers may update payload without a new ts/gid. A read
+    // that began before any callback cannot prove it covered that callback,
+    // even when its revision tuple matches; retain dirty for a trailing read.
+    if(!noNewEvent) continue;
+    target.lastMergedRevision=revision;
+    if(revision) target.revision=revision;
+    if(target.dirty){target.dirty=false;cleared++;}
+    target.degraded=false;target.error='';
+  }
+  if(cleared) st.retry=0;
+  _s033SyncAvisar();
+  // The active event drain or external pull completion owns follow-up work.
+  return cleared>0;
+};
+window._s033MainPullIniciar=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||!window._s012ContextoValido?.(ctx)
+      ||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return null;
+  st.mainPulls=(Number(st.mainPulls)||0)+1;
+  if(st.timer!==null){clearTimeout(st.timer);st.timer=null;}
+  return {owner:ctx.owner,geracao:ctx.geracao,
+    seqs:Object.fromEntries([...st.targets].map(([id,target])=>[id,target.seq]))};
+};
+window._s033MainPullConcluir=function(ctx,ticket){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||!window._s012ContextoValido?.(ctx)
+      ||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao
+      ||ticket?.owner!==ctx.owner||ticket?.geracao!==ctx.geracao) return false;
+  st.mainPulls=Math.max(0,(Number(st.mainPulls)||0)-1);
+  if(!_s033SyncHasDirty(st,false)&&!_s033SyncHasDirty(st,true)) return true;
+  if(_s033SyncEmCurso(st)||document.hidden||_s033SyncQueuedWrite()) return true;
+  const newer=[...st.targets.values()].some(t=>t.dirty&&t.seq>(ticket.seqs?.[t.id]??-1));
+  _s033SyncBackoff(st,newer);
+  return true;
+};
+window._s033BootIniciar=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return false;
+  st.boots++; return true;
+};
+window._s033BootConcluir=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return false;
+  st.boots=Math.max(0,st.boots-1); _s033SyncAcordarDrenagem(st,true); return true;
+};
+window._s033AgendarRecuperacao=function(ctx,fn){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao
+      ||typeof fn!=='function') return false;
+  st.recoveries++; _s033SyncAvisar();
+  let finalizado=false;
+  const finish=()=>{
+    if(finalizado)return; finalizado=true;
+    if(_s033SyncAtual===st){st.recoveries=Math.max(0,st.recoveries-1);
+      if(_s033SyncValido(st)) _s033SyncAcordarDrenagem(st,true);}
+  };
+  setTimeout(()=>{
+    if(!_s033SyncValido(st)){finish();return;}
+    try{Promise.resolve(fn()).then(finish,finish);}catch(e){finish();}
+  },2000);
+  return true;
+};
+window._s033AoEscritasOciosas=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return false;
+  if(!_s033SyncQueuedWrite()){st.waitingWrite=false;_s033SyncAcordarDrenagem(st,true);}
+  return true;
+};
+window._s033AoPendenteAlterada=function(ctx){return window._s033AoEscritasOciosas?.(ctx)||false;};
+window._s033CRMDisponivel=function(ctx,proof){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return false;
+  const target=st.targets.get('crm_indice');
+  if(target&&proof?.complete===true&&proof.indexServerBacked===true
+      &&proof.marker!==null&&(!target.dirty||proof.marker===target.marker)
+      &&(!target.dirty||proof.eventSeqAtStart===target.seq)){
+    target.marker=proof.marker;target.lastServerMarker=proof.marker;
+    target.dirty=false;target.degraded=false;target.error='';
+    st.retry=0;st.paused=false;_s033SyncAvisar();
+    if(_s033SyncHasDirty(st,false)) _s033SyncAcordarDrenagem(st,false);
+    return true;
+  }
+  if(!target?.dirty) return true;
+  // Active controller/manual work owns its trailing read and bounded retry.
+  if(_s033SyncEmCurso(st)||document.hidden||_s033SyncQueuedWrite()) return true;
+  const newer=Number.isInteger(proof?.eventSeqAtStart)&&proof.eventSeqAtStart!==target.seq;
+  _s033SyncBackoff(st,newer);
+  return true;
+};
+window._s033EstadoMonitor=function(){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)) return null;
+  const targets=[...st.targets.values()];
+  const dirty=targets.filter(t=>t.dirty).length;
+  const healthy=targets.length>0&&targets.every(t=>t.active&&t.serverSeen&&!t.degraded
+    &&!t.fromCache&&!t.hasPendingWrites)&&dirty===0&&st.boots===0&&st.recoveries===0
+    &&!st.pulling&&!st.crmPulling&&(Number(st.mainPulls)||0)===0
+    &&!st.paused&&!_s033SyncQueuedWrite();
+  return {active:targets.length>0&&targets.every(t=>t.active),healthy,
+    degraded:targets.some(t=>t.degraded),dirty,
+    waiting:targets.filter(t=>!t.serverSeen).length,
+    pulling:st.pulling||st.crmPulling||(Number(st.mainPulls)||0)>0};
+};
+window._s033PodeEvitarPull=function(ctx){
+  const st=_s033SyncAtual;
+  return _s033SyncValido(st)&&ctx?.owner===st.ctx.owner&&ctx?.geracao===st.ctx.geracao
+    &&(st.boots>0||st.recoveries>0
+      ||([...st.targets.values()].length>0
+        &&[...st.targets.values()].every(t=>t.active&&t.serverSeen&&!t.degraded
+          &&!t.fromCache&&!t.hasPendingWrites&&!t.dirty)
+        &&!st.pulling&&!st.crmPulling&&(Number(st.mainPulls)||0)===0
+        &&!st.paused&&!_s033SyncQueuedWrite()));
+};
+window._s033Acordar=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return false;
+  st.retry=0;st.paused=false;
+  for(const target of st.targets.values()){
+    if(!target.active&&target.retryTimer===null){target.subscribeFailures=0;_s033SyncSubscribe(st,target);}
+  }
+  _s033SyncAcordarDrenagem(st,false);
+  return true;
+};
+window._s033Iniciar=function(ctx){
+  if(!ctx||!window._s012ContextoValido?.(ctx)) return false;
+  if(_s033SyncValido(_s033SyncAtual)&&_s033SyncAtual.ctx.owner===ctx.owner
+      &&_s033SyncAtual.ctx.geracao===ctx.geracao){
+    for(const target of _s033SyncAtual.targets.values()) _s033SyncSubscribe(_s033SyncAtual,target);
+    return true;
+  }
+  const st={id:++_s033SyncSeq,ctx:Object.assign({},ctx),targets:new Map(),timer:null,
+    boots:0,recoveries:0,pulling:false,crmPulling:false,waitingWrite:false,
+    retry:0,paused:false,mainPulls:0};
+  _s033SyncAtual=st;
+  _s033SyncIds(ctx).forEach(id=>st.targets.set(id,{id,seq:0,dirty:false,serverSeen:false,
+    active:false,degraded:false,fromCache:false,hasPendingWrites:false,revision:null,
+    lastMergedRevision:null,marker:null,lastServerMarker:null,error:'',unsubscribe:null,
+    retryTimer:null,subscribeFailures:0}));
+  for(const target of st.targets.values()) _s033SyncSubscribe(st,target);
+  _s033SyncAvisar();
+  return true;
+};
+window._s033Parar=function(){
+  const st=_s033SyncAtual;
+  _s033SyncAtual=null;
+  if(!st)return false;
+  if(st.timer!==null)clearTimeout(st.timer);
+  for(const target of st.targets.values()){
+    if(target.retryTimer!==null)clearTimeout(target.retryTimer);
+    try{target.unsubscribe?.();}catch(e){}
+    target.active=false;target.unsubscribe=null;
+  }
+  return true;
+};
+window._s012AoTrocarSessao.push(ctx=>{
+  if(!ctx){window._s033Parar?.();return;}
+  const st=_s033SyncAtual;
+  if(st&&(st.ctx.owner!==ctx.owner||st.ctx.geracao!==ctx.geracao)) window._s033Parar?.();
 });
 
 // Vendedoras padrao — EDITE OS NOMES AQUI
@@ -12781,6 +13223,8 @@ window._syncPullEmCurso = false;
  */
 window.sincronizarSeNecessario = async function(motivo, opts){
   opts = opts || {};
+  const ctx=window._s012Capturar?.();
+  if(!opts.s033Event&&window._s033PodeEvitarPull?.(ctx)) return false;
   const minimo = opts.minimoMs !== undefined ? opts.minimoMs : 8000;
   const agora = Date.now();
 
@@ -12792,7 +13236,7 @@ window.sincronizarSeNecessario = async function(motivo, opts){
   window._syncPullEmCurso = true;
   window._syncUltimoPull = agora;
   try{
-    await window._syncPull();
+    await window._syncPull(opts);
     console.log('[Avatim] 🔄 sync por gatilho:', motivo);
     return true;
   }catch(e){
@@ -12810,11 +13254,15 @@ window.instalarGatilhosSync = function(){
 
   // Voltar para a aba: quem estava em outra janela quer ver o estado atual
   document.addEventListener('visibilitychange', () => {
-    if(!document.hidden) window.sincronizarSeNecessario('aba reativada', {minimoMs:10000});
+    if(!document.hidden){
+      window._s033Acordar?.(window._s012Capturar?.());
+      window.sincronizarSeNecessario('aba reativada', {minimoMs:10000});
+    }
   });
 
   // Recuperar a conexão depois de ficar offline
   window.addEventListener('online', () => {
+    window._s033Acordar?.(window._s012Capturar?.());
     window.sincronizarSeNecessario('conexão restabelecida', {forcar:true});
   });
 
@@ -13031,7 +13479,12 @@ function _syncChavePullParcial(identidade){
 
 function _syncLeituraPertencePerfilAtivo(leitura){
   const atual = window._syncIdentidadePull?.() || '';
-  return !!atual && atual === _syncIdentidadePullAtiva && leitura?.identidade === atual;
+  const ctx = window._s012Capturar?.();
+  if(!atual || atual !== _syncIdentidadePullAtiva || !ctx || ctx.email !== atual
+      || !window._s012ContextoValido?.(ctx)
+      || (leitura?.identidade !== atual && leitura?.identidade !== ctx.owner)) return false;
+  const s033 = leitura?.s033;
+  return !s033 || (s033.owner === ctx.owner && s033.geracao === ctx.geracao);
 }
 
 // [FIX R75] Havia UM carimbo só, e ele era gravado apenas nas ESCRITAS.
@@ -13073,6 +13526,7 @@ window._syncRestaurarPullParcial = function(){
 /** Marca uma LEITURA bem-sucedida (dados recebidos do Firebase). */
 window._syncMarcarPull = function(leitura){
   if(!_syncLeituraPertencePerfilAtivo(leitura)) return false;
+  const identidade = window._syncIdentidadePull?.() || '';
   const e = window._syncEstado || {};
   e.tsPull = Date.now();
   e.pullParcial = false;
@@ -13080,13 +13534,14 @@ window._syncMarcarPull = function(leitura){
   window._syncEstado = e;
   try{
     localStorage.setItem(SYNC_CHAVE_PULL, String(e.tsPull));
-    localStorage.removeItem(_syncChavePullParcial(leitura.identidade));
+    localStorage.removeItem(_syncChavePullParcial(identidade));
   }catch(err){}
   window._syncRender();
 };
 
 window._syncMarcarPullParcial = function(leitura){
   if(!_syncLeituraPertencePerfilAtivo(leitura)) return false;
+  const identidade = window._syncIdentidadePull?.() || '';
   const e = window._syncEstado || {};
   const falhas = Array.isArray(leitura?.falhas) ? leitura.falhas : [];
   const docs = falhas.map(f => f && f.documento).filter(Boolean);
@@ -13096,7 +13551,7 @@ window._syncMarcarPullParcial = function(leitura){
     : 'A leitura não confirmou todos os documentos.';
   window._syncEstado = e;
   // Só persiste a indicação genérica sob a identidade que iniciou a leitura.
-  try{ localStorage.setItem(_syncChavePullParcial(leitura.identidade), '1'); }catch(err){}
+  try{ localStorage.setItem(_syncChavePullParcial(identidade), '1'); }catch(err){}
   window._syncRender();
 };
 
@@ -13134,6 +13589,7 @@ window._syncRender = function(){
   el.style.display = 'flex';
 
   const {estado, ts, tsPull, msg, pullParcial, pullMsg} = window._syncEstado;
+  const s033Monitor=window._s033EstadoMonitor?.();
   // "Atualizado há X" para o usuário significa "os dados são desta época" —
   // e isso vale para qualquer contato com o servidor, não só para envios.
   const tsContato = Math.max(Number(ts)||0, Number(tsPull)||0);
@@ -13158,6 +13614,11 @@ window._syncRender = function(){
     cor='var(--ouro)'; ponto='var(--ouro)';
     texto = tsPull ? 'Leitura parcial · última leitura completa ' + _syncHaQuanto(tsPull) : 'Leitura parcial';
     titulo='A leitura mais recente não confirmou todos os documentos. ' + (pullMsg||'Tente novamente.');
+  } else if(s033Monitor?.healthy){
+    cor='var(--verde)'; ponto='var(--verde)'; texto='Monitorando alterações';
+    titulo='Listeners do Firebase ativos; última leitura canônica: '
+      +(tsPull?_syncHaQuanto(tsPull):'ainda não registrada')
+      +' · último envio: '+(ts?_syncHaQuanto(ts):'nunca')+'.';
   } else if(estado === 'inicial' && !tsContato){
     cor='var(--muted)'; ponto='var(--muted)'; texto='Sem sincronizar ainda';
     titulo='Nenhuma sincronização registrada neste navegador';
@@ -14548,13 +15009,30 @@ window.crmSincronizar = async function(paresOpt, s012Ctx){
   return {ok,total:pares.length,docs,erros};
 };
 
+let _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
+function _crmS033EscopoRecibos(ctx){
+  if(_crmS033Recibos.owner!==ctx?.owner||_crmS033Recibos.geracao!==ctx?.geracao)
+    _crmS033Recibos={owner:ctx?.owner||null,geracao:ctx?.geracao??null,pares:new Map()};
+  return _crmS033Recibos;
+}
+function _crmS033ReciboConfere(ctx,lid,ano,ts,gid){
+  const estado=_crmS033EscopoRecibos(ctx), recibo=estado.pares.get(lid+'|'+ano);
+  return !!recibo&&recibo.serverBacked===true&&Number(recibo.ts)===Number(ts)
+    &&(!gid||recibo.gid===gid);
+}
+window._s012AoTrocarSessao.push(ctx=>{
+  if(!ctx||_crmS033Recibos.owner!==ctx.owner||_crmS033Recibos.geracao!==ctx.geracao)
+    _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
+});
+
 /**
  * Lê do Firestore os cubos das lojas visíveis para quem está logado.
  * Admin lê de todas; loja lê só a própria.
  */
-window.crmCarregar = async function(paresOpt, s012Ctx){
+window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
   const ctx=s012Ctx||window._s012Capturar?.(), dadosAlvo=D;
   if(!ctx || !window._s012ContextoValido(ctx)) return 0;
+  const _s033Recibos=_crmS033EscopoRecibos(ctx);
   await window.crmHidratarIdb?.(ctx);
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
@@ -14592,6 +15070,40 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
   const _soLocal = [];
   for(const [lid, ano, gidIndice, tsIndice] of _pares){
     if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
+    let _s033Cabeca=null, _s033PartesServidor=true;
+    const _s033LerDoc=async(ref,doServidor,cabeca)=>{
+      const snap=await (doServidor?mod.getDocFromServer:getDoc)(ref);
+      const meta=snap?.metadata||{};
+      const servidor=meta.fromCache===false&&meta.hasPendingWrites===false;
+      if(cabeca){
+        const dados=snap.exists()?snap.data()||{}:{};
+        _s033Cabeca={exists:snap.exists(),serverBacked:servidor,
+          ts:Number(dados.ts)||0,gid:typeof dados.gid==='string'?dados.gid:null,
+          partes:Number(dados.partes)||1};
+      }else if(!servidor) _s033PartesServidor=false;
+      return snap;
+    };
+    const _s033RegistrarPar=()=>{
+      const idPar=lid+'|'+ano;
+      // Um índice pode carregar gid residual de um escritor antigo que só
+      // atualizou o carimbo numérico. Aceitar esse legado exige confirmar a
+      // cabeça e todas as partes no servidor; cache ou família parcial não
+      // pode transformar o token residual em recibo confiável.
+      const legadoComTokenResidual=!!gidIndice&&!_s033Cabeca?.gid
+        &&Number(_s033Cabeca?.ts)===Number(tsIndice)
+        &&_s033Cabeca?.serverBacked===true&&_s033PartesServidor;
+      const indiceConfere=(!tsIndice||Number(_s033Cabeca?.ts)===Number(tsIndice))
+        &&(!gidIndice||_s033Cabeca?.gid===gidIndice||legadoComTokenResidual);
+      const gidRecibo=_s033Cabeca?.gid||(legadoComTokenResidual?gidIndice:null);
+      const serverBacked=!!_s033Cabeca?.exists&&_s033Cabeca.serverBacked
+        &&_s033PartesServidor&&indiceConfere;
+      if(s033Proof) s033Proof.pairs[idPar]={complete:serverBacked,serverBacked,
+        ts:_s033Cabeca?.ts||0,gid:_s033Cabeca?.gid||null};
+      if(serverBacked&&window._s012ContextoValido(ctx)){
+        _s033Recibos.pares.set(idPar,{serverBacked:true,ts:_s033Cabeca.ts,
+          gid:gidRecibo,partes:_s033Cabeca.partes});
+      }else _s033Recibos.pares.delete(idPar);
+    };
     // S014: a carga completa também pode acontecer ao retornar ao owner.
     // Um cubo ainda marcado como não confirmado é a única cópia local útil;
     // não deixe o remoto antigo substituí-lo antes do reenvio explícito.
@@ -14624,7 +15136,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
     const _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
     if(_opCargaInicio?.exclusaoRemota)continue; // resolução explícita; nunca reativar por pull
     try{
-      const snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano)));
+      const snap = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),false,true);
       if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
       if(!snap.exists()){
         if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
@@ -14638,7 +15150,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
         // outro perfil pode já ter publicado uma importação mais nova. Confirme
         // no servidor também quando a leitura inicial parece apagada.
         if(typeof mod.getDocFromServer !== 'function') throw new Error('CRM exige leitura do servidor');
-        const atual = await mod.getDocFromServer(doc(db, 'avatim', _crmDocNome(lid, ano)));
+        const atual = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),true,true);
         if(!atual.exists()) throw new Error('cabeca CRM ausente no servidor');
         if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
         raw = atual.data(); leituraServidor = true;
@@ -14662,7 +15174,8 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
             ||dadosAlvo.crm[lid]?.[ano]!==_cuboCargaInicio)continue;
         if(dadosAlvo.crm[lid]){delete dadosAlvo.crm[lid][ano];if(!Object.keys(dadosAlvo.crm[lid]).length)delete dadosAlvo.crm[lid];}
         window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
-        _crmMarcarVisto(lid,ano,raw.ts,raw.gid||gidIndice,ctx);removidos++;
+        _crmMarcarVisto(lid,ano,raw.ts,raw.gid||gidIndice,ctx);
+        _s033RegistrarPar(); removidos++;
         if(typeof showToast==='function')showToast('Conjunto excluído no servidor. A importação pendente foi guardada como rascunho na lista de importações.','warn');
         continue;
       }
@@ -14696,17 +15209,19 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
           if(!Object.keys(dadosAlvo.crm[lid]).length) delete dadosAlvo.crm[lid];
         }
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
-        removidos++;
+        _s033RegistrarPar(); removidos++;
         continue;
       }
       if(!raw.dados){
         // Cabeça vazia sem _apagado não prova uma exclusão.
+        _s033Recibos.pares.delete(lid+'|'+ano);
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
         if(_temLocal) _soLocal.push({lid, ano, motivo:'vazio no servidor',quando:raw.ts,por:raw.por});
         continue;
       }
       const leves = JSON.parse(raw.dados || '{}');
       if(!leves.linhas){
+        _s033Recibos.pares.delete(lid+'|'+ano);
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
         if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
           quando: raw.ts, por: raw.por});
@@ -14720,7 +15235,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       for(let i = 0; i < partes; i++){
         const nomeParte = refPartes !== undefined
           ? _crmDocParte(lid, ano, raw.gid, i) : _crmDocNome(lid, ano, i);
-        const sp = await (leituraServidor ? mod.getDocFromServer : getDoc)(doc(db, 'avatim', nomeParte));
+        const sp = await _s033LerDoc(doc(db, 'avatim', nomeParte),leituraServidor,false);
         if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
         if(!sp.exists()) throw new Error('parte CRM ausente: '+i);
         const parte = sp.data();
@@ -14748,7 +15263,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
           const itens=[];
           for(let i=0;i<n;i++){
             const nomeParte=_crmDocCompraParte(lid,ano,raw.gid,i);
-            const sp=await (leituraServidor ? mod.getDocFromServer : getDoc)(doc(db,'avatim',nomeParte));
+            const sp=await _s033LerDoc(doc(db,'avatim',nomeParte),leituraServidor,false);
             if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return 0;
             if(!sp.exists())throw new Error('parte de compras ausente: '+i);
             const parte=sp.data()||{};
@@ -14801,7 +15316,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
       if(!dadosAlvo.crm[lid]) dadosAlvo.crm[lid] = {};
       dadosAlvo.crm[lid][ano] = leves;
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
-      carregados++;
+      _s033RegistrarPar(); carregados++;
     }catch(e){
       _invalidarVistoSeFalhou();
       console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
@@ -14850,14 +15365,28 @@ window.crmCarregar = async function(paresOpt, s012Ctx){
  */
 let _crmIndiceLidoEm = 0, _crmAtualizando = null;
 window.crmAtualizarSeMudou = async function(opts){
-  const ctx=window._s012Capturar?.();
+  const ctx=opts?.ctx||window._s012Capturar?.(), provaExterna=opts?._s033Proof||null;
+  const provaCoordenada=!!opts?._s033Coordinated;
+  const proof=provaExterna||{expectedMarker:null,indexServerBacked:false,complete:false,pairs:{}};
+  if(proof){proof.indexServerBacked=false;proof.complete=false;proof.pairs={};}
   if(!ctx || !window._s012ContextoValido(ctx)) return 0;
+  proof.eventSeqAtStart=window._s033MainReadStart?.(ctx)?.seqs?.crm_indice??null;
   const chaveCtx=ctx.owner+'|'+ctx.geracao;
   // o pull também roda a cada troca de tela; o índice não precisa disso
   const forcar = !!(opts && opts.forcar);
-  if(_crmAtualizando===chaveCtx || (!forcar && Date.now() - _crmIndiceLidoEm < 25000)) return 0;
+  if(_crmAtualizando===chaveCtx){
+    if(proof) proof.busy=true;
+    return 0;
+  }
+  if(!forcar && Date.now() - _crmIndiceLidoEm < 25000){
+    if(proof) proof.throttled=true;
+    return 0;
+  }
   // só depois de uma carga completa, e nunca durante uma
-  if(window._crmCargaCompleta !== 'ok') return 0;
+  if(window._crmCargaCompleta !== 'ok'){
+    if(proof) proof.bootIncomplete=true;
+    return 0;
+  }
   _crmAtualizando = chaveCtx;
   try{
     let db, mod;
@@ -14869,11 +15398,23 @@ window.crmAtualizarSeMudou = async function(opts){
       const snap = await getDoc(doc(db, 'avatim', CRM_INDICE));
       if(!window._s012ContextoValido(ctx)) return 0;
       _crmIndiceLidoEm = Date.now();
-      if(!snap.exists()) return 0;
+      const meta=snap?.metadata||{};
+      if(proof) proof.indexServerBacked=meta.fromCache===false&&meta.hasPendingWrites===false;
+      if(!snap.exists()){
+        if(proof){
+          proof.marker='missing';
+          if(!provaExterna) proof.expectedMarker='missing';
+          proof.complete=proof.indexServerBacked&&proof.expectedMarker==='missing';
+        }
+        return 0;
+      }
       const indice = snap.data() || {};
+      if(proof) proof.marker=window._s033MarcadorIndice?.(ctx,indice)??null;
+      if(!provaExterna) proof.expectedMarker=proof.marker;
       carimbos = indice.carimbos || {};
       geracoes = indice.geracoes || {};
     }catch(e){
+      if(proof) proof.error=String(e?.code||e?.message||'index-read-error');
       console.warn('[crm] índice ilegível — o CRM novo chega no próximo F5:', e.code || e.message);
       return 0;
     }
@@ -14893,7 +15434,7 @@ window.crmAtualizarSeMudou = async function(opts){
         &&(!gid||gid===(((visto._geracoes||{})[lid]||{})[ano]));
       // O carimbo pode sobreviver à perda do cubo local; só exclusão durável
       // confirmada da mesma revisão torna a ausência intencional.
-      if(mesmoIndice){
+      if(mesmoIndice&&_crmS033ReciboConfere(ctx,lid,String(ano),Number(ts),gid)){
         const cuboLocal=!!D.crm?.[lid]?.[ano];
         const op=window.crmPendenciaAtual(ctx,lid,ano);
         const exclusaoDuravel=op?._duravelRam===true&&op.owner===ctx.owner
@@ -14907,15 +15448,26 @@ window.crmAtualizarSeMudou = async function(opts){
       if(!window._s012ContextoValido(ctx)) return;
       mudados.push([lid, ano, gid, Number(ts)]);
     }));
-    if(!mudados.length) return 0;
+    if(proof) proof.expectedPairs=mudados.map(x=>[x[0],String(x[1])]);
+    if(!mudados.length){
+      if(proof) proof.complete=proof.indexServerBacked===true
+        &&proof.marker===proof.expectedMarker;
+      return 0;
+    }
     console.log('[crm] índice: recarregando', mudados.map(x => x.join('/')).join(', '));
-    const n = await window.crmCarregar(mudados,ctx);
+    const n = await window.crmCarregar(mudados,ctx,proof);
     if(!window._s012ContextoValido(ctx)) return 0;
     if(n && typeof window.crmAgendarGravacaoIdb === 'function') window.crmAgendarGravacaoIdb(ctx);
+    if(proof){
+      const pares=proof.expectedPairs||[];
+      proof.complete=proof.indexServerBacked===true&&proof.marker===proof.expectedMarker
+        &&pares.length>0&&pares.every(([lid,ano])=>proof.pairs?.[lid+'|'+ano]?.complete===true);
+    }
     return n;
   } finally {
     // Uma leitura antiga não libera o marcador de outra sessão que já começou.
     if(_crmAtualizando===chaveCtx) _crmAtualizando = null;
+    if(!provaCoordenada) window._s033CRMDisponivel?.(ctx,proof);
   }
 };
 
@@ -17323,8 +17875,9 @@ const _IDB_PRAZO = 3000;
 // https:// depois de publicado. Em file:// o IndexedDB não funciona, então
 // nem tentamos: esperar o prazo a cada gravação custaria 3s de travada, e
 // avisar o usuário seria alarme falso — os dados estão no Firestore e o
-// modo local é transitório. Uma vez descoberto, o motivo fica guardado
-// para as chamadas seguintes falharem na hora.
+// modo local é transitório. Motivos estruturais ficam guardados para as
+// chamadas seguintes falharem na hora; timeout ou bloqueio desta abertura
+// não comprova que as próximas devam falhar.
 window._idbIndisponivel = null;
 
 function _idbMotivo(){
@@ -17350,12 +17903,15 @@ function _idbAbrir(){
     const prazo = setTimeout(() => {
       if(resolvido) return;
       resolvido = true;
-      // Não responder uma vez significa não responder sempre: guardar o
-      // veredito evita repetir a espera a cada save.
-      window._idbIndisponivel = 'sem resposta';
       rej(new Error('IndexedDB não respondeu em ' + _IDB_PRAZO + 'ms'));
     }, _IDB_PRAZO);
-    const fim = (fn, arg) => { if(resolvido) return; resolvido = true; clearTimeout(prazo); fn(arg); };
+    const fim = (fn, arg) => {
+      if(resolvido) return false;
+      resolvido = true;
+      clearTimeout(prazo);
+      fn(arg);
+      return true;
+    };
 
     let r;
     try{ r = indexedDB.open(_IDB.nome, _IDB.versao); }
@@ -17364,7 +17920,13 @@ function _idbAbrir(){
       try{ if(!r.result.objectStoreNames.contains(_IDB.store)) r.result.createObjectStore(_IDB.store); }
       catch(e){ /* o onerror cuida */ }
     };
-    r.onsuccess = () => fim(res, r.result);
+    r.onsuccess = () => {
+      const db=r.result;
+      // Um request nativo pode terminar depois do timeout/bloqueio que já
+      // encerrou a Promise. Não o reabra para o chamador antigo nem retenha
+      // uma conexão órfã; uma chamada nova fará o próximo open.
+      if(!fim(res,db)) try{ db?.close(); }catch(_e){}
+    };
     r.onerror   = () => fim(rej, r.error || new Error('falha ao abrir IndexedDB'));
     r.onblocked = () => fim(rej, new Error('IndexedDB bloqueado por outra aba'));
   });
@@ -18238,8 +18800,6 @@ function _persistirLocal(){
       // Voltar a caber não merece balão — só rearma o aviso.
       if(n === 0){ window._avisoQuotaNivel = 0; return true; }
 
-      const mbExcel = _tamanhoMB(D.excelDados || []);
-      const mbCrm   = _tamanhoMB(D.crm || {});
       // Com os cubos no IndexedDB, sair do localStorage é o funcionamento
       // NORMAL, não uma degradação — não há nada que o usuário possa fazer,
       // então isso é log, não balão. Só vira aviso se o IndexedDB falhou.
@@ -18269,12 +18829,9 @@ function _persistirLocal(){
         window._avisoQuotaNivel = 2;
         return true;
       }
-      avisar(n, n === 1
-        ? '⚠️ A planilha bruta do CRM (' + mbExcel.toFixed(1) + ' MB) não cabe no armazenamento local. '
-          + 'Lançamentos e contatos continuam sendo salvos; a planilha vale só nesta sessão.'
-        : '⚠️ A base do CRM (' + (mbExcel + mbCrm).toFixed(1) + ' MB) não cabe no armazenamento local '
-          + 'e o cache alternativo do navegador não respondeu. Lançamentos, contatos e fluxo seguem '
-          + 'salvos; os dados do CRM são recarregados do servidor a cada abertura.', 'warn');
+      const mbExcel = _tamanhoMB(D.excelDados || []);
+      avisar(1, '⚠️ A planilha bruta do CRM (' + mbExcel.toFixed(1) + ' MB) não cabe no armazenamento local. '
+        + 'Lançamentos e contatos continuam sendo salvos; a planilha vale só nesta sessão.', 'warn');
       return true;
     }catch(e){
       if(!ehQuota(e)){
@@ -18436,6 +18993,7 @@ window._s005PendenteLimparSeAtual = function(op, payload, limparTs){
       || window._pendingLocalDataTs !== op.ts) return storageLimpo;
   window._pendingLocalData = null;
   if(limparTs && window._pendingLocalDataTs === op.ts) window._pendingLocalDataTs = null;
+  window._s033AoPendenteAlterada?.(op.ctx);
   return true;
 };
 
@@ -20389,12 +20947,15 @@ async function loadFromFirestore(){
       window._s024RetomarAposPull?.(_s024PullApto, remoto, leitura);
       if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
       _persistirLocal();
+      window._s033MainMerged?.(_s012Ctx,leitura);
       if(leitura.completa === true){
         console.log("[Avatim] loadFromFirestore completo:", D.vendedoras?.length||0, "vendedoras");
         window._syncMarcarPull?.(leitura);
         // [FIX 13/08] auto-recuperar dados presos que nunca subiram
         if(typeof window.autoSyncDadosPresos === 'function'){
-          setTimeout(()=>{if(window._s012ContextoValido(_s012Ctx)) window.autoSyncDadosPresos().catch(_=>{});}, 2000);
+          if(typeof window._s033AgendarRecuperacao==='function')
+            window._s033AgendarRecuperacao(_s012Ctx,()=>window.autoSyncDadosPresos());
+          else setTimeout(()=>{if(window._s012ContextoValido(_s012Ctx)) window.autoSyncDadosPresos().catch(_=>{});}, 2000);
         }
         return true;
       }
@@ -22495,6 +23056,8 @@ async function showApp(){
     return;
   }
   }
+  window._s033Iniciar?.(_s012Ctx);
+  window._s033BootIniciar?.(_s012Ctx);
   const _lerr=document.getElementById('lerr');
   if(_lerr){_lerr.textContent='';_lerr.style.display='none';}
   window._syncRestaurarPullParcial?.();
@@ -22613,11 +23176,15 @@ async function showApp(){
   };
   // [R122] Honra o retorno de loadFromFirestore: se o servidor não respondeu,
   // retenta sozinho em vez de deixar a tela zerada esperando o botão manual.
-  window._carregarComRetentativa(_pintarTelas).catch(e => {
-    if(!window._s012ContextoValido(_s012Ctx)) return;
-    console.error("[Avatim] showApp: erro ao carregar", e.message);
-    _pintarTelas();
-  });
+  Promise.resolve(window._carregarComRetentativa(_pintarTelas)).then(
+    ()=>window._s033BootConcluir?.(_s012Ctx),
+    e=>{
+      if(!window._s012ContextoValido(_s012Ctx)) return;
+      console.error("[Avatim] showApp: erro ao carregar", e.message);
+      _pintarTelas();
+      window._s033BootConcluir?.(_s012Ctx);
+    }
+  );
   // [DIAGNÓSTICO SIMPLES] Log de carregamento
   console.log("[Avatim] showApp: inicializado para", isAdmin() ? "ADMIN" : lojaId());
 
@@ -22625,7 +23192,8 @@ async function showApp(){
   CosmosDB.init();
   // [R73] gatilhos + primeira busca ao entrar no sistema
   if(typeof window.instalarGatilhosSync === 'function') window.instalarGatilhosSync();
-  setTimeout(() => { if(window._s012ContextoValido(_s012Ctx)) window.sincronizarSeNecessario?.('entrou no sistema', {forcar:true}); }, 800);
+  // A leitura inicial e seus retries pertencem ao boot; o hub de eventos
+  // drena apenas novas revisões depois da barreira.
   // [R61] O badge de sync vale para TODOS: a loja precisa saber se as
   // vendas dela subiram. Só o de Cosmos continua restrito ao admin.
   if(typeof window._syncRender === 'function') window._syncRender();
@@ -34060,18 +34628,24 @@ async function sbUpsert(table,data){return await sbRequest(table,'POST',Array.is
 // bug que o R124 corrigiu. Quem grava é save().
 // ══════════════════════════════════════════════════════════════════════
 
-// Admin: sync a cada 30s
+// S033: eventos solicitam o leitor canônico; ações explícitas reutilizam o mesmo fluxo.
 function iniciarAutoRefresh(){
   if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
   
-  // Sync para LOJA: busca dados do Firebase a cada 60s
+  // Sync para LOJA: leitor canônico acionado por eventos e ações explícitas
   if(!isAdmin()){
-    async function syncLoja(){
+    async function syncLoja(opcoes){
+      const _syncCtx=window._s012Capturar?.(), _syncD=D;
+      const _syncValido=()=>!!_syncCtx&&window._s012ContextoValido?.(_syncCtx)&&D===_syncD;
+      if(!_syncValido()) return;
+      let syncLojaCompartilhada=null, liberarSyncLoja=null, _s033PullTicket=null;
       try{
+        _s033PullTicket=window._s033MainPullIniciar?.(_syncCtx)||null;
         const ok = await waitForFirebase(3000);
-        if(!ok || !window.fsCarregar) return;
+        if(!_syncValido()||!ok || !window.fsCarregar) return;
         // [FIX B] Guard com timeout — pendente <60s pula, >60s força sync
         if(window._pendingLocalData){
+          if(opcoes?.s033Event||window._s033EstadoMonitor?.()) return;
           const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
           // [R75] 60s era muito: o usuário trocava de tela e nada acontecia.
           // 15s já cobre a gravação em curso sem travar a leitura seguinte.
@@ -34081,8 +34655,19 @@ function iniciarAutoRefresh(){
           }
           window._pendingLocalData = null;
         }
+        if(syncLoja._s032dEmCurso) return syncLoja._s032dEmCurso;
+        syncLojaCompartilhada=new Promise(resolve=>{liberarSyncLoja=resolve;});
+        syncLoja._s032dEmCurso=syncLojaCompartilhada;
         const leitura = {};
-        const dadosJSON = await window.fsCarregar(leitura);
+        const _pendenteAntes=window._pendingLocalData, _pendenteTsAntes=window._pendingLocalDataTs;
+        const dadosJSON = await window.fsCarregar(leitura,_syncCtx);
+        if(!_syncValido()) return;
+        if(window._pendingLocalData
+            &&(window._pendingLocalData!==_pendenteAntes
+              ||window._pendingLocalDataTs!==_pendenteTsAntes)){
+          window._syncMarcarPullParcial?.(leitura);
+          return;
+        }
         if(!dadosJSON){
           window._syncMarcarPullParcial?.(leitura);
           return;
@@ -34096,7 +34681,7 @@ function iniciarAutoRefresh(){
         // Antes: lojas com campo legado não recebiam campanhas criadas pelo admin
         if(_aceitaRemoto(D.campanhas, remoto.campanhas)) D.campanhas = remoto.campanhas;
         // Merge só vendas e vendasVend desta loja
-        const lid2 = lojaId();
+        const lid2 = _syncCtx.loja;
         // [S003] Mesclar o cadastro antes do filtro para a venda de uma
         // vendedora nova chegar no mesmo pull.
         window._mesclarVendedoras?.(remoto);
@@ -34160,10 +34745,12 @@ function iniciarAutoRefresh(){
           D.fluxo = (D.fluxo||[]).filter(f => !_fluxoExcluido(f.id));
         }
         _persistirLocal();
+        window._s033MainMerged?.(_syncCtx,leitura);
         // [R161] planilha do CRM importada em outra máquina — depois do
         // merge inteiro, porque recarregar um conjunto grande leva tempo
         try{ await window.crmAtualizarSeMudou?.(); }
         catch(eC){ console.warn('[Avatim] syncLoja CRM:', eC.message); }
+        if(!_syncValido()) return;
         // [FIX R75] carimbar a LEITURA — é o que faz o indicador refletir
         // que a tela acabou de receber dados novos.
         if(leitura.completa === true) window._syncMarcarPull?.(leitura);
@@ -34175,18 +34762,30 @@ function iniciarAutoRefresh(){
           ? '[Avatim] 🔄 syncLoja: dados atualizados'
           : '[Avatim] ⚠️ syncLoja: dados parciais mesclados; pull não confirmado');
       }catch(e){ console.warn('[Avatim] syncLoja erro:', e.message); }
+      finally{
+        if(syncLojaCompartilhada){
+          if(syncLoja._s032dEmCurso===syncLojaCompartilhada) syncLoja._s032dEmCurso=null;
+          liberarSyncLoja();
+        }
+        if(_s033PullTicket) window._s033MainPullConcluir?.(_syncCtx,_s033PullTicket);
+      }
     }
     // [R73] exposta para os gatilhos (login, troca de tela, relatório…)
     window._syncPull = syncLoja;
-    syncLoja();
-    _autoRefreshTimer = setInterval(syncLoja, 60000);
+    _autoRefreshTimer=null;
+    window._s033Iniciar?.(window._s012Capturar?.());
     return;
   }
-  async function syncAdmin(){
-    const _s002Ctx=window._s012Capturar?.();
+  async function syncAdmin(opcoes){
+    let syncAdminCompartilhada=null, liberarSyncAdmin=null;
+    const _s002Ctx=window._s012Capturar?.(), _syncCtx=_s002Ctx, _syncD=D;
+    const _syncValido=()=>!!_syncCtx&&window._s012ContextoValido?.(_syncCtx)&&D===_syncD;
+    if(!_syncValido()) return;
+    let _s033PullTicket=null;
     // [FIX B] Guard com timeout — pular sync se há gravação pendente recente (<60s)
     // Se _pendingLocalData ficar preso (bug), não bloquear syncAdmin para sempre
     if(window._pendingLocalData){
+      if(opcoes?.s033Event||window._s033EstadoMonitor?.()) return;
       const pendingAge = window._pendingLocalDataTs ? (Date.now() - window._pendingLocalDataTs) : 999999;
       if(pendingAge < 15000){   // [R75] era 60s — bloqueava o gatilho de tela
         console.log("[Avatim] syncAdmin: gravação em curso (" + Math.round(pendingAge/1000) + "s) — leitura adiada");
@@ -34198,11 +34797,24 @@ function iniciarAutoRefresh(){
       window._pendingLocalDataTs = null;
     }
     // [FIX CRÍTICO] Sempre usar fsCarregar (docs loja_*) como fonte de dados.
+    _s033PullTicket=window._s033MainPullIniciar?.(_syncCtx)||null;
     try{
       const ok = await waitForFirebase(3000);
+      if(!_syncValido()) return;
       if(ok && window.fsCarregar){
+        if(syncAdmin._s032dEmCurso) return syncAdmin._s032dEmCurso;
+        syncAdminCompartilhada=new Promise(resolve=>{liberarSyncAdmin=resolve;});
+        syncAdmin._s032dEmCurso=syncAdminCompartilhada;
         const leitura = {};
-        const dadosJSON = await window.fsCarregar(leitura);
+        const _pendenteAntes=window._pendingLocalData, _pendenteTsAntes=window._pendingLocalDataTs;
+        const dadosJSON = await window.fsCarregar(leitura,_syncCtx);
+        if(!_syncValido()) return;
+        if(window._pendingLocalData
+            &&(window._pendingLocalData!==_pendenteAntes
+              ||window._pendingLocalDataTs!==_pendenteTsAntes)){
+          window._syncMarcarPullParcial?.(leitura);
+          return;
+        }
         if(dadosJSON){
           const remoto = JSON.parse(dadosJSON);
           window._s002ConfirmarMarcasLeitura?.(leitura,_s002Ctx);
@@ -34248,11 +34860,13 @@ function iniciarAutoRefresh(){
           // Atualiza seletores antes de persistir ou aguardar a hidratação do CRM.
           preencherSelectVends(true);
           _persistirLocal();
+          window._s033MainMerged?.(_syncCtx,leitura);
           console.log('[Avatim] 🔄 syncAdmin: dados atualizados dos docs loja_*');
           // [R161] planilha do CRM importada em outra máquina — depois do
           // merge inteiro, porque recarregar um conjunto grande leva tempo
           try{ await window.crmAtualizarSeMudou?.(); }
           catch(eC){ console.warn('[Avatim] syncAdmin CRM:', eC.message); }
+          if(!_syncValido()) return;
           // [FIX R61] O badge só avança quando esta leitura terminou.
           if(leitura.completa === true) window._syncMarcarPull?.(leitura);   // [FIX R75]
           else window._syncMarcarPullParcial?.(leitura);
@@ -34261,12 +34875,19 @@ function iniciarAutoRefresh(){
         }
       }
     }catch(e){ console.warn('[Avatim] syncAdmin erro:', e.message); }
+    finally{
+      if(syncAdminCompartilhada){
+        if(syncAdmin._s032dEmCurso===syncAdminCompartilhada) syncAdmin._s032dEmCurso=null;
+        liberarSyncAdmin();
+      }
+      if(_s033PullTicket) window._s033MainPullConcluir?.(_syncCtx,_s033PullTicket);
+    }
     // [FIX R72] mesma lista fixa de antes, agora pelo despachante central
-    window.rerenderPaginaAtiva?.('syncAdmin');
+    if(_syncValido()) window.rerenderPaginaAtiva?.('syncAdmin');
   }
   window._syncPull = syncAdmin;
-  syncAdmin();
-  _autoRefreshTimer=setInterval(syncAdmin,30000);
+  _autoRefreshTimer=null;
+  window._s033Iniciar?.(window._s012Capturar?.());
 }
 
 // ══════════════════════════════════════════════════════════════════════
