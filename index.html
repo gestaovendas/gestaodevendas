@@ -4209,16 +4209,13 @@ window.fbGetToken = async function(operacao){
   // exatamente isso: dois "fsGravar INICIO" seguidos e, logo depois,
   // "principal ilegível".
   //
-  // Enfileirar também segura o volume. O SDK do Firestore aceita no máximo
-  // 100 gravações na fila; quatro ciclos do admin com a rede ruim passam
-  // disso e ele derruba tudo com "Write stream exhausted maximum allowed
-  // queued writes". Com uma de cada vez, no máximo 9 esperam.
-  //
-  // Quem pede gravação durante outra NÃO vira uma rodada nova: o pedido mais
-  // recente substitui o anterior na fila. Isso é seguro porque todo chamador
-  // grava o estado INTEIRO (JSON.stringify(D)) — o mais novo contém o mais
-  // velho. Quem estava esperando recebe o resultado dessa rodada, e não um
-  // "salvo" que nunca aconteceu.
+  // A fila mantém um ciclo ativo por vez; não iniciar ciclos paralelos evita
+  // que cabeças/caudas de documentos fatiados se intercalem. Cada chamada
+  // pendente mantém seu snapshot e seus contextos S024/S027 próprios. Não
+  // coalescer JSONs distintos: o snapshot pode ter sido capturado antes de
+  // outra edição e só chegar à fila depois dela, e seus waiters carregam ACKs
+  // específicos. A fila local pode reter vários snapshots; isso é diferente
+  // de despachar todos como writes concorrentes para o SDK.
   // ══════════════════════════════════════════════════════════════
   let _gravEmCurso = false;
   let _gravAtivo = null;
@@ -4266,16 +4263,8 @@ window.fbGetToken = async function(operacao){
     return new Promise((resolve,reject)=>{
       const aguardar={resolve,reject};
       if(_gravEmCurso){
-        const existente=_gravPendente.find(x=>x.chave===chave);
-        if(existente){
-          existente.json=dadosJSON;
-          existente.contextoS024=contextoS024||null;
-          existente.contextoS027=contextoS027;
-          existente.aguardando.push(aguardar);
-        }else{
-          _gravPendente.push({chave,json:dadosJSON,contextoS024:contextoS024||null,
-            s012Ctx:ctx,contextoS027,aguardando:[aguardar]});
-        }
+        _gravPendente.push({chave,json:dadosJSON,contextoS024:contextoS024||null,
+          s012Ctx:ctx,contextoS027,aguardando:[aguardar]});
         console.log("[Avatim] R131: gravação em curso — pedido enfileirado ("
           + _gravPendente.reduce((n,x)=>n+x.aguardando.length,0) + " esperando)");
         return;
@@ -7136,6 +7125,14 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
   </div>
 
+  <section class="sc" id="crm-progress-region" role="status" aria-live="polite" aria-atomic="false" aria-busy="false" hidden style="margin-bottom:14px;border-color:var(--borda)">
+    <div id="crm-progress-title" class="st" style="margin-bottom:8px;color:var(--ouro)">CRM</div>
+    <div id="crm-progress-message" style="font-size:12px;line-height:1.5;color:var(--texto);margin-bottom:8px"></div>
+    <progress id="crm-progress-meter" aria-label="Progresso da etapa atual" style="display:block;width:100%;height:8px;accent-color:var(--ouro);margin:0 0 8px"></progress>
+    <div id="crm-progress-summary" style="font-size:11px;color:var(--muted);margin-bottom:6px"></div>
+    <ul id="crm-progress-pairs" style="margin:0;padding-left:18px;font-size:11px;line-height:1.6;color:var(--muted)"></ul>
+  </section>
+
   <!-- Instruções + status carga -->
   <div class="sc admin-only" style="margin-bottom:14px;display:none" id="excel-instrucoes">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
@@ -9193,7 +9190,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-16a';
+window.AVATIM_BUILD = '2026-10-16d';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -9344,11 +9341,22 @@ window.avatimMetasPorMes = function(deMes, ateMes){
 };
 
 window.avatimCrmNoServidor = async function(){
+  const ctx=window._s012Capturar?.(), dadosLocais=D;
+  const valido=()=>!!ctx&&window._s012ContextoValido?.(ctx)&&D===dadosLocais;
+  if(!valido()) return null;
   console.log('%c[Avatim] Cubos do CRM no servidor', 'font-weight:bold;color:#C9A84C');
   let db, mod;
   try{ ({mod, db} = await _bkFirestore()); }
   catch(e){ console.error('Firestore indisponível:', e.message); return null; }
-  const {getDoc, doc} = mod;
+  if(!valido()) return null;
+  const {getDocFromServer, doc} = mod;
+  const lerServidor=async id=>{
+    if(typeof getDocFromServer!=='function') throw new Error('Leitura do servidor indisponível');
+    const snap=await getDocFromServer(doc(db,'avatim',id));
+    if(snap.metadata?.fromCache!==false||snap.metadata?.hasPendingWrites!==false)
+      throw new Error('Leitura sem confirmação do servidor');
+    return snap;
+  };
 
   const lojas = isAdmin()
     ? (typeof LOJAS !== 'undefined' ? LOJAS.map(l => l.id) : [])
@@ -9359,17 +9367,37 @@ window.avatimCrmNoServidor = async function(){
   const anos = [];
   for(let a = anoAtual + 1; a >= anoAtual - 6; a--) anos.push(String(a));
 
-  const achados = [], soNoServidor = [], soLocal = [];
+  const achados = [], soNoServidor = [], soLocal = [], naoVerificados=new Set();
+  const confirmados=new Set(), ativos=new Set();
+  let carimbos={};
+  try{
+    const indice=await lerServidor('crm_indice');
+    if(!valido()) return null;
+    if(indice.exists()) carimbos=indice.data()?.carimbos||{};
+  }catch(e){
+    if(!valido()) return null;
+    naoVerificados.add('crm_indice');
+    console.warn('[crm] índice não confirmado no diagnóstico:',e.code||e.message);
+  }
   for(const lid of lojas){
-    for(const ano of anos){
+    const anosDaLoja=new Set([...anos,...Object.keys(dadosLocais.crm?.[lid]||{}),...Object.keys(carimbos[lid]||{})]);
+    for(const ano of anosDaLoja){
+      if(!valido()) return null;
+      const chave=lid+'/'+ano;
       let snap;
-      try{ snap = await getDoc(doc(db, 'avatim', _crmDocNome(lid, ano))); }
-      catch(e){ console.warn('[crm] falha lendo', lid, ano, e.code||e.message); continue; }
+      try{ snap = await lerServidor(_crmDocNome(lid, ano)); }
+      catch(e){
+        if(!valido()) return null;
+        naoVerificados.add(chave);
+        console.warn('[crm] não confirmado no diagnóstico',lid,ano,e.code||e.message);continue;
+      }
+      if(!valido()) return null;
+      confirmados.add(chave);
       if(!snap.exists()) continue;
       const raw = snap.data() || {};
       let leves = {};
       try{ leves = JSON.parse(raw.dados || '{}'); }catch(e){}
-      const local = ((D.crm||{})[lid]||{})[ano];
+      const local = ((dadosLocais.crm||{})[lid]||{})[ano];
       const estado = raw._apagado ? 'LÁPIDE (apagado)'
                    : !raw.dados   ? 'VAZIO (sem dados)'
                    : !leves.linhas? 'CABEÇA SEM LINHAS'
@@ -9384,34 +9412,37 @@ window.avatimCrmNoServidor = async function(){
         por: raw.por || '—',
         naMemoriaLocal: local ? 'sim' : 'NÃO'
       });
-      if(estado === 'ok' && !local) soNoServidor.push(lid + '/' + ano);
+      if(estado === 'ok'){
+        ativos.add(chave);
+        if(!local) soNoServidor.push(chave);
+      }
     }
   }
   if(achados.length) console.table(achados);
-  else console.warn('Nenhum cubo do CRM encontrado no servidor para este perfil.');
+  else console.warn('Nenhum conjunto CRM ativo confirmado no escopo consultado.');
 
   const anosServidor = [...new Set(achados.filter(a => a.estado === 'ok').map(a => a.ano))].sort();
   console.log('anos com cubo no SERVIDOR:', anosServidor.join(', ') || '(nenhum)');
 
-  Object.keys(D.crm || {}).forEach(lid => Object.keys(D.crm[lid] || {}).forEach(ano => {
-    const noServidor = achados.some(a => a.ano === ano && a.estado === 'ok'
-      && a.loja === ((LOJAS.find(l=>l.id===lid)?.nome) || lid));
-    if(!noServidor) soLocal.push(lid + '/' + ano);
+  lojas.forEach(lid => Object.keys(dadosLocais.crm?.[lid] || {}).forEach(ano => {
+    const chave=lid+'/'+ano;
+    if(!confirmados.has(chave)) naoVerificados.add(chave);
+    else if(!ativos.has(chave)) soLocal.push(chave);
   }));
 
   if(soLocal.length){
-    console.error('❌ SÓ NESTA MÁQUINA, não está no servidor:', soLocal.join(', ')
-      + '\n   É por isso que as outras máquinas não veem esse ano. O envio não'
-      + ' completou. Nesta máquina, aba CRM → "Reenviar ao Firebase".');
+    console.warn('⚠️ Cópia local sem conjunto ativo nas leituras confirmadas:',soLocal.join(', ')
+      + '\n   Preserve a cópia e confira ausência/lápide/estado antes de reenviar.');
   }
   if(soNoServidor.length){
     console.error('❌ NO SERVIDOR mas não carregado aqui:', soNoServidor.join(', ')
       + '\n   O dado existe; esta cópia não o leu. Recarregue; se persistir, é defeito de leitura.');
   }
-  if(!soLocal.length && !soNoServidor.length){
-    console.log('✅ Servidor e memória desta máquina batem.');
+  if(naoVerificados.size) console.warn('[crm] Não foi possível confirmar:',[...naoVerificados].join(', '));
+  if(!soLocal.length && !soNoServidor.length&&!naoVerificados.size){
+    console.log('✅ Os conjuntos do escopo consultado conferem com esta máquina.');
   }
-  return {anosServidor, soLocal, soNoServidor, conjuntos: achados};
+  return {anosServidor, soLocal, soNoServidor, conjuntos: achados,naoVerificados:[...naoVerificados]};
 };
 
 window._semComentarios = function(f){
@@ -9461,13 +9492,13 @@ window.AVATIM_RECURSOS = {
   planilhaDiagnostico:   () => typeof window.avatimDiagnosticarPlanilha === 'function',
   // [R135] apagar CRM não reescreve mais o principal nem os 7 docs de loja
   crmExclusaoLeve:       () => typeof window.crmApagar === 'function'
-                            && !/\bsave\(\)/.test(window._semComentarios(window.crmApagar))
-                            && /_persistirLocal\(\)/.test(window._semComentarios(window.crmApagar)),
+                            && !/\bsave\(\)/.test(window._semComentarios(window.crmApagar._crmN003Base||window.crmApagar))
+                            && /_persistirLocal\(\)/.test(window._semComentarios(window.crmApagar._crmN003Base||window.crmApagar)),
   // [R135] período coberto por conjunto — denuncia o arquivo que subiu pela metade
   coberturaImportacao:   () => typeof _crmCobertura === 'function',
   // [R136] importar manda só o conjunto importado, e fila cheia vira espera
   envioSoDoImportado:    () => typeof window.crmSincronizar === 'function'
-                            && /paresOpt/.test(String(window.crmSincronizar)),
+                            && /paresOpt/.test(String(window.crmSincronizar._crmN003Base||window.crmSincronizar)),
   filaCheiaAguarda:      () => typeof window._crmGravarLote === 'function'
                             && /resource-exhausted/.test(String(window._crmGravarLote)),
   // [R137] o ano inteiro mes a mes, com melhor e pior mes
@@ -9517,8 +9548,8 @@ window.AVATIM_RECURSOS = {
                             && /_getMetasBase\(lid,ref,strictMode\)/.test(window._semComentarios(getMetas)),
   // [R142] cubo que existe só nesta máquina para de passar em silêncio
   crmAvisaSoLocal:       () => typeof window.crmCarregar === 'function'
-                            && /_soLocal/.test(String(window.crmCarregar))
-                            && /_crmSoLocal/.test(String(window.crmCarregar)),
+                            && /_soLocal/.test(String(window.crmCarregar._crmN003Base||window.crmCarregar))
+                            && /_crmSoLocal/.test(String(window.crmCarregar._crmN003Base||window.crmCarregar)),
   // [R161] o cubo do CRM chega às outras máquinas pelo índice, sem F5
   crmRecarregaPeloIndice: () => typeof window.crmAtualizarSeMudou === 'function'
                             && /_crmEscritaIndice/.test(String(window.crmSincronizarUm))
@@ -14627,6 +14658,8 @@ function _crmDocCompraParte(lid, ano, gid, parte){
 
 /** Teto por lote. O Firestore aceita 500; a folga evita erro de borda. */
 const CRM_LOTE_MAX = 400;
+// Folga sobre os 10 MiB da requisição, incluindo nomes e envelope do SDK.
+const CRM_LOTE_BYTES = 4 * 1024 * 1024;
 
 /**
  * Grava uma lista de {id, dados} em lotes atômicos, com prazo.
@@ -14634,12 +14667,26 @@ const CRM_LOTE_MAX = 400;
  * Sem o prazo a promessa fica pendente para sempre quando o Firestore não
  * alcança o servidor — o mesmo motivo que criou o gravarRemotoComPrazo.
  */
-window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=false){
+window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=false, onProgress){
+  const _n003Notificar=ev=>{try{if(typeof onProgress==='function')onProgress(ev);}catch(e){console.warn('[crm] progresso:',e.message||e);}};
   const ctx=s012Ctx||window._s012Capturar?.();
   if(!escritas || !escritas.length) return {lotes:0, docs:0};
   if(!ctx || !window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
   // Dados e destino ficam presos ao owner antes de abrir o SDK.
   const loteEscritas=JSON.parse(JSON.stringify(escritas));
+  const blocos=[];
+  let blocoAtual=[], bytesAtual=0;
+  for(const e of loteEscritas){
+    const bytes=_crmBytes(e)+1024;
+    if(bytes>CRM_LOTE_BYTES) throw new Error('Documento CRM excede o orçamento seguro do lote: '+e.id);
+    if(blocoAtual.length&&(blocoAtual.length>=CRM_LOTE_MAX||bytesAtual+bytes>CRM_LOTE_BYTES)){
+      blocos.push(blocoAtual); blocoAtual=[]; bytesAtual=0;
+    }
+    blocoAtual.push(e); bytesAtual+=bytes;
+  }
+  if(blocoAtual.length) blocos.push(blocoAtual);
+  if(exigirLoteAtomico&&blocos.length!==1)
+    throw new Error('Publicação atômica CRM excede o orçamento seguro; cabeça e índice não foram separados.');
   const {mod, db} = await _bkFirestore();
   if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
   const {writeBatch, doc, setDoc} = mod;
@@ -14672,6 +14719,7 @@ window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=
       publicacaoIniciada=true;
       await comPrazo(window._s012Publicacao(()=>e.merge ? setDoc(doc(db,'avatim',e.id), e.dados, {merge:true})
                              : setDoc(doc(db,'avatim',e.id), e.dados)), e.id);
+      _n003Notificar({fase:'lote',confirmados:i+1,total:loteEscritas.length});
     }
     return {lotes:0, docs:loteEscritas.length,
       sessaoAlterada:!window._s012ContextoValido(ctx)};
@@ -14688,10 +14736,10 @@ window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=
   };
   const _dormir = ms2 => new Promise(r => setTimeout(r, ms2));
 
-  let lotes = 0;
-  for(let i = 0; i < loteEscritas.length; i += CRM_LOTE_MAX){
+  let lotes = 0, confirmados = 0;
+  for(let i = 0; i < blocos.length; i++){
     if(!publicacaoIniciada&&!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
-    const bloco = loteEscritas.slice(i, i + CRM_LOTE_MAX);
+    const bloco = blocos[i];
     const esperas = [0, 4000, 12000];
     let ultimo = null, gravado = false;
     for(let t = 0; t < esperas.length && !gravado; t++){
@@ -14721,9 +14769,10 @@ window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=
       }
     }
     if(!gravado) throw (ultimo || new Error('não foi possível gravar o lote'));
-    lotes++;
+    lotes++; confirmados+=bloco.length;
+    _n003Notificar({fase:'lote',confirmados,total:loteEscritas.length,lotesConfirmados:lotes});
     // Respiro entre lotes: enfileirar um atrás do outro é o que enche a fila.
-    if(i + CRM_LOTE_MAX < loteEscritas.length){
+    if(i + 1 < blocos.length){
       await _dormir(400);
     }
   }
@@ -14875,7 +14924,7 @@ window._crmLimparNaoEnviado=function(ctx,lid,ano,markerEsperado){
   });
 };
 
-window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride){
+window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProgress){
   const ctx=s012Ctx||window._s012Capturar?.();
   if(!ctx || ctx.perfil!=='admin' || !window._s012ContextoValido(ctx))
     throw new Error('s012-sessao-alterada');
@@ -14943,19 +14992,32 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride){
     dados:{dados:JSON.stringify(leves),ts,gid,por,loja:lid,ano:String(ano)}};
   const escritaIndice=_crmEscritaIndice(lid,ano,ts,por,gid);
 
-  await window._crmGravarLote(escritasPartes, undefined, ctx);
+  const _n003Partes=ev=>{try{onProgress?.({tipo:'lote',lid,ano,etapa:'partes',...ev});}catch(e){console.warn('[crm] progresso:',e.message||e);}};
+  _n003Partes({confirmados:0,total:escritasPartes.length});
+  await window._crmGravarLote(escritasPartes, undefined, ctx, false, _n003Partes);
   if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
   // Sem writeBatch não é possível garantir publicação atômica do par; falhe
   // antes da cabeça para deixar apenas partes órfãs e manter o owner pendente.
   if(window.crmPendenciaAtual(ctx,lid,ano)?.exclusaoRemota)
     throw new Error('Exclusão remota recebida; publicação suspensa. Resolva o rascunho nas importações.');
-  await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true);
+  const _n003Publicacao=ev=>{try{onProgress?.({tipo:'lote',lid,ano,etapa:'publicacao',...ev});}catch(e){console.warn('[crm] progresso:',e.message||e);}};
+  _n003Publicacao({confirmados:0,total:2});
+  await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true, _n003Publicacao);
   // Uma confirmação já despachada só atualiza o controle persistido deste owner.
   _crmMarcarVisto(lid, ano, ts, gid, ctx);
-  const confirmada=confirmarOp ? await window.crmPendenciaConfirmarIdb(ctx,confirmarOp,cubo,{ts,gid}) : !opEnviada;
+  let confirmada=!opEnviada;
+  if(confirmarOp){
+    try{ confirmada=await window.crmPendenciaConfirmarIdb(ctx,confirmarOp,cubo,{ts,gid}); }
+    catch(e){
+      confirmada=false;
+      console.warn('[crm] envio confirmado; ACK local pendente em '+lid+'/'+ano+':',e.code||e.message);
+    }
+  }
   if(confirmada) window._crmLimparNaoEnviado?.(ctx,lid,ano,markerEnviado);
+  try{onProgress?.({tipo:'par-publicado',lid,ano,pendenteLocal:!confirmada});}catch(e){console.warn('[crm] progresso:',e.message||e);}
   return {partes: pedacos.length+pedacosCompra.length, partesCompras:pedacosCompra.length,
     clientes: (cubo.clientes||[]).length,
+    pendenteLocal:!confirmada,
     sessaoAlterada:!window._s012ContextoValido(ctx)};
 };
 
@@ -14972,41 +15034,55 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride){
  * era confirmado, a fila do SDK estourava e o commit morria em
  * "Write stream exhausted maximum allowed queued writes".
  */
-window.crmSincronizar = async function(paresOpt, s012Ctx){
+window.crmSincronizar = async function(paresOpt, s012Ctx, onProgress){
   const ctx=s012Ctx||window._s012Capturar?.();
   if(!ctx || ctx.perfil!=='admin' || !window._s012ContextoValido(ctx)){
     showToast('Só o administrador sincroniza o CRM.','err'); return;
   }
-  const cubos=JSON.parse(JSON.stringify(D.crm||{}));
+  const fonte=D.crm||{};
   let pares;
   if(Array.isArray(paresOpt) && paresOpt.length){
-    pares=paresOpt.filter(x=>Array.isArray(x) && ((cubos[x[0]]||{})[x[1]]));
+    pares=paresOpt.filter(x=>Array.isArray(x) && ((fonte[x[0]]||{})[x[1]]));
   }else{
     pares=[];
-    Object.keys(cubos).forEach(lid=>Object.entries(cubos[lid]||{}).forEach(([ano,cubo])=>{if(cubo)pares.push([lid,ano]);}));
+    Object.keys(fonte).forEach(lid=>Object.entries(fonte[lid]||{}).forEach(([ano,cubo])=>{if(cubo)pares.push([lid,ano]);}));
   }
   if(!pares.length){ showToast('Nenhum dado de CRM para sincronizar.','warn'); return; }
+  const cubos={};
+  // Capturar somente os pares enviados, antes de qualquer await.
+  pares.forEach(([lid,ano])=>{
+    (cubos[lid]||(cubos[lid]={}))[ano]=JSON.parse(JSON.stringify(fonte[lid][ano]));
+  });
 
   showToast('⏳ Enviando ' + pares.length + ' conjunto(s) de CRM...','ok');
-  let ok=0, docs=0; const erros=[];
+  const _n003Notificar=ev=>{try{onProgress?.(ev);}catch(e){console.warn('[crm] progresso:',e.message||e);}};
+  _n003Notificar({tipo:'envio-iniciado',total:pares.length});
+  let ok=0, docs=0, concluidos=0; const erros=[], pendentesLocais=[];
   for(const [lid,ano] of pares){
     if(!window._s012ContextoValido(ctx)) break;
+    _n003Notificar({tipo:'par-iniciado',lid,ano,concluidos,total:pares.length});
     try{
-      const r=await window.crmSincronizarUm(lid,ano,ctx,(cubos[lid]||{})[ano]);
-      ok++; docs+=1+r.partes;
+      const r=await window.crmSincronizarUm(lid,ano,ctx,(cubos[lid]||{})[ano],_n003Notificar);
+      ok++; docs+=2+r.partes;
+      if(r.pendenteLocal) pendentesLocais.push(lid+'/'+ano);
+      _n003Notificar({tipo:'par-resultado',lid,ano,estado:'confirmado',pendenteLocal:r.pendenteLocal,concluidos:++concluidos,total:pares.length});
     }catch(e){
       window._crmMarcarNaoEnviado?.(ctx,lid,ano,Date.now());
       erros.push(lid+'/'+ano+': '+(e.code||e.message));
+      const incerto=/não confirmou|sem confirmação|em \d+s/i.test(String(e.code||e.message));
+      _n003Notificar({tipo:'par-resultado',lid,ano,estado:incerto?'incerto':'falhou',estadoLocal:'alteracao-pendente',concluidos:++concluidos,total:pares.length});
     }
   }
-  if(!window._s012ContextoValido(ctx)) return {ok,total:pares.length,docs,erros,cancelada:true};
+  if(!window._s012ContextoValido(ctx)) return {ok,total:pares.length,docs,erros,pendentesLocais,cancelada:true};
   if(erros.length){
     console.error('[crm] sync com falhas:',erros);
     showToast('⚠️ ' + ok + ' de ' + pares.length + ' enviados. Falhas: ' + erros.join(' | '),'err');
+  }else if(pendentesLocais.length){
+    showToast('CRM confirmado no servidor; confirmação local pendente em: '+pendentesLocais.join(', ')+'. A revisão local foi preservada.','warn');
   }else{
     showToast('✅ CRM sincronizado: ' + ok + ' conjunto(s) em ' + docs + ' documento(s).','ok');
   }
-  return {ok,total:pares.length,docs,erros};
+  return {ok,total:pares.length,docs,erros,pendentesLocais};
 };
 
 let _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
@@ -15029,16 +15105,19 @@ window._s012AoTrocarSessao.push(ctx=>{
  * Lê do Firestore os cubos das lojas visíveis para quem está logado.
  * Admin lê de todas; loja lê só a própria.
  */
-window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
+window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
   const ctx=s012Ctx||window._s012Capturar?.(), dadosAlvo=D;
   if(!ctx || !window._s012ContextoValido(ctx)) return 0;
+  const _n003Notificar=ev=>{try{if(typeof onProgress==='function')onProgress(ev);}catch(e){console.warn('[N003] callback de progresso:',e.message||e);}};
+  _n003Notificar({tipo:'leitura-cache-local',etapa:'Verificando cache CRM local',mensagem:'A etapa de cache local começou.'});
   const _s033Recibos=_crmS033EscopoRecibos(ctx);
   await window.crmHidratarIdb?.(ctx);
+  _n003Notificar({tipo:'leitura-cache-local',etapa:'Lendo CRM remoto',mensagem:'A etapa de cache local terminou; conferindo o servidor.'});
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   let db, mod;
   try{ ({mod, db} = await _bkFirestore()); }
-  catch(e){ if(window._s012ContextoValido(ctx)) console.warn('[crm] carregar: Firestore indisponível'); return 0; }
+  catch(e){ if(window._s012ContextoValido(ctx)){console.warn('[crm] carregar: Firestore indisponível');_n003Notificar({tipo:'leitura-falha',mensagem:'Firestore indisponível; leitura remota sem confirmação.'});} return 0; }
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
   const {getDoc, doc} = mod;
 
@@ -15063,13 +15142,17 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
   const _pares = [];
   if(_parcial) paresOpt.forEach(x => { if(Array.isArray(x) && lojas.includes(x[0])) _pares.push([x[0], String(x[1]), x[2], x[3]]); });
   else lojas.forEach(lid => anos.forEach(ano => _pares.push([lid, ano])));
-  let carregados = 0, removidos = 0;
+  _n003Notificar({tipo:'leitura-iniciada',total:_pares.length,parcial:_parcial});
+  let carregados = 0, removidos = 0, falhasN003=0;
   // A lápide explícita _apagado:true retira o par do CRM ativo quando não há
   // operação de gravação local pendente. Ausência de documento, cabeça vazia
   // sem lápide e leituras falhas continuam preservando a cópia local.
   const _soLocal = [];
-  for(const [lid, ano, gidIndice, tsIndice] of _pares){
+  for(let _n003Indice=0;_n003Indice<_pares.length;_n003Indice++){
+    const [lid, ano, gidIndice, tsIndice]=_pares[_n003Indice];
     if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
+    let _n003EstadoPar='pendente';
+    _n003Notificar({tipo:'leitura-par-iniciado',lid,ano,concluidos:_n003Indice,total:_pares.length});
     let _s033Cabeca=null, _s033PartesServidor=true;
     const _s033LerDoc=async(ref,doServidor,cabeca)=>{
       const snap=await (doServidor?mod.getDocFromServer:getDoc)(ref);
@@ -15079,7 +15162,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
         const dados=snap.exists()?snap.data()||{}:{};
         _s033Cabeca={exists:snap.exists(),serverBacked:servidor,
           ts:Number(dados.ts)||0,gid:typeof dados.gid==='string'?dados.gid:null,
-          partes:Number(dados.partes)||1};
+          partes:Number(dados.partes)||1,semDados:!dados.dados};
       }else if(!servidor) _s033PartesServidor=false;
       return snap;
     };
@@ -15134,16 +15217,25 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
     // A fatia B009A só aplica exclusão explícita quando não há gravação local
     // pendente. Marcadores legados sem operação continuam retidos por segurança.
     const _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
-    if(_opCargaInicio?.exclusaoRemota)continue; // resolução explícita; nunca reativar por pull
     try{
-      const snap = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),false,true);
+      if(_opCargaInicio?.exclusaoRemota){_n003EstadoPar='pendencia-local-preservada';continue;}
+      let leituraServidor=false;
+      let snap = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),false,true);
       if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
+      if((!snap.exists()||_s033Cabeca?.semDados)&&_s033Cabeca?.serverBacked!==true){
+        if(typeof mod.getDocFromServer!=='function') throw new Error('Ausência CRM não confirmada no servidor');
+        snap=await _s033LerDoc(doc(db,'avatim',_crmDocNome(lid,ano)),true,true);
+        if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return 0;
+        if(_s033Cabeca?.serverBacked!==true) throw new Error('Ausência CRM não confirmada no servidor');
+        leituraServidor=true;
+      }
       if(!snap.exists()){
+        _n003EstadoPar=_temLocal?'somente-local':'ausente-no-servidor';
         if(_temLocal) _soLocal.push({lid, ano, motivo:'não existe no servidor'});
         _invalidarVistoSeFalhou();
         continue;
       }
-      let raw = snap.data(), leituraServidor = false;
+      let raw = snap.data();
       const cerca=window.crmPendenciaAtual(ctx,lid,ano);
       if(raw._apagado || (cerca?.tipo==='excluir'&&raw.dados&&!raw._apagado)||(gidIndice && !raw.gid)){
         // Uma lápide vinda do cache do SDK não basta para retirar um cubo:
@@ -15151,13 +15243,15 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
         // no servidor também quando a leitura inicial parece apagada.
         if(typeof mod.getDocFromServer !== 'function') throw new Error('CRM exige leitura do servidor');
         const atual = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),true,true);
-        if(!atual.exists()) throw new Error('cabeca CRM ausente no servidor');
         if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
+        if(_s033Cabeca?.serverBacked!==true) throw new Error('Cabeça CRM sem confirmação do servidor');
+        if(!atual.exists()) throw new Error('cabeca CRM ausente no servidor');
         raw = atual.data(); leituraServidor = true;
       }
       if(gidIndice && (Number(raw.ts) !== Number(tsIndice) || (raw.gid && raw.gid !== gidIndice)))
         throw new Error('geracao CRM diferente do indice');
       if(_temPendente){
+        _n003EstadoPar='pendencia-local-preservada';
         if(!raw._apagado||!leituraServidor||_pendenciaMudouDuranteCarga())continue;
         let held=null;
         try{held=await window.crmPendenciaReterExclusaoIdb(ctx,lid,ano,_opCargaInicio,
@@ -15176,6 +15270,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
         window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
         _crmMarcarVisto(lid,ano,raw.ts,raw.gid||gidIndice,ctx);
         _s033RegistrarPar(); removidos++;
+        _n003EstadoPar='removido-no-servidor';
         if(typeof showToast==='function')showToast('Conjunto excluído no servidor. A importação pendente foi guardada como rascunho na lista de importações.','warn');
         continue;
       }
@@ -15210,9 +15305,11 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
         }
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
         _s033RegistrarPar(); removidos++;
+        _n003EstadoPar='removido-no-servidor';
         continue;
       }
       if(!raw.dados){
+        _n003EstadoPar=_temLocal?'somente-local':'vazio-no-servidor';
         // Cabeça vazia sem _apagado não prova uma exclusão.
         _s033Recibos.pares.delete(lid+'|'+ano);
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
@@ -15221,6 +15318,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
       }
       const leves = JSON.parse(raw.dados || '{}');
       if(!leves.linhas){
+        if(_s033Cabeca?.serverBacked!==true) throw new Error('Cabeça CRM do cache sem linhas; servidor não confirmado');
         _s033Recibos.pares.delete(lid+'|'+ano);
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
         if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
@@ -15229,6 +15327,10 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
       }
       const partes = Number(leves._partes) || 0;
       const refPartes = leves._partesRef;
+      const _n003CabecaCompras=leves._comprasCliente;
+      const _n003TotalPartes=partes+(_n003CabecaCompras?.versao===1&&_n003CabecaCompras.disponivel===true?(Number(_n003CabecaCompras._partes)||0):0);
+      let _n003PartesLidas=0;
+      _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:0,total:_n003TotalPartes});
       if(refPartes !== undefined && (!raw.gid || refPartes !== _crmPartePrefixo(lid, ano, raw.gid)))
         throw new Error('referência de partes CRM inválida');
       const clientes = [];
@@ -15245,6 +15347,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
         if(parte.parte !== undefined && Number(parte.parte) !== i)
           throw new Error('índice CRM divergente: '+i);
         clientes.push(...JSON.parse(parte.dados || '[]'));
+        _n003PartesLidas++; _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes});
       }
       const detalheCabeca=leves._comprasCliente;
       let detalheCarregado;
@@ -15281,6 +15384,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
                 throw new Error('linhas de compras inválidas: '+i);
               itens.push(...linhas);
             }
+            _n003PartesLidas++; _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes,detalhe:true});
           }
           detalheCarregado={versao:1,disponivel:true,meses:[...new Set(meses)].sort(),itens};
         }catch(e){
@@ -15317,9 +15421,13 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
       dadosAlvo.crm[lid][ano] = leves;
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
       _s033RegistrarPar(); carregados++;
+      _n003EstadoPar=_s033Recibos.pares.get(lid+'|'+ano)?.serverBacked?'confirmado-no-servidor':'carregado-sem-prova-do-servidor';
     }catch(e){
+      _n003EstadoPar='falha-na-leitura'; falhasN003++;
       _invalidarVistoSeFalhou();
       console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
+    }finally{
+      _n003Notificar({tipo:'leitura-par-resultado',lid,ano,estado:_n003EstadoPar,concluidos:_n003Indice+1,total:_pares.length});
     }
   }
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
@@ -15331,6 +15439,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof){
     window._crmEmitirAtualizacaoUI?.(_pares.map(([lid,ano])=>({lid,ano})), 'leitura');
   }
   if(!_parcial) window._crmCargaCompleta = 'ok';
+  _n003Notificar({tipo:'leitura-concluida',carregados,removidos,falhas:falhasN003,total:_pares.length});
 
   // [R161] recarga parcial: só os conjuntos relidos saem da lista antiga
   if(_parcial){
@@ -15516,7 +15625,7 @@ window.crmApagar = async function(lid, ano){
     const _gid = _indice.dados.geracoes[lid][String(ano)].gid;
     _escritas.forEach(e => { e.dados.gid = _gid; });
     _escritas.push(_indice);
-    await window._crmGravarLote(_escritas,undefined,ctx);
+    await window._crmGravarLote(_escritas,undefined,ctx,true);
     _crmMarcarVisto(lid, ano, _ts, _gid, ctx);
     try{cacheExcluido=await window.crmPendenciaExcluirIdb(ctx,lid,ano,opAoExcluir,{ts:_ts,gid:_gid});}
     catch(eCache){erroCache=eCache;}
@@ -18486,6 +18595,7 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!op?.exclusaoRemota||op.opId!==opId)return false;
   if(!confirm(reimportar?'Reimportar o rascunho como uma nova alteração e enviá-lo ao Firebase?'
       :'Descartar este rascunho pendente? O conjunto continuará excluído.'))return false;
+  let pendenteLocal=false;
   try{
     if(!window._s012ContextoValido(ctx)||window.crmPendenciaAtual(ctx,lid,ano)?.opId!==opId)return false;
     if(reimportar){
@@ -18500,7 +18610,8 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
       (D.crm||(D.crm={}))[lid]||(D.crm[lid]={});D.crm[lid][ano]=JSON.parse(JSON.stringify(nova.cubo));
       window._crmMarcarNaoEnviado(ctx,lid,ano,nova.marker);
       window._crmVersao=(window._crmVersao||0)+1;
-      await window.crmSincronizarUm(lid,ano,ctx,nova.cubo);
+      const envio=await window.crmSincronizarUm(lid,ano,ctx,nova.cubo);
+      pendenteLocal=envio.pendenteLocal;
     }else{
       const marker=window._crmNaoEnviados?.[lid+'|'+ano];
       if(!await window.crmPendenciaExcluirIdb(ctx,lid,ano,op,op.exclusaoRemota))
@@ -18510,7 +18621,9 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
         window._crmLimparNaoEnviado(ctx,lid,ano,marker);
     }
     if(window._s012ContextoValido(ctx)){
-      _crmRenderConjuntos();showToast(reimportar?'Rascunho reimportado e confirmado.':'Rascunho descartado.','ok');
+      _crmRenderConjuntos();
+      showToast(pendenteLocal?'Rascunho confirmado no servidor; confirmação local pendente. A revisão foi preservada.'
+        :reimportar?'Rascunho reimportado e confirmado.':'Rascunho descartado.',pendenteLocal?'warn':'ok');
     }
     return true;
   }catch(e){if(window._s012ContextoValido(ctx)){_crmRenderConjuntos();showToast(e.message||'Falha ao resolver rascunho.','err');}return false;}
@@ -18616,16 +18729,21 @@ window.crmRemoverIdb = async function(ctx, permitirTransicao=false){
 
 // Gravação agrupada: uma rajada de save() não deve serializar 7 MB várias vezes.
 let _idbTimer = null;
+let _idbAgendamento = 0;
 window.crmAgendarGravacaoIdb = function(ctx){
   ctx=ctx||window._s012Capturar?.();
   if(!ctx || !window._s012ContextoValido(ctx)) return false;
-  // Snapshot por owner no agendamento, nunca leia D dentro do timer futuro.
-  const snapshot=JSON.parse(JSON.stringify(D.crm||{})), epoch=_crmCacheEpoch.get(ctx.owner)||0, revisao=_crmCacheRevisao.get(ctx.owner)||0;
+  const dadosAgendados=D, agendamento=++_idbAgendamento;
+  const epoch=_crmCacheEpoch.get(ctx.owner)||0, revisao=_crmCacheRevisao.get(ctx.owner)||0;
   if(_idbTimer) clearTimeout(_idbTimer);
   _idbTimer = setTimeout(() => {
+    if(agendamento!==_idbAgendamento) return;
     _idbTimer = null;
-    if(!window._s012ContextoValido(ctx)) return;
-    window.crmGravarIdb(ctx,snapshot,false,epoch,revisao).catch(e => {
+    if(!window._s012ContextoValido(ctx)||D!==dadosAgendados
+        ||epoch!==(_crmCacheEpoch.get(ctx.owner)||0)
+        ||revisao!==(_crmCacheRevisao.get(ctx.owner)||0)) return;
+    // O writer copia antes do primeiro await; só o timer sobrevivente paga essa cópia.
+    window.crmGravarIdb(ctx,dadosAgendados.crm||{},false,epoch,revisao).catch(e => {
       if(window._s012ContextoValido(ctx)) window._crmIdbOk = false;
       console.warn('[idb] não foi possível guardar os cubos do CRM:', e.message);
     });
@@ -20665,10 +20783,10 @@ async function loadFromFirestore(){
     // fora do payload principal. Carregados aqui, sem travar o resto se falhar.
     // [R84] Cache local primeiro: as telas do CRM já abrem preenchidas e
     // funcionam offline; o Firestore em seguida traz o que mudou.
-    try{ if(typeof window.crmHidratarIdb === 'function') await window.crmHidratarIdb(_s012Ctx); }
-    catch(eIdb){ console.warn('[idb] hidratação ignorada:', eIdb.message); }
-    if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
-    try{ if(typeof window.crmCarregar === 'function') await window.crmCarregar(undefined,_s012Ctx); }
+    try{
+      if(typeof window.crmCarregar === 'function') await window.crmCarregar(undefined,_s012Ctx);
+      else if(typeof window.crmHidratarIdb === 'function') await window.crmHidratarIdb(_s012Ctx);
+    }
     catch(eCrm){ console.warn('[crm] carregamento ignorado:', eCrm.message); }
     if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
     const remoto = JSON.parse(dadosJSON);
@@ -46519,16 +46637,14 @@ window.forcarSyncCompleto = async function(){
 window.autoSyncDadosPresos = async function(){
   const ctx=window._s012Capturar?.(), dadosAlvo=D;
   if(!ctx || !window._s012ContextoValido(ctx)) return false;
-  const snapshot=JSON.stringify(dadosAlvo);
-  const local=JSON.parse(snapshot);
-  // Só rodar se tem dados locais
-  const temVendasVend = local.vendasVend && Object.keys(local.vendasVend).some(vid =>
-    Object.keys(local.vendasVend[vid]||{}).length > 0
+  // Só rodar se tem dados locais; esta leitura é síncrona e não tira snapshot.
+  const temVendasVend = dadosAlvo.vendasVend && Object.keys(dadosAlvo.vendasVend).some(vid =>
+    Object.keys(dadosAlvo.vendasVend[vid]||{}).length > 0
   );
-  const temVendas = local.vendas && Object.keys(local.vendas).some(l =>
-    Object.keys(local.vendas[l]||{}).length > 0
+  const temVendas = dadosAlvo.vendas && Object.keys(dadosAlvo.vendas).some(l =>
+    Object.keys(dadosAlvo.vendas[l]||{}).length > 0
   );
-  const temContatos = (local.contatos||[]).length > 0;
+  const temContatos = (dadosAlvo.contatos||[]).length > 0;
 
   if(!temVendasVend && !temVendas && !temContatos){
     return false; // nada a sincronizar
@@ -46546,6 +46662,10 @@ window.autoSyncDadosPresos = async function(){
       return false;
     }
     window._syncMarcarPull?.(leitura);
+    // O pull pode levar segundos. Capturar somente depois dele para não enfileirar
+    // um estado anterior a uma venda ou configuração alterada enquanto aguardava.
+    const snapshot=JSON.stringify(dadosAlvo);
+    const local=JSON.parse(snapshot);
     const remoto = JSON.parse(remotoJSON);
 
     let precisaPush = false;
@@ -47314,6 +47434,170 @@ function _excelResolverLoja(nomeOrId){
   return s;
 }
 
+// N003 — progresso CRM por operação, limitado ao owner/geração capturados.
+window._crmN003Progresso = (()=>{
+  let sequencia=0, importacao=null, leitura=null, desenhoPendente=false;
+  const contextoValido=t=>!!t?.ctx&&typeof window._s012ContextoValido==='function'
+    &&window._s012ContextoValido(t.ctx);
+  const elemento=id=>document.getElementById(id);
+  const ativo=()=>{
+    const validImport=contextoValido(importacao)?importacao:null;
+    const validRead=contextoValido(leitura)?leitura:null;
+    if(validImport&&!validImport.finalizado)return validImport;
+    if(validRead&&!validRead.finalizado)return validRead;
+    if(!validImport)return validRead;
+    if(!validRead)return validImport;
+    return (validImport.fim||validImport.id)>(validRead.fim||validRead.id)?validImport:validRead;
+  };
+  function desenhar(){
+    if(desenhoPendente)return;
+    desenhoPendente=true;
+    requestAnimationFrame(()=>{desenhoPendente=false;_desenharAgora();});
+  }
+  function _desenharAgora(){
+    const regiao=elemento('crm-progress-region');
+    if(!regiao)return;
+    const t=ativo();
+    regiao.hidden=!t;
+    if(!t)return;
+    regiao.setAttribute('aria-busy',String(!t.finalizado));
+    const title=elemento('crm-progress-title'), msg=elemento('crm-progress-message');
+    const summary=elemento('crm-progress-summary'), list=elemento('crm-progress-pairs');
+    const bar=elemento('crm-progress-meter');
+    if(title)title.textContent=t.titulo;
+    if(msg)msg.textContent=t.mensagem||'Aguardando início da etapa.';
+    if(bar){
+      if(t.progressKnown&&t.total>0&&Number.isFinite(t.total)&&Number.isFinite(t.done)){
+        bar.max=t.total;bar.value=Math.min(Math.max(0,t.done),t.total);bar.hidden=false;
+      }else{bar.removeAttribute('value');bar.hidden=t.progressKnown&&t.total===0;}
+    }
+    if(summary){
+      const vals=[...t.pares.values()];
+      const confirmados=vals.filter(x=>x.estado==='confirmado').length;
+      const incertos=vals.filter(x=>x.estado==='incerto').length;
+      const falhas=vals.filter(x=>x.estado==='falhou').length;
+      const pendentes=vals.filter(x=>x.estado==='pendente'||x.estado==='local').length;
+      const locaisSemAck=vals.filter(x=>x.pendenteLocal).length;
+      const alteracoesLocaisPendentes=vals.filter(x=>x.alteracaoLocalPendente).length;
+      const percentual=t.progressKnown&&t.total>0?`Etapa atual: ${Math.floor(Math.min(Math.max(0,t.done),t.total)/t.total*100)}% (${t.done}/${t.total}). `:'';
+      summary.textContent=percentual+(vals.length
+        ?`Servidor confirmado: ${confirmados}; sem confirmação remota: ${incertos}; falhas: ${falhas}; pendentes/locais: ${pendentes}; alterações locais sem confirmação: ${alteracoesLocaisPendentes}; confirmação local pendente: ${locaisSemAck}.`
+        :'');
+    }
+    if(list){
+      list.replaceChildren();
+      for(const [key,pair] of t.pares){
+        const li=document.createElement('li');
+        li.textContent=`${key.replace('|',' / ')} — ${pair.rotulo}`;
+        list.appendChild(li);
+      }
+    }
+  }
+  function iniciar(tipo,ctx){
+    if(!ctx||!window._s012ContextoValido?.(ctx))return null;
+    if((tipo==='importacao'||tipo==='publicacao')&&importacao
+        &&!importacao.finalizado&&contextoValido(importacao))return null;
+    const t={id:++sequencia,tipo,ctx,titulo:tipo==='importacao'?'Importação CRM':tipo==='publicacao'?'Publicação CRM':'Leitura CRM',
+      mensagem:'Preparando…',done:0,total:0,progressKnown:false,pares:new Map(),finalizado:false};
+    if(tipo==='importacao'||tipo==='publicacao')importacao=t;else leitura=t;
+    desenhar();return t;
+  }
+  function atualizar(t,e={}){
+    if(!contextoValido(t))return;
+    if(e.tipo==='leitura-falha'){finalizar(t,{falha:true,mensagem:e.mensagem||'Leitura CRM sem confirmação.'});return;}
+    if(e.tipo==='leitura-concluida'){finalizar(t,{mensagem:`Leitura terminou: ${e.carregados||0} carregados; ${e.removidos||0} removidos; ${e.falhas||0} falhas em ${e.total||0} pares.`});return;}
+    if(e.mensagem)t.mensagem=e.mensagem;
+    if(e.etapa){t.titulo=e.etapa;if(!Number.isFinite(e.total)&&!Number.isFinite(e.done)&&!Number.isFinite(e.confirmados)&&!Number.isFinite(e.concluidos)){t.done=0;t.total=0;t.progressKnown=false;}}
+    if(Number.isFinite(e.done))t.done=e.done;
+    else if(Number.isFinite(e.confirmados))t.done=e.confirmados;
+    else if(Number.isFinite(e.concluidos))t.done=e.concluidos;
+    if(Number.isFinite(e.total)){t.total=e.total;t.progressKnown=true;}
+    if(e.tipo==='envio-iniciado'){t.titulo='Publicando CRM';t.mensagem=`Aguardando confirmação de ${e.total} conjunto(s).`;t.done=0;t.total=e.total;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='leitura-iniciada'){t.titulo='Lendo CRM';t.mensagem=`Lendo ${e.total} conjunto(s) autorizados.`;t.done=0;t.total=e.total;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='leitura-par-iniciado'){t.titulo='Lendo conjunto CRM';t.done=e.concluidos||0;t.total=e.total||0;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='leitura-partes'){t.titulo='Lendo partes do conjunto';t.done=e.concluidas||0;t.total=e.total||0;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='par-iniciado'){t.titulo='Preparando envio CRM';t.done=e.concluidos||0;t.total=e.total||0;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='par-resultado'){t.titulo='Publicando CRM';t.done=e.concluidos||0;t.total=e.total||0;t.progressKnown=Number.isFinite(e.total);}
+    if(e.tipo==='lote'){t.titulo=e.etapa==='publicacao'?'Confirmando conjunto no servidor':'Enviando dados do conjunto';t.done=e.confirmados||0;t.total=e.total||0;t.progressKnown=Number.isFinite(e.total);}
+    const key=e.lid&&e.ano?`${e.lid}|${e.ano}`:null;
+    if(key){
+      const pair=t.pares.get(key)||{estado:'pendente',rotulo:'Aguardando'};
+      if(e.tipo==='par-iniciado')pair.rotulo='Dados em memória; aguardando confirmação local e remota';
+      if(e.tipo==='lote')pair.rotulo=e.etapa==='publicacao'?'Aguardando confirmação do conjunto':`Blocos confirmados ${e.confirmados||0}/${e.total||0}`;
+      if(e.tipo==='par-publicado') {pair.estado='confirmado';pair.pendenteLocal=!!e.pendenteLocal;pair.rotulo=e.pendenteLocal?'Servidor confirmado; pendência local sem confirmação':'Confirmado no servidor';}
+      if(e.tipo==='par-resultado'){
+        pair.alteracaoLocalPendente=e.estadoLocal==='alteracao-pendente';
+        if(e.estado==='confirmado'){pair.estado='confirmado';pair.pendenteLocal=!!e.pendenteLocal;}
+        else if(e.estado==='incerto')pair.estado='incerto';
+        else pair.estado='falhou';
+        pair.rotulo=e.pendenteLocal&&e.estado==='confirmado'?'Servidor confirmado; pendência local sem confirmação':
+          e.estado==='confirmado'?'Confirmado no servidor':e.estado==='incerto'?'Sem confirmação no prazo':pair.alteracaoLocalPendente?'Envio não confirmado; alteração mantida nesta sessão':'Envio falhou';
+      }
+      if(e.tipo==='leitura-par-iniciado')pair.rotulo='Lendo no servidor';
+      if(e.tipo==='leitura-partes')pair.rotulo=`Partes lidas ${e.concluidas||0}/${e.total||0}`;
+      if(e.tipo==='leitura-par-resultado'){
+        if(e.estado==='confirmado-no-servidor'){pair.estado='confirmado';pair.rotulo='Confirmado no servidor';}
+        else if(e.estado==='somente-local'){pair.estado='local';pair.rotulo='Somente nesta máquina';}
+        else if(e.estado==='pendencia-local-preservada'){pair.estado='local';pair.rotulo='Pendência local preservada';}
+        else if(e.estado==='falha-na-leitura'){pair.estado='falhou';pair.rotulo='Falha na leitura';}
+        else if(e.estado==='ausente-no-servidor'){pair.estado='incerto';pair.rotulo='Ausente no servidor';}
+        else if(e.estado==='vazio-no-servidor'){pair.estado='incerto';pair.rotulo='Sem dados no servidor';}
+        else if(e.estado==='removido-no-servidor'){pair.estado='confirmado';pair.rotulo='Exclusão confirmada no servidor';}
+        else {pair.estado='incerto';pair.rotulo='Sem prova completa do servidor';}
+      }
+      t.pares.set(key,pair);
+    }
+    desenhar();
+  }
+  function finalizar(t,e={}){
+    if(!contextoValido(t))return;
+    if(t.finalizado)return;
+    t.finalizado=true;
+    t.fim=++sequencia;
+    if(e.mensagem)t.mensagem=e.mensagem;
+    else if(e.falha)t.mensagem='A operação terminou com falha; confira os estados por ano.';
+    else t.mensagem='Etapa concluída; confira o resultado de cada ano.';
+    desenhar();
+  }
+  function limpar(){importacao=null;leitura=null;desenhar();}
+  return {iniciar,atualizar,finalizar,limpar};
+})();
+window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+window._s012AoTrocarSessao.push(()=>window._crmN003Progresso.limpar());
+const _n003Yield=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+
+// Background CRM reads never replace an active foreground import.
+if(typeof window.crmCarregar==='function'){
+  const _crmCarregarN003Base=window.crmCarregar;
+  window.crmCarregar=async function(pares,ctx,proof,onProgress){
+    if(onProgress)return _crmCarregarN003Base.apply(this,arguments);
+    const _ctx=ctx||window._s012Capturar?.();
+    const task=window._crmN003Progresso.iniciar('leitura',_ctx);
+    const cb=ev=>window._crmN003Progresso.atualizar(task,ev);
+    try{return await _crmCarregarN003Base.call(this,pares,ctx,proof,cb);}
+    catch(e){window._crmN003Progresso.finalizar(task,{falha:true});throw e;}
+    finally{window._crmN003Progresso.finalizar(task);}
+  };
+  window.crmCarregar._crmN003Base=_crmCarregarN003Base;
+}
+if(typeof window.crmSincronizar==='function'){
+  const _crmSincronizarN003Base=window.crmSincronizar;
+  window.crmSincronizar=async function(pares,ctx,onProgress){
+    if(onProgress)return _crmSincronizarN003Base.apply(this,arguments);
+    const _ctx=ctx||window._s012Capturar?.();
+    const task=window._crmN003Progresso.iniciar('publicacao',_ctx);
+    if(!task){
+      if(window._s012ContextoValido?.(_ctx))showToast('Já existe uma operação CRM em andamento. Aguarde a conclusão antes de reenviar.','warn');
+      return;
+    }
+    const cb=ev=>window._crmN003Progresso.atualizar(task,ev);
+    try{return await _crmSincronizarN003Base.call(this,pares,ctx,cb);}
+    catch(e){window._crmN003Progresso.finalizar(task,{falha:true});throw e;}
+    finally{window._crmN003Progresso.finalizar(task);}
+  };
+  window.crmSincronizar._crmN003Base=_crmSincronizarN003Base;
+}
+
 // ── UPLOAD ─────────────────────────────────────────────────────────
 window.excelProcessarUpload = function(event){
   const _s012CtxExcel=arguments[1]||window._s012Capturar?.(), _s012DExcel=D;
@@ -47321,30 +47605,43 @@ window.excelProcessarUpload = function(event){
   if(!_s012ExcelValido()) return;
   const file = event.target.files?.[0];
   if(!file) return;
+  const _n003Task=arguments[2]||window._crmN003Progresso.iniciar('importacao',_s012CtxExcel);
+  if(!_n003Task){if(_s012ExcelValido()){event.target.value='';showToast('Já existe uma operação CRM em andamento nesta sessão. Aguarde a conclusão.','warn');}return;}
+  window._crmN003Progresso.atualizar(_n003Task,{etapa:'Lendo arquivo',mensagem:`Arquivo selecionado (${file.size} bytes).`,done:0,total:file.size});
 
   // Carregar SheetJS via CDN se ainda não carregado
   if(typeof XLSX === 'undefined'){
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    script.onload = () => { if(_s012ExcelValido()) window.excelProcessarUpload(event,_s012CtxExcel); };
-    script.onerror = () => { if(_s012ExcelValido()) showToast('❌ Não foi possível carregar leitor de Excel (sem internet?).','err'); };
+    script.onload = () => { if(_s012ExcelValido()) window.excelProcessarUpload(event,_s012CtxExcel,_n003Task); };
+    script.onerror = () => { if(_s012ExcelValido()){window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Não foi possível carregar o leitor de planilha.'});showToast('❌ Não foi possível carregar leitor de Excel (sem internet?).','err');} };
     document.head.appendChild(script);
+    window._crmN003Progresso.atualizar(_n003Task,{etapa:'Preparando leitor',mensagem:'Carregando a biblioteca de planilha; sem percentual verificável.'});
     if(_s012ExcelValido()) showToast('⏳ Carregando leitor de Excel...','ok');
     return;
   }
 
   const reader = new FileReader();
+  reader.onprogress = ev=>{if(!_s012ExcelValido())return;window._crmN003Progresso.atualizar(_n003Task,{etapa:'Lendo arquivo',mensagem:ev.lengthComputable?`Lendo ${ev.loaded} de ${ev.total} bytes`:'Lendo arquivo; total indisponível.',done:ev.lengthComputable?ev.loaded:NaN,total:ev.lengthComputable?ev.total:NaN});};
+  reader.onabort=()=>window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Leitura do arquivo interrompida.'});
   reader.onload = async function(e){
     if(!_s012ExcelValido()) return;
     try {
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Interpretando planilha',mensagem:'Decodificação síncrona; percentual indisponível.'});
+      await _n003Yield();
+      if(!_s012ExcelValido())return;
       const data = new Uint8Array(e.target.result);
       const workbook = XLSX.read(data, {type:'array', cellDates:false});
+      await _n003Yield(); if(!_s012ExcelValido())return;
       const firstSheet = workbook.SheetNames[0];
       if(!firstSheet){ showToast('Planilha sem abas.','err'); return; }
       const sheet = workbook.Sheets[firstSheet];
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Convertendo linhas',mensagem:'SheetJS está convertendo a faixa da aba; percentual indisponível.'});
+      await _n003Yield(); if(!_s012ExcelValido())return;
       // sheet_to_json percorre a faixa declarada em !ref; preserve a linha física da aba.
       const linhaInicialPlanilha=Number(String(sheet?.['!ref']||'').match(/^\$?[A-Z]{1,3}\$?(\d+)/i)?.[1])||1;
       const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      await _n003Yield(); if(!_s012ExcelValido())return;
       if(rows.length < 2){ showToast('Planilha sem dados (só cabeçalho ou vazia).','warn'); return; }
 
       const headers = rows[0];
@@ -47412,7 +47709,14 @@ window.excelProcessarUpload = function(event){
       const dadosProcessados = [];
       let ignoradosDadosVazios = 0;
       let ignoradosNaoVenda = 0;
+      const _n003TotalLinhas=rows.length-1;
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Validando linhas',mensagem:`Validando linhas físicas: 0/${_n003TotalLinhas}.`,done:0,total:_n003TotalLinhas});
       for(let i = 1; i < rows.length; i++){
+        if((i-1)>0&&(i-1)%500===0){
+          window._crmN003Progresso.atualizar(_n003Task,{etapa:'Validando linhas',mensagem:`Validando linhas físicas: ${i-1}/${_n003TotalLinhas}.`,done:i-1,total:_n003TotalLinhas});
+          await _n003Yield();
+          if(!_s012ExcelValido())return;
+        }
         const row = rows[i];
         if(!row || !row.length) continue;
         // [FIX 13/08] Filtrar OPERACAO: só VENDA (ignora troca/devolução/etc)
@@ -47451,6 +47755,7 @@ window.excelProcessarUpload = function(event){
           _importId: '' // preenchido logo abaixo
         });
       }
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Validando linhas',mensagem:`Linhas físicas verificadas: ${_n003TotalLinhas}/${_n003TotalLinhas}.`,done:_n003TotalLinhas,total:_n003TotalLinhas});
 
       if(!dadosProcessados.length){
         showToast('Nenhuma linha válida encontrada.','warn');
@@ -47654,12 +47959,16 @@ window.excelProcessarUpload = function(event){
 
       // Agrupar por loja + ano — cada par vira uma unidade independente
       const _grupos = new Map();
-      dadosProcessados.forEach(r => {
-        if(!r.loja) return;
-        const k = r.loja + '|' + r.data.slice(0,4);
-        if(!_grupos.has(k)) _grupos.set(k, []);
-        _grupos.get(k).push(r);
-      });
+      for(let _gi=0;_gi<dadosProcessados.length;_gi++){
+        if(_gi>0&&_gi%500===0){
+          window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agrupando por loja e ano',mensagem:`Linhas agrupadas: ${_gi}/${dadosProcessados.length}.`,done:_gi,total:dadosProcessados.length});
+          await _n003Yield(); if(!_s012ExcelValido())return;
+        }
+        const r=dadosProcessados[_gi]; if(!r.loja)continue;
+        const k=r.loja+'|'+r.data.slice(0,4);
+        if(!_grupos.has(k))_grupos.set(k,[]); _grupos.get(k).push(r);
+      }
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agrupando por loja e ano',mensagem:`Pares encontrados: ${_grupos.size}.`,done:_grupos.size,total:_grupos.size});
 
       // ══════════════════════════════════════════════════════════════
       // [R152] Importar um mês não pode mais apagar o resto do ano.
@@ -47670,8 +47979,10 @@ window.excelProcessarUpload = function(event){
       // explícita de quem está importando.
       // ══════════════════════════════════════════════════════════════
       const _planos = [];
-      _grupos.forEach((linhas, k) => {
+      let _n003Grupo=0;
+      for(const [k,linhas] of _grupos){
         const [lid, ano] = k.split('|');
+        window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agregando conjuntos',mensagem:`Agregando ${lid}/${ano} (${_n003Grupo+1}/${_grupos.size}); cálculo do par é síncrono.`,done:_n003Grupo,total:_grupos.size});
         const cubo = window.crmAgregar(linhas);
         cubo.arquivo = file.name;
         const mesesNovos = window.crmMesesDoCubo(cubo);
@@ -47695,7 +48006,10 @@ window.excelProcessarUpload = function(event){
           if(podado) acao = 'trocaMes';   // só quando dá para fazer direito
         }
         _planos.push({lid, ano, cubo, linhas, anterior, conserva, repete, acao, podado});
-      });
+        _n003Grupo++;
+        window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agregando conjuntos',mensagem:`Conjuntos agregados: ${_n003Grupo}/${_grupos.size}.`,done:_n003Grupo,total:_grupos.size});
+        await _n003Yield(); if(!_s012ExcelValido())return;
+      }
 
       // [R155] Troca de mês é o caminho bom: avisa, mas não pede permissão
       // para perder nada, porque nada se perde.
@@ -47727,14 +48041,27 @@ window.excelProcessarUpload = function(event){
         }
       }
 
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Preparando dados locais',mensagem:'Aplicação local síncrona; percentual indisponível nesta etapa.'});
+      await _n003Yield();
+      if(!_s012ExcelValido())return;
+      const _planosDesatualizados=_planos.filter(p=>(((D.crm||{})[p.lid]||{})[p.ano]||null)!==p.anterior);
+      if(_planosDesatualizados.length){
+        const _paresDesatualizados=_planosDesatualizados.map(p=>p.lid+'/'+p.ano).join(', ');
+        const _aviso='O CRM mudou enquanto o arquivo era preparado ('+_paresDesatualizados+'). Nenhum conjunto foi atualizado; confira a versão atual e reimporte.';
+        event.target.value='';
+        window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:_aviso});
+        showToast(_aviso,'warn');
+        return;
+      }
       const _diagnostico = [];
       const _paresImportados = [];   // [R136] só estes vão ao servidor
       let _totalPedacos = 0;
-      _planos.forEach(p => {
+      for(const p of _planos){
         const cubo = (p.acao === 'funde')    ? window.crmFundirCubos(p.anterior, p.cubo)
                    : (p.acao === 'trocaMes') ? window.crmFundirCubos(p.podado,   p.cubo)
                    :                           p.cubo;
         _paresImportados.push([p.lid, p.ano]);
+        window._crmN003Progresso.atualizar(_n003Task,{lid:p.lid,ano:p.ano,tipo:'par-iniciado'});
         const dg = window.crmGuardar(p.lid, p.ano, cubo);
         _totalPedacos += dg.pedacos;
         _diagnostico.push({
@@ -47746,7 +48073,7 @@ window.excelProcessarUpload = function(event){
           acao: p.acao, mesesCubo: window.crmMesesDoCubo(cubo).length,
           repete: p.repete, conserva: p.conserva
         });
-      });
+      }
 
       // Registro da importação (para a Gestão de Importações)
       if(!D._excelImportacoes) D._excelImportacoes = [];
@@ -47840,21 +48167,30 @@ window.excelProcessarUpload = function(event){
       const _msgLocal = dadosProcessados.length.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
         + (_ignorados.length ? ' · ignoradas: ' + _ignorados.join(', ') : '');
       let _envio = null;
+      window._crmN003Progresso.atualizar(_n003Task,{etapa:'Publicando conjuntos',mensagem:`Aguardando confirmação do servidor para ${_paresImportados.length} conjunto(s).`,done:0,total:_paresImportados.length});
       if(typeof window.crmSincronizar === 'function'){
         if(_s012ExcelValido()) showToast('⏳ ' + _msgLocal + ' — enviando ao servidor...', 'ok');
-        try{ _envio = await window.crmSincronizar(_paresImportados,_s012CtxExcel); }
+        try{ _envio = await window.crmSincronizar(_paresImportados,_s012CtxExcel,ev=>window._crmN003Progresso.atualizar(_n003Task,ev)); }
         catch(e){ _envio = {ok:0, total:1, erros:[e.code||e.message]}; }
       }
       if(!_s012ExcelValido()) return;
       if(_envio && _envio.erros && _envio.erros.length){
-        showToast('⚠️ ' + _msgLocal + ' — mas o envio ao servidor FALHOU ('
-          + _envio.erros.join(' | ') + '). Os dados valem só nesta máquina até você clicar em '
-          + '"Reenviar ao Firebase".', 'err');
+        window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:`Importação em memória; ${_envio.ok||0}/${_envio.total||_paresImportados.length} confirmado(s) no servidor. ${(_envio.pendentesLocais||[]).length} pendência(s) local(is) sem confirmação.`});
+        showToast('⚠️ ' + _msgLocal + ' — ' + _envio.ok + '/' + _envio.total
+          + ' conjunto(s) confirmados no servidor. Sem confirmação: ' + _envio.erros.join(' | ')
+          + (_envio.pendentesLocais?.length ? '. Confirmação local pendente: '+_envio.pendentesLocais.join(', ') : '')
+          + '. Preserve os dados locais e tente reenviar os conjuntos pendentes.', 'err');
       } else if(_envio){
-        // [R161] as outras máquinas recebem pelo índice do CRM, no pull
-        showToast('✅ ' + _msgLocal + ' — enviado ao servidor; as outras máquinas '
+        const _locaisPendentes=_envio.pendentesLocais||[];
+        window._crmN003Progresso.finalizar(_n003Task,{mensagem:_locaisPendentes.length?`Servidor confirmou ${_envio.ok}/${_envio.total}; ${_locaisPendentes.length} pendência(s) local(is) continuam sem confirmação.`:`Servidor confirmou ${_envio.ok}/${_envio.total} conjunto(s).`});
+        // O lote remoto pode confirmar mesmo que a limpeza/recibo local não confirme.
+        if(_locaisPendentes.length)
+          showToast('⚠️ ' + _msgLocal + ' — servidor confirmou os conjuntos; a confirmação de '
+            + _locaisPendentes.length + ' pendência(s) local(is) ainda não foi registrada.', 'warn');
+        else showToast('✅ ' + _msgLocal + ' — enviado ao servidor; as outras máquinas '
           + 'recebem na próxima sincronização (até ~1 min).', 'ok');
       } else {
+        window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Dados preparados nesta sessão; não há confirmação do servidor.'});
         showToast('⚠️ ' + _msgLocal + ' — sem envio ao servidor nesta sessão.', 'warn');
       }
 
@@ -47863,11 +48199,14 @@ window.excelProcessarUpload = function(event){
       window.excelRender();
     } catch(err) {
       if(!_s012ExcelValido()) return;
+      window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Não foi possível concluir a importação.'});
       console.error('[excel] erro:', err);
       showToast('Erro ao processar planilha: '+err.message,'err');
+    } finally {
+      window._crmN003Progresso.finalizar(_n003Task,{mensagem:'Importação não enviada. Consulte o aviso de validação ou cancelamento apresentado.'});
     }
   };
-  reader.onerror = () => { if(_s012ExcelValido()) showToast('Erro ao ler o arquivo.','err'); };
+  reader.onerror = () => { if(_s012ExcelValido()){window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Falha ao ler o arquivo.'});showToast('Erro ao ler o arquivo.','err');} };
   reader.readAsArrayBuffer(file);
 };
 
@@ -48015,7 +48354,7 @@ window.excelLimparDados = async function(){
           const _gid = _indice.dados.geracoes[lid][String(ano)].gid;
           _escritas.forEach(e => { e.dados.gid = _gid; });
           _escritas.push(_indice);
-          await window._crmGravarLote(_escritas,undefined,_s012CtxS024);
+          await window._crmGravarLote(_escritas,undefined,_s012CtxS024,true);
           apagados++;
           // Um lote já despachado pode confirmar apenas o carimbo persistido
           // da identidade que o iniciou, mesmo após a troca de perfil.
@@ -48154,6 +48493,22 @@ window.excelLimparDados = async function(){
   showToast('✅ CRM apagado' + (apagados ? ' — ' + apagados + ' conjunto(s) removidos do Firebase.' : '.'), 'ok');
   window.excelRender();
 };
+
+// As ações da própria tela compartilham o envio ativo; leituras continuam livres.
+for(const [nome,titulo] of [['crmApagar','Excluindo conjunto CRM'],['excelLimparDados','Limpando CRM'],['crmResolverExclusaoPendente','Resolvendo rascunho CRM']]){
+  const executar=window[nome];
+  if(typeof executar!=='function')continue;
+  window[nome]=async function(...args){
+    const ctx=window._s012Capturar?.();
+    if(!window._s012ContextoValido?.(ctx))return executar.apply(this,args);
+    const task=window._crmN003Progresso.iniciar('publicacao',ctx);
+    if(!task){showToast('Já existe uma operação CRM em andamento. Aguarde a conclusão.','warn');return false;}
+    window._crmN003Progresso.atualizar(task,{etapa:titulo,mensagem:'Operação em andamento; aguarde a confirmação.'});
+    try{return await executar.apply(this,args);}
+    finally{window._crmN003Progresso.finalizar(task,{mensagem:'Operação encerrada. Confira o resultado e os avisos apresentados.'});}
+  };
+  window[nome]._crmN003Base=executar;
+}
 
 // ── LIMPAR FILTROS ────────────────────────────────────────────────
 
