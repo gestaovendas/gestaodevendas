@@ -9191,7 +9191,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-17d';
+window.AVATIM_BUILD = '2026-10-17h';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -18997,22 +18997,40 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
     if(D===dadosOrigem&&_crmS042Json((D.crm?.[h.lid]||{})[h.ano])===h.bytes
         &&!_crmS042Pendente(ctx,h.lid,h.ano))correspondem.add(par);
   const db = await _idbAbrir();
-  let efetivo=cubos,gravou=false,provaGravada=null;
+  let efetivo=cubos,gravou=false,provaGravada=null,cacheBytesParaGravar=null;
   try{
     if(!permitirTransicao && !window._s012ContextoValido(ctx)) return false;
     await new Promise((res, rej) => {
       const tx = db.transaction(_IDB.store,'readwrite'),store=tx.objectStore(_IDB.store);
-      const read=store.get(_crmPendKey(ctx)),readProof=store.get(proofKey);let n=0,pRaw,proofRaw;
+      const read=store.get(_crmPendKey(ctx)),readProof=store.get(proofKey);let n=0,pRaw,proofRaw,cacheRaw,needCache=false;
       const finish=()=>{
-        if(++n!==2)return;
+        if(++n!==(needCache?3:2))return;
         try{
           const pendencias=_crmLerObjeto(pRaw,{entradas:{}});
           if((Number(pendencias.epoch)||0)!==epochEsperado
               ||(Number(pendencias.revisao)||0)!==revisaoEsperada
               ||(!permitirTransicao&&_crmS042RegistroEmAndamento(ctx)))return;
           efetivo=_crmAplicarPendencias(cubos,pendencias,ctx.owner);
+          cacheBytesParaGravar=JSON.stringify(efetivo);
           if(!permitirTransicao){
             const antigo=_crmS042Parse(proofRaw,ctx.owner,epochEsperado),novo={};
+            let cacheAnterior={};
+            if(needCache)try{cacheAnterior=JSON.parse(cacheRaw||'{}');}catch(_e){cacheAnterior={};}
+            if(needCache)for(const [par,prova] of Object.entries(antigo)){
+              if(hashes.has(par))continue;
+              const sep=par.indexOf('|'),lid=par.slice(0,sep),ano=par.slice(sep+1);
+              if(sep<1||!cacheAnterior[lid]?.[ano]||!efetivo[lid]?.[ano]
+                  ||_crmS042Pendente(ctx,lid,ano,pendencias))continue;
+              const bytesAnteriores=_crmS042Json(cacheAnterior[lid][ano]);
+              const bytesNovos=_crmS042Json(efetivo[lid][ano]);
+              const aindaAtivo=window._s012ContextoValido(ctx)
+                &&window._s012Capturar?.()?.owner===ctx.owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+                &&D===dadosOrigem&&epochEsperado===(_crmCacheEpoch.get(ctx.owner)||0)
+                &&revisaoEsperada===(_crmCacheRevisao.get(ctx.owner)||0)
+                &&_crmS042Json((D.crm?.[lid]||{})[ano])===bytesNovos;
+              if(bytesAnteriores!==null&&bytesAnteriores!==undefined&&bytesAnteriores===bytesNovos&&aindaAtivo)
+                novo[par]=prova;
+            }
             for(const [par,h] of hashes){
               const semPendencia=!_crmS042Pendente(ctx,h.lid,h.ano,pendencias);
               const aindaAtivo=window._s012ContextoValido(ctx)
@@ -19032,11 +19050,19 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
             else store.delete(proofKey);
             provaGravada=novo;
           }
-          store.put(JSON.stringify(efetivo),chave);gravou=true;
+          store.put(cacheBytesParaGravar,chave);gravou=true;
         }catch(e){tx.abort();rej(e);}
       };
       read.onsuccess=()=>{pRaw=read.result;finish();};
-      readProof.onsuccess=()=>{proofRaw=readProof.result;finish();};
+      readProof.onsuccess=()=>{
+        proofRaw=readProof.result;needCache=!permitirTransicao&&hashes.size===0&&!!proofRaw;
+        if(needCache){
+          const readCache=store.get(chave);
+          readCache.onsuccess=()=>{cacheRaw=readCache.result;finish();};
+          readCache.onerror=()=>{try{tx.abort();}catch(_e){}};
+        }
+        finish();
+      };
       [read,readProof].forEach(r=>r.onerror=()=>{try{tx.abort();}catch(_e){}});
       tx.oncomplete = () => res();
       tx.onerror    = () => rej(tx.error || new Error('transação falhou'));
@@ -26852,12 +26878,26 @@ function filtrarFluxoData(registros){
 
 function renderFluxo(){
   if(!D.fluxo) D.fluxo=[];
+  if(!window._fxListaPaginacao) window._fxListaPaginacao={filtro:null,pagina:0};
+  if(!window._fxListaPaginacaoHook){
+    window._fxListaPaginacaoHook=true;
+    window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+    window._s012AoTrocarSessao.push(()=>{
+      window._fxListaPaginacao={filtro:null,pagina:0};
+      document.getElementById('fluxo-paginacao')?.remove();
+    });
+  }
   // Mostrar filtro de loja apenas para admin
   const filtroLojaDiv=document.getElementById("fx-filtro-loja");
   if(filtroLojaDiv) filtroLojaDiv.style.display=isAdmin()?"block":"none";
 
   // Filtrar por loja
   const lojaFiltro=isAdmin()?(document.getElementById("fx-sel-loja")?.value||""):lojaId();
+  const filtroAtual=[lojaFiltro,_tabFluxo,
+    document.getElementById('fluxo-per-de')?.value||'',
+    document.getElementById('fluxo-per-ate')?.value||''].join('\u001f');
+  const paginaEstado=window._fxListaPaginacao;
+  if(paginaEstado.filtro!==filtroAtual){paginaEstado.filtro=filtroAtual;paginaEstado.pagina=0;}
   let regs=D.fluxo.filter(r=>!lojaFiltro||r.loja===lojaFiltro);
   regs=filtrarFluxoData(regs);
   regs.sort((a,b)=>b.data.localeCompare(a.data));
@@ -27029,10 +27069,18 @@ function renderFluxo(){
   const tbody=document.getElementById("tbody-fluxo");
   const empty=document.getElementById("fluxo-empty");
   if(!regs.length){
-    tbody.innerHTML=""; if(empty) empty.style.display="block"; return;
+    paginaEstado.pagina=0;
+    tbody.innerHTML="";
+    document.getElementById('fluxo-paginacao')?.remove();
+    if(empty) empty.style.display="block"; return;
   }
   if(empty) empty.style.display="none";
-  tbody.innerHTML=regs.map(r=>{
+  const tamanhoPagina=100;
+  const totalPaginas=Math.max(1,Math.ceil(regs.length/tamanhoPagina));
+  paginaEstado.pagina=Math.min(Math.max(0,Number(paginaEstado.pagina)||0),totalPaginas-1);
+  const inicioPagina=paginaEstado.pagina*tamanhoPagina;
+  const regsPagina=regs.slice(inicioPagina,inicioPagina+tamanhoPagina);
+  tbody.innerHTML=regsPagina.map(r=>{
     const o=ORIGENS[r.origem]||{emoji:"📌",label:r.origem,cor:"var(--muted)"};
     const vend=D.vendedoras.find(v=>v.id===r.vendId);
     const loja=LOJAS.find(l=>l.id===r.loja);
@@ -27064,6 +27112,38 @@ function renderFluxo(){
       <td><button onclick="excluirFluxo('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:2px 6px" title="Excluir">✕</button></td>
     </tr>`;
   }).join("");
+  let paginacao=document.getElementById('fluxo-paginacao');
+  if(!paginacao){
+    paginacao=document.createElement('div');
+    paginacao.id='fluxo-paginacao';
+    const rolagem=tbody.closest('table')?.parentElement;
+    if(rolagem) rolagem.insertAdjacentElement('afterend',paginacao);
+  }
+  if(paginacao){
+    const primeiro=inicioPagina+1, ultimo=Math.min(inicioPagina+tamanhoPagina,regs.length);
+    paginacao.style.cssText='display:'+(totalPaginas>1?'flex':'none')+';align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)';
+    paginacao.innerHTML='<span>Mostrando '+primeiro.toLocaleString('pt-BR')+'–'+ultimo.toLocaleString('pt-BR')
+      +' de '+regs.length.toLocaleString('pt-BR')+' registros</span>'
+      +'<div style="display:flex;align-items:center;gap:8px">'
+      +'<button type="button" id="fluxo-pagina-anterior" class="btn-s" style="font-size:10px;padding:5px 9px"'
+      +(paginaEstado.pagina===0?' disabled':'')+' aria-label="Página anterior">‹ Anterior</button>'
+      +'<span>Página '+(paginaEstado.pagina+1).toLocaleString('pt-BR')+' de '+totalPaginas.toLocaleString('pt-BR')+'</span>'
+      +'<button type="button" id="fluxo-pagina-proxima" class="btn-s" style="font-size:10px;padding:5px 9px"'
+      +(paginaEstado.pagina>=totalPaginas-1?' disabled':'')+' aria-label="Próxima página">Próxima ›</button></div>';
+    const moverPagina=delta=>{
+      const proximaPagina=paginaEstado.pagina+delta;
+      if(proximaPagina<0||proximaPagina>=totalPaginas) return;
+      paginaEstado.pagina=proximaPagina;
+      window.renderFluxo();
+      const seguirId=delta>0?'fluxo-pagina-proxima':'fluxo-pagina-anterior';
+      const retornoId=delta>0?'fluxo-pagina-anterior':'fluxo-pagina-proxima';
+      const seguir=document.getElementById(seguirId);
+      const retorno=document.getElementById(retornoId);
+      (seguir&&!seguir.disabled?seguir:retorno)?.focus({preventScroll:true});
+    };
+    paginacao.querySelector('#fluxo-pagina-anterior')?.addEventListener('click',()=>moverPagina(-1));
+    paginacao.querySelector('#fluxo-pagina-proxima')?.addEventListener('click',()=>moverPagina(1));
+  }
 }
 
 function exportarPDFFluxo(){
@@ -46060,6 +46140,15 @@ window._s012AoTrocarSessao.push(()=>_n001FecharHistoricoCompras(false));
 
 function renderContatos(){
   if(!D.contatos) D.contatos = [];
+  if(!window._ctListaPaginacao) window._ctListaPaginacao = {filtro:null,pagina:0};
+  if(!window._ctListaPaginacaoHook){
+    window._ctListaPaginacaoHook = true;
+    window._s012AoTrocarSessao = window._s012AoTrocarSessao || [];
+    window._s012AoTrocarSessao.push(()=>{
+      window._ctListaPaginacao = {filtro:null,pagina:0};
+      document.getElementById('contatos-paginacao')?.remove();
+    });
+  }
   if(typeof _migrarRetornosAntigos === 'function') _migrarRetornosAntigos();
   window._ctBarraIniciar();   // [R172]
 
@@ -46271,8 +46360,14 @@ function renderContatos(){
   const info  = document.getElementById('contatos-lista-info');
   if(!tbody) return;
 
+  const paginaEstado = window._ctListaPaginacao;
+  const filtroAtual = ['ct-filtro-loja','ct-filtro-vend','ct-filtro-tipo','ct-filtro-de','ct-filtro-ate']
+    .map(id => document.getElementById(id)?.value || '').join('\u001f');
+  if(paginaEstado.filtro !== filtroAtual){ paginaEstado.filtro = filtroAtual; paginaEstado.pagina = 0; }
+
   if(contatos.length === 0){
     tbody.innerHTML = '';
+    document.getElementById('contatos-paginacao')?.remove();
     if(vazio){
       vazio.style.display = 'block';
       const msgEl = document.getElementById('contatos-vazio-msg');
@@ -46293,8 +46388,14 @@ function renderContatos(){
   const ordenados = [...contatos].sort((a,b) =>
     (b.data||'').localeCompare(a.data||'') || (b.ts||0) - (a.ts||0)
   );
+  const tamanhoPagina = 100;
+  const totalPaginas = Math.max(1,Math.ceil(ordenados.length/tamanhoPagina));
+  paginaEstado.pagina = Math.min(Math.max(0,Number(paginaEstado.pagina)||0),totalPaginas-1);
+  const inicioPagina = paginaEstado.pagina*tamanhoPagina;
+  const paginaOrdenada = ordenados.slice(inicioPagina,inicioPagina+tamanhoPagina);
 
-  tbody.innerHTML = ordenados.map((c,indice) => {
+  tbody.innerHTML = paginaOrdenada.map((c,indiceLocal) => {
+    const indice = inicioPagina+indiceLocal;
     const v = D.vendedoras.find(x => x.id === c.vendId);
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
@@ -46325,6 +46426,38 @@ function renderContatos(){
       </td>
     </tr>${linhaObs}`;
   }).join('');
+  let paginacao = document.getElementById('contatos-paginacao');
+  if(!paginacao){
+    paginacao = document.createElement('div');
+    paginacao.id = 'contatos-paginacao';
+    const scroll = tbody.closest('table')?.parentElement;
+    if(scroll) scroll.insertAdjacentElement('afterend',paginacao);
+  }
+  if(paginacao){
+    const primeiro = inicioPagina+1, ultimo = Math.min(inicioPagina+tamanhoPagina,ordenados.length);
+    paginacao.style.cssText = 'display:'+(totalPaginas>1?'flex':'none')+';align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)';
+    paginacao.innerHTML = '<span>Mostrando '+primeiro.toLocaleString('pt-BR')+'–'+ultimo.toLocaleString('pt-BR')
+      +' de '+ordenados.length.toLocaleString('pt-BR')+' registros</span>'
+      +'<div style="display:flex;align-items:center;gap:8px">'
+      +'<button type="button" id="ct-pagina-anterior" class="btn-s" style="font-size:10px;padding:5px 9px"'
+      +(paginaEstado.pagina===0?' disabled':'')+' aria-label="Página anterior">‹ Anterior</button>'
+      +'<span>Página '+(paginaEstado.pagina+1).toLocaleString('pt-BR')+' de '+totalPaginas.toLocaleString('pt-BR')+'</span>'
+      +'<button type="button" id="ct-pagina-proxima" class="btn-s" style="font-size:10px;padding:5px 9px"'
+      +(paginaEstado.pagina>=totalPaginas-1?' disabled':'')+' aria-label="Próxima página">Próxima ›</button></div>';
+    const moverPagina = delta => {
+      const proximaPagina = paginaEstado.pagina+delta;
+      if(proximaPagina<0 || proximaPagina>=totalPaginas) return;
+      paginaEstado.pagina = proximaPagina;
+      window.renderContatos();
+      const continuarId = delta>0?'ct-pagina-proxima':'ct-pagina-anterior';
+      const retornoId = delta>0?'ct-pagina-anterior':'ct-pagina-proxima';
+      const continuar = document.getElementById(continuarId);
+      const retorno = document.getElementById(retornoId);
+      (continuar&&!continuar.disabled?continuar:retorno)?.focus({preventScroll:true});
+    };
+    paginacao.querySelector('#ct-pagina-anterior')?.addEventListener('click',()=>moverPagina(-1));
+    paginacao.querySelector('#ct-pagina-proxima')?.addEventListener('click',()=>moverPagina(1));
+  }
   tbody.onclick=event=>{
     const botao=event.target.closest('.ct-n001-historico');
     if(!botao)return;
@@ -52268,30 +52401,18 @@ function _crmRenderMelhores(v){
  * mês não, por definição — "sem comprar há N dias" é pergunta sobre hoje.
  */
 window.crmClientesTodosAnos = function(over){
-  // [R172] over.loja / over.vend: quem chama de outra página passa os seus
-  // filtros, em vez de herdar os da página CRM Clientes
   over = over || {};
   const fLoja = over.loja !== undefined ? over.loja : (document.getElementById('excel-filtro-loja')?.value || '');
   const fVend = over.vend !== undefined ? over.vend : (document.getElementById('excel-filtro-vend')?.value || '');
   let lojas = window.crmLojasVisiveis();
   if(fLoja) lojas = lojas.filter(l => l === fLoja);
-  if(!lojas.length) return [];
+  if(!lojas.length){ window._crmS045Nomes=null; return []; }
 
   let cubo;
   try{ cubo = window.crmCombinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
-  catch(e){ console.warn('[R149] base de clientes:', e.message); return []; }
+  catch(e){ window._crmS045Nomes=null; console.warn('[R149] base de clientes:', e.message); return []; }
 
-  let cl = (cubo.clientes || []).map(c => ({
-    nome: c.n, documento: c.doc || '', telefone: c.tel || '',
-    vendedora: (cubo.vends||[])[c.v] || '',
-    primeira: c.pri, ultima: c.ult,
-    compras: c.compras || 0, total: c.total || 0, itens: c.itens || 0
-  }));
-
-  // [R115] A Origem do Fluxo também atualiza a última compra: cliente
-  // contatada que voltou e comprou sai da régua sem esperar a próxima
-  // importação. Só lançamento com valor > 0 — atendimento sem compra não
-  // reativa ninguém.
+  // [R115] Flow contributes only the latest positive sale and is rebuilt each call.
   const _nrm = x => String(x||'').trim().toLowerCase()
                       .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
   const _compraFluxo = new Map();
@@ -52301,15 +52422,53 @@ window.crmClientesTodosAnos = function(over){
     const d = String(f.data||''); if(!d) return;
     if(!_compraFluxo.has(k) || d > _compraFluxo.get(k)) _compraFluxo.set(k, d);
   });
-  if(_compraFluxo.size){
-    cl.forEach(c => {
-      const d = _compraFluxo.get(_nrm(c.nome));
-      if(d && d > String(c.ultima||'')){ c.ultima = d; c.compraNoFluxo = true; }
-    });
+
+  // Guardar só cálculos puros de nomes; valores CRM e Flow continuam atuais.
+  const ctx=window._s012Capturar?.(), anonimo=window._crmAnonimo;
+  const valido=!!ctx&&window._s012ContextoValido?.(ctx);
+  const anterior=window._crmS045Nomes;
+  const reutilizar=valido&&anterior?.owner===ctx.owner&&anterior.geracao===ctx.geracao
+    &&anterior.anonimo===anonimo;
+  const nomesAnteriores=reutilizar?anterior.nomes:null, nomes=new Map();
+  if(!reutilizar) window._crmS045Nomes=null;
+  if(valido&&!window._crmS045NomesHook){
+    window._crmS045NomesHook=true;
+    window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+    window._s012AoTrocarSessao.push(()=>{window._crmS045Nomes=null;});
   }
 
-  cl = cl.filter(c => !window._crmAnonimo(c.nome, c.documento));
-  if(fVend) cl = cl.filter(c => c.vendedora === fVend);
+  const vends = cubo.vends || [], cl = [];
+  (cubo.clientes || []).forEach(c => {
+    const nome = c.n, documento = c.doc || '';
+    const vendedora = vends[c.v] || '';
+    if(fVend && vendedora !== fVend) return;
+    let documentos, info;
+    if(typeof nome==='string'&&typeof documento==='string'){
+      documentos=nomes.get(nome);
+      if(!documentos){documentos=new Map();nomes.set(nome,documentos);}
+      info=documentos.get(documento)||nomesAnteriores?.get(nome)?.get(documento);
+    }
+    if(!info) info={anonimo:anonimo.call(window,nome,documento),normalizado:null};
+    if(documentos) documentos.set(documento,info);
+    if(info.anonimo) return;
+
+    const item = {
+      nome, documento, telefone: c.tel || '', vendedora,
+      primeira: c.pri, ultima: c.ult,
+      compras: c.compras || 0, total: c.total || 0, itens: c.itens || 0
+    };
+    if(_compraFluxo.size){
+      if(info.normalizado===null) info.normalizado=_nrm(nome);
+      const d = _compraFluxo.get(info.normalizado);
+      if(d && d > String(item.ultima||'')){ item.ultima = d; item.compraNoFluxo = true; }
+    }
+    cl.push(item);
+  });
+  if(valido&&window._s012ContextoValido(ctx)
+      &&window._s012Capturar?.()?.owner===ctx.owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+      &&window._crmAnonimo===anonimo)
+    window._crmS045Nomes={owner:ctx.owner,geracao:ctx.geracao,anonimo,nomes};
+  else window._crmS045Nomes=null;
   return cl;
 };
 
