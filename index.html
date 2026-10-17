@@ -9191,7 +9191,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-16h';
+window.AVATIM_BUILD = '2026-10-17a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -17120,6 +17120,24 @@ window.crmCombinar = function(lojas, anos, opcoes){
     (anos && anos.length ? anos : Object.keys(porAno)).forEach(ano => {
       const c = porAno[ano];
       if(!c) return;
+      const mV = (c.vends||[]).map(v => idx(tVend,iVend,v));
+      (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
+        // [R67] agrupar por documento quando houver — nome é fallback
+        const k = window._crmChaveCli(nome, doc);
+        const e = clientes.get(k);
+        if(!e){
+          clientes.set(k, {n:nome, doc:doc||'', tel:tel||'', v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
+        } else {
+          if(!e.tel && tel) e.tel = tel;
+          if(!e.doc && doc) e.doc = doc;
+          // mesmo cliente em anos diferentes: consolidar
+          if(ult > e.ult){ e.ult = ult; e.v = mV[vi]; }
+          if(((c.meses||[])[priMi]||'') < e.pri) e.pri = (c.meses||[])[priMi]||e.pri;
+          e.compras += compras; e.total += total; e.itens += itens;
+        }
+      });
+      // A régua histórica usa só clientes; não remontar dimensões descartadas.
+      if(opcoes?.somenteClientes===true) return;
       cubosContados++;
       const mesesCliCubo=window.crmMesesDoCubo(c);
       fontesCoberturaMesCli.push({meses:mesesCliCubo,cobertos:window._crmCoberturaMesCli(c)});
@@ -17150,7 +17168,6 @@ window.crmCombinar = function(lojas, anos, opcoes){
         if(!fim || (c.periodo.fim && c.periodo.fim > fim)) fim = c.periodo.fim;
       }
       const mM = (c.meses||[]).map(v => idx(tMes,iMes,v));
-      const mV = (c.vends||[]).map(v => idx(tVend,iVend,v));
       const mP = (c.prods||[]).map(v => idx(tProd,iProd,v));
       const mC = (c.clis ||[]).map(v => idx(tCli, iCli, v));
 
@@ -17190,23 +17207,12 @@ window.crmCombinar = function(lojas, anos, opcoes){
         const k = mP[a]+'|'+mP[b];
         cross.set(k, (cross.get(k)||0) + n);
       });
-      (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
-        // [R67] agrupar por documento quando houver — nome é fallback
-        const k = window._crmChaveCli(nome, doc);
-        const e = clientes.get(k);
-        if(!e){
-          clientes.set(k, {n:nome, doc:doc||'', tel:tel||'', v:mV[vi], pri:(c.meses||[])[priMi]||'', ult, compras, total, itens, loja:lid});
-        } else {
-          if(!e.tel && tel) e.tel = tel;
-          if(!e.doc && doc) e.doc = doc;
-          // mesmo cliente em anos diferentes: consolidar
-          if(ult > e.ult){ e.ult = ult; e.v = mV[vi]; }
-          if(((c.meses||[])[priMi]||'') < e.pri) e.pri = (c.meses||[])[priMi]||e.pri;
-          e.compras += compras; e.total += total; e.itens += itens;
-        }
-      });
     });
   });
+
+  if(opcoes?.somenteClientes===true) return {
+    vends:tVend, clientes:[...clientes.values()].sort((a,b)=>b.total-a.total)
+  };
 
   const par = k => k.split('|').map(Number);
   const mesesResultado=new Set([...mesVend.keys()].map(k=>tMes[Number(k.split('|')[0])]).filter(Boolean));
@@ -52042,7 +52048,7 @@ window.crmClientesTodosAnos = function(over){
   if(!lojas.length) return [];
 
   let cubo;
-  try{ cubo = window.crmCombinar(lojas, null); }   // null = todos os anos
+  try{ cubo = window.crmCombinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
   catch(e){ console.warn('[R149] base de clientes:', e.message); return []; }
 
   let cl = (cubo.clientes || []).map(c => ({
