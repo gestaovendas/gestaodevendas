@@ -9191,7 +9191,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-17a';
+window.AVATIM_BUILD = '2026-10-17d';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -15149,6 +15149,67 @@ window._s012AoTrocarSessao.push(ctx=>{
   if(!ctx||_crmS033Recibos.owner!==ctx.owner||_crmS033Recibos.geracao!==ctx.geracao)
     _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
 });
+let _crmS042Provas={owner:null,geracao:null,epoch:null,revisao:null,pares:new Map()};
+const _crmS042Candidatos=new Map();
+function _crmS042Id(ctx,lid,ano){return JSON.stringify([ctx.owner,String(lid),String(ano)]);}
+function _crmS042Zerar(ctx){
+  _crmS042Provas={owner:ctx?.owner||null,geracao:ctx?.geracao??null,epoch:null,revisao:null,pares:new Map()};
+  for(const [id,c] of _crmS042Candidatos)if(!ctx||c.owner!==ctx.owner||c.geracao!==ctx.geracao)_crmS042Candidatos.delete(id);
+}
+function _crmS042Escopo(ctx){
+  if(_crmS042Provas.owner!==ctx?.owner||_crmS042Provas.geracao!==ctx?.geracao)_crmS042Zerar(ctx);
+  return _crmS042Provas;
+}
+function _crmS042ProvaKey(ctx){return window._s012StorageKey?.('crm-proof',ctx)||null;}
+function _crmS042Pendente(ctx,lid,ano,p){
+  const par=_crmParKey(lid,ano),mem=_crmMemKey(ctx,lid,ano);
+  return !!(p?.entradas?.[par]||window.crmPendenciaAtual?.(ctx,lid,ano)
+    ||window._crmNaoEnviados?.[par]||_crmPendenciasEmGravacao.has(mem));
+}
+function _crmS042RegistroEmAndamento(ctx){
+  const prefix=ctx?.owner+'|';
+  return [..._crmPendenciasEmGravacao.keys()].some(k=>k.startsWith(prefix))
+    ||[..._crmPendenciasMemoria.values()].some(op=>op?.owner===ctx?.owner&&op._duravelRam===false);
+}
+function _crmS042Json(v){try{return JSON.stringify(v);}catch(_e){return null;}}
+function _crmS042PendenciasRAM(ctx){
+  try{return [..._crmPendenciasMemoria.entries()]
+    .filter(([,op])=>op?.owner===ctx?.owner).sort(([a],[b])=>a.localeCompare(b))
+    .map(([key,op])=>({key,op,cubo:op.cubo,meta:JSON.stringify([op.owner,op.lid,op.ano,
+      op.opId,op.baseOpId||null,op.tipo,op.marker,Number(op.epoch)||0,op._duravelRam,
+      op.confirmada===true,op.ts??null,op.gid||null,
+      op.exclusaoRemota?{ts:Number(op.exclusaoRemota.ts)||0,gid:op.exclusaoRemota.gid||null}:null,
+      op.liberaExclusao?{ts:Number(op.liberaExclusao.ts)||0,gid:op.liberaExclusao.gid||null}:null])}));}
+  catch(_e){return null;}
+}
+function _crmS042PendenciasRAMIguais(ctx,inicio){
+  if(!Array.isArray(inicio))return false;
+  const atual=_crmS042PendenciasRAM(ctx);
+  return !!atual&&atual.length===inicio.length&&atual.every((item,i)=>
+    item.key===inicio[i].key&&item.op===inicio[i].op&&item.cubo===inicio[i].cubo
+      &&item.meta===inicio[i].meta);
+}
+async function _crmS042Digest(bytes){
+  try{
+    if(typeof bytes!=='string'||!window.crypto?.subtle||typeof TextEncoder!=='function')return null;
+    const raw=await window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(bytes));
+    return Array.from(new Uint8Array(raw),b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(_e){return null;}
+}
+function _crmS042Parse(raw,owner,epoch){
+  try{
+    const v=typeof raw==='string'?JSON.parse(raw):raw;
+    if(v?.versao!==1||v.owner!==owner||Number(v.epoch)!==Number(epoch)
+      ||!v.pares||typeof v.pares!=='object'||Array.isArray(v.pares))return {};
+    const out={};
+    for(const [par,r] of Object.entries(v.pares))
+      if(typeof par==='string'&&r&&Number(r.ts)>0&&Number.isFinite(Number(r.ts))
+        &&typeof r.gid==='string'&&r.gid.trim()&&/^[0-9a-f]{64}$/.test(r.digest||''))
+        out[par]={ts:Number(r.ts),gid:r.gid,digest:r.digest};
+    return out;
+  }catch(_e){return {};}
+}
+window._s012AoTrocarSessao.push(ctx=>_crmS042Zerar(ctx));
 
 /**
  * Lê do Firestore os cubos das lojas visíveis para quem está logado.
@@ -15161,7 +15222,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
   _n003Notificar({tipo:'leitura-cache-local',etapa:'Verificando cache CRM local',mensagem:'A etapa de cache local começou.'});
   const _s033Recibos=_crmS033EscopoRecibos(ctx);
   await window.crmHidratarIdb?.(ctx);
-  _n003Notificar({tipo:'leitura-cache-local',etapa:'Lendo CRM remoto',mensagem:'A etapa de cache local terminou; conferindo o servidor.'});
+  _n003Notificar({tipo:'leitura-cache-local',etapa:'Lendo CRM remoto',mensagem:'A etapa de cache local terminou; conferindo o servidor.',cacheLocalPronta:window._crmIdbOk===true,cacheLocalOwner:ctx.owner,cacheLocalGeracao:ctx.geracao});
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   let db, mod;
@@ -15192,6 +15253,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
   if(_parcial) paresOpt.forEach(x => { if(Array.isArray(x) && lojas.includes(x[0])) _pares.push([x[0], String(x[1]), x[2], x[3]]); });
   else lojas.forEach(lid => anos.forEach(ano => _pares.push([lid, ano])));
   _n003Notificar({tipo:'leitura-iniciada',total:_pares.length,parcial:_parcial});
+  let _s042PersistirUmaVez=false;
   let carregados = 0, removidos = 0, falhasN003=0;
   // A lápide explícita _apagado:true retira o par do CRM ativo quando não há
   // operação de gravação local pendente. Ausência de documento, cabeça vazia
@@ -15268,8 +15330,46 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
     const _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
     try{
       if(_opCargaInicio?.exclusaoRemota){_n003EstadoPar='pendencia-local-preservada';continue;}
-      let leituraServidor=false;
-      let snap = await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),false,true);
+      let _s042CabecaServidor=null;
+      const _s042Provas=_crmS042Escopo(ctx);
+      const _s042Prova=_s042Provas.pares.get(_crmParKey(lid,ano));
+      if(_s042Prova&&_s042Provas.epoch===(_crmCacheEpoch.get(ctx.owner)||0)
+          &&Number(_s042Prova.ts)>0&&typeof _s042Prova.gid==='string'&&_s042Prova.gid.trim()
+          &&!_temPendente&&!_markerCargaInicio
+          &&(!_parcial||(Number.isFinite(Number(tsIndice))&&Number(tsIndice)>0
+            &&Number(tsIndice)===Number(_s042Prova.ts)
+            &&typeof gidIndice==='string'&&gidIndice===_s042Prova.gid))
+          &&!_crmS042Pendente(ctx,lid,ano)){
+        const _s042Cubo=(dadosAlvo.crm[lid]||{})[ano],_s042Bytes=_crmS042Json(_s042Cubo);
+        const _s042Epoch=_crmCacheEpoch.get(ctx.owner)||0,_s042Rev=_crmCacheRevisao.get(ctx.owner)||0;
+        const _s042Ok=()=>window._s012ContextoValido(ctx)&&D===dadosAlvo
+          &&window._s012Capturar?.()?.owner===ctx.owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+          &&_crmS042Provas===_s042Provas&&_s042Provas.pares.get(_crmParKey(lid,ano))===_s042Prova
+          &&_s042Epoch===(_crmCacheEpoch.get(ctx.owner)||0)&&_s042Rev===(_crmCacheRevisao.get(ctx.owner)||0)
+          &&_crmS042Json((dadosAlvo.crm[lid]||{})[ano])===_s042Bytes
+          &&!_pendenciaMudouDuranteCarga()&&!_crmS042Pendente(ctx,lid,ano);
+        try{
+          const _s042Hash=await _crmS042Digest(_s042Bytes);
+          if(_s042Hash&&_s042Hash===_s042Prova.digest&&_s042Ok()){
+            const _s042Snap=await _s033LerDoc(doc(db,'avatim',_crmDocNome(lid,ano)),true,true);
+            if(_s042Ok()&&_s033Cabeca?.serverBacked===true&&_s042Snap.exists()){
+              const _s042Raw=_s042Snap.data()||{};
+              if(_s042Raw._apagado!==true&&_s042Raw.dados&&Number(_s042Raw.ts)===Number(_s042Prova.ts)
+                  &&_s042Raw.gid===_s042Prova.gid){
+                _crmMarcarVisto(lid,ano,_s042Raw.ts,_s042Raw.gid,ctx);
+                _s033Recibos.pares.set(lid+'|'+ano,{serverBacked:true,ts:Number(_s042Raw.ts),gid:_s042Raw.gid,partes:_s033Cabeca?.partes});
+                if(s033Proof?.pairs)s033Proof.pairs[lid+'|'+ano]={complete:true,serverBacked:true,ts:Number(_s042Raw.ts),gid:_s042Raw.gid};
+                _n003EstadoPar='confirmado-no-servidor';
+                carregados++;
+                continue;
+              }
+              _s042CabecaServidor=_s042Snap;
+            }else if(_s033Cabeca?.serverBacked===true)_s042CabecaServidor=_s042Snap;
+          }
+        }catch(_e){/* Incerteza na prova desativa o atalho. */}
+      }
+      let leituraServidor=!!_s042CabecaServidor;
+      let snap = _s042CabecaServidor||await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),false,true);
       if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
       if((!snap.exists()||_s033Cabeca?.semDados)&&_s033Cabeca?.serverBacked!==true){
         if(typeof mod.getDocFromServer!=='function') throw new Error('Ausência CRM não confirmada no servidor');
@@ -15526,6 +15626,17 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
       _s033RegistrarPar(); carregados++;
       _n003EstadoPar=_s033Recibos.pares.get(lid+'|'+ano)?.serverBacked?'confirmado-no-servidor':'carregado-sem-prova-do-servidor';
+      const _s042Receipt=_s033Recibos.pares.get(lid+'|'+ano);
+      if(_s042Receipt?.serverBacked===true&&Number(raw.ts)>0&&typeof raw.gid==='string'&&raw.gid.trim()
+          &&!_temPendente&&!_markerCargaInicio&&!_pendenciaMudouDuranteCarga()
+          &&!_crmS042Pendente(ctx,lid,ano)){
+        const bytes=_crmS042Json(leves);
+        if(bytes!==null){
+          _crmS042Candidatos.set(_crmS042Id(ctx,lid,ano),{owner:ctx.owner,geracao:ctx.geracao,lid,ano:String(ano),
+            ts:Number(raw.ts),gid:raw.gid,epoch:_crmCacheEpoch.get(ctx.owner)||0,bytes});
+          _s042PersistirUmaVez=true;
+        }
+      }
     }catch(e){
       _n003EstadoPar='falha-na-leitura'; falhasN003++;
       _invalidarVistoSeFalhou();
@@ -15565,6 +15676,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
         + 'navegador e não no Firebase. Veja o console — pode ser a última cópia.', 'err');
     }
   }
+  if(_s042PersistirUmaVez) window.crmAgendarGravacaoIdb?.(ctx);
   return carregados + removidos;
 };
 
@@ -18857,32 +18969,96 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
   if(!ctx || !chave || (!permitirTransicao && !window._s012ContextoValido(ctx))) return false;
   if(epochEsperado===undefined) epochEsperado=_crmCacheEpoch.get(ctx.owner)||0;
   // Capturar antes de qualquer await: nunca serializar D.crm de outra sessão.
+  const dadosOrigem=D;
   const cubos=snapshot===undefined ? JSON.parse(JSON.stringify(D.crm||{})) : JSON.parse(JSON.stringify(snapshot||{}));
   await Promise.all([..._crmPendenciasEmGravacao.entries()].filter(([k])=>k.startsWith(ctx.owner+'|')).map(([,v])=>v));
   // Não converter uma revisão que falhou no sidecar em cache durável só
   // porque outro snapshot/timer chegou depois.
   if([..._crmPendenciasMemoria.values()].some(op=>op.owner===ctx.owner&&op._duravelRam===false)) return false;
   if(revisaoEsperada===undefined) revisaoEsperada=_crmCacheRevisao.get(ctx.owner)||0;
+  const proofKey=_crmS042ProvaKey(ctx),alvos=new Set();
+  if(_crmS042Provas.owner===ctx.owner&&_crmS042Provas.geracao===ctx.geracao)
+    _crmS042Provas.pares.forEach((_v,par)=>alvos.add(par));
+  if(!permitirTransicao)for(const c of _crmS042Candidatos.values())
+    if(c.owner===ctx.owner&&c.geracao===ctx.geracao)alvos.add(_crmParKey(c.lid,c.ano));
+  const hashes=new Map();
+  for(const par of alvos){
+    const sep=par.indexOf('|'),lid=par.slice(0,sep),ano=par.slice(sep+1),cubo=cubos[lid]?.[ano];
+    if(!cubo)continue;
+    const bytes=_crmS042Json(cubo),digest=await _crmS042Digest(bytes);
+    if(digest)hashes.set(par,{bytes,digest,lid,ano});
+  }
+  if(!permitirTransicao&&_crmS042RegistroEmAndamento(ctx))return false;
+  const ativo=window._s012ContextoValido(ctx)&&window._s012Capturar?.()?.owner===ctx.owner
+    &&window._s012Capturar?.()?.geracao===ctx.geracao&&D===dadosOrigem
+    &&epochEsperado===(_crmCacheEpoch.get(ctx.owner)||0)&&revisaoEsperada===(_crmCacheRevisao.get(ctx.owner)||0);
+  const correspondem=new Set();
+  if(ativo&&!permitirTransicao)for(const [par,h] of hashes)
+    if(D===dadosOrigem&&_crmS042Json((D.crm?.[h.lid]||{})[h.ano])===h.bytes
+        &&!_crmS042Pendente(ctx,h.lid,h.ano))correspondem.add(par);
   const db = await _idbAbrir();
-  let efetivo=cubos,gravou=false;
+  let efetivo=cubos,gravou=false,provaGravada=null;
   try{
     if(!permitirTransicao && !window._s012ContextoValido(ctx)) return false;
     await new Promise((res, rej) => {
-      const tx = db.transaction(_IDB.store, 'readwrite'), store=tx.objectStore(_IDB.store);
-      const read=store.get(_crmPendKey(ctx));
-      read.onsuccess=()=>{
-        try{const pendencias=_crmLerObjeto(read.result,{entradas:{}});
+      const tx = db.transaction(_IDB.store,'readwrite'),store=tx.objectStore(_IDB.store);
+      const read=store.get(_crmPendKey(ctx)),readProof=store.get(proofKey);let n=0,pRaw,proofRaw;
+      const finish=()=>{
+        if(++n!==2)return;
+        try{
+          const pendencias=_crmLerObjeto(pRaw,{entradas:{}});
           if((Number(pendencias.epoch)||0)!==epochEsperado
-              ||(Number(pendencias.revisao)||0)!==revisaoEsperada) return;
+              ||(Number(pendencias.revisao)||0)!==revisaoEsperada
+              ||(!permitirTransicao&&_crmS042RegistroEmAndamento(ctx)))return;
           efetivo=_crmAplicarPendencias(cubos,pendencias,ctx.owner);
+          if(!permitirTransicao){
+            const antigo=_crmS042Parse(proofRaw,ctx.owner,epochEsperado),novo={};
+            for(const [par,h] of hashes){
+              const semPendencia=!_crmS042Pendente(ctx,h.lid,h.ano,pendencias);
+              const aindaAtivo=window._s012ContextoValido(ctx)
+                &&window._s012Capturar?.()?.owner===ctx.owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+                &&D===dadosOrigem&&epochEsperado===(_crmCacheEpoch.get(ctx.owner)||0)
+                &&revisaoEsperada===(_crmCacheRevisao.get(ctx.owner)||0)
+                &&_crmS042Json((D.crm?.[h.lid]||{})[h.ano])===h.bytes;
+              if(!correspondem.has(par)||!semPendencia||!efetivo[h.lid]?.[h.ano]
+                  ||!aindaAtivo||JSON.stringify(efetivo[h.lid][h.ano])!==h.bytes)continue;
+              if(antigo[par]?.digest===h.digest)novo[par]=antigo[par];
+              const c=_crmS042Candidatos.get(_crmS042Id(ctx,h.lid,h.ano));
+              if(c&&c.owner===ctx.owner&&c.geracao===ctx.geracao&&c.epoch===epochEsperado
+                  &&c.bytes===h.bytes&&Number(c.ts)>0&&typeof c.gid==='string'&&c.gid.trim())
+                novo[par]={ts:Number(c.ts),gid:c.gid,digest:h.digest};
+            }
+            if(Object.keys(novo).length)store.put(JSON.stringify({versao:1,owner:ctx.owner,epoch:epochEsperado,pares:novo}),proofKey);
+            else store.delete(proofKey);
+            provaGravada=novo;
+          }
           store.put(JSON.stringify(efetivo),chave);gravou=true;
         }catch(e){tx.abort();rej(e);}
       };
+      read.onsuccess=()=>{pRaw=read.result;finish();};
+      readProof.onsuccess=()=>{proofRaw=readProof.result;finish();};
+      [read,readProof].forEach(r=>r.onerror=()=>{try{tx.abort();}catch(_e){}});
       tx.oncomplete = () => res();
       tx.onerror    = () => rej(tx.error || new Error('transação falhou'));
       tx.onabort    = () => rej(tx.error || new Error('transação abortada'));
     });
     if(!gravou) return false;
+    if(!permitirTransicao&&provaGravada&&window._s012ContextoValido(ctx)
+        &&window._s012Capturar?.()?.owner===ctx.owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+        &&D===dadosOrigem&&epochEsperado===(_crmCacheEpoch.get(ctx.owner)||0)
+        &&revisaoEsperada===(_crmCacheRevisao.get(ctx.owner)||0)){
+      const pares=new Map();
+      for(const [par,prova] of Object.entries(provaGravada)){
+        const h=hashes.get(par);
+        if(!h||!correspondem.has(par)||!efetivo[h.lid]?.[h.ano]
+            ||_crmS042Json((D.crm?.[h.lid]||{})[h.ano])!==h.bytes
+            ||_crmS042Pendente(ctx,h.lid,h.ano))continue;
+        pares.set(par,prova);
+      }
+      _crmS042Provas={owner:ctx.owner,geracao:ctx.geracao,epoch:epochEsperado,revisao:revisaoEsperada,pares};
+      for(const [id,c] of _crmS042Candidatos)
+        if(c.owner===ctx.owner&&c.geracao===ctx.geracao&&pares.has(_crmParKey(c.lid,c.ano)))_crmS042Candidatos.delete(id);
+    }
     _crmMarcarCacheDuravel(ctx,efetivo);
     if(window._s012ContextoValido(ctx)) window._crmIdbOk = true;
     return true;
@@ -18896,18 +19072,22 @@ window._s012GravarCrmAoTrocar=function(ctx,cubos){
 /** Lê os cubos guardados. Devolve null quando não há nada. */
 window.crmLerIdb = async function(ctx){
   ctx=ctx||window._s012Capturar?.();
-  const chave=window._s012StorageKey?.('crm',ctx);
+  const chave=window._s012StorageKey?.('crm',ctx),proofKey=_crmS042ProvaKey(ctx);
   if(!ctx || !chave || !window._s012ContextoValido(ctx)) return null;
+  _crmS042Zerar(ctx);
+  const dadosNoInicio=D;
+  const provasRAMInicio=_crmS042Provas;
   const db = await _idbAbrir();
   try{
     if(!window._s012ContextoValido(ctx)) return null;
     // Cache e revisão pertencem à mesma leitura atômica, nunca a dois ACKs.
     const lido = await new Promise((res, rej) => {
       const tx = db.transaction(_IDB.store, 'readonly'),store=tx.objectStore(_IDB.store);
-      const cache=store.get(chave),pending=store.get(_crmPendKey(ctx));
+      const cache=store.get(chave),pending=store.get(_crmPendKey(ctx)),proof=store.get(proofKey);
       const valores={};
       cache.onsuccess=()=>{valores.bruto=cache.result;};
       pending.onsuccess=()=>{valores.pendencias=pending.result;};
+      proof.onsuccess=()=>{valores.prova=proof.result;};
       tx.oncomplete=()=>res(valores);
       tx.onerror=()=>rej(tx.error||new Error('leitura cache CRM falhou'));
       tx.onabort=()=>rej(tx.error||new Error('leitura cache CRM abortada'));
@@ -18916,13 +19096,37 @@ window.crmLerIdb = async function(ctx){
     const bruto=lido.bruto;
     const pendencias=await window.crmPendenciaLerIdb(ctx,lido.pendencias);
     if(!window._s012ContextoValido(ctx)) return null;
-    const cubos=_crmAplicarPendencias(bruto?JSON.parse(bruto):{},pendencias,ctx.owner);
+    const cacheBruto=bruto?JSON.parse(bruto):{};
+    const cubos=_crmAplicarPendencias(cacheBruto,pendencias,ctx.owner);
+    const epoch=Number(pendencias?.epoch)||0,revisao=Number(pendencias?.revisao)||0;
+    const pendenciasRAMInicio=_crmS042PendenciasRAM(ctx);
+    if(pendenciasRAMInicio===null)return null;
+    const recibos=_crmS042Parse(lido.prova,ctx.owner,epoch),validos=new Map();
+    for(const [par,r] of Object.entries(recibos)){
+      const sep=par.indexOf('|'),lid=par.slice(0,sep),ano=par.slice(sep+1),cubo=cacheBruto[lid]?.[ano];
+      if(sep<1||!cubo||_crmS042Pendente(ctx,lid,ano,pendencias))continue;
+      const bytes=_crmS042Json(cubo),live=(dadosNoInicio.crm?.[lid]||{})[ano],liveBytes=_crmS042Json(live);
+      const digest=await _crmS042Digest(bytes);
+      if(!digest||digest!==r.digest||_crmS042Json(cubo)!==bytes||D!==dadosNoInicio
+          ||!window._s012ContextoValido(ctx)||(_crmCacheEpoch.get(ctx.owner)||0)!==epoch
+          ||(_crmCacheRevisao.get(ctx.owner)||0)!==revisao
+          ||_crmS042Json((dadosNoInicio.crm?.[lid]||{})[ano])!==liveBytes
+          ||_crmS042Pendente(ctx,lid,ano,pendencias))continue;
+      validos.set(par,r);
+    }
+    if(!window._s012ContextoValido(ctx)||D!==dadosNoInicio
+        ||window._s012Capturar?.()?.owner!==ctx.owner||window._s012Capturar?.()?.geracao!==ctx.geracao
+        ||(_crmCacheEpoch.get(ctx.owner)||0)!==epoch
+        ||(_crmCacheRevisao.get(ctx.owner)||0)!==revisao
+        ||_crmS042Provas!==provasRAMInicio
+        ||!_crmS042PendenciasRAMIguais(ctx,pendenciasRAMInicio))return null;
+    _crmS042Provas={owner:ctx.owner,geracao:ctx.geracao,epoch,revisao,pares:validos};
     _crmMarcarCacheDuravel(ctx,cubos);
     return cubos;
   } finally { db.close(); }
 };
 window.crmRemoverIdb = async function(ctx, permitirTransicao=false){
-  const chave=window._s012StorageKey?.('crm',ctx);
+  const chave=window._s012StorageKey?.('crm',ctx),proofKey=_crmS042ProvaKey(ctx);
   if(!ctx || !chave || (!permitirTransicao && !window._s012ContextoValido(ctx))) return false;
   const db=await _idbAbrir();let epochConfirmado=null;
   try{
@@ -18934,7 +19138,7 @@ window.crmRemoverIdb = async function(ctx, permitirTransicao=false){
         try{const old=_crmLerObjeto(read.result,{epoch:0});
           const epoch=(Number(old.epoch)||0)+1;
           store.put(JSON.stringify({versao:1,epoch,revisao:0,entradas:{}}),pendingKey);
-          store.delete(chave);epochConfirmado=epoch;
+          store.delete(chave);store.delete(proofKey);epochConfirmado=epoch;
         }catch(e){tx.abort();rej(e);}
       };
       tx.oncomplete=()=>res();
@@ -18943,6 +19147,7 @@ window.crmRemoverIdb = async function(ctx, permitirTransicao=false){
     });
     _crmCacheEpoch.set(ctx.owner,epochConfirmado);
     _crmCacheRevisao.set(ctx.owner,0);
+    _crmS042Zerar(null);
     for(const [k,op] of _crmPendenciasMemoria) if(op.owner===ctx.owner) _crmPendenciasMemoria.delete(k);
     return true;
   } finally { db.close(); }
@@ -20977,7 +21182,7 @@ function _mergeVendasSeguro(remoto){
   }
 }
 
-async function loadFromFirestore(){
+async function loadFromFirestore(onMainDataReady){
   const _s012Ctx=window._s012Capturar?.(), _s012D=D;
   if(!_s012Ctx) return false;
   const ok = await waitForFirebase(3000);
@@ -21000,16 +21205,6 @@ async function loadFromFirestore(){
       return false;
     }
     console.log("[Avatim] loadFromFirestore: dados recebidos, processando...");
-    // [R56] Cubos do CRM vivem em documentos próprios (crm_<loja>_<ano>),
-    // fora do payload principal. Carregados aqui, sem travar o resto se falhar.
-    // [R84] Cache local primeiro: as telas do CRM já abrem preenchidas e
-    // funcionam offline; o Firestore em seguida traz o que mudou.
-    try{
-      if(typeof window.crmCarregar === 'function') await window.crmCarregar(undefined,_s012Ctx);
-      else if(typeof window.crmHidratarIdb === 'function') await window.crmHidratarIdb(_s012Ctx);
-    }
-    catch(eCrm){ console.warn('[crm] carregamento ignorado:', eCrm.message); }
-    if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
     const remoto = JSON.parse(dadosJSON);
     window._s002ConfirmarMarcasLeitura?.(leitura,_s012Ctx);
     const _s024PullApto = window._s024ValidarAntesMerge?.(_s024PullAntes) || null;
@@ -21283,6 +21478,27 @@ async function loadFromFirestore(){
         if(!D.campRealizados) D.campRealizados=[];
         window._mesclarCampRealizadosEm(D.campRealizados, remoto.campRealizados, remoto._campExcluidos);   // [R175]
       }
+      if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
+      const _s041PintarAposCache=ev=>{
+        if(ev?.cacheLocalPronta!==true || ev.cacheLocalOwner!==_s012Ctx.owner
+            || ev.cacheLocalGeracao!==_s012Ctx.geracao || leitura.completa!==true
+            || _s024PullAntes
+            || typeof onMainDataReady!=='function'
+            || !window._s012ContextoValido(_s012Ctx) || D!==_s012D) return;
+        try{ onMainDataReady(_s012Ctx,leitura); }
+        catch(ePaint){ console.warn('[Avatim] pintura inicial ignorada:',ePaint.message); }
+      };
+      try{
+        if(typeof window.crmCarregar === 'function')
+          await window.crmCarregar(undefined,_s012Ctx,undefined,_s041PintarAposCache,{s041ComporProgresso:true});
+        else if(typeof window.crmHidratarIdb === 'function'){
+          await window.crmHidratarIdb(_s012Ctx);
+          _s041PintarAposCache({cacheLocalPronta:window._crmIdbOk===true,
+            cacheLocalOwner:_s012Ctx.owner,cacheLocalGeracao:_s012Ctx.geracao});
+        }
+      }
+      catch(eCrm){ console.warn('[crm] carregamento ignorado:', eCrm.message); }
+      if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
       window._s024RetomarAposPull?.(_s024PullApto, remoto, leitura);
       if(!window._s012ContextoValido(_s012Ctx) || D!==_s012D) return false;
       _persistirLocal();
@@ -22062,7 +22278,10 @@ window._carregarComRetentativa = async function(render){
   const tentar = async () => {
     if(!vigente()) return false;
     try{
-      const ok=await loadFromFirestore();
+      const ok=await loadFromFirestore((ctxMain,leituraMain)=>{
+        if(vigente() && ctxMain?.owner===ctx?.owner && ctxMain?.geracao===ctx?.geracao
+            && leituraMain?.completa===true) render();
+      });
       return vigente()&&ok===true;
     }
     catch(e){
@@ -23510,7 +23729,7 @@ async function showApp(){
   const _pintarTelas = () => {
     if(!window._s012ContextoValido(_s012Ctx)) return;
     carregarVendsForm();
-    preencherSelectVends();
+    preencherSelectVends(true);
     carregarDash();
   };
   // [R122] Honra o retorno de loadFromFirestore: se o servidor não respondeu,
@@ -47821,6 +48040,17 @@ const _n003Yield=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(r
 if(typeof window.crmCarregar==='function'){
   const _crmCarregarN003Base=window.crmCarregar;
   window.crmCarregar=async function(pares,ctx,proof,onProgress){
+    if(onProgress&&arguments[4]?.s041ComporProgresso===true){
+      const _ctx=ctx||window._s012Capturar?.();
+      const task=window._crmN003Progresso.iniciar('leitura',_ctx);
+      const cb=ev=>{
+        window._crmN003Progresso.atualizar(task,ev);
+        try{onProgress(ev);}catch(e){console.warn('[N003] callback de progresso:',e.message||e);}
+      };
+      try{return await _crmCarregarN003Base.call(this,pares,ctx,proof,cb);}
+      catch(e){window._crmN003Progresso.finalizar(task,{falha:true});throw e;}
+      finally{window._crmN003Progresso.finalizar(task);}
+    }
     if(onProgress)return _crmCarregarN003Base.apply(this,arguments);
     const _ctx=ctx||window._s012Capturar?.();
     const task=window._crmN003Progresso.iniciar('leitura',_ctx);
@@ -52099,8 +52329,13 @@ function _crmRenderInativos(v){
     return;
   }
   if(!base.length) base = v.clientes || [];
+  const _diasDesdeCache = new Map();
   const inativos = base
-    .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
+    .map(c => {
+      const data = c.ultima;
+      if(!_diasDesdeCache.has(data)) _diasDesdeCache.set(data, window.crmDiasDesde(data));
+      return {...c, dias: _diasDesdeCache.get(data)};
+    })
     .filter(c => c.dias !== null && c.dias > dias)
     .filter(c => tipoDoc === 'todos' || _crmDocTipo(c.documento) === tipoDoc)
     .sort((a,b) => b.total - a.total);
@@ -52528,8 +52763,13 @@ window.renderInativos180 = function(){
     return;
   }
 
+  const _diasDesdeCache = new Map();
   let inativos = (v.clientes||[])
-    .map(c => ({...c, dias: window.crmDiasDesde(c.ultima)}))
+    .map(c => {
+      const data = c.ultima;
+      if(!_diasDesdeCache.has(data)) _diasDesdeCache.set(data, window.crmDiasDesde(data));
+      return {...c, dias: _diasDesdeCache.get(data)};
+    })
     .filter(c => c.dias !== null && c.dias > dias);
 
   // Popular o seletor de vendedoras com quem realmente tem inativo na lista
@@ -52581,27 +52821,29 @@ window.renderInativos180 = function(){
     const [yb,mb,db] = ate.split('-').map(Number);
     return Math.round((new Date(yb,mb-1,db) - new Date(ya,ma-1,da)) / 86400000);
   };
-  const _contatoCobre = c => {
-    const ct = contatados.get(_norm(c.nome));
-    if(!ct || !ct.data) return false;
-    const ultCompra = String(c.ultima || '');
-    if(ultCompra && ct.data < ultCompra) return false;      // contato anterior à compra
-    const prazo = window.followUpDias(ct.tipo);
-    if(prazo === 0) return true;                             // 0 = nunca reabordar
-    const dias = _diasEntre(ct.data, _hojeISO);
-    return dias !== null && dias < prazo;                    // ainda dentro da janela
+  const _contatoInfoCache = new WeakMap();
+  const _contatoInfo = c => {
+    if(_contatoInfoCache.has(c)) return _contatoInfoCache.get(c);
+    const ct = contatados.get(_norm(c.nome)) || null;
+    let cobre = false, venceu = false;
+    if(ct && ct.data){
+      const ultCompra = String(c.ultima || '');
+      if(!ultCompra || !(ct.data < ultCompra)){
+        const prazo = window.followUpDias(ct.tipo);
+        if(prazo === 0) cobre = true;
+        else {
+          const dias = _diasEntre(ct.data, _hojeISO);
+          if(dias !== null){ cobre = dias < prazo; venceu = dias >= prazo; }
+        }
+      }
+    }
+    const info = {ct, cobre, venceu};
+    _contatoInfoCache.set(c, info);
+    return info;
   };
+  const _contatoCobre = c => _contatoInfo(c).cobre;
   // quem VOLTOU por vencimento do prazo — merece destaque, não é um inativo qualquer
-  const _venceuFollowUp = c => {
-    const ct = contatados.get(_norm(c.nome));
-    if(!ct || !ct.data) return false;
-    const ultCompra = String(c.ultima || '');
-    if(ultCompra && ct.data < ultCompra) return false;
-    const prazo = window.followUpDias(ct.tipo);
-    if(prazo === 0) return false;
-    const dias = _diasEntre(ct.data, _hojeISO);
-    return dias !== null && dias >= prazo;
-  };
+  const _venceuFollowUp = c => _contatoInfo(c).venceu;
   // [R117] Busca por nome/documento/telefone — a régua tem centenas de linhas.
   const _busca = _norm(document.getElementById('ct-inat-busca')?.value || '');
   if(_busca){
@@ -52650,7 +52892,7 @@ window.renderInativos180 = function(){
   const _ord = window._ctInatOrd;
   const _txt = x => String(x||'').toLowerCase();
   const _ultCt = c => {
-    const ct = contatados.get(_norm(c.nome));
+    const ct = _contatoInfo(c).ct;
     return ct ? (ct.data || '') : '';   // sem contato ordena primeiro no crescente
   };
   inativos.sort((a,b) => {
@@ -52687,7 +52929,7 @@ window.renderInativos180 = function(){
     return;
   }
 
-  const semContato = inativos.filter(c => !contatados.has(_norm(c.nome)));
+  const semContato = inativos.filter(c => !_contatoInfo(c).ct);
   const potencial  = inativos.reduce((s,c) => s + (c.total||0), 0);
   const _reabordar = inativos.filter(_venceuFollowUp).length;
   const _avisoReabordar = _reabordar
@@ -52726,7 +52968,7 @@ window.renderInativos180 = function(){
         + _ctTh('Último contato','contato')
         + '<th style="width:110px;text-align:center">Ação</th></tr></thead><tbody>'
       + inativos.slice(0,50).map((c,i) => {
-          const ct = contatados.get(_norm(c.nome));
+          const ct = _contatoInfo(c).ct;
           const corD = c.dias > 365 ? 'var(--verm)' : c.dias > 270 ? 'var(--ouro)' : 'var(--muted)';
           return '<tr>'
             + '<td><strong><button type="button" data-ct-inat-action="historico" data-ct-inat-index="' + i + '" aria-label="Ver histórico de compras de ' + _n001EscHtml(c.nome) + '" '
