@@ -5579,6 +5579,7 @@ body:not(.logado) #appScreen{display:none!important}
 
 @media(max-width:900px){.g2,.g3{grid-template-columns:1fr 1fr}.sidebar{width:200px}.main{margin-left:200px;padding:14px}}
 @media(max-width:620px){.sidebar{transform:translateX(-100%);transition:transform .3s}.sidebar.open{transform:none}.main{margin-left:0}.kgrid{grid-template-columns:1fr 1fr}.g2,.g3{grid-template-columns:1fr}}
+#crm-progress-region [hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -9190,7 +9191,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-16d';
+window.AVATIM_BUILD = '2026-10-16h';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -14667,7 +14668,7 @@ const CRM_LOTE_BYTES = 4 * 1024 * 1024;
  * Sem o prazo a promessa fica pendente para sempre quando o Firestore não
  * alcança o servidor — o mesmo motivo que criou o gravarRemotoComPrazo.
  */
-window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=false, onProgress){
+window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=false, onProgress, validarDespacho){
   const _n003Notificar=ev=>{try{if(typeof onProgress==='function')onProgress(ev);}catch(e){console.warn('[crm] progresso:',e.message||e);}};
   const ctx=s012Ctx||window._s012Capturar?.();
   if(!escritas || !escritas.length) return {lotes:0, docs:0};
@@ -14717,8 +14718,11 @@ window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=
       if(!publicacaoIniciada&&!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
       const e=loteEscritas[i];
       publicacaoIniciada=true;
-      await comPrazo(window._s012Publicacao(()=>e.merge ? setDoc(doc(db,'avatim',e.id), e.dados, {merge:true})
-                             : setDoc(doc(db,'avatim',e.id), e.dados)), e.id);
+      await comPrazo(window._s012Publicacao(()=>{
+        if(typeof validarDespacho==='function')validarDespacho();
+        return e.merge?setDoc(doc(db,'avatim',e.id),e.dados,{merge:true})
+          :setDoc(doc(db,'avatim',e.id),e.dados);
+      }),e.id);
       _n003Notificar({fase:'lote',confirmados:i+1,total:loteEscritas.length});
     }
     return {lotes:0, docs:loteEscritas.length,
@@ -14756,7 +14760,10 @@ window._crmGravarLote = async function(escritas, ms, s012Ctx, exigirLoteAtomico=
         // Não há await entre a guarda e o primeiro commit: uma troca não pode
         // intercalar-se antes do despacho deste lote.
         publicacaoIniciada=true;
-        await comPrazo(window._s012Publicacao(()=>lote.commit()), bloco.length + ' documento(s)');
+        await comPrazo(window._s012Publicacao(()=>{
+          if(typeof validarDespacho==='function')validarDespacho();
+          return lote.commit();
+        }),bloco.length+' documento(s)');
         gravado = true;
       }catch(e){
         ultimo = e;
@@ -14930,21 +14937,44 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
     throw new Error('s012-sessao-alterada');
   const fonte=cuboOverride===undefined ? ((D.crm||{})[lid]||{})[ano] : cuboOverride;
   if(!fonte) throw new Error('Sem cubo para ' + lid + '/' + ano);
+  const dadosEnvio=D,fonteLocalInicial=JSON.stringify(D.crm?.[lid]?.[ano]);
   const chavePendente=lid+'|'+ano;
   const markerEnviado=(window._crmNaoEnviados||{})[chavePendente];
   let cubo=JSON.parse(JSON.stringify(fonte));
+  let opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
+  if(opEnviada?.tipo!=='gravar'&&JSON.stringify(fonte)!==fonteLocalInicial)
+    throw new Error('O conjunto mudou antes do envio; o snapshot antigo não foi publicado.');
+  if(_crmOpComExclusaoConfirmada(opEnviada))throw new Error('O conjunto foi excluído; somente uma nova importação explícita pode restaurá-lo.');
+  const opIdInicial=opEnviada?.opId||null;
   await _crmPendenciasEmGravacao.get(_crmMemKey(ctx,lid,ano));
   if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
-  let opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
-  if(opEnviada?.tipo==='gravar'){
-    // Um descarte em outra aba encerra a operação antiga; retry não é nova edição.
-    const estadoPendente=await window.crmPendenciaLerIdb(ctx);
+  opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
+  if(_crmOpComExclusaoConfirmada(opEnviada))throw new Error('O conjunto foi excluído; somente uma nova importação explícita pode restaurá-lo.');
+  let estadoPendente=null;
+  if(opEnviada||!_idbMotivo()){
+    estadoPendente=await window.crmPendenciaLerIdb(ctx);
     if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
-    if(window.crmPendenciaAtual(ctx,lid,ano)?.opId!==opEnviada.opId)
-      throw new Error('CRM mudou durante a preparação; repita o envio');
+  }
+  const opDepoisLeitura=window.crmPendenciaAtual(ctx,lid,ano);
+  if(_crmOpComExclusaoConfirmada(opDepoisLeitura))
+    throw new Error('O conjunto foi excluído; somente uma nova importação explícita pode restaurá-lo.');
+  if(opIdInicial&&(opDepoisLeitura?.opId||null)!==opIdInicial)
+    throw new Error('CRM mudou durante a preparação; repita o envio');
+  if(!opIdInicial&&opDepoisLeitura){
+    if(opDepoisLeitura.tipo!=='gravar'||JSON.stringify(opDepoisLeitura.cubo)!==JSON.stringify(cubo))
+      throw new Error('Uma operação CRM diferente foi preservada; revise antes de reenviar.');
+    opEnviada=opDepoisLeitura;
+  }
+  if((window.crmPendenciaAtual(ctx,lid,ano)?.opId||null)!==(opEnviada?.opId||null))
+    throw new Error('CRM mudou durante a preparação; repita o envio');
+  if(opEnviada?.tipo==='gravar'){
     if((Number(opEnviada.epoch)||0)!==(Number(estadoPendente?.epoch)||0))
       throw new Error('Esta operação CRM foi descartada em outra aba; importe novamente para criar uma nova edição');
+    if(JSON.stringify(opEnviada.cubo)!==JSON.stringify(cubo))
+      throw new Error('Uma revisão CRM mais recente foi preservada; sincronize a operação atual.');
   }
+  opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
+  if(_crmOpComExclusaoConfirmada(opEnviada))throw new Error('O conjunto foi excluído; somente uma nova importação explícita pode restaurá-lo.');
   if(opEnviada?.tipo==='gravar'&&opEnviada._duravelRam===false){
     // A falha anterior deixou a revisão apenas em RAM. Regravar o sidecar
     // antes do despacho; se continuar indisponível, manter a pendência local.
@@ -14957,7 +14987,7 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
     cubo=JSON.parse(JSON.stringify(atual.cubo));
   }
   opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
-  if(opEnviada?.exclusaoRemota)throw new Error('O conjunto foi excluído; resolva o rascunho na lista de importações.');
+  if(_crmOpComExclusaoConfirmada(opEnviada))throw new Error('O conjunto foi excluído; resolva o rascunho na lista de importações.');
   const confirmarOp=opEnviada?.tipo==='gravar'&&JSON.stringify(opEnviada.cubo)===JSON.stringify(cubo)?opEnviada:null;
   const pedacos = window.crmFatiarClientes(cubo.clientes || []);
   const detalheCompra=cubo._comprasCliente;
@@ -14994,15 +15024,28 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
 
   const _n003Partes=ev=>{try{onProgress?.({tipo:'lote',lid,ano,etapa:'partes',...ev});}catch(e){console.warn('[crm] progresso:',e.message||e);}};
   _n003Partes({confirmados:0,total:escritasPartes.length});
-  await window._crmGravarLote(escritasPartes, undefined, ctx, false, _n003Partes);
+  const opIdPublicacao=opEnviada?.opId||null;
+  const conferirPublicacao=()=>{
+    if(D!==dadosEnvio||(opEnviada?.tipo!=='gravar'
+        &&(JSON.stringify(dadosEnvio.crm?.[lid]?.[ano])!==fonteLocalInicial
+          ||window._crmNaoEnviados?.[chavePendente]!==markerEnviado)))
+      throw new Error('O conjunto local mudou durante o envio; publicação suspensa.');
+    const atual=window.crmPendenciaAtual(ctx,lid,ano);
+    if(_crmOpComExclusaoConfirmada(atual))throw new Error('Exclusão remota recebida; publicação suspensa. Resolva o rascunho nas importações.');
+    if((atual?.opId||null)!==opIdPublicacao)throw new Error('CRM mudou durante o envio; a cabeça não foi publicada.');
+  };
+  conferirPublicacao();
+  await window._crmGravarLote(escritasPartes, undefined, ctx, false, _n003Partes, conferirPublicacao);
   if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
+  conferirPublicacao();
   // Sem writeBatch não é possível garantir publicação atômica do par; falhe
   // antes da cabeça para deixar apenas partes órfãs e manter o owner pendente.
   if(window.crmPendenciaAtual(ctx,lid,ano)?.exclusaoRemota)
     throw new Error('Exclusão remota recebida; publicação suspensa. Resolva o rascunho nas importações.');
   const _n003Publicacao=ev=>{try{onProgress?.({tipo:'lote',lid,ano,etapa:'publicacao',...ev});}catch(e){console.warn('[crm] progresso:',e.message||e);}};
   _n003Publicacao({confirmados:0,total:2});
-  await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true, _n003Publicacao);
+  conferirPublicacao();
+  await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true, _n003Publicacao, conferirPublicacao);
   // Uma confirmação já despachada só atualiza o controle persistido deste owner.
   _crmMarcarVisto(lid, ano, ts, gid, ctx);
   let confirmada=!opEnviada;
@@ -15067,10 +15110,16 @@ window.crmSincronizar = async function(paresOpt, s012Ctx, onProgress){
       if(r.pendenteLocal) pendentesLocais.push(lid+'/'+ano);
       _n003Notificar({tipo:'par-resultado',lid,ano,estado:'confirmado',pendenteLocal:r.pendenteLocal,concluidos:++concluidos,total:pares.length});
     }catch(e){
-      window._crmMarcarNaoEnviado?.(ctx,lid,ano,Date.now());
+      const opAtual=window.crmPendenciaAtual(ctx,lid,ano);
+      if(D.crm?.[lid]?.[ano]&&JSON.stringify(D.crm[lid][ano])===JSON.stringify(cubos[lid]?.[ano])
+          &&!_crmOpComExclusaoConfirmada(opAtual)
+          &&window._crmNaoEnviados?.[lid+'|'+ano]===undefined)
+        window._crmMarcarNaoEnviado?.(ctx,lid,ano,Date.now());
       erros.push(lid+'/'+ano+': '+(e.code||e.message));
       const incerto=/não confirmou|sem confirmação|em \d+s/i.test(String(e.code||e.message));
-      _n003Notificar({tipo:'par-resultado',lid,ano,estado:incerto?'incerto':'falhou',estadoLocal:'alteracao-pendente',concluidos:++concluidos,total:pares.length});
+      const pendente=window._crmNaoEnviados?.[lid+'|'+ano]!==undefined
+        ||(opAtual?.tipo==='gravar'&&!opAtual.confirmada);
+      _n003Notificar({tipo:'par-resultado',lid,ano,estado:incerto?'incerto':'falhou',estadoLocal:pendente?'alteracao-pendente':undefined,concluidos:++concluidos,total:pares.length});
     }
   }
   if(!window._s012ContextoValido(ctx)) return {ok,total:pares.length,docs,erros,pendentesLocais,cancelada:true};
@@ -15237,7 +15286,8 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
       }
       let raw = snap.data();
       const cerca=window.crmPendenciaAtual(ctx,lid,ano);
-      if(raw._apagado || (cerca?.tipo==='excluir'&&raw.dados&&!raw._apagado)||(gidIndice && !raw.gid)){
+      if((raw._apagado || (cerca?.tipo==='excluir'&&raw.dados&&!raw._apagado)||(gidIndice && !raw.gid))
+          &&!(leituraServidor&&_s033Cabeca?.serverBacked===true)){
         // Uma lápide vinda do cache do SDK não basta para retirar um cubo:
         // outro perfil pode já ter publicado uma importação mais nova. Confirme
         // no servidor também quando a leitura inicial parece apagada.
@@ -15250,7 +15300,14 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
       }
       if(gidIndice && (Number(raw.ts) !== Number(tsIndice) || (raw.gid && raw.gid !== gidIndice)))
         throw new Error('geracao CRM diferente do indice');
-      if(_temPendente){
+      const _exclusaoDuravelConfereTombstone=!_temLocal
+        &&raw._apagado===true&&leituraServidor===true&&_s033Cabeca?.serverBacked===true
+        &&_opCargaInicio?.owner===ctx.owner&&_opCargaInicio.lid===lid&&String(_opCargaInicio.ano)===ano
+        &&_opCargaInicio.tipo==='excluir'&&_opCargaInicio.confirmada===true
+        &&_opCargaInicio._duravelRam===true
+        &&Number(_opCargaInicio.ts)===Number(raw.ts)
+        &&(_opCargaInicio.gid||null)===(raw.gid||gidIndice||null);
+      if(_temPendente&&!_exclusaoDuravelConfereTombstone){
         _n003EstadoPar='pendencia-local-preservada';
         if(!raw._apagado||!leituraServidor||_pendenciaMudouDuranteCarga())continue;
         let held=null;
@@ -15277,11 +15334,31 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
       // conjunto apagado deixa um documento vazio como lápide
       if(raw._apagado){
         // Uma lápide confirmada remove só este par e o cache owner-scoped.
-        // A transação também cerca operação/cache por owner e opId; se outra
-        // aba registrar uma gravação durante a leitura, ela recusa a remoção.
+        // A exclusão durável idêntica pode ser reutilizada; os demais casos
+        // cercam operação/cache em transação e preservam uma nova gravação.
         if(_pendenciaMudouDuranteCarga()) continue;
-        const resultadoExclusao=await window.crmPendenciaExcluirIdb(ctx,lid,ano,_opCargaInicio,
-          {ts:raw.ts,gid:raw.gid||gidIndice},true);
+        let resultadoExclusao;
+        if(_exclusaoDuravelConfereTombstone){
+          const opAtual=window.crmPendenciaAtual(ctx,lid,ano);
+          const reutilizar=window._s012ContextoValido(ctx)
+            &&window._s012Capturar?.()?.owner===ctx.owner
+            &&opAtual?.opId===_opIdCargaInicio&&opAtual.owner===ctx.owner
+            &&opAtual.lid===lid&&String(opAtual.ano)===ano
+            &&opAtual.tipo==='excluir'&&opAtual.confirmada===true&&opAtual._duravelRam===true
+            &&Number(opAtual.ts)===Number(raw.ts)
+            &&(opAtual.gid||null)===(raw.gid||gidIndice||null)
+            &&!_pendenciaMudouDuranteCarga()
+            &&window._crmNaoEnviados?.[_chavePendente]===_markerCargaInicio
+            &&(dadosAlvo.crm[lid]||{})[ano]===_cuboCargaInicio;
+          if(!reutilizar)continue;
+          resultadoExclusao={ok:true,duravel:true,op:opAtual};
+        }else{
+          if(_pendenciaMudouDuranteCarga())continue;
+          const cercaLocal=window._crmInstalarCercaExclusaoRAM(ctx,lid,ano,
+            {ts:raw.ts,gid:raw.gid||gidIndice},_cuboCargaInicio,_opCargaInicio);
+          resultadoExclusao=await window.crmPendenciaExcluirIdb(ctx,lid,ano,cercaLocal||_opCargaInicio,
+            {ts:raw.ts,gid:raw.gid||gidIndice},true);
+        }
         if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return 0;
         if(!resultadoExclusao?.ok) throw new Error('estado local mudou; lápide CRM não foi aplicada');
         const opDepois=window.crmPendenciaAtual(ctx,lid,ano);
@@ -15304,6 +15381,8 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
           if(!Object.keys(dadosAlvo.crm[lid]).length) delete dadosAlvo.crm[lid];
         }
         _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx);
+        if(_exclusaoDuravelConfereTombstone&&_markerCargaInicio!==undefined)
+          window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
         _s033RegistrarPar(); removidos++;
         _n003EstadoPar='removido-no-servidor';
         continue;
@@ -15325,30 +15404,53 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
           quando: raw.ts, por: raw.por});
         continue;
       }
-      const partes = Number(leves._partes) || 0;
+      const _partesDeclaradas=leves._partes;
+      const partes=_partesDeclaradas===undefined?0:Number(_partesDeclaradas);
+      if(!Number.isSafeInteger(partes)||partes<0)
+        throw new Error('quantidade de partes CRM inválida');
       const refPartes = leves._partesRef;
       const _n003CabecaCompras=leves._comprasCliente;
       const _n003TotalPartes=partes+(_n003CabecaCompras?.versao===1&&_n003CabecaCompras.disponivel===true?(Number(_n003CabecaCompras._partes)||0):0);
       let _n003PartesLidas=0;
       _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:0,total:_n003TotalPartes});
+      // Lê em lotes limitados e só consome resultados depois que o lote foi drenado.
+      const _s033LerPartesEmLotes=async(total,ler,consumir)=>{
+        const _limiteLote=4;
+        for(let inicio=0;inicio<total;inicio+=_limiteLote){
+          const quantidade=Math.min(_limiteLote,total-inicio);
+          const resultados=await Promise.allSettled(
+            Array.from({length:quantidade},(_,offset)=>ler(inicio+offset))
+          );
+          if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return false;
+          for(let offset=0;offset<resultados.length;offset++){
+            if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return false;
+            const resultado=resultados[offset];
+            if(resultado.status==='rejected')throw resultado.reason;
+            consumir(inicio+offset,resultado.value);
+          }
+        }
+        return window._s012ContextoValido(ctx)&&D===dadosAlvo;
+      };
       if(refPartes !== undefined && (!raw.gid || refPartes !== _crmPartePrefixo(lid, ano, raw.gid)))
         throw new Error('referência de partes CRM inválida');
       const clientes = [];
-      for(let i = 0; i < partes; i++){
-        const nomeParte = refPartes !== undefined
-          ? _crmDocParte(lid, ano, raw.gid, i) : _crmDocNome(lid, ano, i);
-        const sp = await _s033LerDoc(doc(db, 'avatim', nomeParte),leituraServidor,false);
-        if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
+      const _clientesCarregados=await _s033LerPartesEmLotes(partes,async i=>{
+        const nomeParte=refPartes!==undefined
+          ?_crmDocParte(lid,ano,raw.gid,i):_crmDocNome(lid,ano,i);
+        return _s033LerDoc(doc(db,'avatim',nomeParte),leituraServidor,false);
+      },(i,sp)=>{
         if(!sp.exists()) throw new Error('parte CRM ausente: '+i);
-        const parte = sp.data();
+        const parte=sp.data();
         // Mesmo contrato dos documentos fatiados: todo legado ou mesmo envio.
-        if(Boolean(raw.gid) !== Boolean(parte.gid) || (raw.gid && parte.gid !== raw.gid))
+        if(Boolean(raw.gid)!==Boolean(parte.gid)||(raw.gid&&parte.gid!==raw.gid))
           throw new Error('geracao CRM divergente: '+i);
-        if(parte.parte !== undefined && Number(parte.parte) !== i)
+        if(parte.parte!==undefined&&Number(parte.parte)!==i)
           throw new Error('índice CRM divergente: '+i);
-        clientes.push(...JSON.parse(parte.dados || '[]'));
-        _n003PartesLidas++; _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes});
-      }
+        clientes.push(...JSON.parse(parte.dados||'[]'));
+        _n003PartesLidas++;
+        _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes});
+      });
+      if(!_clientesCarregados)return 0;
       const detalheCabeca=leves._comprasCliente;
       let detalheCarregado;
       if(detalheCabeca && detalheCabeca.versao===1){
@@ -15364,10 +15466,10 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
               || !raw.gid || ref!==_crmCompraPartePrefixo(lid,ano,raw.gid))
             throw new Error('cabeça de detalhe inválida');
           const itens=[];
-          for(let i=0;i<n;i++){
+          const _comprasCarregadas=await _s033LerPartesEmLotes(n,async i=>{
             const nomeParte=_crmDocCompraParte(lid,ano,raw.gid,i);
-            const sp=await _s033LerDoc(doc(db,'avatim',nomeParte),leituraServidor,false);
-            if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return 0;
+            return _s033LerDoc(doc(db,'avatim',nomeParte),leituraServidor,false);
+          },(i,sp)=>{
             if(!sp.exists())throw new Error('parte de compras ausente: '+i);
             const parte=sp.data()||{};
             if(parte.gid!==raw.gid || parte.loja!==lid || String(parte.ano)!==String(ano)
@@ -15384,8 +15486,10 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
                 throw new Error('linhas de compras inválidas: '+i);
               itens.push(...linhas);
             }
-            _n003PartesLidas++; _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes,detalhe:true});
-          }
+            _n003PartesLidas++;
+            _n003Notificar({tipo:'leitura-partes',lid,ano,concluidas:_n003PartesLidas,total:_n003TotalPartes,detalhe:true});
+          });
+          if(!_comprasCarregadas)return 0;
           detalheCarregado={versao:1,disponivel:true,meses:[...new Set(meses)].sort(),itens};
         }catch(e){
           console.warn('[crm] detalhe de compras indisponível',lid,ano,e.message||e);
@@ -15626,8 +15730,10 @@ window.crmApagar = async function(lid, ano){
     _escritas.forEach(e => { e.dados.gid = _gid; });
     _escritas.push(_indice);
     await window._crmGravarLote(_escritas,undefined,ctx,true);
+    const cercaExclusao=window._crmInstalarCercaExclusaoRAM(ctx,lid,ano,{ts:_ts,gid:_gid},cubo,opAoExcluir);
     _crmMarcarVisto(lid, ano, _ts, _gid, ctx);
-    try{cacheExcluido=await window.crmPendenciaExcluirIdb(ctx,lid,ano,opAoExcluir,{ts:_ts,gid:_gid});}
+    const opCasLocal=cercaExclusao||opAoExcluir;
+    try{cacheExcluido=await window.crmPendenciaExcluirIdb(ctx,lid,ano,opCasLocal,{ts:_ts,gid:_gid});}
     catch(eCache){erroCache=eCache;}
     if(cacheExcluido)window._crmLimparNaoEnviado?.(ctx,lid,ano,markerAoExcluir);
   }catch(e){
@@ -16957,7 +17063,7 @@ window.crmGuardar = function(lid, ano, cubo){
   window._crmEmitirAtualizacaoUI?.([{lid,ano:String(ano)}], 'gravacao-local');
   if(ctx?.perfil==='admin'){
     window._s012InvalidarCrmDuravel?.(ctx);
-    window.crmPendenciaRegistrarIdb(ctx,lid,ano,cubo);
+    window.crmPendenciaRegistrarIdb(ctx,lid,ano,cubo,'gravar',undefined,{importacaoExplicita:true});
   }
 
   const leves = Object.assign({}, cubo); delete leves.clientes;
@@ -18323,6 +18429,40 @@ function _crmAplicarPendencias(cubos,pendencias,owner){
 window.crmPendenciaAtual=function(ctx,lid,ano){
   return ctx ? _crmPendenciasMemoria.get(_crmMemKey(ctx,lid,ano))||null : null;
 };
+function _crmOpComExclusaoConfirmada(op){
+  return !!(op&&(op.exclusaoRemota
+    ||(op.tipo==='excluir'&&op.confirmada===true&&(Number(op.ts)>0||!!op.gid))));
+}
+window._crmInstalarCercaExclusaoRAM=function(ctx,lid,ano,remoto,cuboPreservado,opEsperada){
+  if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!remoto)return null;
+  const key=_crmMemKey(ctx,lid,ano),atual=_crmPendenciasMemoria.get(key);
+  const semIdb=_idbMotivo();
+  if(!atual&&(semIdb==='file://'||semIdb==='sem suporte no navegador'))return null;
+  if((atual?.opId||null)!==(opEsperada?.opId||null))return null;
+  if((atual?.exclusaoRemota||opEsperada?.exclusaoRemota)
+      &&(Number(atual?.exclusaoRemota?.ts)!==Number(opEsperada?.exclusaoRemota?.ts)
+        ||(atual?.exclusaoRemota?.gid||null)!==(opEsperada?.exclusaoRemota?.gid||null)))return null;
+  const cubo=atual?.tipo==='gravar'&&atual.cubo
+    ?atual.cubo:(cuboPreservado||D.crm?.[lid]?.[ano]||null);
+  let base=atual;
+  if(!base&&cubo){
+    base={owner:ctx.owner,lid:String(lid),ano:String(ano),tipo:'gravar',
+      opId:'crm-fence-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
+      baseOpId:null,marker:window._crmNaoEnviados?.[_crmParKey(lid,ano)],
+      cubo:JSON.parse(JSON.stringify(cubo)),epoch:_crmCacheEpoch.get(ctx.owner)||0,
+      _crmFenceBaseAbsent:true};
+  }
+  if(!base)base={owner:ctx.owner,lid:String(lid),ano:String(ano),tipo:'excluir',
+    confirmada:true,opId:'crm-fence-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
+    baseOpId:null,_crmFenceBaseAbsent:true,epoch:_crmCacheEpoch.get(ctx.owner)||0};
+  const cerca={...base,exclusaoRemota:{ts:Number(remoto.ts)||0,gid:remoto.gid||null},_duravelRam:false};
+  delete cerca.liberaExclusao;
+  _crmPendenciasMemoria.set(key,cerca);
+  if(cerca.tipo==='gravar'&&D.crm?.[lid]?.[ano]){
+    try{window._s012GravarSnapshotLocal?.(ctx,D);}catch(e){console.warn('[crm] cerca de exclusão mantida em RAM:',e.message||e);}
+  }
+  return cerca;
+};
 window.crmPendenciaLerIdb=async function(ctx,rawSnapshot){
   const key=_crmPendKey(ctx);
   if(!ctx||!key||!window._s012ContextoValido(ctx)) return null;
@@ -18347,16 +18487,21 @@ window.crmPendenciaLerIdb=async function(ctx,rawSnapshot){
         continue;
       }
       if(op._duravelRam===false){
-        // Se o write terminou enquanto a leitura aguardava, o opId igual é
-        // a confirmação real. Caso contrário preserve RAM e não aplique o
-        // sidecar anterior sobre o cubo atual.
-        if(persistida?.opId===op.opId) op._duravelRam=true;
-        // S014B: o snapshot pode conter R1 anterior ao commit local de R2.
-        // Só a filiação direta, no mesmo owner/par/época, prova a sucessão.
+        // An old same-op sidecar cannot erase a RAM-only server-deletion fence.
+        const cercaPersistida=!op.exclusaoRemota
+          ||(persistida?.exclusaoRemota?.ts===op.exclusaoRemota.ts
+            &&(persistida?.exclusaoRemota?.gid||null)===(op.exclusaoRemota.gid||null)
+            &&JSON.stringify(persistida?.cubo)===JSON.stringify(op.cubo));
+        if(persistida?.opId===op.opId&&cercaPersistida) op._duravelRam=true;
+        // S014B: a snapshot may contain R1 while an explicit import committed R2.
+        // A successor behind a deletion fence must carry persisted user-import provenance.
         else if(!_crmPendenciasEmGravacao.has(k)&&persistida?.baseOpId===op.opId
             &&persistida.owner===ctx.owner&&persistida.lid===op.lid&&persistida.ano===op.ano
             &&(Number(persistida.epoch)||0)===(Number(op.epoch)||0)
-            &&persistida.tipo==='gravar'&&persistida.cubo)
+            &&persistida.tipo==='gravar'&&persistida.cubo
+            &&(!_crmOpComExclusaoConfirmada(op)
+              ||(Number(persistida.liberaExclusao?.ts)===Number((op.exclusaoRemota||op).ts)
+                &&(persistida.liberaExclusao?.gid||null)===((op.exclusaoRemota||op).gid||null))))
           _crmPendenciasMemoria.set(k,{...persistida,_duravelRam:true});
         else delete state.entradas[pair];
       }else if(!_crmPendenciasEmGravacao.has(k)&&!persistida){
@@ -18373,20 +18518,33 @@ window.crmPendenciaLerIdb=async function(ctx,rawSnapshot){
     return state;
   }finally{ db?.close(); }
 };
-window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsperado){
+window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsperado,opcoes={}){
   if(!ctx?.owner||!window._s012ContextoValido(ctx)) return Promise.resolve(null);
-  // O modo file/sem IndexedDB continua usando o snapshot local S012.
-  // Falhas transitórias de IDB não entram neste fallback.
-  const motivo=_idbMotivo();
-  if(motivo==='file://'||motivo==='sem suporte no navegador') return Promise.resolve(null);
   const pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano),storageKey=_crmPendKey(ctx);
-  if(!storageKey) return Promise.resolve(null);
   const anterior=_crmPendenciasMemoria.get(memKey);
+  const fenceAnterior=_crmOpComExclusaoConfirmada(anterior);
+  // A retry cannot turn a known server deletion into a new write. The existing
+  // explicit import/held-restore entry points may replace it after IDB commit.
+  if(fenceAnterior&&!opcoes.importacaoExplicita)return Promise.resolve(null);
+  const manterCerca=fenceAnterior&&opcoes.importacaoExplicita;
+  const cercaEmEspera=manterCerca?{...anterior,tipo:'gravar',
+    cubo:JSON.parse(JSON.stringify(cubo||{})),_duravelRam:false,
+    exclusaoRemota:anterior.exclusaoRemota||{ts:Number(anterior.ts)||0,gid:anterior.gid||null}}:null;
+  if(manterCerca){
+    delete cercaEmEspera.liberaExclusao;
+    _crmPendenciasMemoria.set(memKey,cercaEmEspera);
+    if(D.crm?.[lid]?.[ano])try{window._s012GravarSnapshotLocal?.(ctx,D);}catch(_){}
+  }
+  const motivo=_idbMotivo();
+  if(motivo==='file://'||motivo==='sem suporte no navegador'||!storageKey)return Promise.resolve(null);
   const op={owner:ctx.owner,lid:String(lid),ano:String(ano),tipo,
     opId:'crm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
     marker:Date.now(),cubo:tipo==='gravar'?JSON.parse(JSON.stringify(cubo||{})):null,
-    baseOpId:anterior?.opId||null,epoch:_crmCacheEpoch.get(ctx.owner)||0,_duravelRam:false};
-  _crmPendenciasMemoria.set(memKey,op);
+    baseOpId:anterior?.opId||null,epoch:_crmCacheEpoch.get(ctx.owner)||0,_duravelRam:false,
+    ...(manterCerca?{liberaExclusao:{...cercaEmEspera.exclusaoRemota}}
+      :!fenceAnterior&&anterior?.liberaExclusao?{liberaExclusao:{...anterior.liberaExclusao}}:{})};
+  const memOpEsperada=manterCerca?cercaEmEspera.opId:op.opId;
+  if(!manterCerca)_crmPendenciasMemoria.set(memKey,op);
   const promise=(async()=>{
     const db=await _idbAbrir();
     try{
@@ -18397,13 +18555,23 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
           try{
             const state=_crmLerObjeto(rq.result,{versao:1,entradas:{}});
             state.entradas=state.entradas||{};
-            if(_crmPendenciasMemoria.get(memKey)?.opId!==op.opId) return;
+            if(manterCerca?_crmPendenciasMemoria.get(memKey)!==cercaEmEspera
+                :_crmPendenciasMemoria.get(memKey)?.opId!==memOpEsperada)return;
             const epochAtual=Number(state.epoch)||0;
             if(epochEsperado!==undefined&&epochAtual!==(Number(epochEsperado)||0))
               throw new Error('cache CRM descartado durante o reenvio');
             // Nova importação se registra na época atual; retry conserva a época original.
             op.epoch=epochAtual;
             const atual=state.entradas[pair];
+            const sucessoraAnterior=manterCerca&&anterior._duravelRam===false
+              &&atual?.baseOpId===anterior.opId&&atual.owner===ctx.owner
+              &&atual.lid===String(lid)&&String(atual.ano)===String(ano)
+              &&(Number(atual.epoch)||0)===(Number(anterior.epoch)||0)
+              &&atual.tipo==='gravar'&&atual.cubo&&atual.liberaExclusao&&!atual.exclusaoRemota;
+            const mesmaBase=(atual?.opId||null)===(anterior?.opId||null)
+              ||(anterior?._crmFenceBaseAbsent&&(atual?.opId||null)===(anterior.baseOpId||null));
+            if(manterCerca&&!sucessoraAnterior&&!mesmaBase)
+              throw new Error('a exclusão CRM mudou antes da persistência da nova importação');
             if(atual&&!atual.confirmada&&atual.opId!==op.baseOpId&&atual.opId!==op.opId){
               (state.conflitos||(state.conflitos={}))[atual.opId]=atual;
             }
@@ -18420,7 +18588,11 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
           if(revisaoPersistida!==null){
             _crmCacheEpoch.set(ctx.owner,epochPersistido);
             _crmCacheRevisao.set(ctx.owner,revisaoPersistida);
-            if(atual?.opId===op.opId) atual._duravelRam=true;
+            if(manterCerca){
+              if(atual===cercaEmEspera)_crmPendenciasMemoria.set(memKey,{...op,_duravelRam:true});
+            }else if(atual?.opId===op.opId&&(!atual.exclusaoRemota
+                ||(op.exclusaoRemota?.ts===atual.exclusaoRemota.ts
+                  &&(op.exclusaoRemota?.gid||null)===(atual.exclusaoRemota.gid||null))))atual._duravelRam=true;
           }
           resolve(true);
         };
@@ -18430,6 +18602,8 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
       return _crmPendenciasMemoria.get(memKey)?.opId===op.opId?op:null;
     }finally{ db.close(); }
   })().catch(e=>{
+    // If an explicit import could not be committed, leave the fenced cube in RAM
+    // and in the owner-scoped snapshot. The generic sender will keep refusing it.
     console.warn('[idb] pendência CRM não persistida:',e.message||e);
     return null;
   }).finally(()=>{
@@ -18441,6 +18615,9 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
 window.crmPendenciaConfirmarIdb=async function(ctx,op,cuboEnviado,remoto={}){
   if(!ctx?.owner||!op||op.owner!==ctx.owner) return false;
   if(op.tipo==='gravar'&&JSON.stringify(op.cubo)!==JSON.stringify(cuboEnviado)) return false;
+  const exclusaoConhecida=()=>op.tipo==='gravar'
+    &&!!window.crmPendenciaAtual(ctx,op.lid,op.ano)?.exclusaoRemota;
+  if(exclusaoConhecida())return false;
   const cacheKey=window._s012StorageKey?.('crm',ctx),pendingKey=_crmPendKey(ctx),pair=_crmParKey(op.lid,op.ano);
   const db=await _idbAbrir();
   try{
@@ -18454,6 +18631,7 @@ window.crmPendenciaConfirmarIdb=async function(ctx,op,cuboEnviado,remoto={}){
           const state=_crmLerObjeto(pRaw,{versao:1,entradas:{}}); state.entradas=state.entradas||{};
           const cache=_crmLerObjeto(cRaw,{});
           atual=state.entradas[pair]||null;
+          if(exclusaoConhecida())return;
           if(atual?.opId===op.opId&&!atual.exclusaoRemota){
             if(op.tipo==='excluir'){
               if(cache[op.lid]){delete cache[op.lid][op.ano];if(!Object.keys(cache[op.lid]).length) delete cache[op.lid];}
@@ -18478,6 +18656,14 @@ window.crmPendenciaConfirmarIdb=async function(ctx,op,cuboEnviado,remoto={}){
     });
     if(revisaoConfirmada!==null)_crmCacheRevisao.set(ctx.owner,revisaoConfirmada);
     const memKey=_crmMemKey(ctx,op.lid,op.ano),mem=_crmPendenciasMemoria.get(memKey);
+    if(exclusaoConhecida()){
+      const sucessoraVolatil=mem?._duravelRam===false&&mem.baseOpId===op.opId
+        &&mem.owner===ctx.owner&&mem.lid===op.lid&&String(mem.ano)===String(op.ano)
+        &&(Number(mem.epoch)||0)===(Number(op.epoch)||0);
+      if(confirmou&&(mem?.opId===op.opId||sucessoraVolatil))
+        _crmPendenciasMemoria.set(memKey,{...mem,_duravelRam:false,_crmFenceBaseAbsent:true,baseOpId:null});
+      return false;
+    }
     const ramMaisNova=mem?._duravelRam===false&&mem.opId!==op.opId;
     if(!ramMaisNova&&atual&&(atual.opId!==op.opId||atual.exclusaoRemota)) _crmPendenciasMemoria.set(memKey,{...atual,_duravelRam:true});
     else if(!ramMaisNova&&op.tipo==='excluir'&&confirmou) _crmPendenciasMemoria.set(memKey,Object.assign({},op,{confirmada:true,gid:remoto.gid||null,ts:Number(remoto.ts)||0,_duravelRam:true}));
@@ -18492,7 +18678,15 @@ window.crmPendenciaConfirmarIdb=async function(ctx,op,cuboEnviado,remoto={}){
 async function _crmPendenciasExcluirIdb(ctx,pares,retornarResultado=false){
   const pendingKey=_crmPendKey(ctx),cacheKey=window._s012StorageKey?.('crm',ctx);
   if(!ctx?.owner||!pendingKey||!cacheKey) return false;
-  const itens=pares.map(p=>({...p,lid:String(p.lid),ano:String(p.ano),opId:p.op?.opId||null}));
+  const itens=pares.map(p=>({...p,lid:String(p.lid),ano:String(p.ano),
+    opId:p.op?._crmFenceBaseAbsent?(p.op.baseOpId||null):(p.op?.opId||null),ramOpId:p.op?._crmFenceBaseAbsent?p.op.opId:null}));
+  const cercaAindaIgual=p=>{
+    const mem=_crmPendenciasMemoria.get(_crmMemKey(ctx,p.lid,p.ano));
+    if(!p.op?.exclusaoRemota)return !mem?.exclusaoRemota;
+    return mem?.opId===p.op.opId
+      &&Number(mem.exclusaoRemota?.ts)===Number(p.op.exclusaoRemota.ts)
+      &&(mem.exclusaoRemota?.gid||null)===(p.op.exclusaoRemota.gid||null);
+  };
   if(itens.some(p=>p.op&&p.op.owner!==ctx.owner))return false;
   if(!itens.length)return true;
   const motivo=_idbMotivo();
@@ -18510,7 +18704,10 @@ async function _crmPendenciasExcluirIdb(ctx,pares,retornarResultado=false){
         try{
           const state=_crmLerObjeto(pRaw,{versao:1,entradas:{}}),cubos=_crmLerObjeto(cRaw,{});
           state.entradas=state.entradas||{};
-          if(itens.some(p=>(state.entradas[_crmParKey(p.lid,p.ano)]?.opId||null)!==p.opId))return;
+          if(itens.some(p=>{
+            const id=state.entradas[_crmParKey(p.lid,p.ano)]?.opId||null;
+            return (id!==p.opId&&(!p.ramOpId||id!==p.ramOpId))||!cercaAindaIgual(p);
+          }))return;
           removidas=itens.map(p=>({owner:ctx.owner,lid:p.lid,ano:p.ano,tipo:'excluir',confirmada:true,
             opId:'crm-del-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
             gid:p.remoto?.gid||null,ts:Number(p.remoto?.ts)||0,cubo:null,epoch:Number(state.epoch)||0}));
@@ -18528,7 +18725,8 @@ async function _crmPendenciasExcluirIdb(ctx,pares,retornarResultado=false){
     _crmCacheRevisao.set(ctx.owner,revisao);
     removidas.forEach((op,i)=>{
       const key=_crmMemKey(ctx,op.lid,op.ano),mem=_crmPendenciasMemoria.get(key);
-      if((mem?.opId||null)===itens[i].opId)_crmPendenciasMemoria.set(key,{...op,_duravelRam:true});
+      if(cercaAindaIgual(itens[i])&&((mem?.opId||null)===itens[i].opId||mem?.opId===itens[i].ramOpId))
+        _crmPendenciasMemoria.set(key,{...op,_duravelRam:true});
     });
     if(window._s012ContextoValido(ctx))_crmMarcarCacheDuravel(ctx,efetivo);
     return retornarResultado?{ok:true,duravel:true,op:removidas.length===1?{...removidas[0]}:null}:true;
@@ -18543,16 +18741,26 @@ window.crmPendenciaReterExclusaoIdb=async function(ctx,lid,ano,op,remoto,cuboLeg
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!remoto)return null;
   const pendingKey=_crmPendKey(ctx),cacheKey=window._s012StorageKey('crm',ctx);
   const pair=_crmParKey(lid,ano),key=_crmMemKey(ctx,lid,ano),opId=op?.opId||null;
-  // O registro anterior precisa terminar antes de anexar a exclusão à mesma op.
-  await _crmPendenciasEmGravacao.get(key);
-  if(!window._s012ContextoValido(ctx)||(window.crmPendenciaAtual(ctx,lid,ano)?.opId||null)!==opId)return null;
+  const atual=window.crmPendenciaAtual(ctx,lid,ano);
+  if((atual?.opId||null)!==opId)return null;
+  if(op&&atual?.exclusaoRemota
+      &&(Number(atual.exclusaoRemota.ts)!==Number(op.exclusaoRemota?.ts)
+        ||(atual.exclusaoRemota.gid||null)!==(op.exclusaoRemota?.gid||null)))return null;
   const original=op||{owner:ctx.owner,lid:String(lid),ano:String(ano),tipo:'gravar',
     opId:'crm-held-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
+    baseOpId:null,_crmFenceBaseAbsent:true,
     marker:window._crmNaoEnviados?.[pair],cubo:JSON.parse(JSON.stringify(cuboLegado||{})),
     epoch:_crmCacheEpoch.get(ctx.owner)||0};
   if(original.owner!==ctx.owner||original.tipo!=='gravar'||!original.cubo)return null;
-  const held={...JSON.parse(JSON.stringify(original)),exclusaoRemota:{ts:Number(remoto.ts)||0,gid:remoto.gid}};
-  delete held._duravelRam;
+  const held={...JSON.parse(JSON.stringify(original)),exclusaoRemota:{ts:Number(remoto.ts)||0,gid:remoto.gid||null},_duravelRam:false};
+  delete held.liberaExclusao;
+  _crmPendenciasMemoria.set(key,held);
+  if(D.crm?.[lid]?.[ano]){
+    try{window._s012GravarSnapshotLocal?.(ctx,D);}catch(e){console.warn('[crm] rascunho cercado mantido em RAM:',e.message||e);}
+  }
+  // Keep the fence live while an earlier registration transaction drains.
+  await _crmPendenciasEmGravacao.get(key);
+  if(!window._s012ContextoValido(ctx)||_crmPendenciasMemoria.get(key)!==held)return null;
   const db=await _idbAbrir();let gravou=false,revisao=null,efetivo=null;
   try{
     await new Promise((resolve,reject)=>{
@@ -18562,13 +18770,18 @@ window.crmPendenciaReterExclusaoIdb=async function(ctx,lid,ano,op,remoto,cuboLeg
         if(++n!==2)return;
         try{
           const state=_crmLerObjeto(pRaw,{versao:1,entradas:{}});state.entradas=state.entradas||{};
-          const atual=state.entradas[pair],idAtual=atual?.opId||null;
-          if(!window._s012ContextoValido(ctx)||(window.crmPendenciaAtual(ctx,lid,ano)?.opId||null)!==opId
-              ||(Number(state.epoch)||0)!==(Number(original.epoch)||0))return;
-          if(idAtual!==opId&&!(op?._duravelRam===false&&idAtual===(op.baseOpId||null)))return;
-          if(atual&&atual.opId!==held.opId&&!atual.confirmada)
-            (state.conflitos||(state.conflitos={}))[atual.opId]=atual;
-          state.entradas[pair]=held;revisao=state.revisao=(Number(state.revisao)||0)+1;
+          const atualPersistido=state.entradas[pair],idAtual=atualPersistido?.opId||null;
+          const sucessorVolatil=op?._duravelRam===false&&atualPersistido?.opId===op.baseOpId
+            &&atualPersistido.owner===ctx.owner&&atualPersistido.lid===String(lid)
+            &&String(atualPersistido.ano)===String(ano)
+            &&(Number(atualPersistido.epoch)||0)===(Number(original.epoch)||0);
+          if(!window._s012ContextoValido(ctx)||_crmPendenciasMemoria.get(key)!==held
+              ||(Number(state.epoch)||0)!==(Number(original.epoch)||0)
+              ||(idAtual!==opId&&!sucessorVolatil&&!(original._crmFenceBaseAbsent&&idAtual===null)))return;
+          if(atualPersistido&&atualPersistido.opId!==held.opId&&!atualPersistido.confirmada)
+            (state.conflitos||(state.conflitos={}))[atualPersistido.opId]=atualPersistido;
+          const salvo={...held};delete salvo._duravelRam;delete salvo._crmFenceBaseAbsent;
+          state.entradas[pair]=salvo;revisao=state.revisao=(Number(state.revisao)||0)+1;
           efetivo=_crmAplicarPendencias(_crmLerObjeto(cRaw,{}),state,ctx.owner);
           os.put(JSON.stringify(state),pendingKey);os.put(JSON.stringify(efetivo),cacheKey);gravou=true;
         }catch(e){erro=e;try{tx.abort();}catch(_){}}
@@ -18579,8 +18792,10 @@ window.crmPendenciaReterExclusaoIdb=async function(ctx,lid,ano,op,remoto,cuboLeg
     });
     if(!gravou)return null;
     _crmCacheRevisao.set(ctx.owner,revisao);
-    if((window.crmPendenciaAtual(ctx,lid,ano)?.opId||null)===opId)
-      _crmPendenciasMemoria.set(key,{...held,_duravelRam:true});
+    if(_crmPendenciasMemoria.get(key)===held){
+      const duravel={...held,_duravelRam:true};delete duravel._crmFenceBaseAbsent;
+      _crmPendenciasMemoria.set(key,duravel);
+    }
     if(window._s012ContextoValido(ctx))_crmMarcarCacheDuravel(ctx,efetivo);
     return held;
   }finally{db.close();}
@@ -18599,7 +18814,7 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
   try{
     if(!window._s012ContextoValido(ctx)||window.crmPendenciaAtual(ctx,lid,ano)?.opId!==opId)return false;
     if(reimportar){
-      const nova=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,op.cubo,'gravar',op.epoch);
+      const nova=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,op.cubo,'gravar',op.epoch,{importacaoExplicita:true});
       if(!nova){
         const tentativa=window.crmPendenciaAtual(ctx,lid,ano);
         if(tentativa?._duravelRam===false&&tentativa.baseOpId===opId)
@@ -47459,19 +47674,43 @@ window._crmN003Progresso = (()=>{
     if(!regiao)return;
     const t=ativo();
     regiao.hidden=!t;
-    if(!t)return;
+    if(!t){
+      regiao.setAttribute('aria-busy','false');
+      for(const id of ['crm-progress-title','crm-progress-message','crm-progress-summary']){
+        const el=elemento(id);if(el){el.textContent='';el.hidden=true;}
+      }
+      const pares=elemento('crm-progress-pairs');
+      if(pares){pares.replaceChildren();pares.hidden=true;}
+      return;
+    }
     regiao.setAttribute('aria-busy',String(!t.finalizado));
     const title=elemento('crm-progress-title'), msg=elemento('crm-progress-message');
     const summary=elemento('crm-progress-summary'), list=elemento('crm-progress-pairs');
     const bar=elemento('crm-progress-meter');
-    if(title)title.textContent=t.titulo;
-    if(msg)msg.textContent=t.mensagem||'Aguardando início da etapa.';
+    const admin=t.ctx?.perfil==='admin';
+    const paresTarefa=[...t.pares.values()];
+    const falha=t.falha||paresTarefa.some(x=>x.estado==='falhou');
+    const pendente=paresTarefa.some(x=>(x.estado==='incerto'&&!x.ausenteConfirmado)||x.estado==='local'||x.pendenteLocal||x.alteracaoLocalPendente
+      ||(t.finalizado&&x.estado==='pendente'));
+    const aviso=[falha?'Falha ao sincronizar CRM':'',pendente?'Sincronização pendente':''].filter(Boolean).join(' · ');
+    const medido=t.progressKnown&&t.total>0&&Number.isFinite(t.total)&&Number.isFinite(t.done);
+    const percentual=medido?Math.floor(Math.min(Math.max(0,t.done),t.total)/t.total*100):null;
+    if(title){title.hidden=!admin;title.textContent=admin?t.titulo:'';}
+    if(msg){
+      const resumoLoja=[percentual===null?'':`${percentual}%`,aviso].filter(Boolean).join(' · ');
+      msg.hidden=!admin&&!resumoLoja;
+      msg.textContent=admin?(t.mensagem||'Aguardando início da etapa.'):resumoLoja;
+    }
     if(bar){
-      if(t.progressKnown&&t.total>0&&Number.isFinite(t.total)&&Number.isFinite(t.done)){
+      if(medido){
         bar.max=t.total;bar.value=Math.min(Math.max(0,t.done),t.total);bar.hidden=false;
       }else{bar.removeAttribute('value');bar.hidden=t.progressKnown&&t.total===0;}
+      bar.style.display=bar.hidden?'none':'block';
     }
     if(summary){
+      summary.hidden=!admin;
+      if(!admin){summary.textContent='';}
+      else{
       const vals=[...t.pares.values()];
       const confirmados=vals.filter(x=>x.estado==='confirmado').length;
       const incertos=vals.filter(x=>x.estado==='incerto').length;
@@ -47483,13 +47722,17 @@ window._crmN003Progresso = (()=>{
       summary.textContent=percentual+(vals.length
         ?`Servidor confirmado: ${confirmados}; sem confirmação remota: ${incertos}; falhas: ${falhas}; pendentes/locais: ${pendentes}; alterações locais sem confirmação: ${alteracoesLocaisPendentes}; confirmação local pendente: ${locaisSemAck}.`
         :'');
+      }
     }
     if(list){
       list.replaceChildren();
-      for(const [key,pair] of t.pares){
-        const li=document.createElement('li');
-        li.textContent=`${key.replace('|',' / ')} — ${pair.rotulo}`;
-        list.appendChild(li);
+      list.hidden=!admin;
+      if(admin){
+        for(const [key,pair] of t.pares){
+          const li=document.createElement('li');
+          li.textContent=`${key.replace('|',' / ')} — ${pair.rotulo}`;
+          list.appendChild(li);
+        }
       }
     }
   }
@@ -47505,7 +47748,7 @@ window._crmN003Progresso = (()=>{
   function atualizar(t,e={}){
     if(!contextoValido(t))return;
     if(e.tipo==='leitura-falha'){finalizar(t,{falha:true,mensagem:e.mensagem||'Leitura CRM sem confirmação.'});return;}
-    if(e.tipo==='leitura-concluida'){finalizar(t,{mensagem:`Leitura terminou: ${e.carregados||0} carregados; ${e.removidos||0} removidos; ${e.falhas||0} falhas em ${e.total||0} pares.`});return;}
+    if(e.tipo==='leitura-concluida'){finalizar(t,{falha:e.falhas>0,mensagem:`Leitura terminou: ${e.carregados||0} carregados; ${e.removidos||0} removidos; ${e.falhas||0} falhas em ${e.total||0} pares.`});return;}
     if(e.mensagem)t.mensagem=e.mensagem;
     if(e.etapa){t.titulo=e.etapa;if(!Number.isFinite(e.total)&&!Number.isFinite(e.done)&&!Number.isFinite(e.confirmados)&&!Number.isFinite(e.concluidos)){t.done=0;t.total=0;t.progressKnown=false;}}
     if(Number.isFinite(e.done))t.done=e.done;
@@ -47536,6 +47779,7 @@ window._crmN003Progresso = (()=>{
       if(e.tipo==='leitura-par-iniciado')pair.rotulo='Lendo no servidor';
       if(e.tipo==='leitura-partes')pair.rotulo=`Partes lidas ${e.concluidas||0}/${e.total||0}`;
       if(e.tipo==='leitura-par-resultado'){
+        pair.ausenteConfirmado=e.estado==='ausente-no-servidor';
         if(e.estado==='confirmado-no-servidor'){pair.estado='confirmado';pair.rotulo='Confirmado no servidor';}
         else if(e.estado==='somente-local'){pair.estado='local';pair.rotulo='Somente nesta máquina';}
         else if(e.estado==='pendencia-local-preservada'){pair.estado='local';pair.rotulo='Pendência local preservada';}
@@ -47553,6 +47797,7 @@ window._crmN003Progresso = (()=>{
     if(!contextoValido(t))return;
     if(t.finalizado)return;
     t.finalizado=true;
+    t.falha=!!e.falha;
     t.fim=++sequencia;
     if(e.mensagem)t.mensagem=e.mensagem;
     else if(e.falha)t.mensagem='A operação terminou com falha; confira os estados por ano.';
@@ -48295,7 +48540,8 @@ window.excelLimparDados = async function(){
   };
   const _finalizarCacheS014=async()=>{
     const itens=pares.map(([lid,ano])=>({lid,ano,op:_opsCrmS014.get(lid+'|'+ano),remoto:_remotosS014.get(lid+'|'+ano)}));
-    if(itens.some(p=>(window.crmPendenciaAtual(_s012CtxS024,p.lid,p.ano)?.opId||null)!==(p.op?.opId||null))
+    if(itens.some(p=>(window.crmPendenciaAtual(_s012CtxS024,p.lid,p.ano)?.opId||null)
+          !==(p.op?.opId||null))
         ||!await _crmPendenciasExcluirIdb(_s012CtxS024,itens))throw new Error('outra revisão CRM foi preservada');
     if(!_estadoAplicadoAindaIgualS014()){
       if(_s012ContextoValido(_s012CtxS024)){
@@ -48356,6 +48602,12 @@ window.excelLimparDados = async function(){
           _escritas.push(_indice);
           await window._crmGravarLote(_escritas,undefined,_s012CtxS024,true);
           apagados++;
+          // A lápide já foi confirmada; instale a cerca em RAM antes de qualquer
+          // finalização local que possa falhar. O snapshot owner-scoped preserva o cubo.
+          const opAntes=_opsCrmS014.get(lid+'|'+ano);
+          const opCercada=window._crmInstalarCercaExclusaoRAM?.(_s012CtxS024,lid,ano,
+            {ts:_ts,gid:_gid},_dadosS024.crm?.[lid]?.[ano],opAntes);
+          if(opCercada)_opsCrmS014.set(lid+'|'+ano,opCercada);
           // Um lote já despachado pode confirmar apenas o carimbo persistido
           // da identidade que o iniciou, mesmo após a troca de perfil.
           _crmMarcarVisto(lid, ano, _ts, _gid, _s012CtxS024);
