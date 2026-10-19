@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-18i';
+window.AVATIM_BUILD = '2026-10-19b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -11269,12 +11269,29 @@ window._s012ResolverRetencao=function(ctx,prova){
   if(!ctx?.owner) return false;
   const ret=_s012RetencoesPorOwner.get(ctx.owner);
   if(!ret) return false;
+  let bruto;
   // Se este é o próprio owner ativo, atualizar a retenção para a revisão mais
   // recente antes de provar armazenamento/ACK. Uma resposta antiga de outra
   // geração nunca substitui os bytes privados mais novos.
   if(window._s012ContextoValido?.(ctx)){
     ret.ctx=Object.assign({},ctx);
-    ret.dados=_s012Clone(D);
+    // Retenções são JSON privado. Serialize a fonte atual uma vez e reutilize
+    // o snapshot já retido quando os bytes forem iguais; só copie a árvore
+    // inteira quando esta chamada observou conteúdo novo.
+    const dadosJsonAtual=_s012JsonSeguro(D);
+    if(typeof dadosJsonAtual==='string'){
+      const dadosJsonRetido=_s012JsonSeguro(ret.dados);
+      if(dadosJsonRetido===dadosJsonAtual) bruto=dadosJsonAtual;
+      else{
+        ret.dados=_s012Clone(D);
+        const dadosJsonCopiados=_s012JsonSeguro(ret.dados);
+        bruto=dadosJsonCopiados===dadosJsonAtual?dadosJsonAtual:dadosJsonCopiados;
+      }
+    }else{
+      // Keep the historical clone fallback (`{}` on serialization failure).
+      ret.dados=_s012Clone(D);
+      bruto=_s012JsonSeguro(ret.dados);
+    }
     // Uma revisão confirmada não pode restaurar a cerca antiga ao reabrir a sessão.
     const crmSnapshot=window._crmPrepararSnapshotLocal?.(ctx,ret.dados);
     if(crmSnapshot)ret.crmPendencias=_s012Clone(crmSnapshot._crmPendenciasSnapshot?.ops||[]);
@@ -11297,7 +11314,7 @@ window._s012ResolverRetencao=function(ctx,prova){
     ret.s024={localOnly:_s012Clone(window._s024LocalOnly),intencoes:(()=>{try{return _s024LerIntencoes(ctx);}catch(e){return ret.s024?.intencoes||[];}})(),
       intencoesRaw:_s012LerRawOwner('s024',ctx)};
   }
-  const bruto=_s012JsonSeguro(ret.dados);
+  if(bruto===undefined) bruto=_s012JsonSeguro(ret.dados);
   if(prova?.remotePayload && prova.remotePayload===bruto){
     const crm=ret.dados?.crm||{};
     // fsGravar confirma principal/lojas, mas não publica os cubos CRM. Um ACK
@@ -11306,10 +11323,13 @@ window._s012ResolverRetencao=function(ctx,prova){
       ret.remoteAck=prova.remotePayload;
   }
   if(prova?.pendingPayload && ret.pendingJson===prova.pendingPayload) ret.pendingAck=true;
-  if(ret.remoteAck!==bruto && !window._s012SnapshotLocalCobre(ctx,ret.dados))
+  let snapshotLocalCobre=window._s012SnapshotLocalCobre(ctx,ret.dados);
+  if(ret.remoteAck!==bruto && !snapshotLocalCobre){
     _s012SalvarSnapshotComCacheOwner(ctx,ret.dados);
-  const localCompleto=window._s012SnapshotLocalCobre(ctx,ret.dados)
-    &&_s012AuxiliaresRetidosDuraveis(ctx,ret);
+    // A save attempt can change localStorage, so recheck once after it.
+    snapshotLocalCobre=window._s012SnapshotLocalCobre(ctx,ret.dados);
+  }
+  const localCompleto=snapshotLocalCobre&&_s012AuxiliaresRetidosDuraveis(ctx,ret);
   const conhecido=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner);
   if(localCompleto && !conhecido && !_s012RetencoesIdbDuraveisPorOwner.has(ctx.owner)
       &&!_s012RetencaoIdbFila.has(ctx.owner)){
@@ -11319,7 +11339,8 @@ window._s012ResolverRetencao=function(ctx,prova){
   // A tombstone is committed before retiring an older fallback. Its full
   // bytes must match the latest data, ACK and sidecars, not an earlier write.
   ret.liberada=localCompleto;
-  if(!_s012RetencaoIdbCobre(ctx,ret)){
+  const retencaoIdbAtualCobre=_s012RetencaoIdbCobre(ctx,ret);
+  if(!retencaoIdbAtualCobre){
     window._s012GravarRetencaoIdb?.(ctx);
     return false;
   }
@@ -11328,7 +11349,8 @@ window._s012ResolverRetencao=function(ctx,prova){
     _s012RetencoesIdbDuraveisPorOwner.delete(ctx.owner);
     _s012RetencoesIdbEstadoPorOwner.delete(ctx.owner);
   }
-  if(![..._s012RetencoesPorOwner.values()].some(r=>!_s012RetencaoIdbCobre(r.ctx,r)))
+  if(![..._s012RetencoesPorOwner.values()].some(r=>r===ret
+      ?!retencaoIdbAtualCobre:!_s012RetencaoIdbCobre(r.ctx,r)))
     window.removeEventListener?.('beforeunload',_s012AvisarRetencaoAntesFechar);
   return true;
 };
@@ -15978,13 +16000,18 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
     throw new Error('s012-sessao-alterada');
   const fonte=cuboOverride===undefined ? ((D.crm||{})[lid]||{})[ano] : cuboOverride;
   if(!fonte) throw new Error('Sem cubo para ' + lid + '/' + ano);
-  const dadosEnvio=D,fonteLocalInicial=JSON.stringify(D.crm?.[lid]?.[ano]);
+  // Keep the live snapshot fence separate from the bytes this invocation
+  // publishes: callers may pass an older captured override.
+  const dadosEnvio=D,cuboLocalInicial=D.crm?.[lid]?.[ano];
+  const fonteLocalInicial=JSON.stringify(cuboLocalInicial);
+  const fontePublicadaInicial=fonte===cuboLocalInicial
+    ?fonteLocalInicial:JSON.stringify(fonte);
   const chavePendente=lid+'|'+ano;
   const markerEnviado=(window._crmNaoEnviados||{})[chavePendente];
-  let cubo=JSON.parse(JSON.stringify(fonte));
   let opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
-  if(opEnviada?.tipo!=='gravar'&&JSON.stringify(fonte)!==fonteLocalInicial)
+  if(opEnviada?.tipo!=='gravar'&&fontePublicadaInicial!==fonteLocalInicial)
     throw new Error('O conjunto mudou antes do envio; o snapshot antigo não foi publicado.');
+  let cubo=JSON.parse(fontePublicadaInicial);
   if(_crmOpComExclusaoConfirmada(opEnviada))throw new Error('O conjunto foi excluído; somente uma nova importação explícita pode restaurá-lo.');
   const opIdInicial=opEnviada?.opId||null;
   await _crmPendenciasEmGravacao.get(_crmMemKey(ctx,lid,ano));
@@ -16088,9 +16115,25 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
   const _n003Publicacao=ev=>{try{onProgress?.({tipo:'lote',lid,ano,etapa:'publicacao',...ev});}catch(e){console.warn('[crm] progresso:',e.message||e);}};
   _n003Publicacao({confirmados:0,total:2});
   conferirPublicacao();
-  await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true, _n003Publicacao, conferirPublicacao, baseEnvio);
+  const cuboPublicacao=dadosEnvio.crm?.[lid]?.[ano]||null;
+  const publicacaoS033={owner:ctx.owner,geracao:ctx.geracao,lid:String(lid),ano:String(ano),
+    ts,gid,opId:opIdPublicacao,dados:dadosEnvio,cubo:cuboPublicacao,partes:escritasPartes.length};
+  publicacaoS033.reciboAntes=_crmS033EscopoRecibos(ctx).pares.get(lid+'|'+ano);
+  const encerrarPublicacaoS033=_crmS033PublicacaoIniciar(ctx,publicacaoS033);
+  let reciboPublicacaoS033=null;
+  try{
+    // O listener do índice pode disparar antes desta continuação do writeBatch.
+    // Enquanto isso, só este par/geração fica pendente; pares externos seguem leitura.
+    await window._crmGravarLote([escritaCabeca,escritaIndice], undefined, ctx, true, _n003Publicacao, conferirPublicacao, baseEnvio);
+    // O ACK é remoto: este recibo S033 não confirma a durabilidade do IDB nem S042.
+    reciboPublicacaoS033=_crmS033PublicacaoRegistrarRecibo(ctx,publicacaoS033,fontePublicadaInicial);
+    // A seen marker must not let a delayed ACK replace a successor's observation.
+    if(reciboPublicacaoS033)_crmMarcarVisto(lid, ano, ts, gid, ctx);
+  }finally{
+    encerrarPublicacaoS033();
+    if(window._s012ContextoValido(ctx))window._s033AoPendenteAlterada?.(ctx);
+  }
   // Uma confirmação já despachada só atualiza o controle persistido deste owner.
-  _crmMarcarVisto(lid, ano, ts, gid, ctx);
   let confirmada=!opEnviada;
   if(confirmarOp){
     try{ confirmada=await window.crmPendenciaConfirmarIdb(ctx,confirmarOp,cubo,{ts,gid}); }
@@ -16098,6 +16141,13 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
       confirmada=false;
       console.warn('[crm] envio confirmado; ACK local pendente em '+lid+'/'+ano+':',e.code||e.message);
     }
+  }
+  if(confirmada&&reciboPublicacaoS033&&window._s012ContextoValido(ctx)
+      &&D===publicacaoS033.dados&&D.crm?.[lid]?.[ano]===reciboPublicacaoS033.cubo
+      &&!window.crmPendenciaAtual(ctx,lid,ano)){
+    const recibos=_crmS033EscopoRecibos(ctx);
+    if(recibos.pares.get(lid+'|'+ano)===reciboPublicacaoS033)
+      reciboPublicacaoS033.opId=null;
   }
   if(confirmada) window._crmLimparNaoEnviado?.(ctx,lid,ano,markerEnviado);
   try{onProgress?.({tipo:'par-publicado',lid,ano,pendenteLocal:!confirmada});}catch(e){console.warn('[crm] progresso:',e.message||e);}
@@ -16183,12 +16233,161 @@ function _crmS033EscopoRecibos(ctx){
     _crmS033Recibos={owner:ctx?.owner||null,geracao:ctx?.geracao??null,pares:new Map()};
   return _crmS033Recibos;
 }
+const _crmS033PublicacoesEmAndamento=new Map();
+// Only the current explicit reimport may temporarily hold its known old base.
+// This map contains no previous cube/receipt and is never a durability proof.
+const _crmS033BasesPendentes=new Map();
+function _crmS033PublicacaoKey(ctx,lid,ano){
+  return JSON.stringify([ctx?.owner||null,ctx?.geracao??null,String(lid),String(ano)]);
+}
+function _crmS033CapturarBasePendente(ctx,lid,ano){
+  if(!ctx||!window._s012ContextoValido(ctx)||window.crmPendenciaAtual(ctx,lid,ano))return null;
+  const base=_crmS057BaseVista(ctx,lid,ano);
+  if(!base||base.existe!==true||base.apagado!==false||typeof base.gid!=='string'||!base.gid
+      ||!D.crm?.[lid]?.[ano]||!_crmS033ReciboConfere(ctx,lid,ano,base.ts,base.gid))return null;
+  return {owner:ctx.owner,geracao:ctx.geracao,lid:String(lid),ano:String(ano),
+    existe:true,apagado:false,ts:base.ts,gid:base.gid};
+}
+function _crmS033BasePendenteVigente(ctx,p){
+  const dirty=p&&window._crmNaoEnviados?.[p.lid+'|'+p.ano];
+  if(!p||!ctx||p.owner!==ctx.owner||p.geracao!==ctx.geracao
+      ||!window._s012ContextoValido(ctx)||D.crm?.[p.lid]?.[p.ano]!==p.cubo
+      // Hydration restores the same operation's marker, generated separately
+      // from crmGuardar's dirty marker. No third marker is covered.
+      ||(dirty!==p.dirty&&dirty!==p.marker))return false;
+  const op=window.crmPendenciaAtual(ctx,p.lid,p.ano);
+  return !!op&&op.owner===ctx.owner&&op.lid===p.lid&&String(op.ano)===p.ano
+    &&op.opId===p.opId&&op.marker===p.marker&&op.tipo==='gravar'&&!op.confirmada
+    &&!op.exclusaoRemota&&!op.liberaExclusao
+    &&(Number(op.epoch)||0)===(Number(_crmCacheEpoch.get(ctx.owner))||0)
+    &&_crmS057BasesMesmaRevisao(op.baseRemota,p.base)
+    &&_crmS057BasesMesmaRevisao(_crmS057BaseVista(ctx,p.lid,p.ano),p.base);
+}
+function _crmS033VincularBasePendente(ctx,op,cubo,base){
+  if(!base||base.owner!==ctx.owner||base.geracao!==ctx.geracao
+      ||base.lid!==op.lid||base.ano!==String(op.ano)||!Number.isFinite(op.marker)
+      ||op.marker<=0||typeof op.opId!=='string'||!op.opId)return;
+  const dirty=window._crmNaoEnviados?.[op.lid+'|'+op.ano];
+  if(!Number.isFinite(dirty)||dirty<=0)return;
+  const p={owner:ctx.owner,geracao:ctx.geracao,lid:op.lid,ano:String(op.ano),
+    opId:op.opId,marker:op.marker,dirty,cubo,
+    base:{existe:true,apagado:false,gid:base.gid,ts:base.ts}};
+  if(_crmS033BasePendenteVigente(ctx,p))
+    _crmS033BasesPendentes.set(_crmS033PublicacaoKey(ctx,op.lid,op.ano),p);
+}
+function _crmS033BasePendenteConfere(ctx,lid,ano,ts,revisao,servidor){
+  const key=_crmS033PublicacaoKey(ctx,lid,ano),p=_crmS033BasesPendentes.get(key);
+  if(!p)return false;
+  if(!_crmS033BasePendenteVigente(ctx,p)){
+    _crmS033BasesPendentes.delete(key);return false;
+  }
+  if(!servidor)return false;
+  const confere=typeof ts==='number'&&Number.isFinite(ts)&&ts>0
+    &&revisao&&typeof revisao.ts==='number'&&revisao.ts===ts
+    &&typeof revisao.gid==='string'&&!!revisao.gid&&revisao.gid===p.base.gid&&ts===p.base.ts;
+  if(!confere)_crmS033BasesPendentes.delete(key);
+  return !!confere;
+}
+function _crmS033PublicacaoVigente(ctx,p){
+  if(!ctx||!p||p.owner!==ctx.owner||p.geracao!==ctx.geracao
+      ||!window._s012ContextoValido(ctx)||D!==p.dados
+      ||D.crm?.[p.lid]?.[p.ano]!==p.cubo)return false;
+  const op=window.crmPendenciaAtual(ctx,p.lid,p.ano);
+  if((op?.opId||null)!==(p.opId||null))return false;
+  if(op&&(op.tipo!=='gravar'||op.exclusaoRemota))return false;
+  return true;
+}
+function _crmS033PublicacaoIniciar(ctx,p){
+  const key=_crmS033PublicacaoKey(ctx,p.lid,p.ano);
+  let set=_crmS033PublicacoesEmAndamento.get(key);
+  if(!set){set=new Set();_crmS033PublicacoesEmAndamento.set(key,set);}
+  set.add(p);
+  return ()=>{
+    set.delete(p);
+    if(!set.size&&_crmS033PublicacoesEmAndamento.get(key)===set)
+      _crmS033PublicacoesEmAndamento.delete(key);
+  };
+}
+function _crmS033PublicacaoPendenteConfere(ctx,lid,ano,ts,gid){
+  const set=_crmS033PublicacoesEmAndamento.get(_crmS033PublicacaoKey(ctx,lid,ano));
+  if(!set)return false;
+  for(const p of set)if(Number(p.ts)===Number(ts)&&p.gid===gid
+      &&_crmS033PublicacaoVigente(ctx,p))return true;
+  return false;
+}
+function _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,proximo,rehidratacao=false){
+  const estado=_crmS033EscopoRecibos(ctx),idPar=lid+'|'+ano;
+  const recibo=estado.pares.get(idPar);
+  const atual=D.crm?.[lid]?.[ano],op=window.crmPendenciaAtual(ctx,lid,ano);
+  let comparacaoFeita=false,bytesIguais=false;
+  const compararBytes=()=>{
+    if(comparacaoFeita)return bytesIguais;
+    comparacaoFeita=true;
+    try{
+      const bytesAtuais=JSON.stringify(atual),bytesNovos=JSON.stringify(proximo);
+      bytesIguais=typeof bytesAtuais==='string'&&bytesAtuais===bytesNovos;
+    }catch(e){}
+    return bytesIguais;
+  };
+  let reatado=false;
+  const chaveBase=_crmS033PublicacaoKey(ctx,lid,ano),basePendente=_crmS033BasesPendentes.get(chaveBase);
+  if(basePendente){
+    if(rehidratacao&&_crmS033BasePendenteVigente(ctx,basePendente)&&compararBytes()){
+      basePendente.cubo=proximo;reatado=true;
+    }else _crmS033BasesPendentes.delete(chaveBase);
+  }
+  if(recibo?.publication){
+    if(rehidratacao&&recibo.owner===ctx?.owner&&recibo.geracao===ctx?.geracao
+        &&recibo.cubo===atual&&(op?.opId||null)===(recibo.opId||null)
+        &&(!op||(op.tipo==='gravar'&&!op.exclusaoRemota))&&compararBytes()){
+      // Hydration may clone this exact pending cube. Move the single strong
+      // reference so the receipt never pins a replaced cube.
+      recibo.cubo=proximo;reatado=true;
+    }else estado.pares.delete(idPar);
+  }
+  if(rehidratacao){
+    const set=_crmS033PublicacoesEmAndamento.get(_crmS033PublicacaoKey(ctx,lid,ano));
+    if(set)for(const p of set){
+      if(_crmS033PublicacaoVigente(ctx,p)&&p.cubo===atual&&compararBytes()){
+        // The remote ACK may still be pending. Keep only this exact pair's
+        // in-flight marker attached to an equivalent hydrated cube.
+        p.cubo=proximo;reatado=true;
+      }
+    }
+  }
+  return reatado;
+}
+function _crmS033PublicacaoRegistrarRecibo(ctx,p,snapshot){
+  if(typeof snapshot!=='string'||!_crmS033PublicacaoVigente(ctx,p)
+      ||JSON.stringify(D.crm?.[p.lid]?.[p.ano])!==snapshot)return null;
+  const estado=_crmS033EscopoRecibos(ctx),idPar=p.lid+'|'+p.ano;
+  const anterior=estado.pares.get(idPar);
+  // Keep a different receipt installed by a reader after this publication
+  // started; replace only the exact prior receipt captured before dispatch.
+  if(anterior&&(Number(anterior.ts)===Number(p.ts)&&anterior.gid===p.gid)
+      &&_crmS033ReciboConfere(ctx,p.lid,p.ano,p.ts,p.gid))return anterior;
+  if(anterior!==(p.reciboAntes||undefined))return null;
+  const recibo={serverBacked:true,ts:p.ts,gid:p.gid,partes:p.partes,
+    publication:true,owner:p.owner,geracao:p.geracao,
+    cubo:p.cubo,opId:p.opId};
+  estado.pares.set(idPar,recibo);
+  return recibo;
+}
 function _crmS033ReciboConfere(ctx,lid,ano,ts,gid){
   const estado=_crmS033EscopoRecibos(ctx), recibo=estado.pares.get(lid+'|'+ano);
-  return !!recibo&&recibo.serverBacked===true&&Number(recibo.ts)===Number(ts)
-    &&(!gid||recibo.gid===gid);
+  if(!recibo||recibo.serverBacked!==true||Number(recibo.ts)!==Number(ts)
+      ||(gid&&recibo.gid!==gid))return false;
+  if(recibo.publication===true){
+    if(recibo.owner!==ctx?.owner||recibo.geracao!==ctx?.geracao
+        ||D.crm?.[lid]?.[ano]!==recibo.cubo)return false;
+    const op=window.crmPendenciaAtual(ctx,lid,ano);
+    if((op?.opId||null)!==(recibo.opId||null)||(op&&(op.tipo!=='gravar'||op.exclusaoRemota)))return false;
+  }
+  return true;
 }
 window._s012AoTrocarSessao.push(ctx=>{
+  for(const [key,p] of _crmS033BasesPendentes)
+    if(!ctx||p.owner!==ctx.owner||p.geracao!==ctx.geracao)_crmS033BasesPendentes.delete(key);
   if(!ctx||_crmS033Recibos.owner!==ctx.owner||_crmS033Recibos.geracao!==ctx.geracao)
     _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
 });
@@ -16578,6 +16777,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
         if(atual?.opId!==held.opId||!atual.exclusaoRemota
             ||window._crmNaoEnviados?.[_chavePendente]!==_markerCargaInicio
             ||dadosAlvo.crm[lid]?.[ano]!==_cuboCargaInicio)continue;
+        _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null);
         if(dadosAlvo.crm[lid]){delete dadosAlvo.crm[lid][ano];if(!Object.keys(dadosAlvo.crm[lid]).length)delete dadosAlvo.crm[lid];}
         window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
         _crmMarcarVisto(lid,ano,raw.ts,raw.gid||gidIndice,ctx,_s057BaseLida);
@@ -16632,6 +16832,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
             ||(!resultadoExclusao.duravel&&!exclusaoVolatilSegura)
             ||(dadosAlvo.crm[lid]||{})[ano]!==_cuboCargaInicio) continue;
         if(dadosAlvo.crm[lid]){
+          _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null);
           delete dadosAlvo.crm[lid][ano];
           if(!Object.keys(dadosAlvo.crm[lid]).length) delete dadosAlvo.crm[lid];
         }
@@ -16781,6 +16982,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress){
       }
       if(_pendenciaMudouDuranteCarga()) continue;
       if(!dadosAlvo.crm[lid]) dadosAlvo.crm[lid] = {};
+      _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,leves);
       dadosAlvo.crm[lid][ano] = leves;
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
       _s033RegistrarPar(); carregados++;
@@ -16877,12 +17079,13 @@ window.crmAtualizarSeMudou = async function(opts){
     try{ ({mod, db} = await _bkFirestore()); }catch(e){ return 0; }
     if(!window._s012ContextoValido(ctx)) return 0;
     const {getDoc, doc} = mod;
-    let carimbos, geracoes;
+    let carimbos, geracoes, indiceServidor=false;
     try{
       const snap = await getDoc(doc(db, 'avatim', CRM_INDICE));
       if(!window._s012ContextoValido(ctx)) return 0;
       _crmIndiceLidoEm = Date.now();
       const meta=snap?.metadata||{};
+      indiceServidor=meta.fromCache===false&&meta.hasPendingWrites===false;
       if(proof) proof.indexServerBacked=meta.fromCache===false&&meta.hasPendingWrites===false;
       if(!snap.exists()){
         if(proof){
@@ -16906,13 +17109,21 @@ window.crmAtualizarSeMudou = async function(opts){
     const lojas = ctx.perfil==='admin'
       ? (typeof LOJAS !== 'undefined' ? LOJAS.map(l=>l.id) : [])
       : [ctx.loja].filter(Boolean);
-    const mudados = [];
+    const mudados = [], adiados=[];
     lojas.forEach(lid => Object.entries(carimbos[lid] || {}).forEach(([ano, ts]) => {
       if(!(Number(ts) > 0)) return;
       const revisao = (geracoes[lid] || {})[ano];
       // Writer antigo muda só carimbos: não usar a geração deixada por outro envio.
       const gid = revisao && Number(revisao.ts) === Number(ts)
         && typeof revisao.gid === 'string' ? revisao.gid : null;
+      if(_crmS033PublicacaoPendenteConfere(ctx,lid,String(ano),Number(ts),gid)){
+        adiados.push([lid,String(ano),gid,Number(ts)]);
+        return;
+      }
+      if(_crmS033BasePendenteConfere(ctx,lid,String(ano),ts,revisao,indiceServidor)){
+        adiados.push([lid,String(ano),gid,Number(ts)]);
+        return;
+      }
       const visto = window._crmTsVisto || {};
       const mesmoIndice=Number(ts)===Number((visto[lid]||{})[ano])
         &&(!gid||gid===(((visto._geracoes||{})[lid]||{})[ano]));
@@ -16933,8 +17144,9 @@ window.crmAtualizarSeMudou = async function(opts){
       mudados.push([lid, ano, gid, Number(ts)]);
     }));
     if(proof) proof.expectedPairs=mudados.map(x=>[x[0],String(x[1])]);
+    if(proof) proof.deferredPairs=adiados.map(x=>[x[0],String(x[1])]);
     if(!mudados.length){
-      if(proof) proof.complete=proof.indexServerBacked===true
+      if(proof) proof.complete=adiados.length===0&&proof.indexServerBacked===true
         &&proof.marker===proof.expectedMarker;
       return 0;
     }
@@ -16944,7 +17156,7 @@ window.crmAtualizarSeMudou = async function(opts){
     if(n && typeof window.crmAgendarGravacaoIdb === 'function') window.crmAgendarGravacaoIdb(ctx);
     if(proof){
       const pares=proof.expectedPairs||[];
-      proof.complete=proof.indexServerBacked===true&&proof.marker===proof.expectedMarker
+      proof.complete=adiados.length===0&&proof.indexServerBacked===true&&proof.marker===proof.expectedMarker
         &&pares.length>0&&pares.every(([lid,ano])=>proof.pairs?.[lid+'|'+ano]?.complete===true);
     }
     return n;
@@ -17038,6 +17250,7 @@ window.crmApagar = async function(lid, ano){
     try{cacheExcluido=await window.crmPendenciaExcluirIdb(ctx,lid,ano,opAoExcluir);}
     catch(eCache){showToast('Não foi possível remover o cache CRM: '+eCache.message,'err');return false;}
     if(!cacheExcluido){showToast('Outra edição do conjunto foi preservada.','warn');return false;}
+    _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null);
     delete D.crm[lid][ano];
     if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
     window._crmEmitirAtualizacaoUI?.([{lid,ano:String(ano)}], 'exclusao-local');
@@ -17053,6 +17266,7 @@ window.crmApagar = async function(lid, ano){
 
   if(erroCache){showToast('Excluído no servidor, mas a limpeza local falhou: '+erroCache.message,'err');return false;}
   if(!cacheExcluido||D.crm?.[lid]?.[ano]!==cubo){showToast('Exclusão enviada; uma importação mais recente foi preservada.','warn');return true;}
+  _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null);
   delete D.crm[lid][ano];
   if(!Object.keys(D.crm[lid]).length) delete D.crm[lid];
   window._crmEmitirAtualizacaoUI?.([{lid,ano:String(ano)}], 'exclusao-remota');
@@ -18269,7 +18483,7 @@ window.crmFundirCubos = function(a, b){
 };
 
 /** Guarda o cubo de uma loja/ano em D.crm e devolve um diagnóstico. */
-window.crmGuardar = function(lid, ano, cubo){
+window.crmGuardar = function(lid, ano, cubo, opcoes={}){
   const detalheCompra=cubo?._comprasCliente;
   if(detalheCompra?.versao===1&&detalheCompra.disponivel===true&&!Array.isArray(detalheCompra.itens))
     throw new Error('O detalhe de compras está inválido; os dados anteriores foram preservados.');
@@ -18348,12 +18562,15 @@ window.crmGuardar = function(lid, ano, cubo){
   if(ctx&&!marcou) throw new Error('Não foi possível registrar a importação pendente. Os dados anteriores foram preservados; tente novamente.');
   const _crmS057BaseAusentePermitida=!D.crm?.[lid]?.[ano]
     &&!window.crmPendenciaAtual(ctx,lid,ano);
+  const _crmS033BaseAnterior=_crmS033CapturarBasePendente(ctx,lid,String(ano));
+  _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,cubo);
   D.crm[lid][ano] = cubo;
   window._crmEmitirAtualizacaoUI?.([{lid,ano:String(ano)}], 'gravacao-local');
   if(ctx?.perfil==='admin'){
     window._s012InvalidarCrmDuravel?.(ctx);
     window.crmPendenciaRegistrarIdb(ctx,lid,ano,cubo,'gravar',undefined,
-      {importacaoExplicita:true,baseAusentePermitida:_crmS057BaseAusentePermitida});
+      {importacaoExplicita:true,baseAusentePermitida:_crmS057BaseAusentePermitida,
+        s067cBaseAnterior:_crmS033BaseAnterior,s067cIdb:opcoes.s067cIdb});
   }
 
   const leves = Object.assign({}, cubo); delete leves.clientes;
@@ -19443,6 +19660,31 @@ function _idbAbrir(){
   });
 }
 
+// Open before copying import cubes; a per-pair open callback can otherwise
+// expire while the next cube and owner snapshots occupy the main thread.
+async function _crmImportacaoIdbAbrir(ctx){
+  if(!ctx?.owner||!window._s012ContextoValido?.(ctx))throw new Error('Sessão da importação alterada.');
+  if(['file://','sem suporte no navegador'].includes(_idbMotivo()))return null;
+  const identidade={owner:ctx.owner,geracao:ctx.geracao,browserToken:ctx.browserToken,
+    browserRevision:ctx.browserRevision};
+  const db=await _idbAbrir();
+  if(!window._s012ContextoValido?.(ctx)){db.close();throw new Error('Sessão da importação alterada.');}
+  let encerrada=false,usos=0,fechada=false;
+  const fechar=()=>{if(encerrada&&!usos&&!fechada){fechada=true;db.close();}};
+  db.onversionchange=()=>{encerrada=true;if(!fechada){fechada=true;db.close();}};
+  return {
+    usar(atual){
+      if(encerrada||!window._s012ContextoValido?.(atual)
+          ||Object.keys(identidade).some(k=>atual?.[k]!==identidade[k]))
+        throw new Error('Conexão da importação pertence a outra sessão ou já foi encerrada.');
+      usos++;
+      let liberado=false;
+      return {db,soltar(){if(liberado)return;liberado=true;usos--;fechar();}};
+    },
+    encerrar(){encerrada=true;fechar();}
+  };
+}
+
 // S030: a full operational snapshot and its S012 sidecars share one owner-keyed
 // IndexedDB transaction. localStorage remains the synchronous fast path.
 const _s012RetencaoIdbFila=new Map();
@@ -19485,17 +19727,25 @@ function _s012RetencaoStorageExpected(envelope,tipo,ctx){
   if(tipo==='s004-sales') return typeof envelope.s004Raw==='string'?envelope.s004Raw:null;
   return null;
 }
-function _s012RetencaoIdbLer(db,key){
+function _s012RetencaoIdbLer(db,key,aoNativeSettled){
+  let liberarNative=()=>{};
+  const nativeSettled=new Promise(resolve=>{liberarNative=resolve;});
+  if(typeof aoNativeSettled==='function') aoNativeSettled(nativeSettled);
   const leitura=new Promise((resolve,reject)=>{
-    let valor=null;
+    let valor=null,tx=null;
     try{
-      const tx=db.transaction(_IDB.store,'readonly'),rq=tx.objectStore(_IDB.store).get(key);
+      tx=db.transaction(_IDB.store,'readonly');
+      tx.oncomplete=()=>{liberarNative();resolve(valor);};
+      tx.onabort=()=>{liberarNative();reject(tx.error||new Error('leitura do snapshot owner abortada'));};
+      tx.onerror=()=>reject(tx.error||new Error('leitura do snapshot owner falhou'));
+      const rq=tx.objectStore(_IDB.store).get(key);
       rq.onsuccess=()=>{valor=rq.result||null;};
       rq.onerror=()=>reject(rq.error||new Error('leitura do snapshot owner falhou'));
-      tx.oncomplete=()=>resolve(valor);
-      tx.onerror=()=>reject(tx.error||new Error('leitura do snapshot owner falhou'));
-      tx.onabort=()=>reject(tx.error||new Error('leitura do snapshot owner abortada'));
-    }catch(e){ reject(e); }
+    }catch(e){
+      if(tx){try{tx.abort();}catch(_){}}
+      else liberarNative();
+      reject(e);
+    }
   });
   return _s012RetencaoComPrazo(leitura,'leitura do snapshot owner');
 }
@@ -19512,25 +19762,36 @@ window._s012GravarRetencaoIdb=function(ctx){
   const key=window._s012StorageKey?.('state-retention',ctx);
   const pedido={raw:window._s012RetencaoIdbRaw?.(ctx)};
   if(!key||!pedido.raw) return Promise.resolve(false);
-  const seq=(_s012RetencaoIdbSequencia.get(ctx.owner)||0)+1;
-  _s012RetencaoIdbSequencia.set(ctx.owner,seq);
-  // A sequência já invalida pedidos anteriores ainda na fila. Liberar seus
-  // bytes agora; uma gravação iniciada mantém sua cópia privada até terminar.
-  const esperaAnterior=_s012RetencaoIdbEsperas.get(owner);
-  if(esperaAnterior) esperaAnterior.raw=null;
-  _s012RetencaoIdbEsperas.set(owner,pedido);
   const base={};
   _s012RetencaoStorageTipos.forEach(tipo=>{
     base[tipo]=_s012RetencaoStorageRaw(tipo,ctx);
   });
   const browserToken=ctx.browserToken||null,browserRevision=Number(ctx.browserRevision)||0,geracao=Number(ctx.geracao)||0;
+  const esperaAnterior=_s012RetencaoIdbEsperas.get(owner);
+  // Repeated requests for these exact bytes must not cancel their own active
+  // transaction. A different preimage or session still supersedes it normally.
+  if(esperaAnterior?.tarefa&&esperaAnterior.seq===_s012RetencaoIdbSequencia.get(owner)
+      &&esperaAnterior.key===key
+      &&(esperaAnterior.raw??esperaAnterior.activeRaw)===pedido.raw
+      &&esperaAnterior.browserToken===browserToken&&esperaAnterior.browserRevision===browserRevision
+      &&esperaAnterior.geracao===geracao
+      &&_s012RetencaoStorageTipos.every(tipo=>esperaAnterior.base?.[tipo]===base[tipo]))
+    return esperaAnterior.tarefa;
+  const seq=(_s012RetencaoIdbSequencia.get(ctx.owner)||0)+1;
+  _s012RetencaoIdbSequencia.set(ctx.owner,seq);
+  // A sequência já invalida pedidos anteriores ainda na fila. Liberar seus
+  // bytes agora; uma gravação iniciada mantém sua cópia privada até terminar.
+  if(esperaAnterior){esperaAnterior.raw=null;esperaAnterior.base=null;}
+  Object.assign(pedido,{key,base,browserToken,browserRevision,geracao,seq,nativeSettled:Promise.resolve()});
+  _s012RetencaoIdbEsperas.set(owner,pedido);
   const anterior=_s012RetencaoIdbFila.get(ctx.owner)||Promise.resolve(false);
   const tarefa=anterior.catch(()=>false).then(async()=>{
     const raw=pedido.raw;
     pedido.raw=null;
-    if(_s012RetencaoIdbEsperas.get(owner)===pedido) _s012RetencaoIdbEsperas.delete(owner);
+    pedido.activeRaw=raw;
     if(_s012RetencaoIdbSequencia.get(ctx.owner)!==seq
         ||window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
+    const baseAtiva=pedido.base;
     // Entradas substituídas não precisam materializar outra cópia completa do snapshot.
     let envelope;
     try{ envelope=JSON.parse(raw); }catch(e){ return false; }
@@ -19539,7 +19800,7 @@ window._s012GravarRetencaoIdb=function(ctx){
       expected[tipo]=_s012RetencaoStorageExpected(envelope,tipo,{owner});
     });
     const record={versao:1,owner,estado:envelope.liberada===true?'resolvida':'ativa',browserToken,
-      browserRevision,geracao,sequencia:seq,base,expected,retencao:envelope};
+      browserRevision,geracao,sequencia:seq,base:baseAtiva,expected,retencao:envelope};
     let recordRaw;
     const db=await _idbAbrir();
     const revisaoBase=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
@@ -19547,9 +19808,31 @@ window._s012GravarRetencaoIdb=function(ctx){
       let gravou=false;
       const commit=await _s012RetencaoComPrazo(new Promise((resolve,reject)=>{
         let ignorado=false;
-        let tx;
+        let tx=null,liberarNative=()=>{};
+        const nativeSettled=new Promise(resolveNative=>{liberarNative=resolveNative;});
+        pedido.nativeSettled=nativeSettled;
         try{
           tx=db.transaction(_IDB.store,'readwrite');
+          tx.oncomplete=()=>{
+            liberarNative();
+            const confirmada=gravou&&!ignorado;
+            // A Promise.race acima pode já ter devolvido o timeout enquanto esta
+            // transação readwrite continuou aguardando o store. Ao completar,
+            // registre apenas a revisão nativa que de fato foi gravada para este
+            // owner; isso atualiza o CAS, mas não confirma nem aposenta a retenção.
+            if(confirmada&&Number.isSafeInteger(record.revision)
+                &&record.owner===ctx.owner&&record.retencao?.owner===ctx.owner){
+              const conhecida=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
+              if(record.revision>conhecida)
+                _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
+            }
+            resolve(confirmada);
+          };
+          tx.onerror=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB falhou'));};
+          tx.onabort=()=>{
+            liberarNative();
+            if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB abortada'));
+          };
           const os=tx.objectStore(_IDB.store),rq=os.get(key);
           rq.onsuccess=()=>{
             let atual=null;
@@ -19578,27 +19861,16 @@ window._s012GravarRetencaoIdb=function(ctx){
             try{ os.put(recordRaw,key);gravou=true; }
             catch(e){ignorado=true;reject(e);try{tx.abort();}catch(_){};}
           };
-          rq.onerror=()=>{ignorado=true;reject(rq.error||new Error('leitura antes do snapshot IDB falhou'));try{tx.abort();}catch(_){}};
-          tx.oncomplete=()=>{
-            const confirmada=gravou&&!ignorado;
-            // O Promise.race acima pode já ter devolvido o timeout enquanto esta
-            // transação readwrite continuou aguardando o store. Ao completar,
-            // registre apenas a revisão nativa que de fato foi gravada para este
-            // owner; isso atualiza o CAS, mas não confirma nem aposenta a retenção.
-            if(confirmada&&Number.isSafeInteger(record.revision)
-                &&record.owner===ctx.owner&&record.retencao?.owner===ctx.owner){
-              const conhecida=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
-              if(record.revision>conhecida)
-                _s012RetencoesIdbRevisaoPorOwner.set(ctx.owner,record.revision);
-            }
-            resolve(confirmada);
-          };
-          tx.onerror=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB falhou'));};
-          tx.onabort=()=>{if(!ignorado)reject(tx.error||new Error('gravação do snapshot IDB abortada'));};
-        }catch(e){reject(e);}
+          rq.onerror=()=>{ignorado=true;reject(rq.error||new Error('leitura antes do snapshot IDB falhou'));try{tx.abort();}catch(_){};};
+        }catch(e){
+          if(tx){try{tx.abort();}catch(_){}}
+          else liberarNative();
+          reject(e);
+        }
       }),'gravação do snapshot owner');
+
       if(!commit) return false;
-      const confirmado=await _s012RetencaoIdbLer(db,key);
+      const confirmado=await _s012RetencaoIdbLer(db,key,nativeSettled=>{pedido.nativeSettled=nativeSettled;});
       if(confirmado!==recordRaw||_s012RetencaoIdbSequencia.get(ctx.owner)!==seq) return false;
       if(window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
       return window._s012MarcarRetencaoIdbDuravel?.(ctx,envelope,raw)===true;
@@ -19607,8 +19879,18 @@ window._s012GravarRetencaoIdb=function(ctx){
     console.warn('[S012] retenção owner não confirmada no IndexedDB:',e.message||e);
     return false;
   });
-  _s012RetencaoIdbFila.set(ctx.owner,tarefa);
-  tarefa.finally(()=>{ if(_s012RetencaoIdbFila.get(ctx.owner)===tarefa) _s012RetencaoIdbFila.delete(ctx.owner); });
+  const fila=tarefa.then(()=>pedido.nativeSettled,()=>pedido.nativeSettled).then(()=>false,()=>false);
+  pedido.tarefa=tarefa;pedido.fila=fila;
+  _s012RetencaoIdbFila.set(ctx.owner,fila);
+  tarefa.finally(()=>{
+    pedido.raw=null;pedido.activeRaw=null;pedido.base=null;
+    if(_s012RetencaoIdbEsperas.get(owner)===pedido)_s012RetencaoIdbEsperas.delete(owner);
+  });
+  fila.then(()=>{
+    if(_s012RetencaoIdbFila.get(ctx.owner)===fila)_s012RetencaoIdbFila.delete(ctx.owner);
+  },()=>{
+    if(_s012RetencaoIdbFila.get(ctx.owner)===fila)_s012RetencaoIdbFila.delete(ctx.owner);
+  });
   return tarefa;
 };
 window._s012HidratarRetencaoIdb=async function(ctx){
@@ -19930,7 +20212,14 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
       :!fenceAnterior&&anterior?.liberaExclusao?{liberaExclusao:{...anterior.liberaExclusao}}:{})};
   const memOpEsperada=manterCerca?cercaEmEspera.opId:op.opId;
   if(!manterCerca)_crmPendenciasMemoria.set(memKey,op);
+  if(opcoes.importacaoExplicita&&!manterCerca)
+    _crmS033VincularBasePendente(ctx,op,cubo,opcoes.s067cBaseAnterior);
   const promise=(async()=>{
+    let reserva=null,db=null;
+    try{
+    // Reserve before the remote-base await so an interrupted importer cannot
+    // close a connection still needed by a real, late registrar operation.
+    reserva=opcoes.s067cIdb?.usar(ctx)||null;
     if(opcoes.importacaoExplicita){
       try{
         const baseFresca=await _crmS057LerBase(ctx,lid,ano);
@@ -19946,8 +20235,7 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
       catch(e){console.warn("[crm] base remota da importação não confirmada:",e.message||e);}
       if(!window._s012ContextoValido(ctx))return null;
     }
-    const db=await _idbAbrir();
-    try{
+    db=reserva?.db||await _idbAbrir();
       await new Promise((resolve,reject)=>{
         const tx=db.transaction(_IDB.store,'readwrite'),os=tx.objectStore(_IDB.store);
         const rq=os.get(storageKey); let erro=null,revisaoPersistida=null,epochPersistido=null;
@@ -20000,7 +20288,7 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
         tx.onabort=()=>reject(erro||tx.error||new Error('gravação de pendência CRM abortada'));
       });
       return _crmPendenciasMemoria.get(memKey)?.opId===op.opId?op:null;
-    }finally{ db.close(); }
+    }finally{ if(reserva)reserva.soltar();else db?.close(); }
   })().catch(e=>{
     // If an explicit import could not be committed, leave the fenced cube in RAM
     // and in the owner-scoped snapshot. The generic sender will keep refusing it.
@@ -20008,6 +20296,7 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
     return null;
   }).finally(()=>{
     if(_crmPendenciasEmGravacao.get(memKey)===promise) _crmPendenciasEmGravacao.delete(memKey);
+    if(window._s012ContextoValido(ctx))window._s033AoPendenteAlterada?.(ctx);
   });
   _crmPendenciasEmGravacao.set(memKey,promise);
   return promise;
@@ -20222,7 +20511,10 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
         throw new Error('Não foi possível registrar a nova importação; o rascunho foi preservado.');
       }
       if(!window._s012ContextoValido(ctx)||window.crmPendenciaAtual(ctx,lid,ano)?.opId!==nova.opId)return false;
-      (D.crm||(D.crm={}))[lid]||(D.crm[lid]={});D.crm[lid][ano]=JSON.parse(JSON.stringify(nova.cubo));
+      (D.crm||(D.crm={}))[lid]||(D.crm[lid]={});
+      const cuboRestaurado=JSON.parse(JSON.stringify(nova.cubo));
+      _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,cuboRestaurado);
+      D.crm[lid][ano]=cuboRestaurado;
       window._crmMarcarNaoEnviado(ctx,lid,ano,nova.marker);
       window._crmVersao=(window._crmVersao||0)+1;
       const envio=await window.crmSincronizarUm(lid,ano,ctx,nova.cubo);
@@ -20540,6 +20832,7 @@ window.crmHidratarIdb = async function(ctx){
     let n = 0;
     for(const op of _crmPendenciasMemoria.values()){
       if(op.owner===ctx.owner&&(op.tipo==='excluir'||op.exclusaoRemota)&&D.crm[op.lid]?.[op.ano]){
+        _crmS033PublicacaoAntesDeSubstituir(ctx,op.lid,op.ano,null);
         delete D.crm[op.lid][op.ano];if(!Object.keys(D.crm[op.lid]).length)delete D.crm[op.lid];n++;
       }
     }
@@ -20549,6 +20842,7 @@ window.crmHidratarIdb = async function(ctx){
         const op=window.crmPendenciaAtual(ctx,lid,ano);
         if(op?._duravelRam===false||op?.exclusaoRemota) return;
         if(!D.crm[lid][ano] || (op?.tipo==='gravar'&&!op.confirmada)){
+          _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,cubo,true);
           D.crm[lid][ano] = cubo; n++;
           if(op&&!op.confirmada) window._crmMarcarNaoEnviado(ctx,lid,ano,op.marker);
         }
@@ -50523,6 +50817,7 @@ window.excelProcessarUpload = function(event){
   reader.onabort=()=>window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:'Leitura do arquivo interrompida.'});
   reader.onload = async function(e){
     if(!_s012ExcelValido()) return;
+    let _s067cIdb=null;
     try {
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Interpretando planilha',mensagem:'Decodificação síncrona; percentual indisponível.'});
       await _n003Yield();
@@ -50965,6 +51260,8 @@ window.excelProcessarUpload = function(event){
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Preparando dados locais',mensagem:'Aplicação local síncrona; percentual indisponível nesta etapa.'});
       await _n003Yield();
       if(!_s012ExcelValido())return;
+      _s067cIdb=await _crmImportacaoIdbAbrir(_s012CtxExcel);
+      if(!_s012ExcelValido())return;
       const _planosDesatualizados=_planos.filter(p=>(((D.crm||{})[p.lid]||{})[p.ano]||null)!==p.anterior);
       if(_planosDesatualizados.length){
         const _paresDesatualizados=_planosDesatualizados.map(p=>p.lid+'/'+p.ano).join(', ');
@@ -50985,7 +51282,7 @@ window.excelProcessarUpload = function(event){
                    :                           p.cubo;
         _paresImportados.push([p.lid, p.ano]);
         window._crmN003Progresso.atualizar(_n003Task,{lid:p.lid,ano:p.ano,tipo:'par-iniciado'});
-        const dg = window.crmGuardar(p.lid, p.ano, cubo);
+        const dg = window.crmGuardar(p.lid, p.ano, cubo,{s067cIdb:_s067cIdb});
         const _opRegistro=window.crmPendenciaAtual(_s012CtxExcel,p.lid,p.ano);
         _registrosImportados.push({lid:String(p.lid),ano:String(p.ano),
           cubo:JSON.stringify(D.crm[p.lid][p.ano]),
@@ -51196,6 +51493,7 @@ window.excelProcessarUpload = function(event){
       console.error('[excel] erro:', err);
       showToast('Erro ao processar planilha: '+err.message,'err');
     } finally {
+      _s067cIdb?.encerrar();
       window._crmN003Progresso.finalizar(_n003Task,{mensagem:'Importação não enviada. Consulte o aviso de validação ou cancelamento apresentado.'});
     }
   };
