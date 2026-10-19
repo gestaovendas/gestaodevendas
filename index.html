@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-18g';
+window.AVATIM_BUILD = '2026-10-18h';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -11005,7 +11005,7 @@ function _s012RetencaoEnvelope(ret){
   return {versao:1,owner:ret.owner,dados:ret.dados===undefined?{}:ret.dados,
     liberada:ret.liberada===true,
     crmPendencias:_s012Clone(crmPendencias),s004Raw:ret.s004Raw??null,
-    pending:_s012Clone(ret.pending),pendingJson:ret.pendingJson??null,
+    pending:ret.pending===undefined?{}:ret.pending,pendingJson:ret.pendingJson??null,
     pendingRaw:ret.pendingRaw??null,pendingLegacy:ret.pendingLegacy===true,pendingTs:ret.pendingTs||null,
     marcas:_s012Clone(ret.marcas||{marcas:[],lojas:[],pendentes:[]}),
     crmStatus:_s012Clone(ret.crmStatus||{visto:{},naoEnviados:{}}),
@@ -11119,7 +11119,14 @@ function _s012SnapshotLocalCobre(ctx,dados){
   if(!local || typeof local!=='object' || Array.isArray(local)) return false;
   const preparado=window._crmPrepararSnapshotLocal?.(ctx,dados)||dados;
   if(raw===_s012JsonSeguro(preparado)) return true;
-  const esperado=_s012Clone(preparado), salvo=_s012Clone(local);
+  // Os snapshots da aplicação são objetos JSON. Os únicos ajustes abaixo são
+  // no primeiro nível; não copiar as árvores CRM/Excel que serão descartadas.
+  let esperado,salvo;
+  try{
+    esperado=preparado&&Object.getPrototypeOf(preparado)===Object.prototype&&typeof preparado.toJSON!=='function'
+      ?{...preparado}:_s012Clone(preparado);
+    salvo={...local};
+  }catch(e){ return false; }
   if(salvo._crmOmitidoLocal===true){
     const crm=esperado.crm||{};
     if(Object.keys(crm).length && !window._s012CrmDuravelIgual?.(ctx,crm)) return false;
@@ -11139,7 +11146,8 @@ function _s012SalvarSnapshotComCacheOwner(ctx,dados){
   const crm=dados?.crm||{};
   if(!key || (Object.keys(crm).length&&!window._s012CrmDuravelIgual?.(ctx,crm))) return false;
   try{
-    const salvo=_s012Clone(dados);
+    const salvo=dados&&Object.getPrototypeOf(dados)===Object.prototype&&typeof dados.toJSON!=='function'
+      ?{...dados}:_s012Clone(dados);
     salvo.excelDados=[]; salvo._excelOmitidoLocal=true;
     salvo.crm={}; salvo._crmOmitidoLocal=true;
     const bruto=JSON.stringify(salvo);
@@ -17742,7 +17750,14 @@ window.crmAgregar = function(linhas, opts){
 const CRM_ORC_DOC = 700 * 1024;   // orçamento por documento (folga sobre 1 MiB)
 
 function _crmBytes(o){
-  try{ return new Blob([JSON.stringify(o)]).size; }catch(e){ return JSON.stringify(o).length; }
+  try{
+    const json=JSON.stringify(o);
+    // Medido por linha de compra: contar UTF-8 sem criar um Blob nativo a cada chamada.
+    if(typeof TextEncoder==='function'){
+      try{ return new TextEncoder().encode(String(json)).length; }catch(_e){}
+    }
+    return new Blob([json]).size;
+  }catch(e){ return JSON.stringify(o).length; }
 }
 
 function _crmBytesCabeca(cubo, semMarcaLinhas=false){
@@ -19437,7 +19452,9 @@ function _s012RetencaoStorageRaw(tipo,ctx){
 }
 function _s012RetencaoStorageExpected(envelope,tipo,ctx){
   if(tipo==='state'){
-    const dados=JSON.parse(JSON.stringify(envelope.dados||{}));
+    // O envelope já foi lido do JSON privado capturado. Só este nível recebe o sidecar.
+    const fonte=envelope.dados||{};
+    const dados=Array.isArray(fonte)?fonte.slice():typeof fonte==='object'?{...fonte}:fonte;
     if(Array.isArray(envelope.crmPendencias)&&envelope.crmPendencias.length)
       dados._crmPendenciasSnapshot={owner:ctx.owner,ops:envelope.crmPendencias};
     return JSON.stringify(dados);
@@ -19488,26 +19505,31 @@ function _s012RetencaoComPrazo(promise,rotulo){
 }
 window._s012GravarRetencaoIdb=function(ctx){
   if(!ctx?.owner) return Promise.resolve(false);
+  const owner=ctx.owner;
   const key=window._s012StorageKey?.('state-retention',ctx);
   const raw=window._s012RetencaoIdbRaw?.(ctx);
   if(!key||!raw) return Promise.resolve(false);
-  let envelope;
-  try{ envelope=JSON.parse(raw); }catch(e){ return Promise.resolve(false); }
   const seq=(_s012RetencaoIdbSequencia.get(ctx.owner)||0)+1;
   _s012RetencaoIdbSequencia.set(ctx.owner,seq);
-  const base={},expected={};
+  const base={};
   _s012RetencaoStorageTipos.forEach(tipo=>{
     base[tipo]=_s012RetencaoStorageRaw(tipo,ctx);
-    expected[tipo]=_s012RetencaoStorageExpected(envelope,tipo,ctx);
   });
-  const record={versao:1,owner:ctx.owner,estado:envelope.liberada===true?'resolvida':'ativa',browserToken:ctx.browserToken||null,
-    browserRevision:Number(ctx.browserRevision)||0,geracao:Number(ctx.geracao)||0,
-    sequencia:seq,base,expected,retencao:envelope};
-  let recordRaw;
+  const browserToken=ctx.browserToken||null,browserRevision=Number(ctx.browserRevision)||0,geracao=Number(ctx.geracao)||0;
   const anterior=_s012RetencaoIdbFila.get(ctx.owner)||Promise.resolve(false);
   const tarefa=anterior.catch(()=>false).then(async()=>{
     if(_s012RetencaoIdbSequencia.get(ctx.owner)!==seq
         ||window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
+    // Entradas substituídas não precisam materializar outra cópia completa do snapshot.
+    let envelope;
+    try{ envelope=JSON.parse(raw); }catch(e){ return false; }
+    const expected={};
+    _s012RetencaoStorageTipos.forEach(tipo=>{
+      expected[tipo]=_s012RetencaoStorageExpected(envelope,tipo,{owner});
+    });
+    const record={versao:1,owner,estado:envelope.liberada===true?'resolvida':'ativa',browserToken,
+      browserRevision,geracao,sequencia:seq,base,expected,retencao:envelope};
+    let recordRaw;
     const db=await _idbAbrir();
     const revisaoBase=_s012RetencoesIdbRevisaoPorOwner.get(ctx.owner)||0;
     try{
