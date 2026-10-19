@@ -3500,15 +3500,16 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
     const _s012Exigir=()=>{if(!_s012Valido()) throw new Error('s012-sessao-alterada');};
     try{
       _s012Exigir();
+      const D2 = JSON.parse(dadosJSON);
       let _configModalidadesMarcadaNoPayload=false;
       try{
-        const cfgPayload=JSON.parse(dadosJSON)?.configModalidades;
+        const cfgPayload=D2?.configModalidades;
         _configModalidadesMarcadaNoPayload=window._camposEditadosAqui?.has('configModalidades')===true
           &&window._vendCampoIgual?.(cfgPayload,D.configModalidades)===true;
       }catch(_e){}
       console.log("[Avatim] fsGravar INICIO | email:", s012Ctx.email,
-        "| vendas keys:", Object.keys(JSON.parse(dadosJSON).vendas||{}).join(","),
-        "| vendasVend keys:", Object.keys(JSON.parse(dadosJSON).vendasVend||{}).length + " vends");
+        "| vendas keys:", Object.keys(D2.vendas||{}).join(","),
+        "| vendasVend keys:", Object.keys(D2.vendasVend||{}).length + " vends");
       // Não reutilizar uma conta SDK persistida de outra identidade local. Se
       // a loja do SDK divergir, tentar autenticar a identidade ativa; uma sessão
       // anônima continua sendo o fallback compatível já usado pela aplicação.
@@ -3526,7 +3527,6 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
       console.log("[Avatim] fsGravar: auth.currentUser=", !!auth.currentUser, "| prosseguindo...");
 
       _s012Exigir();
-      const D2 = JSON.parse(dadosJSON);
       const email = s012Ctx.email||"";
       const isAdm = s012Ctx.perfil === 'admin';
 
@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-18h';
+window.AVATIM_BUILD = '2026-10-18i';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -11018,8 +11018,10 @@ function _s012RetencaoEnvelopeRaw(ret){
 }
 function _s012RetencaoIdbCobre(ctx,ret){
   if(!ctx?.owner||!ret||ret.owner!==ctx.owner) return false;
-  return _s012RetencoesIdbDuraveisPorOwner.get(ctx.owner)===_s012RetencaoEnvelopeRaw(ret)
-    &&_s012RetencoesIdbEstadoPorOwner.get(ctx.owner)===(ret.liberada===true?'resolvida':'ativa');
+  const rawDuravel=_s012RetencoesIdbDuraveisPorOwner.get(ctx.owner);
+  if(typeof rawDuravel!=='string') return false;
+  if(_s012RetencoesIdbEstadoPorOwner.get(ctx.owner)!==(ret.liberada===true?'resolvida':'ativa')) return false;
+  return rawDuravel===_s012RetencaoEnvelopeRaw(ret);
 }
 window._s012RetencaoIdbRaw=function(ctx){
   if(!ctx?.owner) return null;
@@ -19444,6 +19446,7 @@ function _idbAbrir(){
 // S030: a full operational snapshot and its S012 sidecars share one owner-keyed
 // IndexedDB transaction. localStorage remains the synchronous fast path.
 const _s012RetencaoIdbFila=new Map();
+const _s012RetencaoIdbEsperas=new Map();
 const _s012RetencaoIdbSequencia=new Map();
 const _s012RetencaoStorageTipos=['state','pending','edit-marks','crm-state','s024-localonly','s024','s004-sales'];
 function _s012RetencaoStorageRaw(tipo,ctx){
@@ -19507,10 +19510,15 @@ window._s012GravarRetencaoIdb=function(ctx){
   if(!ctx?.owner) return Promise.resolve(false);
   const owner=ctx.owner;
   const key=window._s012StorageKey?.('state-retention',ctx);
-  const raw=window._s012RetencaoIdbRaw?.(ctx);
-  if(!key||!raw) return Promise.resolve(false);
+  const pedido={raw:window._s012RetencaoIdbRaw?.(ctx)};
+  if(!key||!pedido.raw) return Promise.resolve(false);
   const seq=(_s012RetencaoIdbSequencia.get(ctx.owner)||0)+1;
   _s012RetencaoIdbSequencia.set(ctx.owner,seq);
+  // A sequência já invalida pedidos anteriores ainda na fila. Liberar seus
+  // bytes agora; uma gravação iniciada mantém sua cópia privada até terminar.
+  const esperaAnterior=_s012RetencaoIdbEsperas.get(owner);
+  if(esperaAnterior) esperaAnterior.raw=null;
+  _s012RetencaoIdbEsperas.set(owner,pedido);
   const base={};
   _s012RetencaoStorageTipos.forEach(tipo=>{
     base[tipo]=_s012RetencaoStorageRaw(tipo,ctx);
@@ -19518,6 +19526,9 @@ window._s012GravarRetencaoIdb=function(ctx){
   const browserToken=ctx.browserToken||null,browserRevision=Number(ctx.browserRevision)||0,geracao=Number(ctx.geracao)||0;
   const anterior=_s012RetencaoIdbFila.get(ctx.owner)||Promise.resolve(false);
   const tarefa=anterior.catch(()=>false).then(async()=>{
+    const raw=pedido.raw;
+    pedido.raw=null;
+    if(_s012RetencaoIdbEsperas.get(owner)===pedido) _s012RetencaoIdbEsperas.delete(owner);
     if(_s012RetencaoIdbSequencia.get(ctx.owner)!==seq
         ||window._s012RetencaoIdbRaw?.(ctx)!==raw) return false;
     // Entradas substituídas não precisam materializar outra cópia completa do snapshot.
@@ -19912,7 +19923,8 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
   const op={owner:ctx.owner,lid:String(lid),ano:String(ano),tipo,
     ...(baseInicialConhecida?{baseRemota:JSON.parse(JSON.stringify(baseInicial))}:{}),
     opId:'crm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
-    marker:Date.now(),cubo:tipo==='gravar'?JSON.parse(JSON.stringify(cubo||{})):null,
+    marker:Date.now(),cubo:tipo==='gravar'
+      ?(manterCerca?cercaEmEspera.cubo:JSON.parse(JSON.stringify(cubo||{}))):null,
     baseOpId:anterior?.opId||null,epoch:_crmCacheEpoch.get(ctx.owner)||0,_duravelRam:false,
     ...(manterCerca?{liberaExclusao:{...cercaEmEspera.exclusaoRemota}}
       :!fenceAnterior&&anterior?.liberaExclusao?{liberaExclusao:{...anterior.liberaExclusao}}:{})};
@@ -50515,21 +50527,24 @@ window.excelProcessarUpload = function(event){
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Interpretando planilha',mensagem:'Decodificação síncrona; percentual indisponível.'});
       await _n003Yield();
       if(!_s012ExcelValido())return;
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, {type:'array', cellDates:false});
+      let data = new Uint8Array(e.target.result);
+      let workbook = XLSX.read(data, {type:'array', cellDates:false});
       await _n003Yield(); if(!_s012ExcelValido())return;
       const firstSheet = workbook.SheetNames[0];
       if(!firstSheet){ showToast('Planilha sem abas.','err'); return; }
-      const sheet = workbook.Sheets[firstSheet];
+      let sheet = workbook.Sheets[firstSheet];
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Convertendo linhas',mensagem:'SheetJS está convertendo a faixa da aba; percentual indisponível.'});
       await _n003Yield(); if(!_s012ExcelValido())return;
       // sheet_to_json percorre a faixa declarada em !ref; preserve a linha física da aba.
       const linhaInicialPlanilha=Number(String(sheet?.['!ref']||'').match(/^\$?[A-Z]{1,3}\$?(\d+)/i)?.[1])||1;
-      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      let rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      data = null;
+      workbook = null;
+      sheet = null;
       await _n003Yield(); if(!_s012ExcelValido())return;
       if(rows.length < 2){ showToast('Planilha sem dados (só cabeçalho ou vazia).','warn'); return; }
 
-      const headers = rows[0];
+      let headers = rows[0];
       const colMap = _excelDetectarColunas(headers);
       const _modoValor = document.getElementById('excel-modo-valor')?.value || 'auto';
 
@@ -50641,6 +50656,8 @@ window.excelProcessarUpload = function(event){
         });
       }
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Validando linhas',mensagem:`Linhas físicas verificadas: ${_n003TotalLinhas}/${_n003TotalLinhas}.`,done:_n003TotalLinhas,total:_n003TotalLinhas});
+      headers = null;
+      rows = null;
 
       if(!dadosProcessados.length){
         showToast('Nenhuma linha válida encontrada.','warn');
@@ -50841,18 +50858,31 @@ window.excelProcessarUpload = function(event){
           }
         }
       }
+      _dadosParaImportar.length = 0;
 
       // Agrupar por loja + ano — cada par vira uma unidade independente
       const _grupos = new Map();
+      const _foraNomesSet = new Set();
+      let _foraCount = 0;
+      let _foraValor = 0;
+      const _totalLinhasProcessadas = dadosProcessados.length;
       for(let _gi=0;_gi<dadosProcessados.length;_gi++){
         if(_gi>0&&_gi%500===0){
           window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agrupando por loja e ano',mensagem:`Linhas agrupadas: ${_gi}/${dadosProcessados.length}.`,done:_gi,total:dadosProcessados.length});
           await _n003Yield(); if(!_s012ExcelValido())return;
         }
-        const r=dadosProcessados[_gi]; if(!r.loja)continue;
+        const r=dadosProcessados[_gi];
+        if(!r.loja){
+          _foraCount++;
+          _foraValor += Number(r.valor)||0;
+          _foraNomesSet.add((r.vendedora||'').trim() || '(sem nome)');
+          continue;
+        }
         const k=r.loja+'|'+r.data.slice(0,4);
         if(!_grupos.has(k))_grupos.set(k,[]); _grupos.get(k).push(r);
       }
+      const _foraNomes = [..._foraNomesSet];
+      _foraNomesSet.clear();
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agrupando por loja e ano',mensagem:`Pares encontrados: ${_grupos.size}.`,done:_grupos.size,total:_grupos.size});
 
       // ══════════════════════════════════════════════════════════════
@@ -50868,7 +50898,9 @@ window.excelProcessarUpload = function(event){
       for(const [k,linhas] of _grupos){
         const [lid, ano] = k.split('|');
         window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agregando conjuntos',mensagem:`Agregando ${lid}/${ano} (${_n003Grupo+1}/${_grupos.size}); cálculo do par é síncrono.`,done:_n003Grupo,total:_grupos.size});
+        const linhasCount = linhas.length;
         const cubo = window.crmAgregar(linhas);
+        linhas.length = 0;
         cubo.arquivo = file.name;
         const mesesNovos = window.crmMesesDoCubo(cubo);
         cubo.fontes = {}; mesesNovos.forEach(m => { cubo.fontes[m] = file.name; });
@@ -50890,11 +50922,13 @@ window.excelProcessarUpload = function(event){
           podado = window.crmRemoverMeses(anterior, repete);
           if(podado) acao = 'trocaMes';   // só quando dá para fazer direito
         }
-        _planos.push({lid, ano, cubo, linhas, anterior, conserva, repete, acao, podado});
+        _planos.push({lid, ano, cubo, linhasCount, anterior, conserva, repete, acao, podado});
         _n003Grupo++;
         window._crmN003Progresso.atualizar(_n003Task,{etapa:'Agregando conjuntos',mensagem:`Conjuntos agregados: ${_n003Grupo}/${_grupos.size}.`,done:_n003Grupo,total:_grupos.size});
         await _n003Yield(); if(!_s012ExcelValido())return;
       }
+      _grupos.clear();
+      dadosProcessados.length = 0;
 
       // [R155] Troca de mês é o caminho bom: avisa, mas não pede permissão
       // para perder nada, porque nada se perde.
@@ -50904,6 +50938,7 @@ window.excelProcessarUpload = function(event){
           ((LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid) + '/' + p.ano
           + ' troca ' + p.repete.join(',') + ' e mantém ' + p.conserva.join(',')).join(' · '));
       }
+      _trocas.length = 0;
 
       const _conflitos = _planos.filter(p => p.acao === 'conflito');
       if(_conflitos.length){
@@ -50925,6 +50960,7 @@ window.excelProcessarUpload = function(event){
           return;
         }
       }
+      _conflitos.length = 0;
 
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Preparando dados locais',mensagem:'Aplicação local síncrona; percentual indisponível nesta etapa.'});
       await _n003Yield();
@@ -50942,6 +50978,7 @@ window.excelProcessarUpload = function(event){
       const _paresImportados = [];   // [R136] só estes vão ao servidor
       const _registrosImportados = [];
       let _totalPedacos = 0;
+      let _paresAplicados = 0;
       for(const p of _planos){
         const cubo = (p.acao === 'funde')    ? window.crmFundirCubos(p.anterior, p.cubo)
                    : (p.acao === 'trocaMes') ? window.crmFundirCubos(p.podado,   p.cubo)
@@ -50959,13 +50996,28 @@ window.excelProcessarUpload = function(event){
         _diagnostico.push({
           loja: (LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid, ano: p.ano,
           dedup: p.cubo.dedup,
-          linhas: p.linhas.length, clientes: dg.clientes,
+          linhas: p.linhasCount, clientes: dg.clientes,
           kb: Math.round((dg.bytesLeves + dg.bytesClientes)/1024),
           pedacos: dg.pedacos,
           acao: p.acao, mesesCubo: window.crmMesesDoCubo(cubo).length,
           repete: p.repete, conserva: p.conserva
         });
+        _paresAplicados++;
+        // Cada par já capturou sua própria pendência. Deixar o navegador e
+        // o IDB avançarem antes de clonar outro conjunto ou o estado completo.
+        await _n003Yield();
+        if(!_s012ExcelValido())return;
+        const _restantesMudaram=_planos.slice(_paresAplicados).filter(restante=>
+          (((D.crm||{})[restante.lid]||{})[restante.ano]||null)!==restante.anterior);
+        if(_restantesMudaram.length){
+          event.target.value='';
+          throw new Error('O CRM mudou durante a preparação ('
+            + _restantesMudaram.map(restante=>restante.lid+'/'+restante.ano).join(', ')
+            + '). '+_paresAplicados+' conjunto(s) já preparado(s) localmente foram preservados. '
+            + 'Não houve confirmação completa desta importação; revise os rascunhos antes de tentar novamente.');
+        }
       }
+      _planos.length = 0;
 
       // Registro da importação (para a Gestão de Importações)
       if(!D._excelImportacoes) D._excelImportacoes = [];
@@ -50974,20 +51026,23 @@ window.excelProcessarUpload = function(event){
         id: _importIdGerar(),
         arquivo: file.name,
         importadoEm: Date.now(),
-        linhas: dadosProcessados.length,
+        linhas: _totalLinhasProcessadas,
         agregado: true,
         grupos: _diagnostico.map(d => d.loja + '/' + d.ano),
         colunasDetectadas: Object.keys(colMap)
       });
       D._excelImportInfo = {
         arquivo: file.name,
-        linhas: dadosProcessados.length,
+        linhas: _totalLinhasProcessadas,
         importadoEm: Date.now(),
         agregado: true,
         colunasDetectadas: Object.keys(colMap)
       };
 
-      save();
+      // Primeiro guardar o estado local do owner sem clonar D para o writer
+      // genérico. A publicação CRM depende dos registros IDB abaixo; o snapshot
+      // completo de save() ficava no meio dessa confirmação e duplicava o cubo.
+      _persistirLocal();
 
       const _resumo = _diagnostico
         .map(d => d.loja + '/' + d.ano + ': ' + d.linhas.toLocaleString('pt-BR') + ' linhas → '
@@ -51013,7 +51068,7 @@ window.excelProcessarUpload = function(event){
       // cliente+dia, e o ticket médio deixa de ser confiável. Precisa ser dito.
       const _semNF = _diagnostico.reduce((a,d) => a + (d.dedup?.semNF||0), 0);
       if(_semNF > 0){
-        const pct = Math.round(_semNF / dadosProcessados.length * 100);
+        const pct = Math.round(_semNF / _totalLinhasProcessadas * 100);
         console.warn('[crm] linhas sem NF:', _semNF, '('+pct+'%)');
         setTimeout(() => { if(_s012ExcelValido()) showToast('⚠️ ' + _semNF.toLocaleString('pt-BR') + ' linha(s) ('+pct+'%) sem número de NF. '
           + 'Sem ele a venda é identificada por cliente + dia, e o ticket médio fica aproximado. '
@@ -51035,14 +51090,11 @@ window.excelProcessarUpload = function(event){
       // (`if(!r.loja) return`). Isso precisa aparecer na tela: até aqui só
       // saía um console.log, e a importação terminava com "✅ importado"
       // como se nada tivesse ficado para trás.
-      const _foraLinhas = dadosProcessados.filter(r => !r.loja);
-      if(_foraLinhas.length){
-        const _foraValor = _foraLinhas.reduce((t,r) => t + (Number(r.valor)||0), 0);
-        const _foraNomes = [...new Set(_foraLinhas.map(r => (r.vendedora||'').trim() || '(sem nome)'))];
-        _ignorados.push(_foraLinhas.length + ' SEM LOJA');
-        console.warn('[crm] descartadas por falta de loja:', _foraLinhas.length,
+      if(_foraCount){
+        _ignorados.push(_foraCount + ' SEM LOJA');
+        console.warn('[crm] descartadas por falta de loja:', _foraCount,
                      '| valor:', _foraValor, '| vendedor(es):', _foraNomes.join(', '));
-        setTimeout(() => { if(_s012ExcelValido()) showToast('⚠️ ' + _foraLinhas.length.toLocaleString('pt-BR')
+        setTimeout(() => { if(_s012ExcelValido()) showToast('⚠️ ' + _foraCount.toLocaleString('pt-BR')
           + ' linha(s) ficaram SEM LOJA e NÃO entraram em nenhum resultado — R$ '
           + _foraValor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})
           + '. Vendedor(es): ' + _foraNomes.slice(0,4).join(', ')
@@ -51056,20 +51108,21 @@ window.excelProcessarUpload = function(event){
       // "importado" e, se a subida falhasse, o erro ia só para o console — as
       // outras máquinas nunca recebiam nada e ninguém ficava sabendo. Agora a
       // importação ESPERA o envio e conta o que de fato aconteceu.
-      const _msgLocal = dadosProcessados.length.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
+      const _msgLocal = _totalLinhasProcessadas.toLocaleString('pt-BR') + ' linhas agregadas — ' + _resumo
         + (_ignorados.length ? ' · ignoradas: ' + _ignorados.join(', ') : '');
       let _envio = null;
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Publicando conjuntos',mensagem:`Aguardando confirmação do servidor para ${_paresImportados.length} conjunto(s).`,done:0,total:_paresImportados.length});
       let _registrosVerificados=0;
       window._crmN003Progresso.atualizar(_n003Task,{etapa:'Registrando nova importação',mensagem:'Aguardando a confirmação local antes do envio.',done:0,total:_registrosImportados.length});
       const _registrosLocais=await Promise.all(_registrosImportados.map(async r=>{
+        const identificador={lid:r.lid,ano:r.ano};
         let timer;
         try{
           const op=r.promessa?await Promise.race([r.promessa,new Promise((_,reject)=>{
             timer=setTimeout(()=>reject(new Error('O registro local não confirmou dentro do prazo; preserve esta aba e tente novamente.')),
               typeof window._prazoGravacao==='function'?window._prazoGravacao():20000);
           })]):null;
-          if(!_s012ExcelValido())return {r,erro:'A sessão mudou durante o registro local.'};
+          if(!_s012ExcelValido())return {r:identificador,erro:'A sessão mudou durante o registro local.'};
           const atual=window.crmPendenciaAtual(_s012CtxExcel,r.lid,r.ano);
           if(JSON.stringify(D.crm?.[r.lid]?.[r.ano])!==r.cubo)
             throw new Error('O conjunto mudou durante o registro local; revise antes de reenviar.');
@@ -51083,14 +51136,19 @@ window.excelProcessarUpload = function(event){
                   ||(atual.liberaExclusao?.gid||null)!==(r.exclusao.gid||null))))
               throw new Error('Não foi possível confirmar a nova importação no armazenamento local; os dados e a proteção da exclusão foram preservados.');
           }
-          return {r};
-        }catch(e){return {r,erro:e.message||String(e)};}
+          return {r:identificador};
+        }catch(e){return {r:identificador,erro:e.message||String(e)};}
         finally{
           clearTimeout(timer);
+          r.cubo=null;
+          r.promessa=null;
+          r.exclusao=null;
+          r.motivo=null;
           if(_s012ExcelValido())window._crmN003Progresso.atualizar(_n003Task,{etapa:'Registrando nova importação',
             mensagem:'Registros locais verificados',done:++_registrosVerificados,total:_registrosImportados.length});
         }
       }));
+      _registrosImportados.length = 0;
       if(!_s012ExcelValido())return;
       const _paresProntos=_registrosLocais.filter(x=>!x.erro).map(x=>[x.r.lid,x.r.ano]);
       const _falhasLocais=_registrosLocais.filter(x=>x.erro).map(x=>x.r.lid+'/'+x.r.ano+': '+x.erro);
@@ -51105,6 +51163,10 @@ window.excelProcessarUpload = function(event){
         total:_paresImportados.length,erros:[..._falhasLocais,...(_envio?.erros||[])],
         pendentesLocais:[...(_envio?.pendentesLocais||[]),..._registrosLocais.filter(x=>x.erro).map(x=>x.r.lid+'/'+x.r.ano)]};
       if(!_s012ExcelValido()) return;
+      // Também publicar o histórico R166 quando o envio CRM falha, não há pares
+      // prontos, ou o sender não existe. Só o owner que iniciou a importação
+      // pode atualizar o snapshot e a fila genérica.
+      save();
       if(_envio && _envio.erros && _envio.erros.length){
         window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:`Importação em memória; ${_envio.ok||0}/${_envio.total||_paresImportados.length} confirmado(s) no servidor. ${(_envio.pendentesLocais||[]).length} pendência(s) local(is) sem confirmação.`});
         showToast('⚠️ ' + _msgLocal + ' — ' + _envio.ok + '/' + _envio.total
