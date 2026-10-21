@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-20j';
+window.AVATIM_BUILD = '2026-10-20n';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -10944,6 +10944,7 @@ window._s012LerSnapshotLocal=function(ctx,restaurarCrm=false){
 window._s012GravarSnapshotLocal=function(ctx,dados){
   const chave=window._s012StorageKey('state',ctx);
   if(!chave || !dados || typeof dados!=='object' || !window._s012ContextoValido?.(ctx)) return false;
+  dados=window._crmS069SanitizarSnapshotResolvido?.(ctx,dados)||dados;
   const ret=_s012RetencoesPorOwner.get(ctx.owner);
   if(ret && window._s012ContextoValido(ctx)) ret.dados=_s012CloneEstado(ctx,dados);
   try{
@@ -11646,7 +11647,9 @@ function _s012ClonePendenteRetido(ctx,pending){
   }catch(_e){return {};} // Preserve the historical tolerant _s012Clone error contract.
 }
 function _s012EstadoRetido(ctx,dados){
-  const pending=window._pendingLocalData;
+  dados=window._crmS069SanitizarSnapshotResolvido?.(ctx,dados)||dados;
+  const pending=window._crmS069SanitizarSnapshotResolvido?.(ctx,window._pendingLocalData)
+    ||window._pendingLocalData;
   let pendingJson=null;
   try{ pendingJson=pending==null?null:JSON.stringify(pending); }catch(e){}
   let pendingRaw=null,pendingPayload=null,pendingLegacy=false;
@@ -11702,6 +11705,7 @@ window._s012RetencaoAtualizarPendente=function(ctx,pending,ts){
   if(!ctx?.owner||!window._s012ContextoValido?.(ctx)) return false;
   const ret=_s012RetencoesPorOwner.get(ctx.owner);
   if(!ret||ret.owner!==ctx.owner||pending==null) return false;
+  pending=window._crmS069SanitizarSnapshotResolvido?.(ctx,pending)||pending;
   const json=_s012JsonSeguro(pending);
   if(json===null) return false;
   if(ret.liberada===true) ret.liberada=false;
@@ -11805,18 +11809,19 @@ window._s012ResolverRetencao=function(ctx,prova){
     // Retenções são JSON privado. Serialize a fonte atual uma vez e reutilize
     // o snapshot já retido quando os bytes forem iguais; só copie a árvore
     // inteira quando esta chamada observou conteúdo novo.
-    const dadosJsonAtual=_s012EstadoComparavel(ctx,D);
+    const dadosAtuais=window._crmS069SanitizarSnapshotResolvido?.(ctx,D)||D;
+    const dadosJsonAtual=_s012EstadoComparavel(ctx,dadosAtuais);
     if(typeof dadosJsonAtual==='string'){
       const dadosJsonRetido=_s012EstadoComparavel(ctx,ret.dados);
       if(dadosJsonRetido===dadosJsonAtual) bruto=dadosJsonAtual;
       else{
-        ret.dados=_s012CloneEstado(ctx,D);
+        ret.dados=_s012CloneEstado(ctx,dadosAtuais);
         const dadosJsonCopiados=_s012EstadoComparavel(ctx,ret.dados);
         bruto=dadosJsonCopiados===dadosJsonAtual?dadosJsonAtual:dadosJsonCopiados;
       }
     }else{
       // Keep the historical clone fallback (`{}` on serialization failure).
-      ret.dados=_s012CloneEstado(ctx,D);
+      ret.dados=_s012CloneEstado(ctx,dadosAtuais);
       bruto=_s012EstadoComparavel(ctx,ret.dados);
     }
     // Uma revisão confirmada não pode restaurar a cerca antiga ao reabrir a sessão.
@@ -11824,7 +11829,8 @@ window._s012ResolverRetencao=function(ctx,prova){
     if(crmSnapshot)ret.crmPendencias=_s012Clone(crmSnapshot._crmPendenciasSnapshot?.ops||[]);
     ret.marcas=window._s012CapturarMarcasVend?.()||ret.marcas;
     ret.crmStatus={visto:_s012Clone(window._crmTsVisto||{}),naoEnviados:_s012Clone(window._crmNaoEnviados||{})};
-    const pend=window._pendingLocalData;
+    const pend=window._crmS069SanitizarSnapshotResolvido?.(ctx,window._pendingLocalData)
+      ||window._pendingLocalData;
     if(pend!=null){
       const pendente=_s012ClonePendenteRetido(ctx,pend);
       ret.pending=pendente; ret.pendingJson=_s012JsonSeguro(pend);
@@ -12193,8 +12199,14 @@ async function _s033SyncDrenar(st){
     // not repaint the active page. Reuse the guarded renderer for valid full
     // or partial pair progress; its focus/manual-report rules remain intact.
     if(Number(atualizados)>0) window.rerenderPaginaAtiva?.('crm-index-event');
-    if(proof.coreComplete===true&&proof.indexServerBacked===true
-        &&proof.marker===marker&&target?.marker===marker&&target?.seq===seq){
+    const expectedPairs=Array.isArray(proof.expectedPairs)?proof.expectedPairs:[];
+    const cacheCoverage=expectedPairs.length>0&&expectedPairs.every(([lid,ano])=>
+      proof.pairs?.[String(lid)+'|'+String(ano)]?.coreComplete===true
+        ||window._crmS070CacheProvaVigente?.(crmCtx,lid,String(ano),proof)===true);
+    const covered=proof.coreComplete===true||cacheCoverage;
+    if(covered&&proof.indexServerBacked===true&&proof.marker===proof.expectedMarker
+        &&proof.marker===marker&&target?.marker===marker&&target?.seq===seq
+        &&!(proof.deferredPairs||[]).length){
       target.dirty=false; target.degraded=false; target.error=''; st.retry=0; st.paused=false;
       _s033SyncAvisar();
       if(_s033SyncHasDirty(st,false)) _s033SyncAcordarDrenagem(st,false);
@@ -16434,6 +16446,9 @@ const CRM_INDICE = 'crm_indice';
 // exato instalado em memória. Não são uma prova S033/S042 nem um cache local.
 const _crmDetalhesCorePorCubo = new WeakMap();
 const _crmDetalhesConfirmadosPorCubo = new WeakMap();
+// A revalidação S070 é volátil e não promove o core a prova S033/S042.
+// A chave fraca acompanha somente o cubo congelado da sessão corrente.
+const _crmS070CacheRevalidacoesPorCubo = new WeakMap();
 const _crmDetalhesLeiturasAtivas = new Map();
 let _crmDetalhesLeituraSerial=0;
 function _crmS068cProximaLeitura(){
@@ -16478,7 +16493,9 @@ function _crmS068cCoreReciboConfere(ctx,lid,ano,cubo,esperado={}){
       ?!index
       :index?.owner===ctx.owner&&index?.geracao===ctx.geracao&&index.active===true
         &&index.seq===meta.eventSeq&&index.marker===meta.indexMarker));
-  return !!(meta&&meta.coreServerBacked===true&&meta.owner===ctx.owner
+  const cacheRevalidado=esperado.cacheRevalidated===true
+    &&_crmS070CacheReciboConfere(ctx,lid,ano,cubo,esperado);
+  return !!(meta&&(meta.coreServerBacked===true||cacheRevalidado)&&meta.owner===ctx.owner
     &&meta.geracao===ctx.geracao&&ativo?.owner===ctx.owner&&ativo?.geracao===ctx.geracao
     &&meta.lid===String(lid)&&meta.ano===String(ano)&&meta.cubo===cubo
     &&typeof meta.gid==='string'&&!!meta.gid.trim()&&Number(meta.ts)>0
@@ -16496,6 +16513,221 @@ function _crmS068cCoreReciboConfere(ctx,lid,ano,cubo,esperado={}){
     &&(persistenciaCore||meta.eventSeq===null||meta.eventSeq===undefined||seq===meta.eventSeq)
     &&!op&&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
     &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano)));
+}
+function _crmS070CamposCore(cubo){
+  if(!cubo||typeof cubo!=='object'||Array.isArray(cubo))return null;
+  return Object.keys(cubo).filter(k=>k!=='_comprasCliente').map(k=>[k,cubo[k]]);
+}
+function _crmS070CamposCoreIguais(cubo,capturados){
+  if(!Array.isArray(capturados)||!cubo||typeof cubo!=='object'||Array.isArray(cubo))return false;
+  const chaves=Object.keys(cubo).filter(k=>k!=='_comprasCliente');
+  return chaves.length===capturados.length&&capturados.every((par,i)=>
+    Array.isArray(par)&&chaves[i]===par[0]&&cubo[par[0]]===par[1]);
+}
+function _crmS070ConflitoAtual(ctx,lid,ano){
+  const conflitos=_crmS069Conflitos?.get?.(ctx?.owner);
+  if(conflitos?.geracao!==ctx?.geracao)return false;
+  return Object.values(conflitos.items||{}).some(op=>op?._arquivado===true
+    &&op.owner===ctx.owner&&String(op.lid)===String(lid)&&String(op.ano)===String(ano));
+}
+function _crmS070CacheReciboConfere(ctx,lid,ano,cubo,esperado={}){
+  const token=cubo&&_crmS070CacheRevalidacoesPorCubo.get(cubo);
+  const meta=cubo&&_crmDetalhesCorePorCubo.get(cubo),ativo=window._s012Capturar?.();
+  const ticket=window._s033MainReadStart?.(ctx),evento=window._s033S051EstadoIndice?.(ctx);
+  const recibo=_crm2ReceiptValido(cubo,ctx,lid,ano);
+  const reciboConfere=token?.derived===true
+    ?token.nativeAck
+      ?!!(recibo&&token.nativeAck.shape==='projected-full'&&recibo.shape===token.nativeAck.shape
+        &&recibo.owner===token.owner&&recibo.lid===token.lid&&recibo.ano===token.ano
+        &&recibo.epoch===token.nativeAck.epoch&&recibo.revisao===token.nativeAck.revisao
+        &&recibo.rowKey===token.nativeAck.rowKey&&recibo.digest===token.nativeAck.digest)
+      :!recibo
+    :!!(recibo&&recibo.shape==='core'
+      &&recibo.owner===token?.owner&&recibo.epoch===token?.epoch
+      &&recibo.revisao===token?.revisao&&recibo.rowKey===token?.rowKey&&recibo.digest===token?.digest);
+  return !!(token&&meta&&window._s012ContextoValido(ctx)&&ativo?.owner===ctx.owner
+    &&ativo?.geracao===ctx.geracao&&token.owner===ctx.owner&&token.geracao===ctx.geracao
+    &&token.lid===String(lid)&&token.ano===String(ano)&&token.cubo===cubo
+    &&meta.owner===ctx.owner&&meta.geracao===ctx.geracao&&meta.lid===String(lid)
+    &&meta.ano===String(ano)&&meta.cubo===cubo&&meta.cacheRevalidated===true
+    &&meta.coreServerBacked===false&&meta.indexServerBacked===true
+    &&meta.gid===token.gid&&Number(meta.ts)===Number(token.ts)
+    &&meta.eventSeq===token.eventSeq&&meta.indexMarker===token.marker
+    &&Number((window._crmTsVisto||{})[lid]?.[ano])===Number(token.ts)
+    &&((window._crmTsVisto||{})._geracoes?.[lid]?.[ano]||null)===token.gid
+    &&Object.isFrozen(cubo)&&_crmS070CamposCoreIguais(cubo,token.coreFields)
+    &&reciboConfere&&!window.crmPendenciaAtual?.(ctx,lid,ano)
+    &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},String(lid)+'|'+String(ano))
+    &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))
+    &&!_crmS070ConflitoAtual(ctx,lid,ano)
+    &&ticket?.owner===ctx.owner&&ticket?.geracao===ctx.geracao
+    &&ticket.seqs?.crm_indice===token.eventSeq
+    &&evento?.owner===ctx.owner&&evento.geracao===ctx.geracao&&evento.active===true
+    &&evento.seq===token.eventSeq&&evento.marker===token.marker
+    &&(esperado.gid===undefined||esperado.gid===token.gid)
+    &&(esperado.ts===undefined||Number(esperado.ts)===Number(token.ts))
+    &&(esperado.eventSeq===undefined||esperado.eventSeq===token.eventSeq)
+    &&(esperado.indexMarker===undefined||esperado.indexMarker===token.marker));
+}
+window._crmS070CacheProvaVigente=function(ctx,lid,ano,proof){
+  const id=String(lid)+'|'+String(ano),token=proof?.cacheRevalidatedPairs?.[id];
+  if(!token||proof?.indexServerBacked!==true||proof.marker!==proof.expectedMarker
+      ||proof.marker!==token.marker||proof.eventSeqAtStart!==token.eventSeq
+      ||token.owner!==ctx?.owner||token.geracao!==ctx?.geracao)return false;
+  return _crmS070CacheReciboConfere(ctx,lid,ano,D.crm?.[lid]?.[String(ano)],
+    {gid:token.gid,ts:token.ts,eventSeq:token.eventSeq,indexMarker:token.marker});
+};
+function _crmS070TransferirCache(ctx,lid,ano,base,cubo,meta){
+  const token=base&&_crmS070CacheRevalidacoesPorCubo.get(base);
+  if(!token)return true;
+  if(!_crmS070CacheReciboConfere(ctx,lid,ano,base,{gid:token.gid,ts:token.ts,
+      eventSeq:token.eventSeq,indexMarker:token.marker})
+      ||!_crmS070CamposCoreIguais(cubo,token.coreFields)
+      ||_crm2DeepFreeze(cubo)!==cubo)return false;
+  const seguinte=Object.freeze({...token,cubo,derived:true});
+  _crmS070CacheRevalidacoesPorCubo.set(cubo,seguinte);
+  meta.cacheRevalidated=true;meta.coreServerBacked=false;meta.indexServerBacked=true;
+  meta.owner=ctx.owner;meta.geracao=ctx.geracao;meta.lid=String(lid);meta.ano=String(ano);
+  meta.gid=token.gid;meta.ts=token.ts;meta.eventSeq=token.eventSeq;meta.indexMarker=token.marker;
+  meta.cubo=cubo;
+  return true;
+}
+function _crmS070VincularAckNativo(ctx,lid,ano,cubo,head,receipt){
+  const token=cubo&&_crmS070CacheRevalidacoesPorCubo.get(cubo);
+  if(!token||token.derived!==true||token.nativeAck||!receipt||receipt.shape!=='projected-full'
+      ||!window._s012ContextoValido(ctx)||!_crm2ValidaHead(head,ctx.owner,lid,ano,receipt.epoch)
+      ||head.apagado||receipt.owner!==ctx.owner||receipt.lid!==String(lid)||receipt.ano!==String(ano)
+      ||receipt.epoch!==head.epoch||receipt.revisao!==head.revisao
+      ||receipt.rowKey!==head.rowKey||receipt.digest!==head.digest)return false;
+  const nativeAck=Object.freeze({shape:receipt.shape,epoch:receipt.epoch,revisao:receipt.revisao,
+    rowKey:receipt.rowKey,digest:receipt.digest});
+  const seguinte=Object.freeze({...token,nativeAck});
+  _crmS070CacheRevalidacoesPorCubo.set(cubo,seguinte);
+  if(!_crmS070CacheReciboConfere(ctx,lid,ano,cubo,{gid:token.gid,ts:token.ts,
+      eventSeq:token.eventSeq,indexMarker:token.marker})){
+    _crmS070CacheRevalidacoesPorCubo.set(cubo,token);
+    return false;
+  }
+  return true;
+}
+async function _crmS070CacheRevalidarPar(ctx,dadosAlvo,mod,db,lid,ano,gidEsperado,tsEsperado,
+    cerca,indexCache){
+  const pair=String(lid)+'|'+String(ano),stats={serverHeadDocs:0,nativeMetadataRecords:0,nativePayloadBytes:0};
+  const falha=(motivo)=>({ok:false,motivo,stats});
+  const cube=dadosAlvo.crm?.[lid]?.[ano]||null;
+  const receipt=cube&&_crm2ReceiptValido(cube,ctx,lid,ano);
+  const ticketSeq=Number.isSafeInteger(cerca?.eventSeq)?cerca.eventSeq:null;
+  const marker=cerca?.marker??null;
+  const tupleGid=typeof gidEsperado==='string'?gidEsperado:null,tupleTs=Number(tsEsperado);
+  const eventoInicial=window._s033S051EstadoIndice?.(ctx);
+  const captura={dados:dadosAlvo,cube,crmVersao:Number(window._crmVersao)||0,
+    epoch:_crmCacheEpoch.get(ctx?.owner),revision:_crmCacheRevisao.get(ctx?.owner),receipt,
+    op:window.crmPendenciaAtual?.(ctx,lid,ano)||null,
+    marker:window._crmNaoEnviados?.[pair],saving:_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))};
+  const baseVigente=()=>window._s012ContextoValido(ctx)&&D===captura.dados
+    &&window._s012Capturar?.()?.owner===ctx.owner
+    &&window._s012Capturar?.()?.geracao===ctx.geracao
+    &&Number(window._crmVersao||0)===captura.crmVersao
+    &&_crmCacheEpoch.get(ctx.owner)===captura.epoch
+    &&_crmCacheRevisao.get(ctx.owner)===captura.revision
+    &&D.crm?.[lid]?.[ano]===captura.cube
+    &&window.crmPendenciaAtual?.(ctx,lid,ano)===captura.op&&!captura.op
+    &&window._crmNaoEnviados?.[pair]===captura.marker
+    &&captura.marker===undefined&&!captura.saving
+    &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))
+    &&!_crmS070ConflitoAtual(ctx,lid,ano)
+    &&receipt===_crm2ReceiptValido(captura.cube,ctx,lid,ano)
+    &&receipt?.shape==='core'&&Object.isFrozen(captura.cube);
+  const cercaVigente=()=>{
+    const ticket=window._s033MainReadStart?.(ctx),evento=window._s033S051EstadoIndice?.(ctx);
+    return !!(cerca?.indexServerBacked===true&&cerca?.indexFresh===true
+      &&typeof marker==='string'&&marker&&Number.isSafeInteger(ticketSeq)
+      &&ticket?.owner===ctx.owner&&ticket.geracao===ctx.geracao
+      &&ticket.seqs?.crm_indice===ticketSeq
+      &&evento?.owner===ctx.owner&&evento.geracao===ctx.geracao&&evento.active===true
+      &&evento.seq===ticketSeq&&evento.marker===marker
+      &&eventoInicial?.active===true&&eventoInicial.marker===marker
+      &&(eventoInicial.seq===ticketSeq||cerca.allowInitialTicket===true));
+  };
+  if(!cube||!receipt||receipt.shape!=='core'||!baseVigente()||!cercaVigente()
+      ||!tupleGid?.trim()||!Number.isFinite(tupleTs)||tupleTs<=0)return falha('precondicao');
+  if(indexCache?.data){
+    const index=indexCache.data,carimbo=Number(index.carimbos?.[lid]?.[ano]),rev=index.geracoes?.[lid]?.[ano];
+    if(indexCache.marker!==marker||!(carimbo>0)||carimbo!==tupleTs
+        ||!rev||typeof rev.gid!=='string'||!rev.gid.trim()
+        ||Number(rev.ts)!==carimbo||rev.gid!==tupleGid)return falha('indice-divergente');
+  }
+  let headSnap;
+  try{
+    if(typeof mod.getDocFromServer!=='function')return falha('leitura-servidor-indisponivel');
+    headSnap=await mod.getDocFromServer(mod.doc(db,'avatim',_crmDocNome(lid,ano)));
+    stats.serverHeadDocs++;
+  }catch(_e){return falha('cabeca-servidor-indisponivel');}
+  const hm=headSnap?.metadata||{},raw=headSnap?.exists?.()?headSnap.data()||{}:null;
+  if(hm.fromCache!==false||hm.hasPendingWrites!==false||!raw||raw._apagado===true
+      ||typeof raw.gid!=='string'||!raw.gid.trim()||raw.gid!==tupleGid
+      ||Number(raw.ts)!==tupleTs||typeof raw.dados!=='string'||!raw.dados)
+    return falha('cabeca-divergente');
+  let cabeca;
+  try{cabeca=JSON.parse(raw.dados);}catch(_e){return falha('cabeca-invalida');}
+  if(!cabeca||typeof cabeca!=='object'||Array.isArray(cabeca))return falha('cabeca-invalida');
+  const partes=cabeca._partes===undefined?0:Number(cabeca._partes);
+  if(!Number.isSafeInteger(partes)||partes<0)return falha('cabeca-invalida');
+  const remoteDescriptor=_crmS068cProjetarDescritor(cabeca._comprasCliente,lid,ano,tupleGid);
+  const nativePair=_crm2ParKey(ctx.owner,lid,ano),receiptBefore=_crm2ReceiptValido(cube,ctx,lid,ano);
+  let inicio,row,final,dbIdb=null;
+  try{
+    dbIdb=await _idbAbrir();
+    if(!baseVigente()||!cercaVigente())return falha('cerca-alterada');
+    inicio=await _crm2LerMetadadosPar(dbIdb,ctx.owner,lid,ano);
+    stats.nativeMetadataRecords+=4;
+    if(!_crm2ValidOwner(inicio.root,ctx.owner)||inicio.root.mode!=='pair'
+        ||inicio.root.epoch!==receipt.epoch||inicio.op||inicio.proof
+        ||!_crm2ValidaHead(inicio.head,ctx.owner,lid,ano,inicio.root.epoch)
+        ||inicio.head.apagado||inicio.head.rowKey!==receipt.rowKey
+        ||inicio.head.digest!==receipt.digest||inicio.head.revisao!==receipt.revisao)
+      return falha('head-local-divergente');
+    row=await _crm2LerRow(dbIdb,inicio.head.rowKey,{owner:ctx.owner,lid,ano,
+      epoch:inicio.root.epoch,revisao:inicio.head.revisao,digest:inicio.head.digest},{projection:'core'});
+    stats.nativeMetadataRecords++;
+    stats.nativePayloadBytes=_crmUtf8Bytes(row.bytes);
+    const gen=row.meta?.projection?.generation,detail=row.meta?.projection?.detail;
+    const localDescriptor=detail?.descriptor||null;
+    const coreBytes=_crmS042Json(_crm2CuboCore(cube));
+    if(row.meta?.codec!==_CRM2_ROW_PROJECTION_CODEC||row.meta?.state!=='ready'
+        ||!gen||gen.gid!==tupleGid||Number(gen.ts)!==tupleTs
+        ||!detail||!['loaded','empty','unloaded'].includes(detail.state)
+        ||!remoteDescriptor.descriptor
+        ||_crmS068cDescritorSig(localDescriptor)!==_crmS068cDescritorSig(remoteDescriptor.descriptor)
+        ||row.bytes!==coreBytes||_crmS042Json(row.cubo)!==row.bytes)
+      return falha('payload-local-divergente');
+    final=await _crm2LerMetadadosPar(dbIdb,ctx.owner,lid,ano);
+    stats.nativeMetadataRecords+=4;
+    if(JSON.stringify(final.root)!==JSON.stringify(inicio.root)
+        ||JSON.stringify(final.head)!==JSON.stringify(inicio.head)
+        ||JSON.stringify(final.op??null)!==JSON.stringify(inicio.op??null)
+        ||JSON.stringify(final.proof??null)!==JSON.stringify(inicio.proof??null)
+        ||final.op||final.proof)return falha('cas-local-divergente');
+  }catch(_e){return falha('cache-local-indisponivel');}
+  finally{dbIdb?.close();}
+  if(!baseVigente()||!cercaVigente()||receiptBefore!==_crm2ReceiptValido(cube,ctx,lid,ano))
+    return falha('cerca-alterada');
+  const detailState=row.meta.projection.detail.state,desc=row.meta.projection.detail.descriptor;
+  _crmMarcarVisto(lid,ano,tupleTs,tupleGid,ctx);
+  if(!baseVigente()||!cercaVigente())return falha('sessao-alterada');
+  const coreFields=_crmS070CamposCore(cube);
+  const token=Object.freeze({owner:ctx.owner,geracao:ctx.geracao,lid:String(lid),ano:String(ano),
+    gid:tupleGid,ts:tupleTs,eventSeq:ticketSeq,marker,cubo:cube,epoch:receipt.epoch,
+    revisao:receipt.revisao,rowKey:receipt.rowKey,digest:receipt.digest,coreFields,derived:false});
+  const meta={owner:ctx.owner,geracao:ctx.geracao,lid:String(lid),ano:String(ano),gid:tupleGid,ts:tupleTs,
+    eventSeq:ticketSeq,cubo:cube,coreServerBacked:false,cacheRevalidated:true,indexServerBacked:true,
+    indexMarker:marker,readSerial:_crmS068cProximaLeitura(),detailCacheReady:true,coreImmutable:true,
+    headGenerationBound:true,hasDetail:false,detailState,descriptorSig:_crmS068cDescritorSig(desc)};
+  _crmS070CacheRevalidacoesPorCubo.set(cube,token);
+  _crmDetalhesCorePorCubo.set(cube,meta);
+  if(!_crmS070CacheReciboConfere(ctx,lid,ano,cube,{gid:tupleGid,ts:tupleTs,
+      eventSeq:ticketSeq,indexMarker:marker}))return falha('recibo-volatil-invalido');
+  return {ok:true,meta,token,stats,nativePair,coreBytes:row.bytes};
 }
 function _crmS068cDetalheReciboConfere(ctx,lid,ano,cubo,receipt,expected={}){
   if(!receipt||!_crmS068cCoreReciboConfere(ctx,lid,ano,cubo,expected))return false;
@@ -17649,6 +17881,56 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
   if(_parcial) paresOpt.forEach(x => { if(Array.isArray(x) && lojas.includes(x[0])) _pares.push([x[0], String(x[1]), x[2], x[3]]); });
   else lojas.forEach(lid => anos.forEach(ano => _pares.push([lid, ano])));
   _n003Notificar({tipo:'leitura-iniciada',total:_pares.length,parcial:_parcial});
+  let _s070CacheIndice=null;
+  const _s070TemCoreNativo=_crmModoDetalhe==='core'&&_pares.some(([lid,ano])=>{
+    const cube=dadosAlvo.crm?.[lid]?.[String(ano)],receipt=cube&&_crm2ReceiptValido(cube,ctx,lid,String(ano));
+    return receipt?.shape==='core'&&!window.crmPendenciaAtual?.(ctx,lid,String(ano))
+      &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},String(lid)+'|'+String(ano));
+  });
+  if(_s070TemCoreNativo){
+    const state=window._s033S051EstadoIndice?.(ctx),ticket=window._s033MainReadStart?.(ctx);
+    const proofFence=s033Proof?.indexServerBacked===true&&s033Proof.marker!=null
+      &&s033Proof.marker===s033Proof.expectedMarker
+      &&Number.isSafeInteger(s033Proof.eventSeqAtStart)
+      &&state?.active===true&&state.seq===s033Proof.eventSeqAtStart&&state.marker===s033Proof.marker
+      &&ticket?.owner===ctx.owner&&ticket.geracao===ctx.geracao
+      &&ticket.seqs?.crm_indice===s033Proof.eventSeqAtStart;
+    if(proofFence){
+      _s070CacheIndice={marker:s033Proof.marker,eventSeq:s033Proof.eventSeqAtStart,
+        indexServerBacked:true,indexFresh:true,allowInitialTicket:false,data:null};
+    }else if(state?.active===true&&typeof state.marker==='string'&&state.marker
+        &&ticket?.owner===ctx.owner&&ticket.geracao===ctx.geracao
+        &&Number.isSafeInteger(ticket.seqs?.crm_indice)){
+      try{
+        if(typeof mod.getDocFromServer==='function'){
+          const snap=await mod.getDocFromServer(doc(db,'avatim',CRM_INDICE)),m=snap?.metadata||{};
+          const index=snap?.exists?.()?snap.data()||{}:null;
+          const marker=index&&window._s033MarcadorIndice?.(ctx,index);
+          const atual=window._s033S051EstadoIndice?.(ctx),ticketAtual=window._s033MainReadStart?.(ctx);
+          if(m.fromCache===false&&m.hasPendingWrites===false&&index&&typeof marker==='string'&&marker
+              &&marker===state.marker&&atual?.active===true&&atual.seq===ticket.seqs.crm_indice
+              &&atual.marker===marker&&ticketAtual?.seqs?.crm_indice===ticket.seqs.crm_indice){
+            _s070CacheIndice={data:index,marker,eventSeq:ticket.seqs.crm_indice,
+              indexServerBacked:true,indexFresh:true,allowInitialTicket:true};
+            if(s033Proof){
+              if(s033Proof.expectedMarker==null)s033Proof.expectedMarker=marker;
+              if(s033Proof.expectedMarker===marker){
+                s033Proof.indexServerBacked=true;s033Proof.marker=marker;
+              }else _s070CacheIndice=null;
+            }
+          }
+        }
+      }catch(_e){_s070CacheIndice=null;}
+    }
+  }
+  const _s070CacheStats={pares:0,metadataServidor:0,payloadServidor:0,
+    metadataNativo:0,payloadLocalBytes:0};
+  if(_s070CacheIndice){
+    // A proof supplied by crmAtualizarSeMudou already counted the one fresh
+    // index read; a direct boot revalidation reads it here.
+    _s070CacheStats.metadataServidor=1;
+    _n003Notificar({tipo:'cache-revalidacao-iniciada',mensagem:'Conferindo índice, cabeças e payload core local antes de reler partes.'});
+  }
   let _s042PersistirUmaVez=false;
   const _crmProjecoesCoreParaPersistir=new Map();
   let carregados = 0, removidos = 0, falhasN003=0;
@@ -17711,6 +17993,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
     const _opIdCargaInicio=_opCargaInicio?.opId||null;
     let _opIdCargaEsperada=_opIdCargaInicio;
     const _markerCargaInicio=window._crmNaoEnviados?.[_chavePendente];
+    let _markerCargaEsperado=_markerCargaInicio;
     const _estadoVistoPersistido=_crmLerEstadoSeguro(ctx);
     const _ctxAtivoNoInicio=window._s012Capturar?.();
     const _ramVistoAtivo=window._s012ContextoValido(ctx)&&_ctxAtivoNoInicio?.owner===ctx.owner
@@ -17724,16 +18007,18 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
     const _gidVistoInicio=_estadoVistoInicio?._geracoes?.[lid]?.[ano]??null;
     const _cuboCargaInicio=(dadosAlvo.crm[lid]||{})[ano];
     const _temLocal=!!_cuboCargaInicio;
+    const _s069HeldInicio=_opCargaInicio?.exclusaoRemota
+      ?_crmS069CapturarCercaHeld(ctx,lid,ano,_opCargaInicio,_markerCargaInicio):null;
     const _pendenciaMudouDuranteCarga=()=>{
       const atual=window.crmPendenciaAtual(ctx,lid,ano);
       return (atual?.opId||null)!==_opIdCargaEsperada
-        || window._crmNaoEnviados?.[_chavePendente]!==_markerCargaInicio;
+        || window._crmNaoEnviados?.[_chavePendente]!==_markerCargaEsperado;
     };
     const _invalidarVistoSeFalhou=()=>D!==dadosAlvo||_pendenciaMudouDuranteCarga()?false
       :_crmInvalidarVistoAposFalha(lid,ano,ctx,_tsVistoInicio,_gidVistoInicio);
     // A fatia B009A só aplica exclusão explícita quando não há gravação local
     // pendente. Marcadores legados sem operação continuam retidos por segurança.
-    const _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
+    let _temPendente=_opCargaInicio?.tipo==='gravar'||!!_markerCargaInicio;
     const _marcaLegadaSemOperacao=!!_markerCargaInicio&&!_opCargaInicio&&_temLocal
       &&_parcial&&s033Proof?.indexServerBacked===true
       &&Number.isFinite(Number(tsIndice))&&Number(tsIndice)>0
@@ -17761,7 +18046,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
       if(typeof showToast==='function')showToast(mensagem,'warn');
     };
     try{
-      if(_opCargaInicio?.exclusaoRemota){_n003EstadoPar='pendencia-local-preservada';continue;}
+      if(_opCargaInicio?.exclusaoRemota&&!_s069HeldInicio){_n003EstadoPar='pendencia-local-preservada';continue;}
       let _s042CabecaServidor=null;
       const _s042Provas=_crmS042Escopo(ctx);
       const _s042Prova=_s042Provas.pares.get(_crmParKey(lid,ano));
@@ -17807,7 +18092,42 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
           }
         }catch(_e){/* Incerteza na prova desativa o atalho. */}
       }
-      let leituraServidor=!!_s042CabecaServidor||_marcaLegadaSemOperacao;
+      const _metaCoreAnterior=_cuboCargaInicio&&_crmDetalhesCorePorCubo.get(_cuboCargaInicio);
+      const _receiptCoreAnterior=_cuboCargaInicio&&_crm2ReceiptValido(_cuboCargaInicio,ctx,lid,ano);
+      if(_modoDetalhePar==='core'&&_s070CacheIndice&&_receiptCoreAnterior?.shape==='core'
+          &&_metaCoreAnterior?.coreServerBacked!==true&&!_temPendente&&!_markerCargaInicio
+          &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))){
+        let _s070Gid=gidIndice,_s070Ts=Number(tsIndice);
+        if(_s070CacheIndice.data){
+          const _s070Carimbo=Number(_s070CacheIndice.data.carimbos?.[lid]?.[ano]);
+          const _s070Rev=_s070CacheIndice.data.geracoes?.[lid]?.[ano];
+          _s070Gid=_s070Rev&&typeof _s070Rev.gid==='string'&&_s070Rev.gid.trim()
+            &&Number(_s070Rev.ts)===_s070Carimbo?_s070Rev.gid:null;
+          _s070Ts=_s070Carimbo;
+        }
+        const _s070Validacao=await _crmS070CacheRevalidarPar(ctx,dadosAlvo,mod,db,lid,ano,
+          _s070Gid,_s070Ts,_s070CacheIndice,_s070CacheIndice);
+        _s070CacheStats.metadataServidor+=_s070Validacao.stats.serverHeadDocs;
+        _s070CacheStats.metadataNativo+=_s070Validacao.stats.nativeMetadataRecords;
+        _s070CacheStats.payloadLocalBytes+=_s070Validacao.stats.nativePayloadBytes;
+        if(_s070Validacao.ok){
+          const _idCache=lid+'|'+ano;
+          if(s033Proof){
+            if(!s033Proof.cacheRevalidatedPairs)s033Proof.cacheRevalidatedPairs={};
+            s033Proof.cacheRevalidatedPairs[_idCache]=_s070Validacao.token;
+          }
+          carregados++;_s070CacheStats.pares++;
+          _n003EstadoPar='cache-revalidado';
+          _n003Notificar({tipo:'leitura-cache-par',lid,ano,estado:_n003EstadoPar,
+            mensagem:'Core local reutilizado após revalidar índice e cabeça no servidor.',
+            metadataServidor:_s070CacheStats.metadataServidor,payloadServidor:_s070CacheStats.payloadServidor,
+            metadataNativo:_s070CacheStats.metadataNativo,payloadLocalBytes:_s070CacheStats.payloadLocalBytes,
+            paresCacheRevalidados:_s070CacheStats.pares});
+          continue;
+        }
+      }
+      let leituraServidor=!!_s042CabecaServidor||_marcaLegadaSemOperacao
+        ||!!_s069HeldInicio||opcoes?.requireServer===true;
       let snap = _s042CabecaServidor||await _s033LerDoc(doc(db, 'avatim', _crmDocNome(lid, ano)),leituraServidor,true);
       if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
       if((!snap.exists()||_s033Cabeca?.semDados)&&_s033Cabeca?.serverBacked!==true){
@@ -17846,6 +18166,10 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
           await _crmS057BaseSnapshot(snap),ctx,lid,ano,mod,db);
         if(!window._s012ContextoValido(ctx)||D!==dadosAlvo)return 0;
         if(_pendenciaMudouDuranteCarga())continue;
+      }
+      if(_s069HeldInicio&&raw._apagado===true){
+        _n003EstadoPar='pendencia-local-preservada';
+        continue;
       }
       const _exclusaoDuravelConfereTombstone=!_temLocal
         &&raw._apagado===true&&leituraServidor===true&&_s033Cabeca?.serverBacked===true
@@ -17906,7 +18230,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         }
         continue;
       }
-      if(_temPendente&&!_exclusaoDuravelConfereTombstone
+      if(_temPendente&&!_s069HeldInicio&&!_exclusaoDuravelConfereTombstone
           &&(!_marcaLegadaSemOperacao||raw._apagado)){
         _n003EstadoPar='pendencia-local-preservada';
         if(!raw._apagado||!leituraServidor||_pendenciaMudouDuranteCarga())continue;
@@ -18223,6 +18547,41 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         _n003EstadoPar='confirmado-no-servidor';
         continue;
       }
+      let _s069Adocao=null;
+      if(_s069HeldInicio){
+        const gidAtual=raw.gid,tsAtual=Number(raw.ts);
+        const generationBound=typeof gidAtual==='string'&&!!gidAtual.trim()
+          &&gidAtual===gidIndice&&Number(tsIndice)===tsAtual
+          &&Number(_s033Cabeca?.ts)===tsAtual&&_s033Cabeca?.gid===gidAtual;
+        const eventSeq=Number.isSafeInteger(s033Proof?.eventSeqAtStart)
+          ?s033Proof.eventSeqAtStart:_s033SeqInicioPar;
+        const coreMeta={owner:ctx.owner,geracao:ctx.geracao,lid:String(lid),ano:String(ano),
+          gid:gidAtual,ts:tsAtual,eventSeq,cubo:leves,
+          coreServerBacked:_s033Cabeca?.serverBacked===true&&_s033PartesServidor===true,
+          indexServerBacked:s033Proof?.indexServerBacked===true,
+          indexMarker:s033Proof?.marker??null,readSerial:_crmReadSerialPar,
+          detailCacheReady:false,coreImmutable:false,headGenerationBound:generationBound,
+          previousLocalReceipt:null,hasDetail:_estadoDetalhePar==='loaded'||_estadoDetalhePar==='empty',
+          detailState:_estadoDetalhePar,
+          descriptorSig:_crmS068cDescritorSig(_n003ProjecaoDetalhe.descriptor||null)};
+        const projection={generation:{gid:gidAtual,ts:tsAtual},detail:{state:_estadoDetalhePar,
+          descriptor:_n003ProjecaoDetalhe.descriptor||null}};
+        if(_estadoDetalhePar==='loaded')projection.detailData=detalheCarregado?.itens;
+        _s069Adocao=await _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,leves,projection,
+          s033Proof,_s069HeldInicio,{gid:gidAtual,ts:tsAtual},coreMeta,{
+            headServerBacked:_s033Cabeca?.serverBacked===true,
+            partsServerBacked:_s033PartesServidor===true,
+            indexServerBacked:s033Proof?.indexServerBacked===true,
+            generationBound});
+        if(!_s069Adocao){
+          _n003EstadoPar='pendencia-local-preservada';
+          _avisarMarcaPreservada();
+          continue;
+        }
+        _opIdCargaEsperada=null;
+        _markerCargaEsperado=undefined;
+        _temPendente=false;
+      }
       const cercaAtual=window.crmPendenciaAtual(ctx,lid,ano);
       if(_pendenciaMudouDuranteCarga()) continue;
       if(cercaAtual?.tipo==='excluir'){
@@ -18247,7 +18606,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
       // remains bound to the exact server-read bytes even after an index event.
       const _coreImutavel=_modoDetalhePar==='core'&&_crm2DeepFreeze(leves)===leves;
       _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,leves);
-      if(!_temPendente&&!_markerCargaInicio)_crmS042Candidatos.delete(_crmS042Id(ctx,lid,ano));
+      if(!_temPendente&&_markerCargaEsperado===undefined)_crmS042Candidatos.delete(_crmS042Id(ctx,lid,ano));
       dadosAlvo.crm[lid][ano] = leves;
       _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
       const _detalheCompletoPar=_modoDetalhePar==='full'||_estadoDetalhePar==='empty';
@@ -18265,9 +18624,23 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
             &&typeof _s033Cabeca.gid==='string'&&!!_s033Cabeca.gid.trim()
             &&_s033Cabeca.gid===_resultadoProvaPar.gid
             &&Number(_s033Cabeca.ts)===Number(_resultadoProvaPar.ts),
-          previousLocalReceipt:_reciboLocalAnterior?.shape==='core'?{..._reciboLocalAnterior}:null,
+          previousLocalReceipt:_s069Adocao?.receipt?.shape==='core'?{..._s069Adocao.receipt}
+            :_reciboLocalAnterior?.shape==='core'?{..._reciboLocalAnterior}:null,
           hasDetail:_estadoDetalhePar==='loaded'||_estadoDetalhePar==='empty',
           detailState:_estadoDetalhePar,descriptorSig:_crmS068cDescritorSig(_descriptorPersistido)};
+        if(_s069Adocao){
+          const projectionEsperada={generation:{gid:_coreMeta.gid,ts:_coreMeta.ts},
+            detail:{state:_estadoDetalhePar,descriptor:_descriptorPersistido}};
+          if(_estadoDetalhePar==='loaded')projectionEsperada.detailData=leves._comprasCliente?.itens;
+          const local=_crm2ReceiptValido(leves,ctx,lid,ano);
+          _coreMeta.detailCacheReady=!!(local&&local.rowKey===_s069Adocao.head.rowKey
+            &&local.digest===_s069Adocao.head.digest
+            &&Number(local.revisao)===Number(_s069Adocao.head.revisao)
+            &&JSON.stringify(_s069Adocao.projection)===JSON.stringify(projectionEsperada)
+            &&_s069Adocao.projection.generation.gid===_coreMeta.gid
+            &&Number(_s069Adocao.projection.generation.ts)===Number(_coreMeta.ts));
+          _coreMeta.coreImmutable=Object.isFrozen(leves);
+        }
         _crmDetalhesCorePorCubo.set(leves,_coreMeta);
         if(_coreMeta.hasDetail){
           const _items=leves._comprasCliente?.itens;
@@ -18292,11 +18665,15 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         }
       }
       carregados++;
-      _n003EstadoPar=_s033Recibos.pares.get(lid+'|'+ano)?.serverBacked?'confirmado-no-servidor':'carregado-sem-prova-do-servidor';
+      _n003EstadoPar=_resultadoProvaPar.coreComplete===true&&_resultadoProvaPar.detailComplete===false
+          &&_estadoDetalhePar==='unloaded'?'confirmado-core-detalhe-sob-demanda'
+        :_resultadoProvaPar.coreComplete===true&&_resultadoProvaPar.detailComplete===false
+          &&_estadoDetalhePar==='legacy'?'confirmado-core-detalhe-indisponivel'
+        :_s033Recibos.pares.get(lid+'|'+ano)?.serverBacked?'confirmado-no-servidor':'carregado-sem-prova-do-servidor';
       const _s042Receipt=_s033Recibos.pares.get(lid+'|'+ano);
       if(_modoDetalhePar==='full'&&_s042Receipt?.serverBacked===true
           &&Number(raw.ts)>0&&typeof raw.gid==='string'&&raw.gid.trim()
-          &&!_temPendente&&!_markerCargaInicio&&!_pendenciaMudouDuranteCarga()
+          &&!_temPendente&&_markerCargaEsperado===undefined&&!_pendenciaMudouDuranteCarga()
           &&!_crmS042Pendente(ctx,lid,ano)){
         const bytes=_crmS042Json(leves);
         if(bytes!==null){
@@ -18331,7 +18708,10 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
     window._crmEmitirAtualizacaoUI?.(_pares.map(([lid,ano])=>({lid,ano})), 'leitura');
   }
   if(!_parcial) window._crmCargaCompleta = 'ok';
-  _n003Notificar({tipo:'leitura-concluida',carregados,removidos,falhas:falhasN003,total:_pares.length});
+  _n003Notificar({tipo:'leitura-concluida',carregados,removidos,falhas:falhasN003,total:_pares.length,
+    cacheRevalidados:_s070CacheStats.pares,cacheMetadataServidor:_s070CacheStats.metadataServidor,
+    cachePayloadServidor:_s070CacheStats.payloadServidor,cacheMetadataNativo:_s070CacheStats.metadataNativo,
+    cachePayloadLocalBytes:_s070CacheStats.payloadLocalBytes});
 
   // [R161] recarga parcial: só os conjuntos relidos saem da lista antiga
   if(_parcial){
@@ -18392,7 +18772,8 @@ window.crmAtualizarSeMudou = async function(opts){
   const provaCoordenada=!!opts?._s033Coordinated;
   const detailMode=opts?.detailMode==='core'?'core':'full';
   const proof=provaExterna||opts?._s051ProofSink||{expectedMarker:null,indexServerBacked:false,complete:false,pairs:{}};
-  if(proof){proof.indexServerBacked=false;proof.complete=false;proof.coreComplete=false;proof.pairs={};}
+  if(proof){proof.indexServerBacked=false;proof.complete=false;proof.coreComplete=false;
+    proof.pairs={};proof.cacheRevalidatedPairs={};proof.expectedPairs=[];proof.deferredPairs=[];}
   if(!ctx || !window._s012ContextoValido(ctx)) return 0;
   proof.eventSeqAtStart=window._s033MainReadStart?.(ctx)?.seqs?.crm_indice??null;
   const chaveCtx=ctx.owner+'|'+ctx.geracao;
@@ -18419,7 +18800,9 @@ window.crmAtualizarSeMudou = async function(opts){
     const {getDoc, doc} = mod;
     let carimbos, geracoes, indiceServidor=false;
     try{
-      const snap = await getDoc(doc(db, 'avatim', CRM_INDICE));
+      const lerIndice=opts?.requireServer===true?mod.getDocFromServer:getDoc;
+      if(typeof lerIndice!=='function')return 0;
+      const snap = await lerIndice(doc(db, 'avatim', CRM_INDICE));
       if(!window._s012ContextoValido(ctx)) return 0;
       _crmIndiceLidoEm = Date.now();
       const meta=snap?.metadata||{};
@@ -18455,6 +18838,12 @@ window.crmAtualizarSeMudou = async function(opts){
       // Writer antigo muda só carimbos: não usar a geração deixada por outro envio.
       const gid = revisao && Number(revisao.ts) === Number(ts)
         && typeof revisao.gid === 'string' ? revisao.gid : null;
+      if(opts?._s069Reimport){
+        const alvo=opts._s069Reimport;
+        if(lid===alvo.lid&&String(ano)===String(alvo.ano)
+            &&typeof gid==='string'&&gid.trim())mudados.push([lid,String(ano),gid,Number(ts)]);
+        return;
+      }
       if(_crmS033PublicacaoPendenteConfere(ctx,lid,String(ano),Number(ts),gid)){
         adiados.push([lid,String(ano),gid,Number(ts)]);
         return;
@@ -18478,6 +18867,18 @@ window.crmAtualizarSeMudou = async function(opts){
       const coreAtual=D.crm?.[lid]?.[String(ano)];
       const metaCoreAtual=_crmDetalhesCorePorCubo.get(coreAtual);
       const eventoAtual=provaCoordenada?window._s033S051EstadoIndice?.(ctx):null;
+      const reciboCoreNativo=coreAtual&&_crm2ReceiptValido(coreAtual,ctx,lid,String(ano));
+      if(detailMode==='core'&&provaCoordenada&&reciboCoreNativo?.shape==='core'
+          &&metaCoreAtual?.coreServerBacked!==true&&!window.crmPendenciaAtual?.(ctx,lid,String(ano))
+          &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},lid+'|'+String(ano))
+          &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,String(ano)))
+          &&!_crmS070ConflitoAtual(ctx,lid,String(ano))){
+        // The normal reader will freshly revalidate this native projected row
+        // against the same server-backed index event and head before skipping
+        // core parts. It remains outside S033's part-read proof map.
+        mudados.push([lid,String(ano),gid,Number(ts)]);
+        return;
+      }
       // A fresh unchanged index can reuse this session's immutable server-read
       // core. Native/cold data and residual legacy generation tokens cannot.
       if(detailMode==='core'&&provaCoordenada&&indiceServidor===true&&mesmoIndice
@@ -18587,7 +18988,8 @@ window.crmAtualizarSeMudou = async function(opts){
       return 0;
     }
     console.log('[crm] índice: recarregando', mudados.map(x => x.join('/')).join(', '));
-    const n = await window.crmCarregar(mudados,ctx,proof,undefined,{detailMode});
+    const n = await window.crmCarregar(mudados,ctx,proof,undefined,
+      {detailMode,requireServer:opts?.requireServer===true});
     if(!window._s012ContextoValido(ctx)) return 0;
     if(n && typeof window.crmAgendarGravacaoIdb === 'function') window.crmAgendarGravacaoIdb(ctx);
     if(proof){
@@ -19728,7 +20130,8 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
     const seq=seqAtual(),seqOk=!metaOk||m.eventSeq===null||m.eventSeq===undefined||seq===m.eventSeq;
     const recibo=!!(p.ts>0&&p.gid&&_crmS068cCoreReciboConfere(ctx,p.lid,p.ano,live,
       {gid:p.gid,ts:p.ts,detailState:m?.detailState,descriptorSig:m?.descriptorSig,
-        eventSeq:m?.eventSeq,indexMarker:m?.indexMarker,readSerial:m?.readSerial}));
+        eventSeq:m?.eventSeq,indexMarker:m?.indexMarker,readSerial:m?.readSerial,
+        cacheRevalidated:m?.cacheRevalidated===true}));
     const semPendente=!opPendente(p)&&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},p.chave)
       &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,p.lid,p.ano));
     return {live,metaOk,seq,seqOk,recibo,semPendente,ok:live===p.cubo&&metaOk&&seqOk&&recibo&&semPendente};
@@ -19739,11 +20142,12 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
     const core=_crmDetalhesCorePorCubo.get(c),state=core?.detailState;
     const confirmado=state==='empty'
       ?_crmS068cCoreReciboConfere(ctx,p.lid,p.ano,c,{gid:p.gid,ts:p.ts,
-        detailState:'empty',descriptorSig:core?.descriptorSig})
+        detailState:'empty',descriptorSig:core?.descriptorSig,cacheRevalidated:core?.cacheRevalidated===true})
       :state==='loaded'&&p.meta?.hasDetail===true
         &&_crmS068cDetalheReciboConfere(ctx,p.lid,p.ano,c,
           _crmDetalhesConfirmadosPorCubo.get(c),{gid:p.gid,ts:p.ts,detailState:'loaded',
-            descriptorSig:_crmS068cDescritorSig(c._comprasCliente)});
+            descriptorSig:_crmS068cDescritorSig(c._comprasCliente),
+            cacheRevalidated:core?.cacheRevalidated===true});
     if(!confirmado)return null;
     return {lid:p.lid,ano:p.ano,gid:p.gid,ts:p.ts,
       estado:c._comprasCliente.itens.length?'completo':'vazio-confirmado',
@@ -19798,8 +20202,19 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
     dadosAlvo.crm[p.lid][p.ano]=atualizado;
     const detailState=Number(rec._detalhe._partes)===0?'empty':'loaded';
     const meta={...p.meta,cubo:atualizado,hasDetail:true,detailState,
-      descriptorSig:p.meta.descriptorSig};
+      descriptorSig:_crmS068cDescritorSig(rec._detalhe)};
+    if(meta.cacheRevalidated===true){
+      meta.detailCacheReady=true;
+      if(!_crmS070TransferirCache(ctx,p.lid,p.ano,base.cubo,atualizado,meta)){
+        dadosAlvo.crm[p.lid][p.ano]=base.cubo;
+        return null;
+      }
+    }
     _crmDetalhesCorePorCubo.set(atualizado,meta);
+    _crmDetalhesConfirmadosPorCubo.set(atualizado,{owner:ctx.owner,geracao:ctx.geracao,
+      lid:p.lid,ano:p.ano,gid:p.gid,ts:p.ts,eventSeq:base.seq,coreMeta:meta,
+      detailRef:rec._detalhe,items:rec._detalhe.itens,detailState,
+      descriptorSig:_crmS068cDescritorSig(rec._detalhe)});
     _crmDetalhesConfirmadosPorCubo.set(atualizado,{owner:ctx.owner,geracao:ctx.geracao,
       lid:p.lid,ano:p.ano,gid:p.gid,ts:p.ts,eventSeq:base.seq,coreMeta:meta,
       detailRef:rec._detalhe,items:rec._detalhe.itens,detailState,
@@ -20050,11 +20465,15 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
           if(!validarAplicacao())throw new Error('A solicitação de detalhe deixou de estar ativa.');
           if(!contextoVigente()||dadosAlvo.crm?.[p.lid]?.[p.ano]!==baseAplicacao
               ||opPendente(p)!==opInicio||marcadorPendente(p)!==markerInicio||seqAtual()!==seqInicio
-              ||!validarAplicacao()||!_crmS068cCoreReciboConfere(ctx,p.lid,p.ano,baseAplicacao,{gid:p.gid,ts:p.ts})
+              ||!validarAplicacao()||!_crmS068cCoreReciboConfere(ctx,p.lid,p.ano,baseAplicacao,
+                {gid:p.gid,ts:p.ts,cacheRevalidated:p.meta?.cacheRevalidated===true})
               ||coreBytes(baseAplicacao)!==bytesCore)
             throw new Error('O CRM atual mudou antes da aplicação do detalhe.');
-          dadosAlvo.crm[p.lid][p.ano]=atualizado;
           const metaAtual={...p.meta,cubo:atualizado,hasDetail:true};
+          if(metaAtual.cacheRevalidated===true
+              &&!_crmS070TransferirCache(ctx,p.lid,p.ano,baseAplicacao,atualizado,metaAtual))
+            throw new Error('A revalidação local do core deixou de estar vigente.');
+          dadosAlvo.crm[p.lid][p.ano]=atualizado;
           _crmDetalhesCorePorCubo.set(atualizado,metaAtual);
           const detalheState=Number(rec.descriptor?._partes)===0?'empty':'loaded';
           const coreInfo=_crmDetalhesCorePorCubo.get(atualizado);
@@ -20086,7 +20505,8 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
                   _crmDetalhesConfirmadosPorCubo.get(atualizado),{gid:p.gid,ts:p.ts,
                     detailState:detalheState,descriptorSig:descriptorSig(detalheAplicado),
                     eventSeq:coreInfo.eventSeq,indexMarker:coreInfo.indexMarker,
-                    readSerial:coreInfo.readSerial,detailCacheReady:false,requireFreshIndex:true}))
+                    readSerial:coreInfo.readSerial,detailCacheReady:false,requireFreshIndex:true,
+                    cacheRevalidated:coreInfo.cacheRevalidated===true}))
               throw new Error('O detalhe foi lido, mas o estado local mudou antes da gravação do cache.');
             if(saved===true)coreInfo.detailCacheReady=true;
             else notificar({tipo:'detalhe-cache-pendente',lid:p.lid,ano:p.ano,
@@ -20142,10 +20562,11 @@ window.crmDetalheDisponivelNoCubo=function(ctx,lid,ano){
       ||meta.lid!==String(lid)||meta.ano!==String(ano)||meta.cubo!==c||!meta.hasDetail
       ||!window._crmComprasClienteValido(c._comprasCliente))return false;
   if(meta.detailState==='empty')return _crmS068cCoreReciboConfere(ctx,lid,String(ano),c,
-    {gid:meta.gid,ts:meta.ts,detailState:'empty',descriptorSig:meta.descriptorSig});
+    {gid:meta.gid,ts:meta.ts,detailState:'empty',descriptorSig:meta.descriptorSig,
+      cacheRevalidated:meta.cacheRevalidated===true});
   return meta.detailState==='loaded'&&_crmS068cDetalheReciboConfere(ctx,lid,String(ano),c,
     _crmDetalhesConfirmadosPorCubo.get(c),{gid:meta.gid,ts:meta.ts,detailState:'loaded',
-      descriptorSig:_crmS068cDescritorSig(c._comprasCliente)});
+      descriptorSig:_crmS068cDescritorSig(c._comprasCliente),cacheRevalidated:meta.cacheRevalidated===true});
 };
 
 /** Carrega detalhe somente para os pares que podem entrar na atribuição de clientes. */
@@ -22271,6 +22692,118 @@ window._s012HidratarRetencaoIdb=async function(ctx){
 // edição que ainda precisa ser confirmada.
 const _crmPendenciasMemoria = new Map();
 const _crmCacheEpoch = new Map();
+// S069 keeps displaced exclusion-fenced drafts owner/session scoped. They are
+// reconstructed from native `c` conflict roots after reload, never from a
+// shared browser cache or another profile's active operation map.
+const _crmS069Conflitos = new Map();
+const _crmS069Resolvidos = new Map();
+window._s012AoTrocarSessao.push(ctx=>{
+  for(const [owner,registro] of _crmS069Conflitos)
+    if(!ctx||owner!==ctx.owner||registro.geracao!==ctx.geracao)_crmS069Conflitos.delete(owner);
+  for(const [owner,registro] of _crmS069Resolvidos)
+    if(!ctx||owner!==ctx.owner||registro.geracao!==ctx.geracao)_crmS069Resolvidos.delete(owner);
+});
+function _crmS069FenceResolvidaConfere(ctx,registro,op){
+  const fence=registro?.fence,head=registro?.head;
+  return !!(fence&&op&&op._duravelRam===true&&op.tipo==='excluir'&&op.confirmada===true
+    &&!op.exclusaoRemota&&!op.liberaExclusao&&head?.apagado===true
+    &&_crm2ValidaHead(head,ctx.owner,registro.op.lid,registro.op.ano,registro.op.epoch)
+    &&op.owner===ctx.owner&&op.lid===registro.op.lid&&String(op.ano)===String(registro.op.ano)
+    &&Number(op.epoch)===Number(head.epoch)&&Number(op.ts)===Number(head.ts)
+    &&(op.gid||null)===(head.gid||null)&&_crm2SnapshotsOperacaoIguais(op,fence));
+}
+function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrackedCube=false){
+  if(!ctx?.owner||!window._s012ContextoValido(ctx)||!dados||typeof dados!=='object'||Array.isArray(dados))return dados;
+  const resolvidos=_crmS069Resolvidos.get(ctx.owner);
+  if(!resolvidos||resolvidos.geracao!==ctx.geracao)return dados;
+  let saida=dados,crmClonado=false;
+  const garantirCopia=()=>{if(!inPlace&&saida===dados)saida={...dados};};
+  const meta=dados._crmPendenciasSnapshot;
+  const opDoArquivo=(op,r)=>op?.owner===ctx.owner&&op?.lid===r.op.lid
+    &&String(op?.ano)===String(r.op.ano)&&op?.opId===r.op.opId
+    &&_crmS069SnapshotOpIgual(op,r.op);
+  if(meta?.owner===ctx.owner&&Array.isArray(meta.ops)){
+    const ops=meta.ops.filter(op=>{
+      const r=Object.values(resolvidos.items).find(item=>opDoArquivo(op,item));
+      if(!r)return true;
+      const lid=String(r.op.lid),ano=String(r.op.ano),par=_crmParKey(lid,ano);
+      const cubo=dados.crm?.[lid]?.[ano];
+      const cuboExato=!!cubo&&_crmS042Json(cubo)===_crmS042Json(r.cubo);
+      const atual=window.crmPendenciaAtual?.(ctx,lid,ano);
+      const cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,atual);
+      const outros=meta.ops.some(outro=>outro!==op&&outro?.owner===ctx.owner
+        &&outro?.lid===lid&&String(outro?.ano)===ano&&!opDoArquivo(outro,r)
+        &&!(cercaAtual&&_crm2SnapshotsOperacaoIguais(outro,r.fence)));
+      const head=r.head&&_crm2ValidaHead(r.head,ctx.owner,lid,ano,r.op.epoch);
+      const semSucessor=(!atual||cercaAtual)
+        &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)
+        &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano));
+      // Old S012 metadata is removable only with both its original cube bytes
+      // and a current native head bound to the archive. Identity alone loses edits.
+      return !(cuboExato&&head&&semSucessor&&!outros);
+    });
+    if(ops.length!==meta.ops.length){
+      garantirCopia();
+      if(ops.length)saida._crmPendenciasSnapshot={...meta,ops};
+      else delete saida._crmPendenciasSnapshot;
+    }
+  }
+  for(const r of Object.values(resolvidos.items)){
+    const lid=String(r.op.lid),ano=String(r.op.ano),par=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
+    const opAtual=window.crmPendenciaAtual?.(ctx,lid,ano);
+    const cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,opAtual);
+    if(opAtual&&!cercaAtual||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)
+        ||_crmPendenciasEmGravacao.has(memKey))continue;
+    const opsDoPar=meta?.owner===ctx.owner&&Array.isArray(meta.ops)
+      ?meta.ops.filter(op=>op?.owner===ctx.owner&&op?.lid===lid&&String(op?.ano)===ano):[];
+    if(opsDoPar.some(op=>!opDoArquivo(op,r)
+        &&!(cercaAtual&&_crm2SnapshotsOperacaoIguais(op,r.fence))))continue;
+    // A persisted snapshot without this exact operation could be a legitimate
+    // successor. Only the resolver's synchronous in-memory cleanup may remove
+    // a byte-identical old cube without the operation metadata.
+    if(!opsDoPar.some(op=>opDoArquivo(op,r))&&!allowUntrackedCube)continue;
+    const cubo=dados.crm?.[lid]?.[ano];
+    if(!cubo||_crmS042Json(cubo)!==_crmS042Json(r.cubo))continue;
+    const head=r.head;
+    const headValido=head&&_crm2ValidaHead(head,ctx.owner,lid,ano,r.op.epoch);
+    const comprovadamenteObsoleto=headValido&&(head.apagado===true
+      ||head.digest!==r.op.digest);
+    if(!comprovadamenteObsoleto)continue;
+    garantirCopia();
+    if(!crmClonado||saida.crm===dados.crm){saida.crm={...(saida.crm||{})};crmClonado=true;}
+    const lojaAtual=saida.crm[lid]||{};
+    const loja={...lojaAtual};
+    delete loja[ano];
+    if(Object.keys(loja).length)saida.crm[lid]=loja;else delete saida.crm[lid];
+  }
+  return saida;
+}
+window._crmS069SanitizarSnapshotResolvido=_crmS069SanitizarSnapshotResolvido;
+function _crmS069LimparCopiaResolvida(ctx,dados,registro,canonicoAtual){
+  if(!dados||typeof dados!=='object'||Array.isArray(dados))return {ok:false,dados};
+  const limpo=_crmS069SanitizarSnapshotResolvido(ctx,dados,false,true)||dados;
+  const lid=String(registro.op.lid),ano=String(registro.op.ano);
+  const meta=limpo._crmPendenciasSnapshot;
+  const ops=meta?.owner===ctx.owner&&Array.isArray(meta.ops)
+    ?meta.ops.filter(op=>op?.owner===ctx.owner&&op?.lid===lid&&String(op?.ano)===ano):[];
+  const atual=window.crmPendenciaAtual?.(ctx,lid,ano);
+  const cercaAtual=_crmS069FenceResolvidaConfere(ctx,registro,atual);
+  if(ops.some(op=>!cercaAtual||!_crm2SnapshotsOperacaoIguais(op,registro.fence)))
+    return {ok:false,dados:limpo};
+  const cubo=limpo.crm?.[lid]?.[ano];
+  if(!cubo)return {ok:true,dados:limpo};
+  const head=registro.head;
+  if(head?.apagado!==true){
+    const atual=D.crm?.[lid]?.[ano],receipt=atual&&_crm2ReceiptValido(atual,ctx,lid,ano);
+    if(receipt&&receipt.epoch===head?.epoch&&receipt.revisao===head?.revisao
+        &&receipt.rowKey===head?.rowKey&&receipt.digest===head?.digest
+        &&_crmS042Json(cubo)===_crmS042Json(atual))return {ok:true,dados:limpo};
+    // This local-only binding preserves an already loaded current detail. It
+    // neither certifies a full native row nor becomes a reusable cache proof.
+    if(typeof canonicoAtual==='function'&&canonicoAtual(head,cubo))return {ok:true,dados:limpo};
+  }
+  return {ok:false,dados:limpo};
+}
 // S068B per-pair cache protocol. These helpers deliberately live outside the
 // S012 retention block; S012 calls only the public capture/materialize/root
 // hooks below and never embeds a cube in its reference envelope.
@@ -22931,7 +23464,8 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
   try{
   publicada=await _crm2Tx(db,'readwrite',(os,_tx,done,fail)=>{
     const ro=os.get(ownerKey),rh=os.get(headKey),rp=os.get(opKey),rm=os.get(preparada.rowKey),rx=os.get(preparada.preparedKey);
-    let falta=5,v={};
+    const rc=opcoes.conflito?.key?os.get(opcoes.conflito.key):null;
+    let falta=5+(rc?1:0),v={};
     const finalizar=()=>{
       if(--falta!==0)return;
       try{
@@ -22942,7 +23476,14 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
         if(typeof opcoes.validar==='function'&&!opcoes.validar())return done(false);
         const revAtual=head&&Number(head.epoch)===Number(root.epoch)?Number(head.revisao):0;
         if(revAtual!==Number(opcoes.revisaoBase??0))return done(false);
+        if(Object.prototype.hasOwnProperty.call(opcoes,'headBaseEsperada')
+            &&JSON.stringify(head||null)!==JSON.stringify(opcoes.headBaseEsperada))return done(false);
         if((opAtual?.opId||null)!==(opcoes.opIdBase||null))return done(false);
+        if(Object.prototype.hasOwnProperty.call(opcoes,'opBaseEsperada')
+            &&(opcoes.opBaseEsperada===null?opAtual!=null
+              :!_crm2SnapshotsOperacaoIguais(opAtual,opcoes.opBaseEsperada)))return done(false);
+        if(opcoes.conflito?.key&&v.conflito!==undefined
+            &&JSON.stringify(v.conflito)!==JSON.stringify(opcoes.conflito.valor))return done(false);
         if(v.row?.state!=='prepared'||v.row.rowKey!==preparada.rowKey
             ||v.prepared?.rowKey!==preparada.rowKey||v.prepared.owner!==owner
             ||Number(v.prepared.epoch)!==Number(root.epoch))return done(false);
@@ -22973,6 +23514,8 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
       r.onsuccess=()=>{v[k]=r.result;finalizar();};
       r.onerror=()=>fail(r.error||new Error('CAS CRM v2 falhou'));
     });
+    if(rc){rc.onsuccess=()=>{v.conflito=rc.result;finalizar();};
+      rc.onerror=()=>fail(rc.error||new Error('conflito CRM v2 não lido durante CAS'));}
   });
   if(publicada){
     preparada.finalizado=true;
@@ -23029,6 +23572,173 @@ async function _crm2VerificarPublicacao(ctx,db,esperado){
     if(esperado.projection!==undefined&&JSON.stringify(row.projection)!==JSON.stringify(esperado.projection))return false;
   }
   return true;
+}
+function _crmS069CapturarCercaHeld(ctx,lid,ano,op,marker){
+  const pair=_crmParKey(lid,ano);
+  // Retaining an excluded draft clears the UI send marker, not its native operation marker.
+  const markerConfere=marker===undefined
+    ||Number.isFinite(Number(marker))&&Number(marker)===Number(op?.marker);
+  if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!op
+      ||op.owner!==ctx.owner||op.lid!==String(lid)||String(op.ano)!==String(ano)
+      ||op.tipo!=='gravar'||!op.exclusaoRemota||op.liberaExclusao
+      ||op._duravelRam!==true||!op.cubo||typeof op.rowKey!=='string'
+      ||!/^[0-9a-f]{64}$/.test(op.digest||'')||!Number.isSafeInteger(op.rowRevision)
+      ||!Number.isSafeInteger(op.epoch)||op.epoch<0
+      ||!markerConfere
+      ||_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano)))return null;
+  const opMeta=_crm2OpMeta(op,op.rowKey,op.digest,op.rowRevision);
+  if(!_crm2ValidaOp(opMeta,ctx.owner,String(lid),String(ano),op.epoch))return null;
+  return {op,opMeta,marker,cubo:D.crm?.[lid]?.[ano]||null,owner:ctx.owner,
+    geracao:ctx.geracao,epoch:op.epoch};
+}
+function _crmS069IndiceAtual(ctx,proof,coreMeta,exigirLimpo=false){
+  if(!window._s012ContextoValido(ctx)||proof?.indexServerBacked!==true
+      ||proof.marker==null||proof.marker!==proof.expectedMarker
+      ||!Number.isSafeInteger(proof.eventSeqAtStart)
+      ||coreMeta?.indexServerBacked!==true||coreMeta.indexMarker!==proof.marker
+      ||coreMeta.eventSeq!==proof.eventSeqAtStart)return false;
+  const ticket=window._s033MainReadStart?.(ctx),estado=window._s033S051EstadoIndice?.(ctx);
+  return !!(ticket?.owner===ctx.owner&&ticket.geracao===ctx.geracao
+    &&ticket.seqs?.crm_indice===proof.eventSeqAtStart
+    &&estado?.owner===ctx.owner&&estado.geracao===ctx.geracao&&estado.active===true
+    &&estado.seq===proof.eventSeqAtStart&&estado.marker===proof.marker
+    &&(!exigirLimpo||estado.dirty===false));
+}
+async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projectionSource,
+    proof,held,remoto,coreMeta,server={}){
+  const owner=ctx?.owner,anoTexto=String(ano),pair=_crmParKey(lid,anoTexto),memKey=_crmMemKey(ctx,lid,anoTexto);
+  const inicio={dados:dadosAlvo,cubo:held?.cubo,versao:window._crmVersao,
+    epoch:_crmCacheEpoch.get(owner),revisao:_crmCacheRevisao.get(owner)};
+  const op=held?.op,opMeta=held?.opMeta,seal=op?.exclusaoRemota;
+  const gid=remoto?.gid,ts=Number(remoto?.ts);
+  let markerEsperado=held?.marker;
+  const cuboAtual=()=>D.crm?.[lid]?.[anoTexto]||null;
+  const contextoEstavel=()=>window._s012ContextoValido(ctx)&&D===inicio.dados
+    &&window._s012Capturar?.()?.owner===owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+    &&Number(window._crmVersao||0)===Number(inicio.versao)
+    &&_crmCacheEpoch.get(owner)===inicio.epoch&&_crmCacheRevisao.get(owner)===inicio.revisao
+    &&window.crmPendenciaAtual?.(ctx,lid,anoTexto)===op
+    &&_crm2SnapshotsOperacaoIguais(window.crmPendenciaAtual?.(ctx,lid,anoTexto),opMeta)
+    &&window._crmNaoEnviados?.[pair]===markerEsperado
+    &&!_crmPendenciasEmGravacao.has(memKey)
+    &&cuboAtual()===inicio.cubo
+    &&(!inicio.cubo||_crmS042Json(inicio.cubo)===_crmS042Json(op?.cubo))
+    &&_crmS069IndiceAtual(ctx,proof,coreMeta);
+  if(ctx?.perfil!=='admin'||!held||!op||!seal||op.liberaExclusao
+      ||held.owner!==owner||held.geracao!==ctx.geracao||Number(held.epoch)!==Number(op.epoch)
+      ||!server.headServerBacked||!server.partsServerBacked||!server.indexServerBacked
+      ||!server.generationBound||typeof gid!=='string'||!gid.trim()||!Number.isFinite(ts)||ts<=0
+      )return false;
+  // The indexed live generation must differ from the old, already-deleted base.
+  if(Number(seal.ts)===ts&&(seal.gid||null)===(gid||null))return false;
+  if(!projectionSource||!_crm2ProjecaoLocalValida(projectionSource)
+      ||projectionSource.generation?.gid!==gid||Number(projectionSource.generation?.ts)!==ts
+      ||!_crmS069IndiceAtual(ctx,proof,coreMeta)||!contextoEstavel())return false;
+  const invalidarProva=()=>{
+    _crmS033EscopoRecibos(ctx).pares.delete(pair);
+    if(proof?.pairs)delete proof.pairs[pair];
+    if(proof){proof.complete=false;proof.coreComplete=false;}
+  };
+  invalidarProva();
+  let opBytes;
+  try{opBytes=JSON.stringify(op.cubo);}catch(_e){return false;}
+  if(typeof opBytes!=='string')return false;
+  const db=await _idbAbrir();
+  if(!db)return false;
+  let preparada=null;
+  try{
+    if(!contextoEstavel())return false;
+    const atual=await _crm2LerMetadadosPar(db,owner,lid,anoTexto);
+    if(!_crm2ValidOwner(atual.root,owner)||atual.root.mode!=='pair'
+        ||Number(atual.root.epoch)!==Number(op.epoch)
+        ||!_crm2ValidaOp(atual.op,owner,lid,anoTexto,atual.root.epoch)
+        ||!_crm2SnapshotsOperacaoIguais(atual.op,opMeta)
+        ||!_crm2ValidaHead(atual.head,owner,lid,anoTexto,atual.root.epoch)
+        ||!atual.head?.apagado||Number(atual.head.ts)!==Number(seal.ts)
+        ||(atual.head.gid||null)!==(seal.gid||null))return false;
+    const original=await _crm2LerRow(db,atual.op.rowKey,{owner,lid,ano:anoTexto,
+      epoch:atual.root.epoch,revisao:atual.op.rowRevision,digest:atual.op.digest});
+    if(original.meta.codec!==_CRM2_CODEC||original.bytes!==opBytes
+        ||!_crm2SnapshotsOperacaoIguais(op,atual.op))return false;
+    const conflictKey=_crm2Key('c',owner,lid,anoTexto,atual.op.opId);
+    const archived={...atual.op,kind:'conflict'};
+    const oldConflict=await _crm2Get(db,conflictKey);
+    if(oldConflict!==undefined&&JSON.stringify(oldConflict)!==JSON.stringify(archived))return false;
+    const revisionBase=Number(atual.head.revisao)||0,revisionNew=revisionBase+1;
+    const projection={generation:{gid,ts},detail:{state:projectionSource.detail.state,
+      descriptor:projectionSource.detail.descriptor==null?null:_crm2PlainClone(projectionSource.detail.descriptor)}};
+    if(projectionSource.detailData!==undefined)projection.detailData=projectionSource.detailData;
+    if(!_crm2ProjecaoLocalValida(projection))return false;
+    preparada=await _crm2PrepararRow(ctx,db,atual.root,lid,anoTexto,cuboRemoto,
+      revisionNew,null,null,{shape:'projected',projection});
+    const newCore=_crmS042Json(_crm2CuboCore(cuboRemoto));
+    if(typeof newCore!=='string'||preparada.bytes!==newCore
+        ||!_crmS069IndiceAtual(ctx,proof,coreMeta)||!contextoEstavel())return false;
+    const validar=()=>contextoEstavel()&&coreMeta?.cubo===cuboRemoto
+      &&coreMeta.coreServerBacked===true&&coreMeta.headGenerationBound===true
+      &&coreMeta.gid===gid&&Number(coreMeta.ts)===ts
+      &&server.headServerBacked===true&&server.partsServerBacked===true
+      &&server.indexServerBacked===true&&server.generationBound===true
+      &&_crmS042Json(_crm2CuboCore(cuboRemoto))===preparada.bytes;
+    const head=await _crm2PublicarRow(ctx,db,preparada,{revisaoBase:revisionBase,
+      headBaseEsperada:atual.head,opIdBase:atual.op.opId,opBaseEsperada:atual.op,
+      revisaoNova:revisionNew,removerOperacao:true,invalidarProva:true,
+      conflito:{key:conflictKey,valor:archived},validar});
+    if(!head)return false;
+    // Once the native transaction commits there is no rollback claim. Any
+    // failed readback leaves the old row rooted by `c` and RAM proof incomplete.
+    const publicacaoLida=await _crm2VerificarPublicacao(ctx,db,{owner,lid,ano:anoTexto,
+      epoch:atual.root.epoch,head,op:null,checkOp:true,payloadKey:preparada.payloadKey,
+      payloadBytes:preparada.bytes,detailPayloadKey:preparada.detailPayloadKey,
+      detailBytes:preparada.detailBytes,projection:preparada.meta.projection,
+      noDetail:!preparada.detailPayloadKey});
+    const final=publicacaoLida?await _crm2LerMetadadosPar(db,owner,lid,anoTexto):null;
+    const conflitoLido=publicacaoLida?await _crm2Get(db,conflictKey):undefined;
+    const originalLido=publicacaoLida?await _crm2LerRow(db,original.meta.rowKey,{owner,lid,
+      ano:anoTexto,epoch:original.meta.epoch,revisao:original.meta.revisao,digest:original.meta.digest}):null;
+    if(!publicacaoLida||!final||!_crm2ValidOwner(final.root,owner)
+        ||!_crm2ValidaHead(final.head,owner,lid,anoTexto,atual.root.epoch)
+        ||JSON.stringify(final.head)!==JSON.stringify(head)||final.op||final.proof
+        ||JSON.stringify(conflitoLido)!==JSON.stringify(archived)
+        ||originalLido?.bytes!==opBytes||originalLido?.meta?.rowKey!==op.rowKey
+        ||!contextoEstavel())return false;
+    if(markerEsperado!==undefined){
+      if(window._crmLimparNaoEnviado?.(ctx,lid,anoTexto,markerEsperado)!==true
+          ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair))return false;
+      markerEsperado=undefined;
+    }
+    if(!contextoEstavel())return false;
+    const shape=projection.detail.state==='loaded'?'projected-full':'core';
+    if(_crm2DeepFreeze(cuboRemoto)!==cuboRemoto
+        ||!_crm2FreezeAndCertify(ctx,lid,anoTexto,cuboRemoto,{shape,epoch:head.epoch,
+          revisao:head.revisao,rowKey:head.rowKey,digest:head.digest}))return false;
+    const receipt=_crm2ReceiptValido(cuboRemoto,ctx,lid,anoTexto);
+    if(!receipt||receipt.rowKey!==head.rowKey||receipt.digest!==head.digest
+        ||Number(receipt.revisao)!==Number(head.revisao))return false;
+    if(_crmPendenciasMemoria.get(memKey)!==op)return false;
+    _crmPendenciasMemoria.delete(memKey);
+    _crmCacheEpoch.set(owner,head.epoch);
+    _crmCacheRevisao.set(owner,(Number(_crmCacheRevisao.get(owner))||0)+1);
+    _crmS042Escopo(ctx).pares.delete(pair);
+    _crmS042Candidatos.delete(_crmS042Id(ctx,lid,anoTexto));
+    const cache=_crmS069Conflitos.get(owner),items=cache?.geracao===ctx.geracao
+      ?{...cache.items}:{};
+    items[op.opId]={...archived,cubo:op.cubo,_arquivado:true,
+      _head:{...head},_remoto:{gid:head.gid||null,ts:Number(head.ts)||0,apagado:head.apagado===true,
+        revisao:Number(head.revisao)||0}};
+    _crmS069Conflitos.set(owner,{geracao:ctx.geracao,items});
+    window._s033AoPendenteAlterada?.(ctx);
+    return {head,projection:preparada.meta.projection,receipt,shape,conflictKey,archived};
+  }catch(e){
+    // A failure can occur after the native CAS committed. Keep the archived
+    // conflict root and old active RAM draft for recovery; never claim rollback.
+    invalidarProva();
+    console.warn('[crm] adoção canônica pendente após arquivar rascunho:',e?.message||e);
+    return false;
+  }finally{
+    if(preparada?.limpezaSegura&&!preparada.finalizado)await _crm2DescartarPreparada(db,preparada);
+    db.close();
+  }
 }
 async function _crm2PublicarTombstone(ctx,db,lid,ano,epoch,revisionBase,opBase,opMeta){
   const owner=ctx.owner,rootKey=_crm2OwnerKey(owner),headKey=_crm2HeadKey(owner,lid,ano),opKey=_crm2OpKey(owner,lid,ano);
@@ -23422,6 +24132,314 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
   state.epoch=bruto.root.epoch;state.revisao=_crmCacheRevisao.get(owner)||0;
   return {cubos,state,provas,heads,operacoes,root:bruto.root};
 }
+async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual){
+  const owner=ctx?.owner,lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),opId=arquivado?.opId;
+  const par=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
+  if(!owner||!lid||!ano||!opId||!window._s012ContextoValido(ctx)
+      ||!arquivado?.cubo||!_crm2ValidaOp(_crm2OpMeta(arquivado,arquivado.rowKey,
+        arquivado.digest,arquivado.rowRevision),owner,lid,ano,arquivado.epoch))return false;
+  const atual=window.crmPendenciaAtual(ctx,lid,ano);
+  if(atual?.opId===opId&&_crm2SnapshotsOperacaoIguais(atual,arquivado))return false;
+  const headValido=!!head&&_crm2ValidaHead(head,owner,lid,ano,arquivado.epoch);
+  if(!headValido)return false;
+  const cuboAtual=D.crm?.[lid]?.[ano];
+  const marker=window._crmNaoEnviados?.[par];
+  if(!atual){
+    if(marker!==undefined||_crmPendenciasEmGravacao.has(memKey))return false;
+    if(head.apagado===true){if(cuboAtual)return false;}
+    else{
+      const receipt=cuboAtual&&_crm2ReceiptValido(cuboAtual,ctx,lid,ano);
+      const nativo=receipt&&receipt.epoch===head.epoch&&receipt.revisao===head.revisao
+        &&receipt.rowKey===head.rowKey&&receipt.digest===head.digest;
+      if(!nativo&&!(typeof canonicoAtual==='function'&&canonicoAtual(head)))return false;
+    }
+  }
+  const existente=_crmS069Resolvidos.get(owner),items={
+    ...(existente?.geracao===ctx.geracao?existente.items||{}:{})
+  };
+  items[opId]={op:_crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),
+    cubo:arquivado.cubo,head:headValido?{...head}:null,
+    // The resolver has just read and matched native head/op; never infer this authority from a snapshot.
+    fence:head.apagado===true&&atual?._duravelRam===true&&atual.tipo==='excluir'
+      &&atual.confirmada===true&&!atual.exclusaoRemota&&!atual.liberaExclusao
+      &&Number(atual.epoch)===Number(head.epoch)&&Number(atual.ts)===Number(head.ts)
+      &&(atual.gid||null)===(head.gid||null)
+        ?_crm2OpMeta(atual,atual.rowKey,atual.digest,atual.rowRevision):null};
+  _crmS069Resolvidos.set(owner,{geracao:ctx.geracao,items});
+
+  const storageKey=window._s012StorageKey?.('state',ctx);
+  if(!storageKey)return false;
+  let raw;
+  try{raw=localStorage.getItem(storageKey);}catch(_e){return false;}
+  if(raw!==null){
+    let snapshot;
+    try{snapshot=JSON.parse(raw);}catch(_e){return false;}
+    if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))return false;
+    const limpeza=_crmS069LimparCopiaResolvida(ctx,snapshot,items[opId],canonicoAtual);
+    if(!limpeza.ok)return false;
+    let novoRaw;
+    try{novoRaw=JSON.stringify(limpeza.dados);}catch(_e){return false;}
+    if(typeof novoRaw!=='string')return false;
+    try{
+      if(novoRaw!==raw)localStorage.setItem(storageKey,novoRaw);
+      if(localStorage.getItem(storageKey)!==novoRaw)return false;
+    }catch(_e){return false;}
+  }
+
+  // S012 can retain independent `pending` copies in RAM, localStorage and IDB.
+  // Sanitize each before allowing the archive root to be removed.
+  const limpezaPendente=(dados)=>_crmS069LimparCopiaResolvida(ctx,dados,items[opId],canonicoAtual);
+  let pendenteMemoria=null,pendenteMemoriaJson=null;
+  if(window._pendingLocalData!=null){
+    const limpo=limpezaPendente(window._pendingLocalData);
+    if(!limpo.ok)return false;
+    pendenteMemoria=limpo.dados;
+    try{pendenteMemoriaJson=JSON.stringify(pendenteMemoria);}catch(_e){return false;}
+    if(typeof pendenteMemoriaJson!=='string')return false;
+  }
+  let salvo;
+  try{salvo=window._s005PendingLerArmazenado(ctx);}catch(_e){return false;}
+  let pendenteSalvo=null,pendenteSalvoJson=null;
+  if(salvo?.payload!=null){
+    try{pendenteSalvo=JSON.parse(salvo.payload);}catch(_e){return false;}
+    const limpo=limpezaPendente(pendenteSalvo);
+    if(!limpo.ok)return false;
+    pendenteSalvo=limpo.dados;
+    try{pendenteSalvoJson=JSON.stringify(pendenteSalvo);}catch(_e){return false;}
+    if(typeof pendenteSalvoJson!=='string')return false;
+  }
+  if(pendenteMemoriaJson!==null&&pendenteSalvoJson!==null
+      &&pendenteMemoriaJson!==pendenteSalvoJson)return false;
+  if(pendenteMemoriaJson!==null)window._pendingLocalData=pendenteMemoria;
+  if(pendenteSalvoJson!==null&&salvo?.payload!==pendenteSalvoJson){
+    if(window._s005PendingStorageSet?.(pendenteSalvoJson,ctx)!==true)return false;
+    try{salvo=window._s005PendingLerArmazenado(ctx);}catch(_e){return false;}
+    if(salvo?.payload!==pendenteSalvoJson)return false;
+  }
+
+  // Rebuild the S012 envelope from the sanitized current owner state, then
+  // verify its projected data and pending copy before persisting it.
+  if(window._s012RegistrarRetencao?.(ctx,D)!==true)return false;
+  const retencao=_s012RetencoesPorOwner.get(owner);
+  if(!retencao||retencao.owner!==owner||retencao.ctx?.geracao!==ctx.geracao)return false;
+  const retDados=limpezaPendente(retencao.dados);
+  if(!retDados.ok)return false;
+  retencao.dados=retDados.dados;
+  if(retencao.pending!=null){
+    const retPendente=limpezaPendente(retencao.pending);
+    if(!retPendente.ok)return false;
+    const json=_s012JsonSeguro(retPendente.dados);
+    if(typeof json!=='string')return false;
+    if(json!==retencao.pendingJson){
+      retencao.pending=_s012ClonePendenteRetido(ctx,retPendente.dados);
+      retencao.pendingJson=json;retencao.pendingAck=false;
+      _s068c42CertificarPendente(ctx,retencao,retencao.pending,json);
+    }
+  }
+  if((retencao.crmPendencias||[]).some(op=>op?.owner===owner
+      &&op?.lid===lid&&String(op?.ano)===ano
+      &&!(_crmS069FenceResolvidaConfere(ctx,items[opId],window.crmPendenciaAtual(ctx,lid,ano))
+        &&_crm2SnapshotsOperacaoIguais(op,items[opId].fence))))return false;
+  if(retencao.pendingAck!==true&&!_s012PersistirPendingRetido(ctx,retencao))return false;
+  const rawRetencao=window._s012RetencaoIdbRaw?.(ctx);
+  if(typeof rawRetencao!=='string'||!rawRetencao)return false;
+  const retencaoGravada=await window._s012GravarRetencaoIdb?.(ctx);
+  if(retencaoGravada!==true||!window._s012ContextoValido(ctx))return false;
+  if(window._s012RetencaoIdbRaw?.(ctx)===rawRetencao)return true;
+  // Its own ACK may retire S012. Accept only that exact terminal envelope,
+  // after its native queue and generation-bound roots have been read back.
+  let resolvida;
+  try{resolvida=JSON.parse(rawRetencao);resolvida.liberada=true;}catch(_e){return false;}
+  const rawResolvida=_s012JsonSeguro(resolvida);
+  if(typeof rawResolvida!=='string')return false;
+  const terminalAtual=()=>{
+    const raw=window._s012RetencaoIdbRaw?.(ctx);
+    return window._s012ContextoValido(ctx)&&(raw===null||raw===rawResolvida);
+  };
+  if(!terminalAtual())return false;
+  const fila=_s012RetencaoIdbFila.get(owner);
+  try{if(fila)await _s012RetencaoComPrazo(fila,'finalização da retenção do rascunho');}
+  catch(_e){return false;}
+  if(!terminalAtual())return false;
+  const dbRetencao=await _idbAbrir();
+  if(!dbRetencao)return false;
+  try{
+    const key=window._s012StorageKey?.('state-retention',ctx);
+    if(!key)return false;
+    const raw=await _s012RetencaoIdbLer(dbRetencao,key);
+    const record=typeof raw==='string'?JSON.parse(raw):null;
+    if(!terminalAtual()||!_s012RetencaoRegistroV2Valido(record,owner)
+        ||record.versao!==(resolvida.versao===2?3:2)||record.estado!=='resolvida'
+        ||record.browserToken!==(ctx.browserToken||null)
+        ||Number(record.browserRevision)!==Number(ctx.browserRevision||0)
+        ||Number(record.geracao)!==Number(ctx.geracao||0)
+        ||_s012JsonSeguro(record.retencao)!==rawResolvida)return false;
+    // Envelope v1 embeds its complete data; v2 instead requires native CRM
+    // roots. Read back the exact terminal record in both supported formats.
+    const conferido=await _s012RetencaoIdbLer(dbRetencao,key,null,
+      record.retencao.versao===2?{ctx,raw,projecao:record.retencao.crm}:undefined);
+    return conferido===raw&&terminalAtual();
+  }catch(_e){return false;}
+  finally{dbRetencao.close();}
+}
+// Bind a verified native core to the exact server-loaded full cube only for
+// resolving one archive. Wire descriptors and materialized detail descriptors
+// have different fields; validate their respective receipts without changing
+// either descriptor or granting S042/full-row/cache authority.
+function _crmS069VincularCanonicoCarregado(ctx,lid,ano,head,row){
+  const dados=D,cubo=D.crm?.[lid]?.[ano],meta=cubo&&_crmDetalhesCorePorCubo.get(cubo);
+  const receipt=cubo&&_crmDetalhesConfirmadosPorCubo.get(cubo);
+  const generation=row?.meta?.projection?.generation,descriptor=row?.meta?.projection?.detail?.descriptor;
+  const wireSig=_crmS068cDescritorSig(descriptor),bytes=cubo&&_crmS042Json(cubo);
+  const headJson=_crmS042Json(head),detail=cubo?._comprasCliente,items=detail?.itens;
+  if(row?.meta?.codec!==_CRM2_ROW_PROJECTION_CODEC
+      ||row.meta.projection?.detail?.state!=='unloaded'||typeof row.bytes!=='string'
+      ||typeof bytes!=='string'||!meta||!receipt||meta.headGenerationBound!==true
+      ||meta.detailState!=='loaded'||generation?.gid!==meta.gid
+      ||Number(generation?.ts)!==Number(meta.ts)||meta.descriptorSig!==wireSig
+      ||!descriptor?.disponivel||descriptor._partes<1
+      ||!detail||detail.versao!==1||detail.disponivel!==true
+      ||!Array.isArray(items)||!Array.isArray(detail.meses)
+      ||_crmS042Json(detail.meses)!==_crmS042Json(descriptor.meses)
+      ||!window._crmComprasClienteValido(detail))return null;
+  const materializedSig=_crmS068cDescritorSig(detail);
+  // Compare every core field exactly, including keys/order, replacing only
+  // the known unloaded placeholder in this temporary comparison object.
+  const coreIgual=()=>_crmS042Json({...cubo,_comprasCliente:row.cubo._comprasCliente})===row.bytes;
+  const vigente=atual=>window._s012ContextoValido(ctx)&&D===dados&&D.crm?.[lid]?.[ano]===cubo
+    &&_crmS042Json(atual)===headJson&&_crmS042Json(cubo)===bytes&&coreIgual()
+    &&_crmDetalhesCorePorCubo.get(cubo)===meta
+    &&_crmDetalhesConfirmadosPorCubo.get(cubo)===receipt
+    &&_crmS068cCoreReciboConfere(ctx,lid,ano,cubo,{gid:meta.gid,ts:meta.ts,
+      coreMeta:meta,detailState:'loaded',descriptorSig:wireSig})
+    &&receipt.owner===ctx.owner&&receipt.geracao===ctx.geracao
+    &&receipt.lid===String(lid)&&receipt.ano===String(ano)
+    &&receipt.coreMeta===meta&&receipt.gid===meta.gid&&Number(receipt.ts)===Number(meta.ts)
+    &&receipt.detailRef===detail&&receipt.items===items&&receipt.detailState==='loaded'
+    &&receipt.descriptorSig===materializedSig
+    &&(receipt.eventSeq==null||receipt.eventSeq===meta.eventSeq)
+    &&Object.isFrozen(detail)&&Object.isFrozen(items);
+  // S012 may contain the earlier exact unloaded core, not the full cube now
+  // in D. Preserve that canonical core too; accept only its known zero-item
+  // representation, never another loaded detail or different core field.
+  const coreComItensVazios=_crmS042Json({...row.cubo,
+    _comprasCliente:{...row.cubo._comprasCliente,itens:[]}});
+  const conferir=(atual,copia)=>vigente(atual)&&(copia===undefined
+    ||_crmS042Json(copia)===bytes||_crmS042Json(copia)===row.bytes
+    ||_crmS042Json(copia)===coreComItensVazios);
+  return conferir(head)?conferir:null;
+}
+async function _crmS069ExcluirConflito(ctx,arquivado){
+  const owner=ctx?.owner,lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),opId=arquivado?.opId;
+  if(!owner||!lid||!ano||!opId||!window._s012ContextoValido(ctx)
+      ||arquivado?._arquivado!==true||arquivado.owner!==owner
+      ||arquivado.kind!=='conflict'||arquivado.tipo!=='gravar'||!arquivado.exclusaoRemota
+      ||!Number.isSafeInteger(arquivado.epoch)||!Number.isSafeInteger(arquivado.rowRevision)
+      ||typeof arquivado.rowKey!=='string'||!/^[0-9a-f]{64}$/.test(arquivado.digest||''))return false;
+  // Inspect the native head before choosing local hydration. An exact full
+  // current receipt already binds D; projecting it back to core would discard
+  // its available detail and publication metadata during archive resolution.
+  const pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano),conflictKey=_crm2Key('c',owner,lid,ano,opId);
+  const esperado={..._crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),kind:'conflict'};
+  const opIgual=(a,b)=>a==null?b==null:b!=null&&_crm2SnapshotsOperacaoIguais(a,b);
+  const db=await _idbAbrir();
+  if(!db)return false;
+  try{
+    let base=await _crm2LerMetadadosPar(db,owner,lid,ano);
+    const receiptAntes=_crm2ReceiptValido(D.crm?.[lid]?.[ano],ctx,lid,ano),headAntes=base.head;
+    const fullAtual=receiptAntes&&['full','projected-full'].includes(receiptAntes.shape)
+      &&headAntes&&!headAntes.apagado&&receiptAntes.epoch===headAntes.epoch
+      &&receiptAntes.revisao===headAntes.revisao&&receiptAntes.rowKey===headAntes.rowKey
+      &&receiptAntes.digest===headAntes.digest;
+    if(!fullAtual){
+      await window.crmHidratarIdb?.(ctx,{projection:'core'});
+      if(!window._s012ContextoValido(ctx))return false;
+      base=await _crm2LerMetadadosPar(db,owner,lid,ano);
+    }
+    const opRam=window.crmPendenciaAtual(ctx,lid,ano)||null;
+    if(!_crm2ValidOwner(base.root,owner)||base.root.mode!=='pair'
+        ||Number(base.root.epoch)!==Number(arquivado.epoch)
+        ||base.head&&!_crm2ValidaHead(base.head,owner,lid,ano,base.root.epoch)
+        ||!opIgual(base.op,opRam))return false;
+    const original=await _crm2LerRow(db,arquivado.rowKey,{owner,lid,ano,epoch:arquivado.epoch,
+      revisao:arquivado.rowRevision,digest:arquivado.digest});
+    if(original.meta.codec!==_CRM2_CODEC||original.bytes!==JSON.stringify(arquivado.cubo)
+        ||await _crm2Digest(original.bytes)!==arquivado.digest)return false;
+    const headBase=base.head||null,opBase=base.op||null;
+    // Keep loaded purchase detail in D without pretending that the native
+    // unloaded row stores it. The fallback binding is private to this action.
+    let canonicoAtual=null;
+    const dadosProva=D,cuboProva=D.crm?.[lid]?.[ano];
+    if(headBase&&!headBase.apagado&&!opRam&&cuboProva
+        &&!_crm2ReceiptValido(cuboProva,ctx,lid,ano)){
+      const bytesProva=_crmS042Json(cuboProva);
+      const row=await _crm2LerRow(db,headBase.rowKey,{owner,lid,ano,epoch:headBase.epoch,
+        revisao:headBase.revisao,digest:headBase.digest},{projection:'core'});
+      const depois=await _crm2LerMetadadosPar(db,owner,lid,ano);
+      if(!window._s012ContextoValido(ctx)||D!==dadosProva||D.crm?.[lid]?.[ano]!==cuboProva
+          ||_crmS042Json(cuboProva)!==bytesProva||typeof bytesProva!=='string'
+          ||row.meta.codec!==_CRM2_ROW_PROJECTION_CODEC
+          ||row.meta.projection.detail.state!=='unloaded'
+          ||JSON.stringify(depois.root)!==JSON.stringify(base.root)
+          ||JSON.stringify(depois.head||null)!==JSON.stringify(headBase)
+          ||!opIgual(depois.op,opBase)||JSON.stringify(depois.proof)!==JSON.stringify(base.proof)
+          ||window.crmPendenciaAtual(ctx,lid,ano)
+          ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+          ||_crmPendenciasEmGravacao.has(memKey))return false;
+      if(row.bytes===bytesProva){
+        if(!_crm2FreezeAndCertify(ctx,lid,ano,cuboProva,{shape:'core',epoch:headBase.epoch,
+            revisao:headBase.revisao,rowKey:headBase.rowKey,digest:headBase.digest}))return false;
+      }else{
+        canonicoAtual=_crmS069VincularCanonicoCarregado(ctx,lid,ano,headBase,row);
+        if(!canonicoAtual||!canonicoAtual(headBase))return false;
+      }
+    }
+    if(!await _crmS069PrepararResolucaoArquivo(ctx,arquivado,headBase,canonicoAtual))return false;
+    const arquivoIgual=()=>{
+      const atual=_crmS069Conflitos.get(owner)?.items?.[opId];
+      return !!(atual&&_crm2SnapshotsOperacaoIguais(atual,arquivado)
+        &&_crmS042Json(atual.cubo)===_crmS042Json(arquivado.cubo));
+    };
+    const valido=()=>window._s012ContextoValido(ctx)
+      &&window._s012Capturar?.()?.owner===owner&&window._s012Capturar?.()?.geracao===ctx.geracao
+      &&!_crmPendenciasEmGravacao.has(memKey)
+      &&_crmS069Conflitos.get(owner)?.geracao===ctx.geracao
+      &&arquivoIgual()&&(!canonicoAtual||canonicoAtual(headBase))
+      &&opIgual(window.crmPendenciaAtual(ctx,lid,ano)||null,opRam);
+    const apagou=await _crm2Tx(db,'readwrite',(os,_tx,done,fail)=>{
+      const req={root:os.get(_crm2OwnerKey(owner)),head:os.get(_crm2HeadKey(owner,lid,ano)),
+        op:os.get(_crm2OpKey(owner,lid,ano)),conflict:os.get(conflictKey)};
+      const out={};let falta=4;
+      const finish=()=>{
+        if(--falta!==0)return;
+        if(!valido()||!_crm2ValidOwner(out.root,owner)||out.root.mode!=='pair'
+            ||Number(out.root.epoch)!==Number(arquivado.epoch)
+            ||JSON.stringify(out.head||null)!==JSON.stringify(headBase)
+            ||!opIgual(out.op,opBase)
+            ||JSON.stringify(out.conflict)!==JSON.stringify(esperado))return done(false);
+        os.delete(conflictKey);
+        os.put({...out.root,metadataRevision:(Number(out.root.metadataRevision)||0)+1},_crm2OwnerKey(owner));
+        done(true);
+      };
+      Object.entries(req).forEach(([k,r])=>{
+        r.onsuccess=()=>{out[k]=r.result;finish();};
+        r.onerror=()=>fail(r.error||new Error('CAS de rascunho arquivado CRM falhou'));
+      });
+    });
+    if(!apagou)return false;
+    const final=await _crm2LerMetadadosPar(db,owner,lid,ano),conflitoFinal=await _crm2Get(db,conflictKey);
+    if(!_crm2ValidOwner(final.root,owner)||Number(final.root.epoch)!==Number(arquivado.epoch)
+        ||Number(final.root.metadataRevision)<Number(base.root.metadataRevision||0)+1
+        ||JSON.stringify(final.head||null)!==JSON.stringify(headBase)
+        ||!opIgual(final.op,opBase)
+        ||conflitoFinal!==undefined||!valido())return false;
+    const cache=_crmS069Conflitos.get(owner),items={...cache.items};delete items[opId];
+    _crmS069Conflitos.set(owner,{geracao:ctx.geracao,items});
+    _crmCacheRevisao.set(owner,Number(final.root.metadataRevision)||0);
+    window._crmS068bAgendarColeta?.({owner});
+    return true;
+  }finally{db.close();}
+}
 // Exact local-detail lookup is a read-only cache optimization. A returned
 // array is useful only with its generation tuple; this helper never writes a
 // receipt, operation, proof, or retention record.
@@ -23442,7 +24460,7 @@ window._crmS068cLerDetalheLocal=async function(ctx,lid,ano,expected={}){
   if(coreMeta?.detailCacheReady!==true
       ||!_crmS068cCoreReciboConfere(ctx,lid,ano,cube,{gid,ts,eventSeq:coreMeta?.eventSeq,
         indexMarker:coreMeta?.indexMarker,readSerial:coreMeta?.readSerial,
-        detailCacheReady:true,requireFreshIndex:true}))
+        detailCacheReady:true,requireFreshIndex:true,cacheRevalidated:coreMeta?.cacheRevalidated===true}))
     return result('nao-carregado',{code:'detail-cache-not-revalidated'});
   let coreBytes;
   try{coreBytes=_crmS042Json(_crm2CuboCore(cube));}catch(_e){coreBytes=null;}
@@ -23460,7 +24478,7 @@ window._crmS068cLerDetalheLocal=async function(ctx,lid,ano,expected={}){
     &&_crmS042Json(_crm2CuboCore(D.crm?.[lid]?.[ano]))===start.coreBytes
     &&_crmS068cCoreReciboConfere(ctx,lid,ano,D.crm?.[lid]?.[ano],{gid,ts,
       eventSeq:coreMeta?.eventSeq,indexMarker:coreMeta?.indexMarker,readSerial:coreMeta?.readSerial,
-      detailCacheReady:true,requireFreshIndex:true});
+      detailCacheReady:true,requireFreshIndex:true,cacheRevalidated:coreMeta?.cacheRevalidated===true});
   let db;
   try{
     db=await _idbAbrir();
@@ -23543,7 +24561,7 @@ window._crmS068cLerDetalheLocal=async function(ctx,lid,ano,expected={}){
         ||JSON.stringify(after.row)!==JSON.stringify(captured.meta)
         ||!_crmS068cCoreReciboConfere(ctx,lid,ano,D.crm?.[lid]?.[ano],{gid,ts,
           eventSeq:coreMeta?.eventSeq,indexMarker:coreMeta?.indexMarker,
-          detailCacheReady:true,requireFreshIndex:true}))return result('obsoleto',{code:'recheck'});
+          detailCacheReady:true,requireFreshIndex:true,cacheRevalidated:coreMeta?.cacheRevalidated===true}))return result('obsoleto',{code:'recheck'});
     return result(captured.estado, null,{gid,ts,descriptor:captured.descriptor,items});
   }catch(e){return result('falha',{code:'idb',message:e?.message||String(e)});}
   finally{db?.close();}
@@ -23874,6 +24892,27 @@ function _crm2SnapshotsOperacaoIguais(a,b){
   try{
     const meta=op=>_crm2OpMeta(op,op.rowKey||null,op.digest||null,op.rowRevision);
     return JSON.stringify(meta(a))===JSON.stringify(meta(b));
+  }catch(_e){return false;}
+}
+function _crmS069SnapshotOpIgual(a,b){
+  if(!a||!b)return false;
+  try{
+    const meta=op=>{
+      const v=_crm2OpMeta(op,op.rowKey||null,op.digest||null,op.rowRevision);
+      delete v.rowKey;delete v.digest;delete v.rowRevision;
+      return JSON.stringify(v);
+    };
+    if(meta(a)!==meta(b))return false;
+    const campos=['rowKey','digest','rowRevision'];
+    const presentes=op=>campos.filter(k=>Object.prototype.hasOwnProperty.call(op,k));
+    const pa=presentes(a),pb=presentes(b);
+    // Real pre-durable S012 snapshots omit all three row fences, regardless
+    // of which operand is the native conflict and which is the snapshot.
+    // A partially present fence is malformed and fails closed; when both
+    // sides carry fences, every value must match exactly.
+    if(pa.length&&pa.length!==campos.length||pb.length&&pb.length!==campos.length)return false;
+    return campos.every(k=>!Object.prototype.hasOwnProperty.call(a,k)
+      ||!Object.prototype.hasOwnProperty.call(b,k)||a[k]===b[k]);
   }catch(_e){return false;}
 }
 async function _crm2LerPendenciaPar(ctx,db,lid,ano){
@@ -24344,6 +25383,7 @@ const _crmPendenciasEmGravacao = new Map();
 // o payload já está em dados.crm e não precisa ser duplicado.
 window._crmPrepararSnapshotLocal=function(ctx,dados){
   if(!ctx?.owner||!dados?.crm)return dados;
+  dados=window._crmS069SanitizarSnapshotResolvido?.(ctx,dados)||dados;
   const ops=[];
   for(const op of _crmPendenciasMemoria.values()){
     if(op.owner!==ctx.owner||op._duravelRam!==false||op.tipo!=='gravar')continue;
@@ -24354,6 +25394,7 @@ window._crmPrepararSnapshotLocal=function(ctx,dados){
   return ops.length?Object.assign({},dados,{_crmPendenciasSnapshot:{owner:ctx.owner,ops}}):dados;
 };
 window._crmRestaurarSnapshotLocal=function(ctx,dados){
+  dados=window._crmS069SanitizarSnapshotResolvido?.(ctx,dados,true)||dados;
   const meta=dados?._crmPendenciasSnapshot;
   if(dados)delete dados._crmPendenciasSnapshot;
   if(!ctx?.owner||meta?.owner!==ctx.owner||!Array.isArray(meta.ops)
@@ -24363,6 +25404,20 @@ window._crmRestaurarSnapshotLocal=function(ctx,dados){
         ||!op.lid||!op.ano)continue;
     const cubo=dados.crm?.[op.lid]?.[op.ano];
     if(!cubo)continue;
+    // An S012 callback can deliver a snapshot captured before the native
+    // archive CAS. Once this session has read that durable conflict root,
+    // the exact same operation must not be restored as sendable `p` again.
+    const arquivos=_crmS069Conflitos.get(ctx.owner),arquivado=arquivos?.geracao===ctx.geracao
+      ?arquivos.items?.[op.opId]:null;
+    if(arquivado?._arquivado===true&&arquivado.owner===ctx.owner
+        &&arquivado.lid===String(op.lid)&&String(arquivado.ano)===String(op.ano)
+        &&_crmS069SnapshotOpIgual(arquivado,op)
+        &&_crmS042Json(arquivado.cubo)===_crmS042Json(cubo)){
+      const key=_crmMemKey(ctx,op.lid,op.ano),atual=_crmPendenciasMemoria.get(key);
+      if(atual?.opId===op.opId&&_crmS069SnapshotOpIgual(atual,op)
+          &&_crmS042Json(atual.cubo)===_crmS042Json(cubo))_crmPendenciasMemoria.delete(key);
+      continue;
+    }
     _crmPendenciasMemoria.set(_crmMemKey(ctx,op.lid,op.ano),
       {...op,cubo:JSON.parse(JSON.stringify(cubo)),_duravelRam:false});
   }
@@ -25275,13 +26330,239 @@ window.crmPendenciaReterExclusaoIdb=async function(ctx,lid,ano,op,remoto,cuboLeg
     return held;
   }finally{db.close();}
 };
+async function _crmS069ReimportarArquivado(ctx,arquivado){
+  const lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),opId=arquivado?.opId;
+  const owner=ctx?.owner,pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
+  const pendenteInicial=window.crmPendenciaAtual(ctx,lid,ano)||null;
+  const cercaInicialValida=!!(pendenteInicial&&pendenteInicial.owner===owner
+    &&pendenteInicial.lid===lid&&String(pendenteInicial.ano)===ano
+    &&pendenteInicial.tipo==='excluir'&&pendenteInicial.confirmada===true
+    &&pendenteInicial._duravelRam===true&&typeof pendenteInicial.gid==='string'
+    &&!!pendenteInicial.gid.trim()&&Number.isFinite(Number(pendenteInicial.ts))
+    &&Number(pendenteInicial.ts)>0
+    &&_crm2ValidaOp(_crm2OpMeta(pendenteInicial,pendenteInicial.rowKey,
+      pendenteInicial.digest,pendenteInicial.rowRevision),owner,lid,ano,pendenteInicial.epoch));
+  const mesmoArquivo=()=>{
+    const atual=_crmS069Conflitos.get(owner)?.items?.[opId];
+    return !!(atual&&_crmS069Conflitos.get(owner)?.geracao===ctx.geracao
+      &&_crm2SnapshotsOperacaoIguais(atual,arquivado)
+      &&_crmS042Json(atual.cubo)===_crmS042Json(arquivado.cubo));
+  };
+  if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!mesmoArquivo()
+      ||arquivado?._arquivado!==true||!arquivado.cubo||typeof opId!=='string'
+      ||(pendenteInicial&&!cercaInicialValida)
+      ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+      ||_crmPendenciasEmGravacao.has(memKey))return false;
+  const dbInicial=await _idbAbrir();
+  if(!dbInicial)return false;
+  try{
+    const conflito=await _crm2Get(dbInicial,_crm2Key('c',owner,lid,ano,opId));
+    const esperado={..._crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),kind:'conflict'};
+    if(JSON.stringify(conflito)!==JSON.stringify(esperado))return false;
+    if(cercaInicialValida){
+      const native=await _crm2LerMetadadosPar(dbInicial,owner,lid,ano),epoch=_crmCacheEpoch.get(owner);
+      if(!_crm2ValidOwner(native.root,owner)||native.root.mode!=='pair'
+          ||native.root.epoch!==epoch||pendenteInicial.epoch!==epoch
+          ||!_crm2ValidaHead(native.head,owner,lid,ano,epoch)||native.head.apagado!==true
+          ||Number(native.head.ts)!==Number(pendenteInicial.ts)||native.head.gid!==pendenteInicial.gid
+          ||!_crm2ValidaOp(native.op,owner,lid,ano,epoch)||native.op.tipo!=='excluir'
+          ||native.op.confirmada!==true||native.op.opId!==pendenteInicial.opId
+          ||Number(native.op.ts)!==Number(pendenteInicial.ts)||native.op.gid!==pendenteInicial.gid
+          ||!_crm2SnapshotsOperacaoIguais(native.op,pendenteInicial))return false;
+    }
+  }finally{dbInicial.close();}
+  const proof={expectedMarker:null,indexServerBacked:false,complete:false,coreComplete:false,pairs:{}};
+  const atualizados=await window.crmAtualizarSeMudou?.({ctx,forcar:true,detailMode:'full',
+    requireServer:true,_s051ProofSink:proof,_s069Reimport:{lid,ano,opId}});
+  if(typeof atualizados!=='number'||!Number.isFinite(atualizados)||atualizados<0
+      ||!window._s012ContextoValido(ctx)||!mesmoArquivo()
+      ||proof.indexServerBacked!==true||proof.complete!==true||proof.marker==null
+      ||proof.marker!==proof.expectedMarker||proof.expectedPairs?.length!==1
+      ||proof.expectedPairs?.[0]?.[0]!==lid||String(proof.expectedPairs?.[0]?.[1])!==ano)return false;
+  const evidence=proof.pairs?.[pair],cube=D.crm?.[lid]?.[ano];
+  const coreMeta=cube&&_crmDetalhesCorePorCubo.get(cube);
+  const gid=evidence?.gid,ts=Number(evidence?.ts);
+  const dadosBase=D,versaoBase=window._crmVersao,cubeBase=cube;
+  let bytesBase=null,provaVersaoAtual=false;
+  if(cube){
+    if(cercaInicialValida)return false;
+    provaVersaoAtual=evidence?.complete===true&&evidence?.coreComplete===true
+      &&evidence?.detailComplete===true&&typeof gid==='string'&&!!gid.trim()
+      &&Number.isFinite(ts)&&ts>0&&coreMeta?.coreServerBacked===true
+      &&coreMeta.headGenerationBound===true&&coreMeta.indexServerBacked===true
+      &&coreMeta.gid===gid&&Number(coreMeta.ts)===ts
+      &&coreMeta.indexMarker===proof.marker&&coreMeta.eventSeq===proof.eventSeqAtStart
+      &&_crmS069IndiceAtual(ctx,proof,coreMeta);
+    bytesBase=_crmS042Json(cube);
+    if(typeof bytesBase!=='string')return false;
+  }else{
+    // A current indexed tombstone has no cube/core metadata. Reimport is safe
+    // only when this fresh server read produced the exact durable native delete
+    // fence the existing explicit-import path requires.
+    const fence=window.crmPendenciaAtual(ctx,lid,ano);
+    const indiceAtual=()=>{
+      const ticket=window._s033MainReadStart?.(ctx),estadoIndice=window._s033S051EstadoIndice?.(ctx);
+      return !!(ticket?.owner===owner&&ticket.geracao===ctx.geracao
+        &&ticket.seqs?.crm_indice===proof.eventSeqAtStart
+        &&estadoIndice?.owner===owner&&estadoIndice.geracao===ctx.geracao
+        &&estadoIndice.active===true&&estadoIndice.dirty===false
+        &&estadoIndice.seq===proof.eventSeqAtStart&&estadoIndice.marker===proof.marker);
+    };
+    const fenceAtual=!!(fence&&fence.owner===owner&&fence.lid===lid&&String(fence.ano)===ano
+      &&fence.tipo==='excluir'&&fence.confirmada===true&&fence._duravelRam===true
+      &&(!cercaInicialValida||(fence.opId===pendenteInicial.opId
+        &&_crm2SnapshotsOperacaoIguais(fence,pendenteInicial)))
+      &&typeof gid==='string'&&!!gid.trim()&&Number.isFinite(ts)&&ts>0
+      &&Number(fence.ts)===ts&&fence.gid===gid
+      &&Number.isSafeInteger(fence.epoch)&&fence.epoch===_crmCacheEpoch.get(owner)
+      &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+      &&!_crmPendenciasEmGravacao.has(memKey));
+    const falhaTombstoneNaoComprovado={ok:false,
+      mensagem:'Não foi possível confirmar com segurança a versão excluída. O rascunho foi preservado; tente novamente após uma nova leitura do servidor.'};
+    if(evidence?.complete!==true||evidence?.coreComplete!==true
+        ||evidence?.detailComplete!==true||evidence?.serverBacked!==true||!indiceAtual()||!fenceAtual
+        ||!window._s012ContextoValido(ctx)||D!==dadosBase||!mesmoArquivo())return falhaTombstoneNaoComprovado;
+    let baseServidor;
+    try{baseServidor=await _crmS057LerBase(ctx,lid,ano);}
+    catch(_e){return falhaTombstoneNaoComprovado;}
+    if(!window._s012ContextoValido(ctx)||D!==dadosBase||!mesmoArquivo()||!indiceAtual()
+        ||window.crmPendenciaAtual(ctx,lid,ano)!==fence
+        ||!_crmS057BaseValida(baseServidor)||baseServidor.existe!==true
+        ||baseServidor.apagado!==true||baseServidor.gid!==gid||Number(baseServidor.ts)!==ts)
+      return falhaTombstoneNaoComprovado;
+    const dbTombstone=await _idbAbrir();
+    if(!dbTombstone)return falhaTombstoneNaoComprovado;
+    let fenceNativa=false;
+    try{
+      const native=await _crm2LerMetadadosPar(dbTombstone,owner,lid,ano);
+      const epoch=_crmCacheEpoch.get(owner);
+      fenceNativa=!!(_crm2ValidOwner(native.root,owner)&&native.root.mode==='pair'
+        &&native.root.epoch===epoch&&Number(fence.epoch)===epoch
+        &&_crm2ValidaHead(native.head,owner,lid,ano,epoch)&&native.head.apagado===true
+        &&Number(native.head.ts)===ts&&native.head.gid===gid
+        &&_crm2ValidaOp(native.op,owner,lid,ano,epoch)&&native.op.tipo==='excluir'
+        &&native.op.confirmada===true&&Number(native.op.ts)===ts&&native.op.gid===gid
+        &&native.op.opId===fence.opId
+        &&_crm2SnapshotsOperacaoIguais(native.op,fence));
+    }finally{dbTombstone.close();}
+    if(!fenceNativa||!indiceAtual()||window.crmPendenciaAtual(ctx,lid,ano)!==fence
+        ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+        ||_crmPendenciasEmGravacao.has(memKey))return falhaTombstoneNaoComprovado;
+    provaVersaoAtual=true;
+  }
+  if(!provaVersaoAtual||!window._s012ContextoValido(ctx)||D!==dadosBase
+      ||window._crmVersao!==versaoBase||D.crm?.[lid]?.[ano]!==cubeBase
+      ||(cubeBase&&_crmS042Json(D.crm?.[lid]?.[ano])!==bytesBase)
+      ||!mesmoArquivo())return false;
+  const epoch=_crmCacheEpoch.get(owner);
+  const nova=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,arquivado.cubo,'gravar',epoch,
+    {importacaoExplicita:true});
+  if(!nova||!window._s012ContextoValido(ctx)||!mesmoArquivo()
+      ||D!==dadosBase||D.crm?.[lid]?.[ano]!==cubeBase||window._crmVersao!==versaoBase
+      ||(cubeBase?_crmS042Json(D.crm?.[lid]?.[ano])!==bytesBase:D.crm?.[lid]?.[ano]!==undefined)
+      ||window.crmPendenciaAtual(ctx,lid,ano)?.opId!==nova.opId)return false;
+  (D.crm||(D.crm={}))[lid]||(D.crm[lid]={});
+  const restored=nova._duravelRam===true&&_crmS068bReciboCompletoConfere(
+    _crm2ReceiptValido(nova.cubo,ctx,lid,ano),ctx,lid,ano,nova)
+    ?nova.cubo:JSON.parse(JSON.stringify(nova.cubo));
+  _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,restored);
+  D.crm[lid][ano]=restored;
+  window._crmMarcarNaoEnviado(ctx,lid,ano,nova.marker);
+  window._crmVersao=(window._crmVersao||0)+1;
+  const envio=await window.crmSincronizarUm(lid,ano,ctx,nova.cubo);
+  if(envio?.pendenteLocal===true||!window._s012ContextoValido(ctx))
+    return {ok:true,pendenteLocal:true,arquivoRemovido:false};
+  const recibo=_crmS033EscopoRecibos(ctx).pares.get(pair),ack=recibo?.publication===true
+    &&recibo.owner===owner&&recibo.geracao===ctx.geracao&&recibo.opId===null
+    &&recibo.cubo===D.crm?.[lid]?.[ano]&&Number(recibo.ts)>0
+    &&typeof recibo.gid==='string'&&!!recibo.gid.trim()
+    &&_crmS033ReciboConfere(ctx,lid,ano,recibo.ts,recibo.gid);
+  if(!ack||window.crmPendenciaAtual(ctx,lid,ano))
+    return {ok:true,pendenteLocal:true,arquivoRemovido:false};
+  const dbAck=await _idbAbrir();
+  if(!dbAck)return {ok:true,pendenteLocal:true,arquivoRemovido:false};
+  let canonicalConfirmado=false;
+  try{
+    const atual=await _crm2LerMetadadosPar(dbAck,owner,lid,ano);
+    // The full native ACK binds its generation in q, not in h. The head
+    // carries the exact row/revision/digest fence; projected/cache-only rows
+    // without this full proof conservatively keep the archive for review.
+    const q=atual.proof,h=atual.head,epoch=atual.root?.epoch;
+    const ackAtual=()=>window._s012ContextoValido(ctx)&&D===dadosBase&&mesmoArquivo()
+      &&_crmS033EscopoRecibos(ctx).pares.get(pair)===recibo
+      &&_crmS033ReciboConfere(ctx,lid,ano,recibo.ts,recibo.gid)
+      &&!window.crmPendenciaAtual(ctx,lid,ano)
+      &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+      &&!_crmPendenciasEmGravacao.has(memKey);
+    if(ackAtual()&&_crm2ValidOwner(atual.root,owner)&&atual.root.mode==='pair'
+        &&!atual.op&&_crm2ValidaHead(h,owner,lid,ano,epoch)&&!h.apagado
+        &&q?.codec===_CRM2_CODEC&&q.kind==='proof'&&q.owner===owner
+        &&q.lid===lid&&String(q.ano)===ano&&q.epoch===epoch
+        &&q.revisao===h.revisao&&q.rowKey===h.rowKey&&q.digest===h.digest
+        &&Number(q.ts)===Number(recibo.ts)&&q.gid===recibo.gid){
+      const row=await _crm2LerRow(dbAck,h.rowKey,{owner,lid,ano,epoch,
+        revisao:h.revisao,digest:h.digest});
+      const final=await _crm2LerMetadadosPar(dbAck,owner,lid,ano);
+      canonicalConfirmado=ackAtual()&&row.meta.codec===_CRM2_CODEC
+        &&row.bytes===_crmS042Json(nova.cubo)
+        &&JSON.stringify(final.root)===JSON.stringify(atual.root)
+        &&JSON.stringify(final.head)===JSON.stringify(h)&&!final.op
+        &&JSON.stringify(final.proof)===JSON.stringify(q);
+    }
+  }finally{dbAck.close();}
+  // This explicit import replaced D outside normal save(). Refresh its
+  // owner snapshot only after the exact remote/native full ACK. A failed local
+  // write preserves the prior copy; strict archive cleanup may then refuse.
+  if(canonicalConfirmado)window._s012GravarSnapshotLocal?.(ctx,D);
+  const arquivoRemovido=canonicalConfirmado
+    ?await _crmS069ExcluirConflito(ctx,arquivado):false;
+  return {ok:true,pendenteLocal:!canonicalConfirmado,arquivoRemovido};
+}
 window.crmPendenciasExclusao=function(ctx){
   ctx=ctx||window._s012Capturar?.();
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx))return [];
-  return [..._crmPendenciasMemoria.values()].filter(op=>op.owner===ctx.owner&&op.exclusaoRemota);
+  const ativas=[..._crmPendenciasMemoria.values()].filter(op=>op.owner===ctx.owner&&op.exclusaoRemota);
+  const arquivo=_crmS069Conflitos.get(ctx.owner);
+  const arquivadas=arquivo?.geracao===ctx.geracao?Object.values(arquivo.items||{}):[];
+  return [...ativas,...arquivadas];
 };
 window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
   const ctx=window._s012Capturar?.(),op=window.crmPendenciaAtual(ctx,lid,ano);
+  const arquivo=_crmS069Conflitos.get(ctx?.owner),arquivado=arquivo?.geracao===ctx?.geracao
+    ?arquivo.items?.[opId]:null;
+  if(ctx?.perfil==='admin'&&window._s012ContextoValido(ctx)&&arquivado?._arquivado===true
+      &&arquivado.owner===ctx.owner&&arquivado.lid===String(lid)&&String(arquivado.ano)===String(ano)){
+    if(!confirm(reimportar
+        ?'Consultar a versão atual no servidor e substituir seus dados por este rascunho, como uma nova importação?'
+        :'Descartar apenas este rascunho arquivado? Os dados atuais serão preservados.'))return false;
+    try{
+      const resultado=reimportar?await _crmS069ReimportarArquivado(ctx,arquivado)
+        :await _crmS069ExcluirConflito(ctx,arquivado);
+      const ok=resultado===true||resultado?.ok===true;
+      if(window._s012ContextoValido(ctx)){
+        _crmRenderConjuntos();
+        let mensagem=resultado?.pendenteLocal
+          ?'Reimportação registrada, mas a confirmação local ainda não está completa. O rascunho arquivado foi preservado.'
+          :resultado?.arquivoRemovido===false&&reimportar
+            ?'Reimportação confirmada; o rascunho arquivado continua disponível para revisão.'
+            :ok?(reimportar
+              ?'Rascunho reimportado como uma nova importação; confirmação local concluída.'
+              :'Rascunho arquivado descartado; os dados atuais foram preservados.')
+          :'Não foi possível concluir; o rascunho arquivado foi preservado para revisão.';
+        if(resultado?.mensagem)mensagem=resultado.mensagem;
+        showToast(mensagem,resultado?.pendenteLocal?'warn':ok?'ok':'warn');
+      }
+      return ok;
+    }catch(e){
+      if(window._s012ContextoValido(ctx)){
+        _crmRenderConjuntos();
+        showToast(reimportar
+          ?'Não foi possível concluir. O rascunho arquivado foi preservado; tente novamente após uma nova leitura da versão atual.'
+          :'Não foi possível concluir; o rascunho arquivado foi preservado para revisão.','warn');
+      }
+      return false;
+    }
+  }
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!op?.exclusaoRemota||op.opId!==opId)return false;
   if(!confirm(reimportar?'Reimportar o rascunho como uma nova alteração e enviá-lo ao Firebase?'
       :'Descartar este rascunho pendente? O conjunto continuará excluído.'))return false;
@@ -25488,12 +26769,14 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
           Array.isArray(d.descriptor?.meses)?d.descriptor.meses:null]);
         const detailReceiptOk=d.state==='loaded'&&modern
           &&_crmS068cDetalheReciboConfere(ctx,q.lid,q.ano,q.cubo,detailReceipt,
-            {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente)})
+            {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente),
+                cacheRevalidated:q.projection.coreReceipt?.cacheRevalidated===true})
           &&(d.state!=='loaded'||q.projection.itemsRef===detailReceipt.items
             &&Object.isFrozen(q.projection.itemsRef));
         const coreExpected={gid:g?.gid,ts:g?.ts,detailState:d.state,
           descriptorSig:descriptorSigAtual,readSerial:q.projection.coreReceipt?.readSerial,
-          coreMeta:q.projection.coreReceipt,persistenciaCore:true};
+          coreMeta:q.projection.coreReceipt,persistenciaCore:true,
+          cacheRevalidated:q.projection.coreReceipt?.cacheRevalidated===true};
         const coreReceiptOk=['unloaded','empty','legacy'].includes(d.state)&&modern
           &&_crmS068cCoreReciboConfere(ctx,q.lid,q.ano,q.cubo,coreExpected);
         const core=_crm2CuboCore(q.cubo),coreBytes=core&&_crmS042Json(core);
@@ -25560,7 +26843,8 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
             &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,q.lid,q.ano))
             &&(d.state==='loaded'
               ?_crmS068cDetalheReciboConfere(ctx,q.lid,q.ano,q.cubo,detailReceipt,
-                {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente)})
+                {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente),
+                cacheRevalidated:q.projection.coreReceipt?.cacheRevalidated===true})
               :_crmS068cCoreReciboConfere(ctx,q.lid,q.ano,q.cubo,coreExpected))
             &&formatoConfere()&&_crmS042Json(_crm2CuboCore(q.cubo))===coreBytes
             &&preparada.bytes===coreBytes;
@@ -25577,7 +26861,8 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
               ||estadoFinal.proof||!estavel()||!fonteIgual(q)||!pendenciaIgual(q)
               ||!(d.state==='loaded'
                 ?_crmS068cDetalheReciboConfere(ctx,q.lid,q.ano,q.cubo,detailReceipt,
-                  {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente)})
+                  {gid:g.gid,ts:g.ts,detailState:'loaded',descriptorSig:_crmS068cDescritorSig(q.cubo._comprasCliente),
+                cacheRevalidated:q.projection.coreReceipt?.cacheRevalidated===true})
                 :_crmS068cCoreReciboConfere(ctx,q.lid,q.ano,q.cubo,coreExpected))||!formatoConfere()){
             completo=false;continue;
           }
@@ -25588,6 +26873,10 @@ window.crmGravarIdb = async function(ctx, snapshot, permitirTransicao=false, epo
           }
           const receipt=_crm2ReceiptValido(q.cubo,ctx,q.lid,q.ano);
           if(!reciboConfere(receipt,headNovo,q.ano,epoch,certifiedShape)){completo=false;continue;}
+          if(q.projection.coreReceipt?.cacheRevalidated===true
+              &&!_crmS070VincularAckNativo(ctx,q.lid,q.ano,q.cubo,headNovo,receipt)){
+            completo=false;continue;
+          }
           if(q.candidateRef&&_crmS042Candidatos.get(q.id)===q.candidateRef)_crmS042Candidatos.delete(q.id);
           esperados.set(q.pair,{q,head:headNovo,op:null,recibo:receipt,shape:certifiedShape});
         }finally{
@@ -25802,9 +27091,40 @@ function _crm2EstadoLeituraConfere(ctx,inicio){
     p.lid===inicio.folhas[i].lid&&p.ano===inicio.folhas[i].ano&&p.cubo===inicio.folhas[i].cubo);
 }
 function _crm2MesclarMemoriaLida(ctx,state){
+  // If a delayed writer exposed the same operation in both namespaces, the
+  // immutable `c` root wins for that exact archived draft. Keep a different
+  // successor operation for the pair untouched.
+  for(const [pair,op] of Object.entries(state.entradas||{})){
+    const conflito=state.conflitos?.[op?.opId];
+    if(!op||!conflito||conflito.kind!=='conflict'||conflito.owner!==ctx.owner
+        ||conflito.lid!==op.lid||String(conflito.ano)!==String(op.ano)
+        ||conflito.tipo!=='gravar'||!conflito.exclusaoRemota
+        ||!_crmS069SnapshotOpIgual(conflito,op)
+        ||_crmS042Json(conflito.cubo)!==_crmS042Json(op.cubo))continue;
+    delete state.entradas[pair];
+    const key=_crmMemKey(ctx,op.lid,op.ano),mem=_crmPendenciasMemoria.get(key);
+    if(mem?.opId===op.opId&&_crmS069SnapshotOpIgual(mem,op)
+        &&_crmS042Json(mem.cubo)===_crmS042Json(op.cubo))_crmPendenciasMemoria.delete(key);
+  }
   for(const [k,op] of _crmPendenciasMemoria){
     if(op.owner!==ctx.owner)continue;
     const pair=_crmParKey(op.lid,op.ano),persistida=state.entradas[pair];
+    // A fresh IDB view can contain the exact operation only in the immutable
+    // conflict root `c`: S012 may have restored an older owner snapshot before
+    // this read rebuilt `_crmS069Conflitos`. In that ordering, the durable
+    // conflict—not the volatile RAM copy—is authoritative. Remove only the
+    // byte-identical archived operation; a different successor `p` for this
+    // pair remains in `state.entradas` and is installed below.
+    const conflito=state.conflitos?.[op?.opId];
+    if(conflito?.kind==='conflict'&&conflito.owner===ctx.owner
+        &&conflito.lid===op.lid&&String(conflito.ano)===String(op.ano)
+        &&conflito.tipo==='gravar'&&!!conflito.exclusaoRemota
+        &&_crmS069SnapshotOpIgual(conflito,op)
+        &&_crmS042Json(conflito.cubo)===_crmS042Json(op.cubo)){
+      if(persistida?.opId===op.opId)delete state.entradas[pair];
+      _crmPendenciasMemoria.delete(k);
+      continue;
+    }
     if((Number(op.epoch)||0)!==state.epoch){op._duravelRam=false;continue;}
     if(op._duravelRam===false){
       const cercaIgual=!op.exclusaoRemota||persistida?.exclusaoRemota?.ts===op.exclusaoRemota.ts
@@ -25845,7 +27165,38 @@ window.crmLerIdb = async function(ctx,opcoes={}){
     const vista=await _crm2LerVisao(ctx,db,root,{mesclarMemoria:false,projection});
     if(!_crm2EstadoLeituraConfere(ctx,inicio)||_crmS042Provas!==provasInicio)return null;
     _crm2MesclarMemoriaLida(ctx,vista.state);
+    const conflitosS069={};
+    for(const op of Object.values(vista.state.conflitos||{})){
+      if(op?.owner!==ctx.owner||op.kind!=='conflict'||op.tipo!=='gravar'||!op.exclusaoRemota
+          ||!op.cubo||typeof op.opId!=='string'||!op.opId)continue;
+      const idPar=_crm2ParKey(ctx.owner,op.lid,op.ano),head=vista.heads.get(idPar)||null;
+      const item={...op,_arquivado:true,_head:head?{...head}:null,
+        _remoto:head?{gid:head.gid||null,ts:Number(head.ts)||0,apagado:head.apagado===true,
+          revisao:Number(head.revisao)||0}:null};
+      if(_crm2DeepFreeze(item)!==item)continue;
+      const pair=_crmParKey(op.lid,op.ano),memKey=_crmMemKey(ctx,op.lid,op.ano);
+      const marker=window._crmNaoEnviados?.[pair];
+      if(marker!==undefined&&Number(marker)===Number(op.marker)
+          &&!window.crmPendenciaAtual(ctx,op.lid,op.ano)
+          &&!_crmPendenciasEmGravacao.has(memKey)){
+        window._crmLimparNaoEnviado(ctx,op.lid,op.ano,marker);
+      }
+      conflitosS069[op.opId]=item;
+    }
+    _crmS069Conflitos.set(ctx.owner,{geracao:ctx.geracao,items:conflitosS069});
     _crmCacheEpoch.set(ctx.owner,vista.root.epoch);
+    // Hand the hydrator the current native heads from this exact accepted
+    // read. This is last-known local head metadata, not a new S033 proof.
+    const headSink=opcoes?._s069HeadSink;
+    if(headSink&&typeof headSink==='object'){
+      headSink.owner=ctx.owner;headSink.geracao=ctx.geracao;headSink.epoch=vista.root.epoch;
+      headSink.pairs={};
+      for(const op of Object.values(vista.state.conflitos||{})){
+        if(op?.owner!==ctx.owner||op.kind!=='conflict')continue;
+        const pair=_crm2ParKey(ctx.owner,op.lid,op.ano),head=vista.heads.get(pair)||null;
+        headSink.pairs[pair]=head?{...head}:null;
+      }
+    }
     const revisao=_crmCacheRevisao.get(ctx.owner)||0;
     if(projection==='full'){
       const validos=new Map();
@@ -26065,6 +27416,8 @@ window.crmRemoverIdb = async function(ctx, permitirTransicao=false){
 
     _crmCacheEpoch.set(owner,gravado.epoch);
     _crmCacheRevisao.set(owner,0);
+    _crmS069Conflitos.delete(owner);
+    _crmS069Resolvidos.delete(owner);
     if(_crmS042Provas?.owner===owner)_crmS042Zerar(null);
     for(const [k,op] of _crmPendenciasMemoria)if(op.owner===owner)_crmPendenciasMemoria.delete(k);
     _s012RetencoesPorOwner.delete(owner);
@@ -26179,10 +27532,61 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   const versaoCarga=window._crmVersao,dadosCarga=D;
   try{
-    const cubos = await window.crmLerIdb(ctx,{projection});
+    const headSink={};
+    const cubos = await window.crmLerIdb(ctx,{projection,_s069HeadSink:headSink});
     if(!window._s012ContextoValido(ctx)||!cubos||D!==dadosCarga||window._crmVersao!==versaoCarga) return 0;
     if(!D.crm) D.crm = {};
     let n = 0;
+    // A stale S012 snapshot can restore both an old held operation and its
+    // old cube before this native read discovers the exact archived `c` row.
+    // Once `_crm2MesclarMemoriaLida` removes that identical volatile op, replace
+    // only the matching stale D cube with the cube just materialized from the
+    // current native head. A different local cube, successor op/marker, or
+    // in-flight write keeps ownership of the pair and is left untouched.
+    const conflitos=_crmS069Conflitos.get(ctx.owner);
+    if(conflitos?.geracao===ctx.geracao){
+      for(const arquivado of Object.values(conflitos.items||{})){
+        const lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),
+          memKey=lid&&ano?_crmMemKey(ctx,lid,ano):null,pair=lid&&ano?_crmParKey(lid,ano):null;
+        if(!lid||!ano||arquivado?._arquivado!==true||arquivado.owner!==ctx.owner
+            ||arquivado.kind!=='conflict'||arquivado.tipo!=='gravar'||!arquivado.exclusaoRemota
+            ||!memKey||!pair||window.crmPendenciaAtual(ctx,lid,ano)
+            ||_crmPendenciasEmGravacao.has(memKey))continue;
+        const stale=D.crm?.[lid]?.[ano],canonical=cubos[lid]?.[ano],nativePair=_crm2ParKey(ctx.owner,lid,ano);
+        const head=headSink.owner===ctx.owner&&headSink.geracao===ctx.geracao
+          &&Number(headSink.epoch)===Number(_crmCacheEpoch.get(ctx.owner))
+          ?headSink.pairs?.[nativePair]:null;
+        if(!stale||_crmS042Json(stale)!==_crmS042Json(arquivado.cubo)
+            ||headSink.owner!==ctx.owner||headSink.geracao!==ctx.geracao
+            ||!_crm2ValidaHead(head,ctx.owner,lid,ano,headSink.epoch)
+            ||Number(arquivado.epoch)!==Number(headSink.epoch))continue;
+        const marker=window._crmNaoEnviados?.[pair];
+        if(marker!==undefined){
+          if(Number(marker)!==Number(arquivado.marker)
+              ||window._crmLimparNaoEnviado?.(ctx,lid,ano,marker)!==true
+              ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair))continue;
+        }
+        if(!window._s012ContextoValido(ctx)||D!==dadosCarga||D.crm?.[lid]?.[ano]!==stale
+            ||window.crmPendenciaAtual(ctx,lid,ano)||_crmPendenciasEmGravacao.has(memKey))continue;
+        if(head.apagado===true&&!canonical){
+          // A same-read native tombstone is the known local canonical state.
+          // Remove only this exact displaced cube, keeping its separate c row.
+          _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null,true);
+          if(D!==dadosCarga||D.crm?.[lid]?.[ano]!==stale
+              ||window.crmPendenciaAtual(ctx,lid,ano)||_crmPendenciasEmGravacao.has(memKey))continue;
+          delete D.crm[lid][ano];if(!Object.keys(D.crm[lid]).length)delete D.crm[lid];n++;
+          continue;
+        }
+        const receipt=canonical&&_crm2ReceiptValido(canonical,ctx,lid,ano);
+        if(head.apagado===true||!canonical||!receipt
+            ||receipt.epoch!==head.epoch||receipt.revisao!==head.revisao
+            ||receipt.rowKey!==head.rowKey||receipt.digest!==head.digest)continue;
+        _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,canonical,true);
+        if(D!==dadosCarga||D.crm?.[lid]?.[ano]!==stale
+            ||window.crmPendenciaAtual(ctx,lid,ano)||_crmPendenciasEmGravacao.has(memKey))continue;
+        D.crm[lid][ano]=canonical;n++;
+      }
+    }
     for(const op of _crmPendenciasMemoria.values()){
       if(op.owner===ctx.owner&&(op.tipo==='excluir'||op.exclusaoRemota)&&D.crm[op.lid]?.[op.ano]){
         _crmS033PublicacaoAntesDeSubstituir(ctx,op.lid,op.ano,null);
@@ -56071,6 +57475,7 @@ window._crmN003Progresso = (()=>{
       else{
       const vals=[...t.pares.values()];
       const confirmados=vals.filter(x=>x.estado==='confirmado').length;
+      const cacheRevalidados=vals.filter(x=>x.estado==='cache').length;
       const incertos=vals.filter(x=>x.estado==='incerto').length;
       const falhas=vals.filter(x=>x.estado==='falhou').length;
       const pendentes=vals.filter(x=>x.estado==='pendente'||x.estado==='local').length;
@@ -56078,7 +57483,7 @@ window._crmN003Progresso = (()=>{
       const alteracoesLocaisPendentes=vals.filter(x=>x.alteracaoLocalPendente).length;
       const percentual=t.progressKnown&&t.total>0?`Etapa atual: ${Math.floor(Math.min(Math.max(0,t.done),t.total)/t.total*100)}% (${t.done}/${t.total}). `:'';
       summary.textContent=percentual+(vals.length
-        ?`Servidor confirmado: ${confirmados}; sem confirmação remota: ${incertos}; falhas: ${falhas}; pendentes/locais: ${pendentes}; alterações locais sem confirmação: ${alteracoesLocaisPendentes}; confirmação local pendente: ${locaisSemAck}.`
+        ?`Servidor confirmado: ${confirmados}; cache local revalidado: ${cacheRevalidados}; sem confirmação remota: ${incertos}; falhas: ${falhas}; pendentes/locais: ${pendentes}; alterações locais sem confirmação: ${alteracoesLocaisPendentes}; confirmação local pendente: ${locaisSemAck}.`
         :'');
       }
     }
@@ -56106,7 +57511,14 @@ window._crmN003Progresso = (()=>{
   function atualizar(t,e={}){
     if(!contextoValido(t))return;
     if(e.tipo==='leitura-falha'){finalizar(t,{falha:true,mensagem:e.mensagem||'Leitura CRM sem confirmação.'});return;}
-    if(e.tipo==='leitura-concluida'){finalizar(t,{falha:e.falhas>0,mensagem:`Leitura terminou: ${e.carregados||0} carregados; ${e.removidos||0} removidos; ${e.falhas||0} falhas em ${e.total||0} pares.`});return;}
+    if(e.tipo==='leitura-concluida'){
+      t.cacheRevalidados=Number(e.cacheRevalidados)||0;
+      t.cacheMetadataServidor=Number(e.cacheMetadataServidor)||0;
+      t.cachePayloadServidor=Number(e.cachePayloadServidor)||0;
+      t.cacheMetadataNativo=Number(e.cacheMetadataNativo)||0;
+      t.cachePayloadLocalBytes=Number(e.cachePayloadLocalBytes)||0;
+      finalizar(t,{falha:e.falhas>0,mensagem:`Leitura terminou: ${e.carregados||0} carregados; exclusões já registradas no servidor verificadas: ${e.removidos||0}; ${e.falhas||0} falhas em ${e.total||0} pares. Cache local revalidado: ${t.cacheRevalidados}; metadados do servidor: ${t.cacheMetadataServidor}; payload remoto no atalho: ${t.cachePayloadServidor}; metadados nativos conferidos: ${t.cacheMetadataNativo}; payload local verificado: ${t.cachePayloadLocalBytes} bytes.`});return;
+    }
     if(e.mensagem)t.mensagem=e.mensagem;
     if(e.etapa){t.titulo=e.etapa;if(!Number.isFinite(e.total)&&!Number.isFinite(e.done)&&!Number.isFinite(e.confirmados)&&!Number.isFinite(e.concluidos)){t.done=0;t.total=0;t.progressKnown=false;}}
     if(Number.isFinite(e.done))t.done=e.done;
@@ -56145,6 +57557,9 @@ window._crmN003Progresso = (()=>{
       if(e.tipo==='leitura-par-resultado'){
         pair.ausenteConfirmado=e.estado==='ausente-no-servidor';
         if(e.estado==='confirmado-no-servidor'){pair.estado='confirmado';pair.rotulo='Confirmado no servidor';}
+        else if(e.estado==='cache-revalidado'){pair.estado='cache';pair.rotulo='Cache local revalidado pelo índice e cabeça; core reutilizado';}
+        else if(e.estado==='confirmado-core-detalhe-sob-demanda'){pair.estado='confirmado';pair.rotulo='Dados principais confirmados; detalhes sob demanda';}
+        else if(e.estado==='confirmado-core-detalhe-indisponivel'){pair.estado='confirmado';pair.rotulo='Dados principais confirmados; detalhes indisponíveis neste conjunto legado';}
         else if(e.estado==='somente-local'){pair.estado='local';pair.rotulo='Somente nesta máquina';}
         else if(e.estado==='pendencia-local-preservada'){pair.estado='local';pair.rotulo='Pendência local preservada';}
         else if(e.estado==='falha-na-leitura'){pair.estado='falhou';pair.rotulo='Falha na leitura';}
@@ -56162,6 +57577,7 @@ window._crmN003Progresso = (()=>{
     if(t.finalizado)return;
     t.finalizado=true;
     t.falha=!!e.falha;
+    if(t.tipo==='leitura')t.titulo=e.falha?'Leitura do CRM encerrada com falhas':'Leitura do CRM concluída';
     t.fim=++sequencia;
     if(e.mensagem)t.mensagem=e.mensagem;
     else if(e.falha)t.mensagem='A operação terminou com falha; confira os estados por ano.';
@@ -56620,9 +58036,9 @@ window.excelProcessarUpload = function(event){
       // [R152] Importar um mês não pode mais apagar o resto do ano.
       // Antes daqui ia um `crmGuardar` direto, que substituía o ano
       // inteiro — quem importava mês a mês ficava só com o último.
-      // Agora cada grupo ganha um plano, e a única situação que ainda
-      // perde mês (o arquivo repete UNS e omite OUTROS) vira decisão
-      // explícita de quem está importando.
+      // Cada grupo ganha um plano; sobreposição parcial só pode virar
+      // troca mensal se o histórico confirmar todos os meses preservados.
+      // Sem essa prova, a prévia falha antes de qualquer gravação.
       // ══════════════════════════════════════════════════════════════
       const _planos = [];
       let _n003Grupo=0;
@@ -56640,10 +58056,9 @@ window.excelProcessarUpload = function(event){
         const _novoSet  = new Set(mesesNovos);
         const conserva  = mesesAnt.filter(m => !_novoSet.has(m));  // só a base tem
         const repete    = mesesAnt.filter(m =>  _novoSet.has(m));  // os dois têm
-        // [R155] Repetir uns meses e omitir outros deixou de obrigar a
-        // trocar o ano inteiro: dá para tirar só os meses repetidos do
-        // cubo antigo e fundir o novo por cima. Foi o caso do agosto
-        // fechado, que a planilha do ano sobrescreveu pela metade.
+        // [R155] Repetir uns meses e omitir outros só permite substituir
+        // os repetidos quando o detalhe completo reconstrói o restante.
+        // Se não for possível provar essa preservação, a prévia cancela.
         let acao = !anterior            ? 'novo'
                  : conserva.length === 0 ? 'substitui'
                  : repete.length   === 0 ? 'funde'
@@ -56699,32 +58114,50 @@ window.excelProcessarUpload = function(event){
         for(const p of _planosComDetalhe){
           const d=_detalhesPorPar.get(String(p.lid)+'|'+String(p.ano));
           if(d?.estado==='legado'){
-            if(p.acao==='funde')_falhasDetalhe.push({p,motivo:'legado'});
-            continue; // sobreposição mantém a confirmação explícita de ano inteiro
+            if(p.acao==='funde'||p.acao==='conflito')
+              _falhasDetalhe.push({p,motivo:'legado',meses:[...p.conserva]});
+            continue;
           }
           if(!d||!['completo','vazio-confirmado'].includes(d.estado)
               ||!window._crmComprasClienteValido?.({versao:1,disponivel:true,meses:d.meses,itens:d.itens})){
-            if(p.acao==='funde')_falhasDetalhe.push({p,motivo:'indisponivel'});
-            continue; // conflito mantém a escolha explícita de substituir o ano inteiro
+            if(p.acao==='funde'||p.acao==='conflito')
+              _falhasDetalhe.push({p,motivo:'indisponivel',meses:[...p.conserva]});
+            continue;
           }
           const mesesDetalhados=new Set(d.meses||[]);
           const mesesBase=window.crmMesesDoCubo(p.anterior);
           p.anteriorMesclavel=Object.assign({},p.anterior,{_comprasCliente:{versao:1,
             disponivel:true,meses:[...d.meses],itens:d.itens}});
           if(p.acao==='funde'){
-            if(mesesBase.some(m=>!mesesDetalhados.has(m)))_falhasDetalhe.push({p,motivo:'cobertura'});
-          }else if(p.conserva.every(m=>mesesDetalhados.has(m))){
-            p.podado=window.crmRemoverMeses(p.anteriorMesclavel,p.repete);
-            if(p.podado)p.acao='trocaMes';
+            const faltantes=mesesBase.filter(m=>!mesesDetalhados.has(m));
+            if(faltantes.length)_falhasDetalhe.push({p,motivo:'cobertura',meses:faltantes});
+          }else{
+            const faltantes=p.conserva.filter(m=>!mesesDetalhados.has(m));
+            if(faltantes.length){
+              _falhasDetalhe.push({p,motivo:'cobertura',meses:faltantes});
+              continue;
+            }
+            const podado=window.crmRemoverMeses(p.anteriorMesclavel,p.repete);
+            const mesesRestantes=new Set(podado?window.crmMesesDoCubo(podado):[]);
+            if(!podado||p.conserva.some(m=>!mesesRestantes.has(m))
+                ||p.repete.some(m=>mesesRestantes.has(m))){
+              _falhasDetalhe.push({p,motivo:'reconstrucao',meses:[...p.conserva]});
+              continue;
+            }
+            p.podado=podado;
+            p.acao='trocaMes';
           }
         }
         if(_falhasDetalhe.length){
-          const _sem=(motivo,lista)=>lista.filter(x=>x.motivo===motivo).map(x=>x.p.lid+'/'+x.p.ano).join(', ');
+          const _sem=(motivo,lista)=>lista.filter(x=>x.motivo===motivo).map(x=>
+            x.p.lid+'/'+x.p.ano+(x.meses?.length?' (meses: '+x.meses.join(', ')+')':'')).join(', ');
           const _avisos=[];
-          const _legado=_sem('legado',_falhasDetalhe),_indisponivel=_sem('indisponivel',_falhasDetalhe),_cobertura=_sem('cobertura',_falhasDetalhe);
-          if(_legado)_avisos.push('O histórico legado de '+_legado+' não tem detalhe completo para uma mescla segura; reimporte o período completo antes de acrescentar meses sem sobreposição.');
-          if(_indisponivel)_avisos.push('Não foi possível confirmar o histórico de '+_indisponivel+'.');
-          if(_cobertura)_avisos.push('O detalhe de '+_cobertura+' não cobre todos os meses que precisam ser preservados.');
+          const _legado=_sem('legado',_falhasDetalhe),_indisponivel=_sem('indisponivel',_falhasDetalhe),
+            _cobertura=_sem('cobertura',_falhasDetalhe),_reconstrucao=_sem('reconstrucao',_falhasDetalhe);
+          if(_legado)_avisos.push('O histórico legado de '+_legado+' não tem detalhe completo para preservar os meses indicados.');
+          if(_indisponivel)_avisos.push('Não foi possível confirmar o detalhe necessário de '+_indisponivel+'.');
+          if(_cobertura)_avisos.push('O detalhe de '+_cobertura+' não confirma todos os meses necessários para preservar a base.');
+          if(_reconstrucao)_avisos.push('Não foi possível reconstruir com segurança os meses preservados de '+_reconstrucao+'.');
           const _aviso=_avisos.join(' ')+( _avisos.length?' Nenhum conjunto desta importação foi alterado.':'');
           event.target.value='';
           window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:_aviso});
@@ -56733,8 +58166,8 @@ window.excelProcessarUpload = function(event){
         }
       }
 
-      // [R155] Troca de mês é o caminho bom: avisa, mas não pede permissão
-      // para perder nada, porque nada se perde.
+      // [R155] Chegando aqui, cada troca mensal já preserva os meses
+      // omitidos que o detalhe confirmou; planos inseguros foram cancelados.
       const _trocas = _planos.filter(p => p.acao === 'trocaMes');
       if(_trocas.length){
         console.log('[crm] R155: troca por mês —', _trocas.map(p =>
@@ -56745,23 +58178,15 @@ window.excelProcessarUpload = function(event){
 
       const _conflitos = _planos.filter(p => p.acao === 'conflito');
       if(_conflitos.length){
-        const _det = _conflitos.map(p =>
-          '\u2022 ' + ((LOJAS.find(l=>l.id===p.lid)?.nome) || p.lid) + '/' + p.ano
-          + ' \u2014 o arquivo repete ' + p.repete.join(', ')
-          + ' e deixa de fora ' + p.conserva.join(', ')).join('\n');
-        const _segue = confirm(
-          'Este arquivo repete meses que j\u00e1 est\u00e3o na base:\n\n' + _det +
-          '\n\nO CRM guarda o ano agregado \u2014 n\u00e3o d\u00e1 para trocar s\u00f3 um m\u00eas ' +
-          'dentro de um ano j\u00e1 consolidado. Continuar substitui o ANO INTEIRO pelo ' +
-          'conte\u00fado deste arquivo, e os meses listados como "deixa de fora" ' +
-          'precisar\u00e3o ser reimportados.\n\n' +
-          'OK = substituir mesmo assim.\nCancelar = n\u00e3o importar nada ' +
-          '(monte um arquivo com todos os meses que quer manter).');
-        if(!_segue){
-          showToast('Importa\u00e7\u00e3o cancelada \u2014 nada foi alterado.','warn');
-          event.target.value = '';
-          return;
-        }
+        const _det = _conflitos.map(p=>p.lid+'/'+p.ano+' (meses preservados: '
+          +p.conserva.join(', ')+')').join(', ');
+        const _aviso='Não foi possível comprovar a preservação mensal de '+_det
+          +'. Inclua no arquivo os meses que deseja manter ou confira o histórico. '
+          +'Nenhum conjunto desta importação foi alterado.';
+        event.target.value='';
+        window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:_aviso});
+        showToast(_aviso,'warn');
+        return;
       }
       _conflitos.length = 0;
 
@@ -61660,13 +63085,21 @@ function _crmRenderConjuntos(){
         + 'suba a planilha dele e ela é <strong>somada</strong> ao ano, sem mexer no que já está aqui. '
         + 'Para corrigir um mês que subiu errado é diferente: reimporte um arquivo com os meses que deseja corrigir. '
         + 'Quando o sistema consegue preservar os outros meses, ele <strong>substitui apenas os meses repetidos</strong>. '
-        + 'Se não conseguir, pedirá confirmação para substituir o ano inteiro; nesse caso, inclua todos os meses '
-        + 'que deseja manter, pois os meses omitidos precisarão ser importados novamente.</div>'
+        + 'Se não conseguir confirmar e preservar os outros meses, a importação será cancelada sem alterar o CRM. '
+        + 'Confira o histórico ou inclua no arquivo todos os meses que deseja manter.</div>'
       + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
   if(isAdmin())window.crmPendenciasExclusao?.().forEach(op=>{
     const box=document.createElement('div');box.style.cssText='margin-top:10px;padding:10px;border:1px solid var(--ouro);border-radius:6px';
-    const text=document.createElement('p');text.textContent=((LOJAS.find(l=>l.id===op.lid)?.nome)||op.lid)+' / '+op.ano+': conjunto excluído no servidor. Rascunho pendente preservado, fora dos indicadores.';box.appendChild(text);
+    const text=document.createElement('p'),nome=((LOJAS.find(l=>l.id===op.lid)?.nome)||op.lid);
+    if(op._arquivado===true){
+      const atual=D.crm?.[op.lid]?.[String(op.ano)];
+      text.textContent=nome+' / '+op.ano+': '+(atual
+        ?'dados do CRM disponíveis. '
+        :'versão atual em conferência. ')
+        +'Rascunho de uma importação anterior preservado para revisão, fora dos indicadores.';
+    }else text.textContent=nome+' / '+op.ano+': conjunto excluído no servidor. Rascunho pendente preservado, fora dos indicadores.';
+    box.appendChild(text);
     for(const [label,action,value] of [['Reimportar rascunho','reimportar',true],['Descartar rascunho','descartar',false]]){
       const button=document.createElement('button');button.className='btn-s';button.textContent=label;button.dataset.crmConflito=action;
       button.onclick=()=>window.crmResolverExclusaoPendente(op.lid,op.ano,op.opId,value);box.appendChild(button);
