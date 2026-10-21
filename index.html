@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-20n';
+window.AVATIM_BUILD = '2026-10-20p';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -14728,10 +14728,13 @@ window.rerenderPaginaAtiva = function(motivo){
   const fn = _RENDER_PAGINA[pg];
   if(!fn) return false;
 
-  // Não redesenhar por baixo de quem está digitando: perderia o texto e
-  // moveria o cursor. A próxima passada pega.
+  // Preserve edits in active form controls. Excel CRM filters are read-only
+  // selectors whose current values are consumed by excelRender.
   const foco = document.activeElement;
-  if(foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName) && foco.type !== 'button'){
+  const focoFiltroExcel = pg === 'excel' && foco?.tagName === 'SELECT'
+    && ['excel-filtro-ano','excel-filtro-mes','excel-filtro-loja','excel-filtro-vend'].includes(foco.id);
+  if(foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName)
+      && foco.type !== 'button' && !focoFiltroExcel){
     window._rerenderAdiado = true;
     // [R157] Antes, nada escutava esta bandeira: ela era içada e
     // ficava lá. A tela só voltava a pintar no batimento de 45s, no
@@ -23649,13 +23652,19 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
   try{
     if(!contextoEstavel())return false;
     const atual=await _crm2LerMetadadosPar(db,owner,lid,anoTexto);
+    // Owner migration may pair this exact held row before the remote replay.
+    const headMatchesSeal=atual.head?.apagado===true
+      &&Number(atual.head.ts)===Number(seal.ts)
+      &&(atual.head.gid||null)===(seal.gid||null);
+    const headMatchesHeldRow=atual.head?.apagado===false
+      &&atual.op?.tipo==='gravar'&&atual.head.rowKey===atual.op.rowKey
+      &&atual.head.digest===atual.op.digest&&atual.head.revisao===atual.op.rowRevision;
     if(!_crm2ValidOwner(atual.root,owner)||atual.root.mode!=='pair'
         ||Number(atual.root.epoch)!==Number(op.epoch)
         ||!_crm2ValidaOp(atual.op,owner,lid,anoTexto,atual.root.epoch)
         ||!_crm2SnapshotsOperacaoIguais(atual.op,opMeta)
         ||!_crm2ValidaHead(atual.head,owner,lid,anoTexto,atual.root.epoch)
-        ||!atual.head?.apagado||Number(atual.head.ts)!==Number(seal.ts)
-        ||(atual.head.gid||null)!==(seal.gid||null))return false;
+        ||!(headMatchesSeal||headMatchesHeldRow))return false;
     const original=await _crm2LerRow(db,atual.op.rowKey,{owner,lid,ano:anoTexto,
       epoch:atual.root.epoch,revisao:atual.op.rowRevision,digest:atual.op.digest});
     if(original.meta.codec!==_CRM2_CODEC||original.bytes!==opBytes
