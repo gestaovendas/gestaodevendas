@@ -9768,7 +9768,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-20p';
+window.AVATIM_BUILD = '2026-10-20q';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -17262,7 +17262,8 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
   if(opEnviada?.tipo==='gravar'&&opEnviada._duravelRam===false){
     // A falha anterior deixou a revisão apenas em RAM. Regravar o sidecar
     // antes do despacho; se continuar indisponível, manter a pendência local.
-    const persistida=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,opEnviada.cubo,'gravar',Number(opEnviada.epoch)||0);
+    const persistida=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,opEnviada.cubo,'gravar',Number(opEnviada.epoch)||0,
+      {markerOrigem:opEnviada.marker});
     if(!window._s012ContextoValido(ctx)) throw new Error('s012-sessao-alterada');
     const atual=window.crmPendenciaAtual(ctx,lid,ano);
     if(!persistida||!atual||atual.opId!==persistida.opId||atual._duravelRam!==true)
@@ -17890,7 +17891,11 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
     return receipt?.shape==='core'&&!window.crmPendenciaAtual?.(ctx,lid,String(ano))
       &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},String(lid)+'|'+String(ano));
   });
-  if(_s070TemCoreNativo){
+  const _s073HeldNoBoot=!_parcial&&_pares.some(([lid,ano])=>{
+    const op=window.crmPendenciaAtual(ctx,lid,ano);
+    return !!_crmS069CapturarCercaHeld(ctx,lid,ano,op,window._crmNaoEnviados?.[_crmParKey(lid,ano)]);
+  });
+  if(_s070TemCoreNativo||_s073HeldNoBoot){
     const state=window._s033S051EstadoIndice?.(ctx),ticket=window._s033MainReadStart?.(ctx);
     const proofFence=s033Proof?.indexServerBacked===true&&s033Proof.marker!=null
       &&s033Proof.marker===s033Proof.expectedMarker
@@ -17926,6 +17931,18 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
       }catch(_e){_s070CacheIndice=null;}
     }
   }
+  // Cold held drafts need the same fresh index/event binding as an indexed pull.
+  if(_s073HeldNoBoot&&!s033Proof&&_s070CacheIndice?.data){
+    const index=_s070CacheIndice.data;
+    s033Proof={indexServerBacked:true,marker:_s070CacheIndice.marker,
+      expectedMarker:_s070CacheIndice.marker,eventSeqAtStart:_s070CacheIndice.eventSeq,
+      complete:false,coreComplete:false,pairs:{}};
+    for(const par of _pares){
+      const [lid,ano]=par,ts=index.carimbos?.[lid]?.[ano],g=index.geracoes?.[lid]?.[ano];
+      if(typeof ts==='number'&&Number.isFinite(ts)&&ts>0&&g?.ts===ts
+          &&typeof g.gid==='string'&&g.gid.trim()){par[2]=g.gid;par[3]=ts;}
+    }
+  }
   const _s070CacheStats={pares:0,metadataServidor:0,payloadServidor:0,
     metadataNativo:0,payloadLocalBytes:0};
   if(_s070CacheIndice){
@@ -17942,6 +17959,17 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
   // sem lápide e leituras falhas continuam preservando a cópia local.
   const _soLocal = [];
   const _crmCoreMetaParaPersistir=new Map();
+  const _s069MarkerBatch={ctx,dados:dadosAlvo,seq:undefined,capture:undefined,archives:[]};
+  const _s069VistoDiferido=_pares.some(([l,a])=>{
+    const op=window.crmPendenciaAtual(ctx,l,a),m=window._crmNaoEnviados?.[_crmParKey(l,a)];
+    return !!(op?.exclusaoRemota&&_crmS069CapturarCercaHeld(ctx,l,a,op,m)?.markerDivergente);
+  });
+  const _s069VistosPendentes=new Map();
+  const _s069MarcarVistoLeitura=(l,a,t,g,c,b)=>{
+    if(!_s069VistoDiferido)return _crmMarcarVisto(l,a,t,g,c,b);
+    const key=_crmParKey(l,a);_s069VistosPendentes.set(key,{lid:String(l),ano:String(a),ts:t,gid:g,base:b});
+    return true;
+  };
   for(let _n003Indice=0;_n003Indice<_pares.length;_n003Indice++){
     const [lid, ano, gidIndice, tsIndice]=_pares[_n003Indice];
     let _modoDetalhePar=_crmModoDetalhe;
@@ -18076,7 +18104,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
               const _s042Raw=_s042Snap.data()||{};
               if(_s042Raw._apagado!==true&&_s042Raw.dados&&Number(_s042Raw.ts)===Number(_s042Prova.ts)
                   &&_s042Raw.gid===_s042Prova.gid){
-                _crmMarcarVisto(lid,ano,_s042Raw.ts,_s042Raw.gid,ctx);
+                _s069MarcarVistoLeitura(lid,ano,_s042Raw.ts,_s042Raw.gid,ctx);
                 _s033Recibos.pares.set(lid+'|'+ano,{serverBacked:true,ts:Number(_s042Raw.ts),gid:_s042Raw.gid,partes:_s033Cabeca?.partes});
                 if(_s042Cubo&&typeof _s042Cubo==='object')
                   _crmDetalhesCorePorCubo.set(_s042Cubo,{owner:ctx.owner,geracao:ctx.geracao,
@@ -18253,7 +18281,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,null);
         if(dadosAlvo.crm[lid]){delete dadosAlvo.crm[lid][ano];if(!Object.keys(dadosAlvo.crm[lid]).length)delete dadosAlvo.crm[lid];}
         window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
-        _crmMarcarVisto(lid,ano,raw.ts,raw.gid||gidIndice,ctx,_s057BaseLida);
+        _s069MarcarVistoLeitura(lid,ano,raw.ts,raw.gid||gidIndice,ctx,_s057BaseLida);
         _s033RegistrarPar(); removidos++;
         _n003EstadoPar='removido-no-servidor';
         if(typeof showToast==='function')showToast('Conjunto excluído no servidor. A importação pendente foi guardada como rascunho na lista de importações.','warn');
@@ -18309,7 +18337,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
           delete dadosAlvo.crm[lid][ano];
           if(!Object.keys(dadosAlvo.crm[lid]).length) delete dadosAlvo.crm[lid];
         }
-        _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
+        _s069MarcarVistoLeitura(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
         if(_exclusaoDuravelConfereTombstone&&_markerCargaInicio!==undefined)
           window._crmLimparNaoEnviado(ctx,lid,ano,_markerCargaInicio);
         _s033RegistrarPar(); removidos++;
@@ -18321,7 +18349,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         _n003EstadoPar=_temLocal?'somente-local':'vazio-no-servidor';
         // Cabeça vazia sem _apagado não prova uma exclusão.
         _s033Recibos.pares.delete(lid+'|'+ano);
-        _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
+        _s069MarcarVistoLeitura(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
         if(_temLocal) _soLocal.push({lid, ano, motivo:'vazio no servidor',quando:raw.ts,por:raw.por});
         continue;
       }
@@ -18399,7 +18427,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         if(_marcaLegadaSemOperacao){_avisarMarcaPreservada();continue;}
         if(_s033Cabeca?.serverBacked!==true) throw new Error('Cabeça CRM do cache sem linhas; servidor não confirmado');
         _s033Recibos.pares.delete(lid+'|'+ano);
-        _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
+        _s069MarcarVistoLeitura(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
         if(_temLocal) _soLocal.push({lid, ano, motivo:'cabeça sem linhas no servidor',
           quando: raw.ts, por: raw.por});
         continue;
@@ -18575,14 +18603,14 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
             headServerBacked:_s033Cabeca?.serverBacked===true,
             partsServerBacked:_s033PartesServidor===true,
             indexServerBacked:s033Proof?.indexServerBacked===true,
-            generationBound});
+            generationBound},_s069MarkerBatch);
         if(!_s069Adocao){
           _n003EstadoPar='pendencia-local-preservada';
           _avisarMarcaPreservada();
           continue;
         }
         _opIdCargaEsperada=null;
-        _markerCargaEsperado=undefined;
+        if(!_s069Adocao.markerMismatch)_markerCargaEsperado=undefined;
         _temPendente=false;
       }
       const cercaAtual=window.crmPendenciaAtual(ctx,lid,ano);
@@ -18611,7 +18639,7 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
       _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,leves);
       if(!_temPendente&&_markerCargaEsperado===undefined)_crmS042Candidatos.delete(_crmS042Id(ctx,lid,ano));
       dadosAlvo.crm[lid][ano] = leves;
-      _crmMarcarVisto(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
+      _s069MarcarVistoLeitura(lid, ano, raw.ts, raw.gid || gidIndice, ctx,_s057BaseLida);
       const _detalheCompletoPar=_modoDetalhePar==='full'||_estadoDetalhePar==='empty';
       const _resultadoProvaPar=_s033RegistrarPar(_detalheCompletoPar);
       if(_resultadoProvaPar.coreComplete&&window._s012ContextoValido(ctx)
@@ -18692,6 +18720,14 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
       console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
     }finally{
       _n003Notificar({tipo:'leitura-par-resultado',lid,ano,estado:_n003EstadoPar,concluidos:_n003Indice+1,total:_pares.length});
+    }
+  }
+  if(_s069VistosPendentes.size||_s069MarkerBatch.archives.length){
+    const _s069MarkerOk=_s069MarkerBatch.archives.length
+      ?await _crmS069FinalizarMarkerBatch(ctx,_s069MarkerBatch,_s069VistosPendentes):false;
+    if(!_s069MarkerOk){
+      const _rawEsperado=_s069MarkerBatch.capture?.storage?.['crm-state'];
+      _crmS069VistoBatchPersist(ctx,_s069VistosPendentes,[],_rawEsperado);
     }
   }
   if(!window._s012ContextoValido(ctx) || D!==dadosAlvo) return 0;
@@ -22440,7 +22476,8 @@ window._s012GravarRetencaoIdb=function(ctx){
             if(atual&&Number(atual.browserRevision||0)>Number(ctx.browserRevision||0)){
               ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
             }
-            if(atual?.browserToken===ctx.browserToken&&atual?.browserRevision===ctx.browserRevision
+            // A resolved record is historical; RAM generations restart on reload.
+            if(atual?.estado!=='resolvida'&&atual?.browserToken===ctx.browserToken&&atual?.browserRevision===ctx.browserRevision
                 &&Number(atual.geracao||0)>Number(ctx.geracao||0)){
               ignorado=true;resolve(false);try{tx.abort();}catch(_){};return;
             }
@@ -22715,34 +22752,86 @@ function _crmS069FenceResolvidaConfere(ctx,registro,op){
     &&Number(op.epoch)===Number(head.epoch)&&Number(op.ts)===Number(head.ts)
     &&(op.gid||null)===(head.gid||null)&&_crm2SnapshotsOperacaoIguais(op,fence));
 }
-function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrackedCube=false){
+function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrackedCube=false,markerProofs=null){
   if(!ctx?.owner||!window._s012ContextoValido(ctx)||!dados||typeof dados!=='object'||Array.isArray(dados))return dados;
   const resolvidos=_crmS069Resolvidos.get(ctx.owner);
   if(!resolvidos||resolvidos.geracao!==ctx.geracao)return dados;
   let saida=dados,crmClonado=false;
   const garantirCopia=()=>{if(!inPlace&&saida===dados)saida={...dados};};
   const meta=dados._crmPendenciasSnapshot;
-  const opDoArquivo=(op,r)=>op?.owner===ctx.owner&&op?.lid===r.op.lid
-    &&String(op?.ano)===String(r.op.ano)&&op?.opId===r.op.opId
-    &&_crmS069SnapshotOpIgual(op,r.op);
+  const chavePar=(lid,ano)=>JSON.stringify([String(lid),String(ano)]);
+  const assinaturaOp=op=>{
+    if(!op||typeof op!=='object')return null;
+    try{
+      const value=JSON.stringify(_crm2OpMeta(op,op.rowKey||null,op.digest||null,op.rowRevision));
+      return typeof value==='string'?value:null;
+    }catch(_e){return null;}
+  };
+  const opDoArquivo=(op,r)=>{
+    try{return !!(op?.owner===ctx.owner&&op?.lid===r.op.lid
+      &&String(op?.ano)===String(r.op.ano)&&op?.opId===r.op.opId
+      &&_crmS069SnapshotOpIgual(op,r.op));}
+    catch(_e){return false;}
+  };
+  const resolvedById=new Map(),seenIds=new Set(),ambiguousIds=new Set();
+  for(const [key,r] of Object.entries(resolvidos.items||{})){
+    const op=r?.op,id=op?.opId;
+    if(typeof id!=='string'||!id.trim())continue;
+    if(seenIds.has(id)){ambiguousIds.add(id);resolvedById.delete(id);continue;}
+    seenIds.add(id);
+    if(key!==id||op.owner!==ctx.owner||typeof op.lid!=='string'||typeof op.ano!=='string'
+        ||!Number.isSafeInteger(op.epoch)||op.epoch<0
+        ||!_crm2ValidaOp(op,ctx.owner,op.lid,op.ano,op.epoch))continue;
+    resolvedById.set(id,r);
+  }
+  for(const id of ambiguousIds)resolvedById.delete(id);
+  const resolvedRows=[...resolvedById.values()],pairIndex=new Map();
+  if(meta?.owner===ctx.owner&&Array.isArray(meta.ops)){
+    for(const op of meta.ops){
+      if(op?.owner!==ctx.owner||typeof op.lid!=='string')continue;
+      const key=chavePar(op.lid,op.ano);
+      let pair=pairIndex.get(key);
+      if(!pair){pair={total:0,archivedById:new Map(),strict:new Map()};pairIndex.set(key,pair);}
+      pair.total++;
+      const signature=assinaturaOp(op);
+      if(signature!==null)pair.strict.set(signature,(pair.strict.get(signature)||0)+1);
+      const r=typeof op.opId==='string'?resolvedById.get(op.opId):null;
+      if(r&&opDoArquivo(op,r))
+        pair.archivedById.set(op.opId,(pair.archivedById.get(op.opId)||0)+1);
+    }
+  }
+  const arquivoCorrespondente=op=>{
+    const r=typeof op?.opId==='string'?resolvedById.get(op.opId):null;
+    return r&&opDoArquivo(op,r)?r:null;
+  };
+  const countsFor=(lid,ano,r)=>{
+    const pair=pairIndex.get(chavePar(lid,ano));
+    if(!pair)return {total:0,archived:0,fence:0,overlap:0};
+    const archived=pair.archivedById.get(r.op.opId)||0;
+    const fenceSignature=assinaturaOp(r.fence);
+    const fence=fenceSignature===null?0:pair.strict.get(fenceSignature)||0;
+    const overlap=fence&&opDoArquivo(r.fence,r)?fence:0;
+    return {total:pair.total,archived,fence,overlap};
+  };
+  const cuboBytesCache=new WeakMap();
+  const cuboBytes=r=>{
+    if(!r||typeof r!=='object')return null;
+    if(!cuboBytesCache.has(r)){try{cuboBytesCache.set(r,_crmS042Json(r.cubo));}catch(_e){cuboBytesCache.set(r,null);}}
+    return cuboBytesCache.get(r);
+  };
   if(meta?.owner===ctx.owner&&Array.isArray(meta.ops)){
     const ops=meta.ops.filter(op=>{
-      const r=Object.values(resolvidos.items).find(item=>opDoArquivo(op,item));
-      if(!r)return true;
+      const r=arquivoCorrespondente(op);if(!r)return true;
       const lid=String(r.op.lid),ano=String(r.op.ano),par=_crmParKey(lid,ano);
-      const cubo=dados.crm?.[lid]?.[ano];
-      const cuboExato=!!cubo&&_crmS042Json(cubo)===_crmS042Json(r.cubo);
-      const atual=window.crmPendenciaAtual?.(ctx,lid,ano);
-      const cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,atual);
-      const outros=meta.ops.some(outro=>outro!==op&&outro?.owner===ctx.owner
-        &&outro?.lid===lid&&String(outro?.ano)===ano&&!opDoArquivo(outro,r)
-        &&!(cercaAtual&&_crm2SnapshotsOperacaoIguais(outro,r.fence)));
+      const cubo=dados.crm?.[lid]?.[ano],cuboExato=!!cubo&&_crmS042Json(cubo)===cuboBytes(r);
+      const atual=window.crmPendenciaAtual?.(ctx,lid,ano),cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,atual);
+      const markerProof=markerProofs?.get?.(r.op.opId),markerAllowed=_crmS069MarkerProofConfere(ctx,r,markerProof);
+      const contagens=countsFor(lid,ano,r);
+      const outros=contagens.total-contagens.archived-contagens.fence+contagens.overlap>0;
       const head=r.head&&_crm2ValidaHead(r.head,ctx.owner,lid,ano,r.op.epoch);
       const semSucessor=(!atual||cercaAtual)
-        &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)
+        &&(!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)||markerAllowed)
         &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano));
-      // Old S012 metadata is removable only with both its original cube bytes
-      // and a current native head bound to the archive. Identity alone loses edits.
       return !(cuboExato&&head&&semSucessor&&!outros);
     });
     if(ops.length!==meta.ops.length){
@@ -22751,47 +22840,46 @@ function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrack
       else delete saida._crmPendenciasSnapshot;
     }
   }
-  for(const r of Object.values(resolvidos.items)){
+  for(const r of resolvedRows){
+    if(!r?.op)continue;
     const lid=String(r.op.lid),ano=String(r.op.ano),par=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
-    const opAtual=window.crmPendenciaAtual?.(ctx,lid,ano);
-    const cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,opAtual);
-    if(opAtual&&!cercaAtual||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)
+    const opAtual=window.crmPendenciaAtual?.(ctx,lid,ano),cercaAtual=_crmS069FenceResolvidaConfere(ctx,r,opAtual);
+    const markerProof=markerProofs?.get?.(r.op.opId),markerAllowed=_crmS069MarkerProofConfere(ctx,r,markerProof);
+    if(opAtual&&!cercaAtual||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)&&!markerAllowed
         ||_crmPendenciasEmGravacao.has(memKey))continue;
-    const opsDoPar=meta?.owner===ctx.owner&&Array.isArray(meta.ops)
-      ?meta.ops.filter(op=>op?.owner===ctx.owner&&op?.lid===lid&&String(op?.ano)===ano):[];
-    if(opsDoPar.some(op=>!opDoArquivo(op,r)
-        &&!(cercaAtual&&_crm2SnapshotsOperacaoIguais(op,r.fence))))continue;
-    // A persisted snapshot without this exact operation could be a legitimate
-    // successor. Only the resolver's synchronous in-memory cleanup may remove
-    // a byte-identical old cube without the operation metadata.
-    if(!opsDoPar.some(op=>opDoArquivo(op,r))&&!allowUntrackedCube)continue;
+    const contagens=countsFor(lid,ano,r);
+    const outros=contagens.total-contagens.archived-contagens.fence+contagens.overlap>0;
+    if(outros)continue;
+    // A persisted snapshot without this exact operation could be a legitimate successor.
+    if(!contagens.archived&&!allowUntrackedCube)continue;
     const cubo=dados.crm?.[lid]?.[ano];
-    if(!cubo||_crmS042Json(cubo)!==_crmS042Json(r.cubo))continue;
-    const head=r.head;
-    const headValido=head&&_crm2ValidaHead(head,ctx.owner,lid,ano,r.op.epoch);
-    const comprovadamenteObsoleto=headValido&&(head.apagado===true
-      ||head.digest!==r.op.digest);
+    if(!cubo||_crmS042Json(cubo)!==cuboBytes(r))continue;
+    const head=r.head,headValido=head&&_crm2ValidaHead(head,ctx.owner,lid,ano,r.op.epoch);
+    const comprovadamenteObsoleto=headValido&&(head.apagado===true||head.digest!==r.op.digest);
     if(!comprovadamenteObsoleto)continue;
     garantirCopia();
     if(!crmClonado||saida.crm===dados.crm){saida.crm={...(saida.crm||{})};crmClonado=true;}
-    const lojaAtual=saida.crm[lid]||{};
-    const loja={...lojaAtual};
+    const lojaAtual=saida.crm[lid]||{},loja={...lojaAtual};
     delete loja[ano];
     if(Object.keys(loja).length)saida.crm[lid]=loja;else delete saida.crm[lid];
   }
   return saida;
 }
 window._crmS069SanitizarSnapshotResolvido=_crmS069SanitizarSnapshotResolvido;
-function _crmS069LimparCopiaResolvida(ctx,dados,registro,canonicoAtual){
+function _crmS069LimparCopiaResolvida(ctx,dados,registro,canonicoAtual,markerProofs=null){
   if(!dados||typeof dados!=='object'||Array.isArray(dados))return {ok:false,dados};
-  const limpo=_crmS069SanitizarSnapshotResolvido(ctx,dados,false,true)||dados;
+  const limpo=_crmS069SanitizarSnapshotResolvido(ctx,dados,false,true,markerProofs)||dados;
   const lid=String(registro.op.lid),ano=String(registro.op.ano);
   const meta=limpo._crmPendenciasSnapshot;
   const ops=meta?.owner===ctx.owner&&Array.isArray(meta.ops)
     ?meta.ops.filter(op=>op?.owner===ctx.owner&&op?.lid===lid&&String(op?.ano)===ano):[];
   const atual=window.crmPendenciaAtual?.(ctx,lid,ano);
   const cercaAtual=_crmS069FenceResolvidaConfere(ctx,registro,atual);
-  if(ops.some(op=>!cercaAtual||!_crm2SnapshotsOperacaoIguais(op,registro.fence)))
+  const markerProof=markerProofs?.get?.(registro.op.opId);
+  const markerBound=_crmS069MarkerProofConfere(ctx,registro,markerProof);
+  if(ops.some(op=>markerBound
+      ?!_crmS069SnapshotOpIgual(op,registro.op)
+      :!cercaAtual||!_crm2SnapshotsOperacaoIguais(op,registro.fence)))
     return {ok:false,dados:limpo};
   const cubo=limpo.crm?.[lid]?.[ano];
   if(!cubo)return {ok:true,dados:limpo};
@@ -23468,7 +23556,8 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
   publicada=await _crm2Tx(db,'readwrite',(os,_tx,done,fail)=>{
     const ro=os.get(ownerKey),rh=os.get(headKey),rp=os.get(opKey),rm=os.get(preparada.rowKey),rx=os.get(preparada.preparedKey);
     const rc=opcoes.conflito?.key?os.get(opcoes.conflito.key):null;
-    let falta=5+(rc?1:0),v={};
+    const rret=opcoes.retencaoCerca?.key?os.get(opcoes.retencaoCerca.key):null;
+    let falta=5+(rc?1:0)+(rret?1:0),v={};
     const finalizar=()=>{
       if(--falta!==0)return;
       try{
@@ -23487,9 +23576,20 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
               :!_crm2SnapshotsOperacaoIguais(opAtual,opcoes.opBaseEsperada)))return done(false);
         if(opcoes.conflito?.key&&v.conflito!==undefined
             &&JSON.stringify(v.conflito)!==JSON.stringify(opcoes.conflito.valor))return done(false);
+        if(opcoes.retencaoCerca?.key
+            &&(v.retencao!==opcoes.retencaoCerca.raw
+              ||typeof opcoes.retencaoCerca.validar!=='function'
+              ||!opcoes.retencaoCerca.validar()))return done(false);
         if(v.row?.state!=='prepared'||v.row.rowKey!==preparada.rowKey
             ||v.prepared?.rowKey!==preparada.rowKey||v.prepared.owner!==owner
             ||Number(v.prepared.epoch)!==Number(root.epoch))return done(false);
+        const geracao=opcoes.cabecaGeracao;
+        if(geracao!==undefined&&(opcoes.cabeca===null||opcoes.cabecaTombstone
+            ||v.row.codec!==_CRM2_ROW_PROJECTION_CODEC||v.row.shape!=='projected'
+            ||typeof geracao?.gid!=='string'||!geracao.gid.trim()
+            ||typeof geracao.ts!=='number'||!Number.isFinite(geracao.ts)||geracao.ts<=0
+            ||v.row.projection?.generation?.gid!==geracao.gid
+            ||v.row.projection?.generation?.ts!==geracao.ts))return done(false);
         const metaPronta={...v.row,state:'ready'};
         const proxima=Number(opcoes.revisaoNova)||revAtual+1;
         cabecaNova=opcoes.cabeca===null?null:opcoes.cabecaTombstone
@@ -23499,7 +23599,7 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
             atualizadoEm:Date.now()}
           :{codec:_CRM2_CODEC,kind:'head',owner,epoch:Number(root.epoch),
             lid:String(lid),ano:String(ano),revisao:proxima,rowKey:preparada.rowKey,digest:preparada.digest,
-            apagado:false,atualizadoEm:Date.now()};
+            apagado:false,...(geracao?{ts:geracao.ts,gid:geracao.gid}:{}),atualizadoEm:Date.now()};
         os.put(metaPronta,preparada.rowKey);
         if(cabecaNova)os.put(cabecaNova,headKey);else os.delete(headKey);
         if(opcoes.operacao)os.put(opcoes.operacao,opKey);
@@ -23519,6 +23619,8 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
     });
     if(rc){rc.onsuccess=()=>{v.conflito=rc.result;finalizar();};
       rc.onerror=()=>fail(rc.error||new Error('conflito CRM v2 não lido durante CAS'));}
+    if(rret){rret.onsuccess=()=>{v.retencao=rret.result;finalizar();};
+      rret.onerror=()=>fail(rret.error||new Error('retenção S012 não lida durante CAS CRM'));}
   });
   if(publicada){
     preparada.finalizado=true;
@@ -23577,21 +23679,25 @@ async function _crm2VerificarPublicacao(ctx,db,esperado){
   return true;
 }
 function _crmS069CapturarCercaHeld(ctx,lid,ano,op,marker){
-  const pair=_crmParKey(lid,ano);
-  // Retaining an excluded draft clears the UI send marker, not its native operation marker.
+  const pair=_crmParKey(lid,ano),possuiMarker=Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair);
+  // A typed mismatch is only a recovery candidate; archive still needs the
+  // owner-local S012 preimage proof and atomic native retention CAS below.
   const markerConfere=marker===undefined
     ||Number.isFinite(Number(marker))&&Number(marker)===Number(op?.marker);
+  const markerScalar=typeof marker==='boolean'||typeof marker==='string'
+    ||typeof marker==='number'&&Number.isFinite(marker);
+  const markerDivergente=possuiMarker&&markerScalar&&!markerConfere;
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx)||!op
       ||op.owner!==ctx.owner||op.lid!==String(lid)||String(op.ano)!==String(ano)
       ||op.tipo!=='gravar'||!op.exclusaoRemota||op.liberaExclusao
       ||op._duravelRam!==true||!op.cubo||typeof op.rowKey!=='string'
       ||!/^[0-9a-f]{64}$/.test(op.digest||'')||!Number.isSafeInteger(op.rowRevision)
       ||!Number.isSafeInteger(op.epoch)||op.epoch<0
-      ||!markerConfere
+      ||!markerConfere&&!markerDivergente
       ||_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano)))return null;
   const opMeta=_crm2OpMeta(op,op.rowKey,op.digest,op.rowRevision);
   if(!_crm2ValidaOp(opMeta,ctx.owner,String(lid),String(ano),op.epoch))return null;
-  return {op,opMeta,marker,cubo:D.crm?.[lid]?.[ano]||null,owner:ctx.owner,
+  return {op,opMeta,marker,markerDivergente,cubo:D.crm?.[lid]?.[ano]||null,owner:ctx.owner,
     geracao:ctx.geracao,epoch:op.epoch};
 }
 function _crmS069IndiceAtual(ctx,proof,coreMeta,exigirLimpo=false){
@@ -23608,13 +23714,13 @@ function _crmS069IndiceAtual(ctx,proof,coreMeta,exigirLimpo=false){
     &&(!exigirLimpo||estado.dirty===false));
 }
 async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projectionSource,
-    proof,held,remoto,coreMeta,server={}){
+    proof,held,remoto,coreMeta,server={},markerBatch=null){
   const owner=ctx?.owner,anoTexto=String(ano),pair=_crmParKey(lid,anoTexto),memKey=_crmMemKey(ctx,lid,anoTexto);
   const inicio={dados:dadosAlvo,cubo:held?.cubo,versao:window._crmVersao,
     epoch:_crmCacheEpoch.get(owner),revisao:_crmCacheRevisao.get(owner)};
   const op=held?.op,opMeta=held?.opMeta,seal=op?.exclusaoRemota;
-  const gid=remoto?.gid,ts=Number(remoto?.ts);
-  let markerEsperado=held?.marker;
+  const gid=remoto?.gid,ts=Number(remoto?.ts),markerMismatch=held?.markerDivergente===true;
+  let markerEsperado=held?.marker,markerProof=null;
   const cuboAtual=()=>D.crm?.[lid]?.[anoTexto]||null;
   const contextoEstavel=()=>window._s012ContextoValido(ctx)&&D===inicio.dados
     &&window._s012Capturar?.()?.owner===owner&&window._s012Capturar?.()?.geracao===ctx.geracao
@@ -23624,6 +23730,7 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
     &&_crm2SnapshotsOperacaoIguais(window.crmPendenciaAtual?.(ctx,lid,anoTexto),opMeta)
     &&window._crmNaoEnviados?.[pair]===markerEsperado
     &&!_crmPendenciasEmGravacao.has(memKey)
+    &&(!markerProof||markerProof.validar())
     &&cuboAtual()===inicio.cubo
     &&(!inicio.cubo||_crmS042Json(inicio.cubo)===_crmS042Json(op?.cubo))
     &&_crmS069IndiceAtual(ctx,proof,coreMeta);
@@ -23650,6 +23757,11 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
   if(!db)return false;
   let preparada=null;
   try{
+    if(markerMismatch){
+      if(!markerBatch||markerBatch.ctx!==ctx||markerBatch.dados!==dadosAlvo)return false;
+      markerProof=await _crmS069MarkerRecoveryProvar(ctx,db,markerBatch,held,lid,anoTexto,opBytes);
+      if(!markerProof)return false;
+    }
     if(!contextoEstavel())return false;
     const atual=await _crm2LerMetadadosPar(db,owner,lid,anoTexto);
     // Owner migration may pair this exact held row before the remote replay.
@@ -23670,9 +23782,7 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
     if(original.meta.codec!==_CRM2_CODEC||original.bytes!==opBytes
         ||!_crm2SnapshotsOperacaoIguais(op,atual.op))return false;
     const conflictKey=_crm2Key('c',owner,lid,anoTexto,atual.op.opId);
-    const archived={...atual.op,kind:'conflict'};
-    const oldConflict=await _crm2Get(db,conflictKey);
-    if(oldConflict!==undefined&&JSON.stringify(oldConflict)!==JSON.stringify(archived))return false;
+    const archivedBase={...atual.op,kind:'conflict'};
     const revisionBase=Number(atual.head.revisao)||0,revisionNew=revisionBase+1;
     const projection={generation:{gid,ts},detail:{state:projectionSource.detail.state,
       descriptor:projectionSource.detail.descriptor==null?null:_crm2PlainClone(projectionSource.detail.descriptor)}};
@@ -23683,6 +23793,15 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
     const newCore=_crmS042Json(_crm2CuboCore(cuboRemoto));
     if(typeof newCore!=='string'||preparada.bytes!==newCore
         ||!_crmS069IndiceAtual(ctx,proof,coreMeta)||!contextoEstavel())return false;
+    const headPreview={codec:_CRM2_CODEC,kind:'head',owner,epoch:Number(atual.root.epoch),
+      lid:String(lid),ano:anoTexto,revisao:revisionNew,rowKey:preparada.rowKey,
+      digest:preparada.digest,apagado:false,ts:Number(ts)||0,gid:gid||null};
+    const markerBinding=markerMismatch
+      ?_crmS069MarkerBindingCriar(ctx,op,markerEsperado,headPreview):null;
+    if(markerMismatch&&!markerBinding)return false;
+    const archived=markerMismatch?{...archivedBase,markerBinding}:archivedBase;
+    const oldConflict=await _crm2Get(db,conflictKey);
+    if(oldConflict!==undefined&&JSON.stringify(oldConflict)!==JSON.stringify(archived))return false;
     const validar=()=>contextoEstavel()&&coreMeta?.cubo===cuboRemoto
       &&coreMeta.coreServerBacked===true&&coreMeta.headGenerationBound===true
       &&coreMeta.gid===gid&&Number(coreMeta.ts)===ts
@@ -23692,7 +23811,9 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
     const head=await _crm2PublicarRow(ctx,db,preparada,{revisaoBase:revisionBase,
       headBaseEsperada:atual.head,opIdBase:atual.op.opId,opBaseEsperada:atual.op,
       revisaoNova:revisionNew,removerOperacao:true,invalidarProva:true,
-      conflito:{key:conflictKey,valor:archived},validar});
+      cabecaGeracao:{gid,ts},conflito:{key:conflictKey,valor:archived},
+      ...(markerProof?{retencaoCerca:{key:markerProof.proof.key,raw:markerProof.proof.recordRaw,
+        validar:markerProof.validar}}:{}),validar});
     if(!head)return false;
     // Once the native transaction commits there is no rollback claim. Any
     // failed readback leaves the old row rooted by `c` and RAM proof incomplete.
@@ -23711,7 +23832,7 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
         ||JSON.stringify(conflitoLido)!==JSON.stringify(archived)
         ||originalLido?.bytes!==opBytes||originalLido?.meta?.rowKey!==op.rowKey
         ||!contextoEstavel())return false;
-    if(markerEsperado!==undefined){
+    if(markerEsperado!==undefined&&!markerMismatch){
       if(window._crmLimparNaoEnviado?.(ctx,lid,anoTexto,markerEsperado)!==true
           ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair))return false;
       markerEsperado=undefined;
@@ -23736,8 +23857,16 @@ async function _crmS069ArquivarCerca(ctx,dadosAlvo,lid,ano,cuboRemoto,projection
       _head:{...head},_remoto:{gid:head.gid||null,ts:Number(head.ts)||0,apagado:head.apagado===true,
         revisao:Number(head.revisao)||0}};
     _crmS069Conflitos.set(owner,{geracao:ctx.geracao,items});
+    if(markerProof){
+      markerProof.head={...head};markerProof.archived={...archived,cubo:op.cubo,_arquivado:true};
+      markerProof.op={...op,payloadKey:original.meta.payloadKey};
+      markerProof.cuboBytes=opBytes;
+      markerBatch.archives||(markerBatch.archives=[]);
+      markerBatch.archives.push(markerProof);
+    }
     window._s033AoPendenteAlterada?.(ctx);
-    return {head,projection:preparada.meta.projection,receipt,shape,conflictKey,archived};
+    return {head,projection:preparada.meta.projection,receipt,shape,conflictKey,archived,
+      markerMismatch};
   }catch(e){
     // A failure can occur after the native CAS committed. Keep the archived
     // conflict root and old active RAM draft for recovery; never claim rollback.
@@ -23783,6 +23912,534 @@ function _crm2ValidaHead(head,owner,lid,ano,epoch){
     &&(head.apagado?head.rowKey===null&&head.digest===null
       :typeof head.rowKey==='string'&&head.rowKey.startsWith(_CRM2_PREFIX+'m|')
         &&/^[0-9a-f]{64}$/.test(head.digest||'')));
+}
+function _crmS069MarkerScalar(marker){
+  return typeof marker==='boolean'||typeof marker==='string'
+    ||typeof marker==='number'&&Number.isFinite(marker);
+}
+function _crmS069MarkerBindingCriar(ctx,op,marker,head){
+  if(!ctx?.owner||typeof ctx.browserToken!=='string'||!ctx.browserToken.trim()
+      ||!Number.isSafeInteger(ctx.browserRevision)||ctx.browserRevision<0
+      ||!Number.isSafeInteger(ctx.geracao)||ctx.geracao<0
+      ||!op||!_crmS069MarkerScalar(marker)||!head
+      ||head.apagado!==false||head.owner!==ctx.owner||head.lid!==String(op.lid)
+      ||head.ano!==String(op.ano)||head.epoch!==op.epoch
+      ||!Number.isSafeInteger(head.revisao)||head.revisao<1
+      ||typeof head.rowKey!=='string'||!/^[0-9a-f]{64}$/.test(head.digest||''))return null;
+  const opMarkerPresent=Object.prototype.hasOwnProperty.call(op,'marker')&&op.marker!==undefined;
+  if(opMarkerPresent&&!_crmS069MarkerScalar(op.marker))return null;
+  return {version:1,source:'crm-state',owner:ctx.owner,
+    browserToken:ctx.browserToken,browserRevision:ctx.browserRevision,
+    geracao:ctx.geracao,lid:String(op.lid),ano:String(op.ano),epoch:op.epoch,
+    opId:op.opId,opMarkerPresent,opMarkerType:opMarkerPresent?typeof op.marker:'undefined',
+    opMarkerValue:opMarkerPresent?op.marker:null,
+    markerType:typeof marker,markerValue:marker,
+    head:{epoch:head.epoch,revisao:head.revisao,rowKey:head.rowKey,digest:head.digest,
+      apagado:false,ts:Number(head.ts)||0,gid:head.gid||null}};
+}
+function _crmS069MarkerBindingValida(arquivado,ctx,head){
+  if(!arquivado||!Object.prototype.hasOwnProperty.call(arquivado,'markerBinding'))return false;
+  const b=arquivado.markerBinding,keys=['version','source','owner','browserToken','browserRevision',
+    'geracao','lid','ano','epoch','opId','opMarkerPresent','opMarkerType','opMarkerValue','markerType','markerValue','head'];
+  if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).length!==keys.length
+      ||!keys.every(k=>Object.prototype.hasOwnProperty.call(b,k))
+      ||b.version!==1||b.source!=='crm-state'||b.owner!==arquivado.owner
+      ||b.lid!==arquivado.lid||b.ano!==String(arquivado.ano)||b.epoch!==arquivado.epoch
+      ||b.opId!==arquivado.opId||!Number.isSafeInteger(b.epoch)||b.epoch<0
+      ||typeof b.opMarkerPresent!=='boolean'||!_crmS069MarkerScalar(b.markerValue)
+      ||b.markerType!==typeof b.markerValue
+      ||(b.opMarkerPresent
+        ?!Object.prototype.hasOwnProperty.call(arquivado,'marker')
+          ||b.opMarkerType!==typeof arquivado.marker||b.opMarkerValue!==arquivado.marker
+        :Object.prototype.hasOwnProperty.call(arquivado,'marker')
+          &&arquivado.marker!==undefined||b.opMarkerType!=='undefined'||b.opMarkerValue!==null)
+      ||!Number.isSafeInteger(b.browserRevision)||b.browserRevision<0
+      ||!Number.isSafeInteger(b.geracao)||b.geracao<0
+      ||typeof b.browserToken!=='string'||!b.browserToken.trim()
+      ||!b.head||typeof b.head!=='object'||Array.isArray(b.head)
+      ||Object.keys(b.head).length!==7
+      ||!['epoch','revisao','rowKey','digest','apagado','ts','gid'].every(k=>Object.prototype.hasOwnProperty.call(b.head,k)))return false;
+  // These fields record the session that observed the marker; they are not a
+  // session lease. Cold recovery binds a fresh live proof to this owner and
+  // exact archive instead of rejecting a legitimate same-owner login.
+  if(ctx&&b.owner!==ctx.owner)return false;
+  if(head){
+    const h=b.head;
+    return !!(h&&typeof h==='object'&&!Array.isArray(h)
+      &&Object.keys(h).length===7&&h.epoch===head.epoch&&h.revisao===head.revisao
+      &&h.rowKey===head.rowKey&&h.digest===head.digest&&h.apagado===head.apagado
+      &&Number(h.ts)===Number(head.ts||0)&&(h.gid||null)===(head.gid||null));
+  }
+  return !!(b.head&&b.head.epoch===arquivado.epoch
+    &&Number.isSafeInteger(b.head.revisao)&&b.head.revisao>0
+    &&typeof b.head.rowKey==='string'&&/^[0-9a-f]{64}$/.test(b.head.digest||'')
+    &&b.head.apagado===false);
+}
+function _crmS069MarkerBindingMarkerConfere(arquivado,marker){
+  const b=arquivado?.markerBinding;
+  return !!(_crmS069MarkerScalar(marker)&&b&&b.markerType===typeof marker
+    &&Object.is(b.markerValue,marker));
+}
+function _crmS069MarkerProofConfere(ctx,registro,proof){
+  const pair=_crmParKey(registro?.op?.lid,registro?.op?.ano),b=registro?.markerBinding;
+  if(!proof||!b||!_crmS069MarkerBindingValida({...registro.op,kind:'conflict',markerBinding:b},ctx,registro.head)
+      ||!_crmS069MarkerBindingMarkerConfere({markerBinding:b},proof.marker)
+      ||proof.archived?.opId!==registro.op?.opId
+      ||!_crm2SnapshotsOperacaoIguais(proof.op,registro.op))return false;
+  const markerAtual=window._crmNaoEnviados?.[pair];
+  const markerVigente=_crmS069MarkerBindingMarkerConfere({markerBinding:b},markerAtual)
+    ||proof.hidden&&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair);
+  return markerVigente&&proof.sourceValidar?.()===true;
+}
+function _crmS069ConflitoEsperado(arquivado){
+  const esperado={..._crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),kind:'conflict'};
+  if(Object.prototype.hasOwnProperty.call(arquivado||{},'markerBinding')){
+    if(!_crmS069MarkerBindingValida(arquivado))return null;
+    esperado.markerBinding=arquivado.markerBinding;
+  }
+  return esperado;
+}
+function _crmS069AtualizarVistoEstado(estado,lid,ano,ts,gid,base){
+  if(!estado.visto[lid])estado.visto[lid]={};
+  estado.visto[lid][String(ano)]=Number(ts)||0;
+  const geracoes=estado.visto._geracoes||(estado.visto._geracoes={});
+  (geracoes[lid]||(geracoes[lid]={}))[String(ano)]=base?.gid===null?(base.indiceGid||null):(gid||null);
+  const bases=estado.visto._bases||(estado.visto._bases={});
+  if(base?.gid===null&&_crmS057BaseValida(base))
+    (bases[lid]||(bases[lid]={}))[String(ano)]=JSON.parse(JSON.stringify(base));
+  else if(bases[lid])delete bases[lid][String(ano)];
+}
+function _crmS069VistoBatchPersist(ctx,updates,markers=[],expectedRaw){
+  if(!window._s012ContextoValido(ctx)||!updates?.size&&!markers.length)return false;
+  const leitura=_crmLerEstadoSeguro(ctx);
+  if(!leitura.ok)return false;
+  const statusKey=window._s012StorageKey?.('crm-state',ctx);
+  if(!statusKey)return false;
+  let rawAtual;
+  try{rawAtual=localStorage.getItem(statusKey);}catch(_e){return false;}
+  if(expectedRaw!==undefined&&rawAtual!==expectedRaw)return false;
+  const estado=leitura.estado;
+  for(const [k,u] of updates||[])_crmS069AtualizarVistoEstado(estado,u.lid,u.ano,u.ts,u.gid,u.base);
+  for(const item of markers){
+    if(!Object.prototype.hasOwnProperty.call(estado.naoEnviados,item.pair)
+        ||!Object.is(estado.naoEnviados[item.pair],item.marker))return false;
+    delete estado.naoEnviados[item.pair];
+  }
+  let raw;
+  try{raw=JSON.stringify(estado);localStorage.setItem(statusKey,raw);if(localStorage.getItem(statusKey)!==raw)return false;}
+  catch(_e){return false;}
+  if(window._s012ContextoValido(ctx)){
+    window._crmTsVisto=estado.visto;window._crmNaoEnviados=estado.naoEnviados;
+  }
+  return true;
+}
+function _crmS069RestaurarMarkerBatch(ctx,batch){
+  if(!window._s012ContextoValido(ctx)||!batch?.archives?.length)return false;
+  const key=window._s012StorageKey?.('crm-state',ctx);let estado;
+  try{estado=key?JSON.parse(localStorage.getItem(key)||'null'):null;}catch(_e){return false;}
+  if(!estado||typeof estado!=='object'||Array.isArray(estado)
+      ||!estado.visto||!estado.naoEnviados)return false;
+  for(const item of batch.archives){
+    if(item.markerWasAbsent===true)continue;
+    if(Object.prototype.hasOwnProperty.call(estado.naoEnviados,item.pair)
+        &&!Object.is(estado.naoEnviados[item.pair],item.marker))return false;
+    estado.naoEnviados[item.pair]=item.marker;
+  }
+  try{
+    const raw=JSON.stringify(estado);localStorage.setItem(key,raw);
+    if(localStorage.getItem(key)!==raw)return false;
+  }catch(_e){return false;}
+  window._crmTsVisto=estado.visto;window._crmNaoEnviados=estado.naoEnviados;
+  return true;
+}
+function _crmS069MarkerStatusConfere(status,pair,marker){
+  const marcas=status?.naoEnviados||{};
+  return !Object.prototype.hasOwnProperty.call(marcas,pair)||Object.is(marcas[pair],marker);
+}
+function _crmS069MarkerIndexRows(proof,rows,owner,ownerRequired=true){
+  if(!Array.isArray(rows))return null;
+  proof.rowIndexes||(proof.rowIndexes=new WeakMap());
+  let index=proof.rowIndexes.get(rows);
+  if(index)return index;
+  index=new Map();
+  for(const row of rows){
+    if(!row||typeof row!=='object'||ownerRequired&&row.owner!==owner)continue;
+    const pair=_crmParKey(row.lid,row.ano);
+    if(!index.has(pair))index.set(pair,[]);
+    index.get(pair).push(row);
+  }
+  proof.rowIndexes.set(rows,index);
+  return index;
+}
+function _crmS069MarkerDadosConfere(ctx,dados,lid,ano,op,bytes,canonicalBytes=null,proof=null){
+  if(dados==null)return true;
+  if(!dados||typeof dados!=='object'||Array.isArray(dados))return false;
+  const loja=dados.crm?.[lid],temCubo=!!loja&&Object.prototype.hasOwnProperty.call(loja,ano);
+  const cuboBytes=temCubo?_crmS042Json(loja[ano]):null;
+  if(temCubo&&cuboBytes!==bytes&&cuboBytes!==canonicalBytes)return false;
+  const meta=dados._crmPendenciasSnapshot;
+  if(meta!==undefined){
+    if(!meta||meta.owner!==ctx.owner||!Array.isArray(meta.ops))return false;
+    const index=proof&&_crmS069MarkerIndexRows(proof,meta.ops,ctx.owner);
+    const ops=index?(index.get(_crmParKey(lid,ano))||[])
+      :meta.ops.filter(x=>x?.owner===ctx.owner&&x?.lid===lid&&String(x?.ano)===ano);
+    if(ops.length>1||ops.some(x=>!_crmS069SnapshotOpIgual(x,op)))return false;
+    if(ops.length&&(!temCubo||cuboBytes!==bytes))return false;
+  }
+  return true;
+}
+function _crmS069MarkerOpsConfere(ctx,ops,lid,ano,op,proof=null,container=null){
+  if(!Array.isArray(ops))return false;
+  const index=proof&&_crmS069MarkerIndexRows(proof,ops,ctx.owner);
+  const pares=index?(index.get(_crmParKey(lid,ano))||[])
+    :ops.filter(x=>x?.owner===ctx.owner&&x?.lid===lid&&String(x?.ano)===ano);
+  return pares.length<=1&&pares.every(x=>_crmS069SnapshotOpIgual(x,op));
+}
+function _crmS069MarkerCrmRefsConfere(ctx,crm,lid,ano,op,bytes,canonicalBytes=null,canonicalHead=null,proof=null){
+  if(!crm)return true;
+  const inlineIndex=proof&&_crmS069MarkerIndexRows(proof,crm.inline||[],ctx.owner,false);
+  const refIndex=proof&&_crmS069MarkerIndexRows(proof,crm.refs||[],ctx.owner,true);
+  const inline=inlineIndex?(inlineIndex.get(_crmParKey(lid,ano))||[])
+    :(crm.inline||[]).filter(x=>x?.lid===lid&&String(x?.ano)===ano);
+  const refs=refIndex?(refIndex.get(_crmParKey(lid,ano))||[])
+    :(crm.refs||[]).filter(x=>x?.owner===ctx.owner&&x?.lid===lid&&String(x?.ano)===ano);
+  if(inline.length>1||refs.length>1)return false;
+  if(inline.length){
+    const inlineBytes=_crmS042Json(inline[0].cubo);
+    const held=inlineBytes===bytes&&(!inline[0].operacao||_crmS069SnapshotOpIgual(inline[0].operacao,op));
+    const canonical=inlineBytes===canonicalBytes&&!inline[0].operacao;
+    if(!held&&!canonical)return false;
+  }
+  if(refs.length){
+    const ref=refs[0],opMeta=ref.operacao;
+    const held=ref.epoch===op.epoch&&ref.rowKey===op.rowKey&&ref.digest===op.digest
+      &&ref.revisao===op.rowRevision&&(!opMeta||_crmS069SnapshotOpIgual(opMeta,op));
+    const canonical=canonicalHead&&ref.epoch===canonicalHead.epoch
+      &&ref.rowKey===canonicalHead.rowKey&&ref.digest===canonicalHead.digest
+      &&ref.revisao===canonicalHead.revisao&&!opMeta;
+    if(!held&&!canonical)return false;
+  }
+  return true;
+}
+function _crmS069MarkerIdle(ctx,batch){
+  const owner=ctx?.owner;
+  if(batch.seq===undefined)batch.seq=_s012RetencaoIdbSequencia.get(owner)||0;
+  return window._s012ContextoValido(ctx)&&(_s012RetencaoIdbSequencia.get(owner)||0)===batch.seq
+    &&!_s012RetencaoIdbFila.has(owner)&&!_s012RetencaoIdbEsperas.has(owner)
+    &&!_crmRetencaoEstadoAgendada?.has?.(owner);
+}
+function _crmS069MarkerCaptureStable(ctx,batch,fast=false){
+  if(!_crmS069MarkerIdle(ctx,batch)||_s012RetencoesPorOwner.get(ctx.owner)!==batch.retRef)return false;
+  // Pair checks use the parsed owner preimage and live target pair; avoid
+  // serializing the full retained owner or `_pendingLocalData` per pair.
+  if(fast||batch.staging)return true;
+  try{
+    if(_s012RetencaoStorageTipos.some(tipo=>_s012RetencaoStorageRaw(tipo,ctx)!==batch.storage[tipo]))return false;
+  }catch(_e){return false;}
+  return true;
+}
+async function _crmS069MarkerCapture(ctx,db,batch){
+  if(batch.capture!==undefined)return batch.capture;
+  if(!_crmS069MarkerIdle(ctx,batch))return batch.capture=null;
+  const retRef=_s012RetencoesPorOwner.get(ctx.owner),retRaw=window._s012RetencaoIdbRaw?.(ctx);
+  const seq=_s012RetencaoIdbSequencia.get(ctx.owner)||0;
+  const key=window._s012StorageKey?.('state-retention',ctx);
+  if(!key||retRef&&(retRef.owner!==ctx.owner||retRef.ctx?.geracao!==ctx.geracao
+      ||retRef.liberada===true||typeof retRaw!=='string'||!retRaw))return batch.capture=null;
+  const storage={},keys={};
+  try{
+    for(const tipo of _s012RetencaoStorageTipos){
+      keys[tipo]=window._s012StorageKey?.(tipo,ctx);
+      if(!keys[tipo])return batch.capture=null;
+      storage[tipo]=localStorage.getItem(keys[tipo]);
+    }
+    batch.pendingMemJson=_s012JsonSeguro(window._pendingLocalData);
+  }catch(_e){return batch.capture=null;}
+  if(batch.pendingMemJson===null&&window._pendingLocalData!=null)return batch.capture=null;
+  const preimagesStable=()=>window._s012ContextoValido(ctx)
+    &&(_s012RetencaoIdbSequencia.get(ctx.owner)||0)===seq
+    &&_s012RetencaoIdbFila.get(ctx.owner)==null&&!_s012RetencaoIdbEsperas.has(ctx.owner)
+    &&_s012RetencoesPorOwner.get(ctx.owner)===retRef
+    &&_s012RetencaoStorageTipos.every(tipo=>_s012RetencaoStorageRaw(tipo,ctx)===storage[tipo]);
+  const recordRaw=await _crm2Get(db,key);
+  if(!preimagesStable())return batch.capture=null;
+  let record=null;
+  if(recordRaw!==undefined){
+    if(typeof recordRaw!=='string')return batch.capture=null;
+    try{record=JSON.parse(recordRaw);}catch(_e){return batch.capture=null;}
+    // Resolved retention is historical evidence, not a live-session lease.
+    if(!_s012RetencaoRegistroV2Valido(record,ctx.owner)
+        ||!['ativa','resolvida'].includes(record.estado)
+        ||record.retencao.liberada!==(record.estado==='resolvida'))return batch.capture=null;
+  }
+  if(record?.versao===3&&record.estado==='ativa'){
+    try{
+      const conferido=await _s012RetencaoIdbLer(db,key,null,
+        {ctx,raw:recordRaw,projecao:record.retencao.crm});
+      if(conferido!==recordRaw)return batch.capture=null;
+    }catch(_e){return batch.capture=null;}
+  }
+  if(!preimagesStable())return batch.capture=null;
+  const proof={key,recordRaw,record,retRaw,retRef,storage,keys,pendingMemJson:batch.pendingMemJson,
+    seq};
+  batch.capture=proof;batch.retRaw=retRaw;batch.retRef=retRef;batch.storage=storage;batch.seq=proof.seq;
+  const estadoRaw=storage['crm-state'];let status;
+  try{status=estadoRaw===null?{visto:{},naoEnviados:{}}:JSON.parse(estadoRaw);}catch(_e){return batch.capture=null;}
+  if(!status||typeof status!=='object'||Array.isArray(status)
+      ||!status.naoEnviados||typeof status.naoEnviados!=='object'||Array.isArray(status.naoEnviados))return batch.capture=null;
+  proof.status=status;
+  proof.rowIndexes=new WeakMap();
+  proof.stateData=null;
+  if(storage.state!==null){
+    try{proof.stateData=JSON.parse(storage.state);}catch(_e){return batch.capture=null;}
+    if(!proof.stateData||typeof proof.stateData!=='object'||Array.isArray(proof.stateData))return batch.capture=null;
+  }
+  proof.pendingValues=[];
+  if(batch.pendingMemJson!==null){
+    try{proof.pendingMemory=JSON.parse(batch.pendingMemJson);}catch(_e){return batch.capture=null;}
+    proof.pendingValues.push(proof.pendingMemory);
+  }
+  if(record?.estado!=='resolvida'&&record?.retencao.pending!=null)
+    proof.pendingValues.push(record.retencao.pending);
+  if(storage.pending!==null){
+    try{
+      const parsed=JSON.parse(storage.pending);
+      const payload=parsed?._avatimPending===1?parsed.payload:storage.pending;
+      if(typeof payload!=='string')return batch.capture=null;
+      proof.pendingValues.push(JSON.parse(payload));
+    }catch(_e){return batch.capture=null;}
+  }
+  return proof;
+}
+function _crmS069MarkerSnapshotPairConfere(ctx,proof,lid,ano,op,bytes,marker,canonicalBytes=null,canonicalHead=null,fast=false){
+  // S012 never restores a resolved fallback; later local writes supersede it.
+  const pair=_crmParKey(lid,ano),ret=proof.record?.estado==='resolvida'?null:proof.record?.retencao;
+  if(!_crmS069MarkerCaptureStable(ctx,proof,fast)||!_crmS069MarkerStatusConfere(proof.status,pair,marker)
+      ||!_crmS069MarkerStatusConfere(ret?.crmStatus,pair,marker))return false;
+  const live=proof.retRef;
+  if(live&&(live!==_s012RetencoesPorOwner.get(ctx.owner)
+      ||!_crmS069MarkerStatusConfere(live.crmStatus,pair,marker)
+      ||!_crmS069MarkerDadosConfere(ctx,live.dados,lid,ano,op,bytes,canonicalBytes,proof)
+      ||!_crmS069MarkerOpsConfere(ctx,live.crmPendencias,lid,ano,op,proof)
+      ||!_crmS069MarkerCrmRefsConfere(ctx,live.crm,lid,ano,op,bytes,canonicalBytes,canonicalHead,proof)))return false;
+  if(proof.stateData&&!_crmS069MarkerDadosConfere(ctx,proof.stateData,lid,ano,op,bytes,canonicalBytes,proof))return false;
+  if(ret&&(!_crmS069MarkerDadosConfere(ctx,ret.dados,lid,ano,op,bytes,canonicalBytes,proof)
+      ||!_crmS069MarkerOpsConfere(ctx,ret.crmPendencias,lid,ano,op,proof)))return false;
+  const pendingValues=[...(proof.pendingValues||[])];
+  if(window._pendingLocalData!=null)pendingValues.push(window._pendingLocalData);
+  if(live?.pending!=null)pendingValues.push(live.pending);
+  for(const value of pendingValues)
+    if(!_crmS069MarkerDadosConfere(ctx,value,lid,ano,op,bytes,canonicalBytes,proof))return false;
+  return _crmS069MarkerCrmRefsConfere(ctx,ret?.crm,lid,ano,op,bytes,canonicalBytes,canonicalHead,proof);
+}
+async function _crmS069MarkerRecoveryProvar(ctx,db,batch,held,lid,ano,opBytes){
+  const proof=await _crmS069MarkerCapture(ctx,db,batch);
+  if(!proof||!_crmS069MarkerSnapshotPairConfere(ctx,proof,String(lid),String(ano),held.op,opBytes,held.marker,null,null,true))return null;
+  const pair=_crmParKey(lid,ano),retStatus=proof.record?.estado==='resolvida'
+    ?null:proof.record?.retencao?.crmStatus;
+  const retMarker=retStatus?.naoEnviados||{};
+  if(Object.prototype.hasOwnProperty.call(retMarker,pair)&&!Object.is(retMarker[pair],held.marker))return null;
+  const sourceValidar=()=>_crmS069MarkerCaptureStable(ctx,proof)
+    &&Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair)
+    &&Object.is(window._crmNaoEnviados?.[pair],held.marker)
+    &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))
+    &&_crmS069MarkerSnapshotPairConfere(ctx,proof,String(lid),String(ano),held.op,opBytes,held.marker,null,null,true);
+  return {proof,pair,lid:String(lid),ano:String(ano),marker:held.marker,
+    opId:held.op.opId,opBytes,head:null,op:held.op,sourceValidar,
+    validar:()=>sourceValidar()&&window.crmPendenciaAtual(ctx,lid,ano)===held.op};
+}
+async function _crmS069MarkerColdProvar(ctx,db,batch,archived,head,canonicalBytes,allowHidden=false){
+  const lid=String(archived?.lid||''),ano=String(archived?.ano||''),pair=_crmParKey(lid,ano);
+  const memoryMarks=window._crmNaoEnviados||{},markerPresent=Object.prototype.hasOwnProperty.call(memoryMarks,pair);
+  const marker=memoryMarks[pair],hidden=!markerPresent;
+  if(!lid||!ano||!_crmS069MarkerBindingValida(archived,ctx,head)
+      ||hidden&&!allowHidden||!hidden&&!_crmS069MarkerBindingMarkerConfere(archived,marker)
+      ||window.crmPendenciaAtual(ctx,lid,ano)||_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano)))return null;
+  const op={..._crm2OpMeta(archived,archived.rowKey,archived.digest,archived.rowRevision),
+    cubo:archived.cubo,_duravelRam:true};
+  const opBytes=_crmS042Json(op.cubo);
+  if(typeof opBytes!=='string'||await _crm2Digest(opBytes)!==op.digest)return null;
+  const proof=await _crmS069MarkerCapture(ctx,db,batch);
+  if(!proof)return null;
+  const durableMarks=proof.status?.naoEnviados||{},durablePresent=Object.prototype.hasOwnProperty.call(durableMarks,pair);
+  const stagedValue=batch?.stagedMarkers?.get?.(pair);
+  const staged=hidden&&durablePresent&&Object.is(stagedValue,archived.markerBinding.markerValue)
+    &&Object.is(durableMarks[pair],archived.markerBinding.markerValue);
+  const markerWasAbsent=hidden&&!staged&&!durablePresent;
+  // A hidden RAM marker is recoverable only when it was already durably absent,
+  // or when this batch deliberately staged deletion of the exact captured marker.
+  if(hidden&&!markerWasAbsent&&!staged
+      ||!hidden&&(!durablePresent||!Object.is(durableMarks[pair],archived.markerBinding.markerValue)))return null;
+  if(!_crmS069MarkerSnapshotPairConfere(ctx,proof,lid,ano,op,opBytes,
+      archived.markerBinding.markerValue,canonicalBytes,head,true))return null;
+  const item={pair,lid,ano,marker:archived.markerBinding.markerValue,opId:archived.opId,
+    op,archived,opBytes,head:{...head},canonicalBytes,hidden,markerWasAbsent,staged,proof,sourceValidar:null};
+  item.sourceValidar=(fast=false)=>{
+    const currentMarks=window._crmNaoEnviados||{},currentPresent=Object.prototype.hasOwnProperty.call(currentMarks,pair);
+    const currentDurable=proof.status?.naoEnviados||{},currentDurablePresent=Object.prototype.hasOwnProperty.call(currentDurable,pair);
+    const markerCurrent=item.hidden?!currentPresent&&(item.markerWasAbsent?!currentDurablePresent
+      :item.staged&&currentDurablePresent&&Object.is(currentDurable[pair],item.marker))
+      :currentPresent&&_crmS069MarkerBindingMarkerConfere(archived,currentMarks[pair]);
+    return _crmS069MarkerCaptureStable(ctx,proof,fast)&&markerCurrent
+      &&!window.crmPendenciaAtual(ctx,lid,ano)
+      &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))
+      &&_crmS069MarkerSnapshotPairConfere(ctx,proof,lid,ano,op,opBytes,
+        archived.markerBinding.markerValue,canonicalBytes,head,true);
+  };
+  return item;
+}
+async function _crmS069MarkerReadback(ctx,batch){
+  const items=batch?.archives||[],proof=batch?.capture;
+  const semSucessorRam=item=>!window.crmPendenciaAtual(ctx,item.lid,item.ano);
+  if(!items.length||!proof||!_crmS069MarkerCaptureStable(ctx,proof)
+      ||items.some(x=>!x.sourceValidar(true)||!semSucessorRam(x)))return false;
+  for(const item of items){
+    const cube=D.crm?.[item.lid]?.[item.ano],receipt=cube&&_crm2ReceiptValido(cube,ctx,item.lid,item.ano);
+    if(!cube||!receipt||receipt.epoch!==item.head.epoch||receipt.revisao!==item.head.revisao
+        ||receipt.rowKey!==item.head.rowKey||receipt.digest!==item.head.digest)return false;
+  }
+  const db=await _idbAbrir();if(!db)return false;
+  try{
+    const out=await _crm2Tx(db,'readonly',(os,_tx,done,fail)=>{
+      const req={retencao:os.get(proof.key),root:os.get(_crm2OwnerKey(ctx.owner))},por=[];
+      for(const item of items){
+        const cKey=_crm2Key('c',ctx.owner,item.lid,item.ano,item.opId);
+        const keys={c:cKey,h:_crm2HeadKey(ctx.owner,item.lid,item.ano),
+          p:_crm2OpKey(ctx.owner,item.lid,item.ano),row:item.op.rowKey};
+        req['c'+por.length]=os.get(keys.c);req['h'+por.length]=os.get(keys.h);
+        req['p'+por.length]=os.get(keys.p);req['m'+por.length]=os.get(keys.row);
+        por.push(item);
+      }
+      const result={};let left=Object.keys(req).length;
+      Object.entries(req).forEach(([name,r])=>{
+        r.onsuccess=()=>{result[name]=r.result;if(--left===0)done({result,por});};
+        r.onerror=()=>fail(r.error||new Error('readback do vínculo S069 falhou'));
+      });
+    });
+    if(out.result.retencao!==proof.recordRaw
+        ||!_crm2ValidOwner(out.result.root,ctx.owner)||out.result.root.mode!=='pair')return false;
+    for(let i=0;i<items.length;i++){
+      const item=items[i],c=out.result['c'+i],head=out.result['h'+i],pending=out.result['p'+i],meta=out.result['m'+i];
+      const expected=_crmS069ConflitoEsperado(item.archived);
+      if(!expected||JSON.stringify(c)!==JSON.stringify(expected)||pending!==undefined
+          ||!_crm2ValidaHead(head,ctx.owner,item.lid,item.ano,out.result.root.epoch)
+          ||!_crmS069MarkerBindingValida(c,ctx,head)
+          ||JSON.stringify(head)!==JSON.stringify(item.head)
+          ||!_crm2MetaRowValida(meta,{owner:ctx.owner,lid:item.lid,ano:item.ano,
+            epoch:item.op.epoch,revisao:item.op.rowRevision,digest:item.op.digest})
+          ||meta.state!=='ready'||meta.rowKey!==item.op.rowKey)return false;
+      // The conflict row bytes were captured and digest-checked before its CAS.
+      // Its immutable native row identity and payload key must remain exact.
+      if(typeof meta.payloadKey!=='string'
+          ||item.op.payloadKey!==undefined&&meta.payloadKey!==item.op.payloadKey)return false;
+      const bytes=await _crm2Get(db,meta.payloadKey);
+      if(bytes!==item.opBytes)return false;
+    }
+    return _crmS069MarkerCaptureStable(ctx,proof)&&items.every(x=>x.sourceValidar(true)&&semSucessorRam(x));
+  }catch(_e){return false;}finally{db.close();}
+}
+async function _crmS069FinalizarMarkerBatch(ctx,batch,updates){
+  const items=batch?.archives||[];if(!items.length)return false;
+  const proof=batch.capture;
+  if(!proof||!await _crmS069MarkerReadback(ctx,batch))return false;
+  const markers=items.map(x=>({pair:x.pair,marker:x.marker}));
+  if(!_crmS069VistoBatchPersist(ctx,updates,markers,proof.storage['crm-state']))return false;
+  try{batch.clearedStatusRaw=localStorage.getItem(proof.keys['crm-state']);}catch(_e){return false;}
+  const existing=_crmS069Resolvidos.get(ctx.owner),resolved={
+    ...(existing?.geracao===ctx.geracao?existing.items||{}:{})};
+  for(const item of items){
+    resolved[item.opId]={op:_crm2OpMeta(item.op,item.op.rowKey,item.op.digest,item.op.rowRevision),
+      cubo:item.op.cubo,head:{...item.head},fence:null,markerBinding:item.archived.markerBinding};
+  }
+  _crmS069Resolvidos.set(ctx.owner,{geracao:ctx.geracao,items:resolved});
+  const first=items[0];
+  const preparado=await _crmS069PrepararResolucaoArquivo(ctx,first.archived,first.head,null);
+  if(!preparado){_crmS069RestaurarMarkerBatch(ctx,batch);return false;}
+  batch.finished=true;
+  return true;
+}
+async function _crmS069FinalizarMarkerColdBatch(ctx,batch){
+  const items=batch?.archives||[];
+  if(!items.length||!await _crmS069MarkerReadback(ctx,batch))return false;
+  const proofs=new Map(items.map(item=>[item.opId,item]));
+  const statusRAM=window._crmNaoEnviados||{};
+  for(const item of items){
+    const present=Object.prototype.hasOwnProperty.call(statusRAM,item.pair);
+    if(item.markerWasAbsent?present:!_crmS069MarkerBindingMarkerConfere(item.archived,statusRAM[item.pair]))return false;
+    if(window.crmPendenciaAtual(ctx,item.lid,item.ano)
+        ||_crmPendenciasEmGravacao.has(_crmMemKey(ctx,item.lid,item.ano)))return false;
+  }
+  let hidden=false;
+  try{
+  for(const item of items){
+    item.hidden=true;
+    if(!item.markerWasAbsent)delete statusRAM[item.pair];
+  }
+  hidden=true;
+  window._crmNaoEnviados=statusRAM;
+  const existing=_crmS069Resolvidos.get(ctx.owner),resolved={
+    ...(existing?.geracao===ctx.geracao?existing.items||{}:{})};
+  for(const item of items){
+    resolved[item.opId]={op:_crm2OpMeta(item.archived,item.archived.rowKey,
+      item.archived.digest,item.archived.rowRevision),cubo:item.archived.cubo,
+      head:{...item.head},fence:null,markerBinding:item.archived.markerBinding};
+  }
+  _crmS069Resolvidos.set(ctx.owner,{geracao:ctx.geracao,items:resolved});
+  batch.capture.staging=true;
+  let preparado=false;
+  try{
+    const first=items[0];
+    preparado=await _crmS069PrepararResolucaoArquivo(ctx,first.archived,
+      first.head,null,proofs);
+  }finally{batch.capture.staging=false;}
+  if(!preparado){_crmS069RestaurarMarkerBatch(ctx,batch);return false;}
+
+  // Re-capture sanitized S012 state once. A staged marker may be absent in RAM
+  // while its exact durable preimage remains; genuine interrupted absence must
+  // stay absent in both places.
+  const stagedMarkers=new Map(items.filter(item=>!item.markerWasAbsent)
+    .map(item=>[item.pair,item.marker]));
+  const fresh={ctx,dados:D,seq:undefined,capture:undefined,archives:[],stagedMarkers};
+  const db=await _idbAbrir();if(!db){_crmS069RestaurarMarkerBatch(ctx,batch);return false;}
+  try{
+    for(const old of items){
+      const canonical=D.crm?.[old.lid]?.[old.ano];
+      const bytes=canonical?_crmS042Json(canonical):null;
+      const item=await _crmS069MarkerColdProvar(ctx,db,fresh,old.archived,
+        old.head,bytes,true);
+      if(!item){_crmS069RestaurarMarkerBatch(ctx,batch);return false;}
+      fresh.archives.push(item);
+    }
+  }finally{db.close();}
+  if(!await _crmS069MarkerReadback(ctx,fresh)){
+    _crmS069RestaurarMarkerBatch(ctx,batch);return false;
+  }
+  const markers=fresh.archives.filter(item=>!item.markerWasAbsent)
+    .map(item=>({pair:item.pair,marker:item.marker}));
+  const updates=batch.updates instanceof Map?batch.updates:new Map();
+  if((markers.length||updates.size)
+      &&!_crmS069VistoBatchPersist(ctx,updates,markers,fresh.capture.storage['crm-state'])){
+    _crmS069RestaurarMarkerBatch(ctx,batch);return false;
+  }
+  const statusAtual=window._crmNaoEnviados||{};
+  if(fresh.archives.some(item=>Object.prototype.hasOwnProperty.call(statusAtual,item.pair))){
+    _crmS069RestaurarMarkerBatch(ctx,batch);return false;
+  }
+  if(!markers.length&&updates.size===0){
+    for(const item of fresh.archives){
+      if(item.markerWasAbsent&&Object.prototype.hasOwnProperty.call(
+          fresh.capture.status?.naoEnviados||{},item.pair)){
+        _crmS069RestaurarMarkerBatch(ctx,batch);return false;
+      }
+    }
+  }
+  batch.finished=true;
+  hidden=false;
+  return true;
+  }catch(_e){
+    if(hidden)_crmS069RestaurarMarkerBatch(ctx,batch);
+    return false;
+  }
 }
 function _crm2ValidaOp(op,owner,lid,ano,epoch){
   if(op==null)return true;
@@ -23990,7 +24647,9 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
           const op=r.result;
           if(!op||op.codec!==_CRM2_CODEC||op.kind!=='conflict'||op.owner!==owner
               ||op.lid!==id.lid||op.ano!==id.ano||op.opId!==id.opId
-              ||!['gravar','excluir'].includes(op.tipo))return fail(new Error('registro de conflito CRM v2 inválido'));
+              ||!['gravar','excluir'].includes(op.tipo)
+              ||Object.prototype.hasOwnProperty.call(op,'markerBinding')&&!_crmS069MarkerBindingValida(op))
+            return fail(new Error('registro de conflito CRM v2 inválido'));
           if(op.tipo!=='gravar'){
             out.conflitos.push({key,identidade:id,valor:op});pendentes--;finaliza();return;
           }
@@ -24141,7 +24800,7 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
   state.epoch=bruto.root.epoch;state.revisao=_crmCacheRevisao.get(owner)||0;
   return {cubos,state,provas,heads,operacoes,root:bruto.root};
 }
-async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual){
+async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual,markerProofs=null){
   const owner=ctx?.owner,lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),opId=arquivado?.opId;
   const par=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
   if(!owner||!lid||!ano||!opId||!window._s012ContextoValido(ctx)
@@ -24173,7 +24832,8 @@ async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual
       &&atual.confirmada===true&&!atual.exclusaoRemota&&!atual.liberaExclusao
       &&Number(atual.epoch)===Number(head.epoch)&&Number(atual.ts)===Number(head.ts)
       &&(atual.gid||null)===(head.gid||null)
-        ?_crm2OpMeta(atual,atual.rowKey,atual.digest,atual.rowRevision):null};
+        ?_crm2OpMeta(atual,atual.rowKey,atual.digest,atual.rowRevision):null,
+    markerBinding:arquivado.markerBinding||null};
   _crmS069Resolvidos.set(owner,{geracao:ctx.geracao,items});
 
   const storageKey=window._s012StorageKey?.('state',ctx);
@@ -24184,7 +24844,7 @@ async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual
     let snapshot;
     try{snapshot=JSON.parse(raw);}catch(_e){return false;}
     if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))return false;
-    const limpeza=_crmS069LimparCopiaResolvida(ctx,snapshot,items[opId],canonicoAtual);
+    const limpeza=_crmS069LimparCopiaResolvida(ctx,snapshot,items[opId],canonicoAtual,markerProofs);
     if(!limpeza.ok)return false;
     let novoRaw;
     try{novoRaw=JSON.stringify(limpeza.dados);}catch(_e){return false;}
@@ -24197,7 +24857,7 @@ async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual
 
   // S012 can retain independent `pending` copies in RAM, localStorage and IDB.
   // Sanitize each before allowing the archive root to be removed.
-  const limpezaPendente=(dados)=>_crmS069LimparCopiaResolvida(ctx,dados,items[opId],canonicoAtual);
+  const limpezaPendente=(dados)=>_crmS069LimparCopiaResolvida(ctx,dados,items[opId],canonicoAtual,markerProofs);
   let pendenteMemoria=null,pendenteMemoriaJson=null;
   if(window._pendingLocalData!=null){
     const limpo=limpezaPendente(window._pendingLocalData);
@@ -24349,7 +25009,8 @@ async function _crmS069ExcluirConflito(ctx,arquivado){
   // current receipt already binds D; projecting it back to core would discard
   // its available detail and publication metadata during archive resolution.
   const pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano),conflictKey=_crm2Key('c',owner,lid,ano,opId);
-  const esperado={..._crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),kind:'conflict'};
+  const esperado=_crmS069ConflitoEsperado(arquivado);
+  if(!esperado)return false;
   const opIgual=(a,b)=>a==null?b==null:b!=null&&_crm2SnapshotsOperacaoIguais(a,b);
   const db=await _idbAbrir();
   if(!db)return false;
@@ -26366,8 +27027,8 @@ async function _crmS069ReimportarArquivado(ctx,arquivado){
   if(!dbInicial)return false;
   try{
     const conflito=await _crm2Get(dbInicial,_crm2Key('c',owner,lid,ano,opId));
-    const esperado={..._crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),kind:'conflict'};
-    if(JSON.stringify(conflito)!==JSON.stringify(esperado))return false;
+    const esperado=_crmS069ConflitoEsperado(arquivado);
+    if(!esperado||JSON.stringify(conflito)!==JSON.stringify(esperado))return false;
     if(cercaInicialValida){
       const native=await _crm2LerMetadadosPar(dbInicial,owner,lid,ano),epoch=_crmCacheEpoch.get(owner);
       if(!_crm2ValidOwner(native.root,owner)||native.root.mode!=='pair'
@@ -27179,14 +27840,16 @@ window.crmLerIdb = async function(ctx,opcoes={}){
       if(op?.owner!==ctx.owner||op.kind!=='conflict'||op.tipo!=='gravar'||!op.exclusaoRemota
           ||!op.cubo||typeof op.opId!=='string'||!op.opId)continue;
       const idPar=_crm2ParKey(ctx.owner,op.lid,op.ano),head=vista.heads.get(idPar)||null;
+      if(Object.prototype.hasOwnProperty.call(op,'markerBinding')
+          &&!_crmS069MarkerBindingValida(op,ctx))throw new Error('vínculo typed do marcador CRM arquivado inválido');
       const item={...op,_arquivado:true,_head:head?{...head}:null,
         _remoto:head?{gid:head.gid||null,ts:Number(head.ts)||0,apagado:head.apagado===true,
           revisao:Number(head.revisao)||0}:null};
       if(_crm2DeepFreeze(item)!==item)continue;
       const pair=_crmParKey(op.lid,op.ano),memKey=_crmMemKey(ctx,op.lid,op.ano);
       const marker=window._crmNaoEnviados?.[pair];
-      if(marker!==undefined&&Number(marker)===Number(op.marker)
-          &&!window.crmPendenciaAtual(ctx,op.lid,op.ano)
+      if(!Object.prototype.hasOwnProperty.call(op,'markerBinding')&&marker!==undefined
+          &&Number(marker)===Number(op.marker)&&!window.crmPendenciaAtual(ctx,op.lid,op.ano)
           &&!_crmPendenciasEmGravacao.has(memKey)){
         window._crmLimparNaoEnviado(ctx,op.lid,op.ano,marker);
       }
@@ -27540,6 +28203,7 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
   const projection=opcoes?.projection==='core'?'core':'full';
   window._crmVersao = (window._crmVersao||0) + 1;   // [R91] invalida o cache dos relatórios
   const versaoCarga=window._crmVersao,dadosCarga=D;
+  let markerColdDb=null;
   try{
     const headSink={};
     const cubos = await window.crmLerIdb(ctx,{projection,_s069HeadSink:headSink});
@@ -27553,6 +28217,7 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
     // current native head. A different local cube, successor op/marker, or
     // in-flight write keeps ownership of the pair and is left untouched.
     const conflitos=_crmS069Conflitos.get(ctx.owner);
+    const markerColdBatch={ctx,dados:D,seq:undefined,capture:undefined,archives:[]};
     if(conflitos?.geracao===ctx.geracao){
       for(const arquivado of Object.values(conflitos.items||{})){
         const lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),
@@ -27569,8 +28234,23 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
             ||headSink.owner!==ctx.owner||headSink.geracao!==ctx.geracao
             ||!_crm2ValidaHead(head,ctx.owner,lid,ano,headSink.epoch)
             ||Number(arquivado.epoch)!==Number(headSink.epoch))continue;
-        const marker=window._crmNaoEnviados?.[pair];
-        if(marker!==undefined){
+        const markerMap=window._crmNaoEnviados||{},markerPresent=Object.prototype.hasOwnProperty.call(markerMap,pair);
+        const marker=markerMap[pair];
+        let coldMarkerItem=null;
+        if(Object.prototype.hasOwnProperty.call(arquivado,'markerBinding')){
+          if(! _crmS069MarkerBindingValida(arquivado,ctx,head)
+              ||markerPresent&&!_crmS069MarkerBindingMarkerConfere(arquivado,marker)||head.apagado===true
+              ||!canonical)continue;
+          const canonicalReceipt=_crm2ReceiptValido(canonical,ctx,lid,ano);
+          if(!canonicalReceipt||canonicalReceipt.epoch!==head.epoch
+              ||canonicalReceipt.revisao!==head.revisao||canonicalReceipt.rowKey!==head.rowKey
+              ||canonicalReceipt.digest!==head.digest)continue;
+          if(!markerColdDb)markerColdDb=await _idbAbrir();
+          if(!markerColdDb)continue;
+          coldMarkerItem=await _crmS069MarkerColdProvar(ctx,markerColdDb,markerColdBatch,
+            arquivado,head,_crmS042Json(canonical),true);
+          if(!coldMarkerItem)continue;
+        }else if(marker!==undefined){
           if(Number(marker)!==Number(arquivado.marker)
               ||window._crmLimparNaoEnviado?.(ctx,lid,ano,marker)!==true
               ||Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},pair))continue;
@@ -27594,6 +28274,7 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
         if(D!==dadosCarga||D.crm?.[lid]?.[ano]!==stale
             ||window.crmPendenciaAtual(ctx,lid,ano)||_crmPendenciasEmGravacao.has(memKey))continue;
         D.crm[lid][ano]=canonical;n++;
+        if(coldMarkerItem)markerColdBatch.archives.push(coldMarkerItem);
       }
     }
     for(const op of _crmPendenciasMemoria.values()){
@@ -27614,6 +28295,9 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
         }
       });
     });
+    if(markerColdDb){markerColdDb.close();markerColdDb=null;}
+    if(markerColdBatch.archives.length)
+      await _crmS069FinalizarMarkerColdBatch(ctx,markerColdBatch);
     if(window._s012ContextoValido(ctx)) window._crmIdbOk = true;
     if(n) console.log('[idb] CRM hidratado do cache local:', n, 'conjunto(s)');
     return n;
@@ -27621,6 +28305,8 @@ window.crmHidratarIdb = async function(ctx,opcoes={}){
     if(window._s012ContextoValido(ctx)) window._crmIdbOk = false;
     console.warn('[idb] leitura do CRM falhou:', e.message);
     return 0;
+  }finally{
+    markerColdDb?.close();
   }
 };
 
