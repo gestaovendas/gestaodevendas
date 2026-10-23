@@ -9754,7 +9754,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-22b';
+window.AVATIM_BUILD = '2026-10-23b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -14639,15 +14639,24 @@ window.instalarGatilhosSync = function(){
   // Voltar para a aba: quem estava em outra janela quer ver o estado atual
   document.addEventListener('visibilitychange', () => {
     if(!document.hidden){
-      window._s033Acordar?.(window._s012Capturar?.());
-      window.sincronizarSeNecessario('aba reativada', {minimoMs:10000});
+      const _ctxVisivel=window._s012Capturar?.();
+      window._s033Acordar?.(_ctxVisivel);
+      Promise.resolve(window.sincronizarSeNecessario('aba reativada', {minimoMs:10000}))
+        .then(()=>window._crmS075AgendarRecuperacaoCRM?.(_ctxVisivel),()=>window._crmS075AgendarRecuperacaoCRM?.(_ctxVisivel))
+        .catch(()=>{});
     }
   });
 
   // Recuperar a conexão depois de ficar offline
   window.addEventListener('online', () => {
-    window._s033Acordar?.(window._s012Capturar?.());
-    window.sincronizarSeNecessario('conexão restabelecida', {forcar:true});
+    const _ctxOnline=window._s012Capturar?.();
+    window._s033Acordar?.(_ctxOnline);
+    // O pull pode ser corretamente adiado pela guarda de pendência; o replay
+    // envia os bytes/token S005 atuais pela fila e transação canônicas.
+    window._s076aReenviarPendenteAtual?.(_ctxOnline,{silenciosa:false});
+    Promise.resolve(window.sincronizarSeNecessario('conexão restabelecida', {forcar:true}))
+      .then(()=>window._crmS075AgendarRecuperacaoCRM?.(_ctxOnline),()=>window._crmS075AgendarRecuperacaoCRM?.(_ctxOnline))
+      .catch(()=>{});
   });
 
   // Antes de fechar, empurrar o que ainda não subiu
@@ -17142,6 +17151,14 @@ async function _crmS057BaseSnapshot(snap){
   return base;
 }
 async function _crmS057LigarIndiceLegado(base,ctx,lid,ano,mod,db){
+  // A confirmed missing head is meaningful only when this fresh server index
+  // also has no generation or carimbo for the same pair.
+  if(base.existe===false){
+    const snap=await mod.getDocFromServer(mod.doc(db,'avatim',CRM_INDICE));
+    if(!window._s012ContextoValido(ctx))throw new Error('s012-sessao-alterada');
+    _crmS057ConferirIndice(snap,base,lid,ano,base);
+    return base;
+  }
   if(base.gid!==null)return base;
   const snap=await mod.getDocFromServer(mod.doc(db,'avatim',CRM_INDICE));
   if(!window._s012ContextoValido(ctx))throw new Error('s012-sessao-alterada');
@@ -17165,6 +17182,21 @@ async function _crmS057LerBase(ctx,lid,ano){
     if(!window._s012ContextoValido(ctx))throw new Error('s012-sessao-alterada');
     return _crmS057LigarIndiceLegado(base,ctx,lid,ano,mod,db);
   })(),'a base da nova importação CRM');
+}
+function _crmS057EstadoDetalheCabeca(raw,lid,ano){
+  if(!raw||raw._apagado===true||typeof raw.dados!=='string')
+    return {state:'legacy',descriptor:null};
+  let dados;
+  try{dados=JSON.parse(raw.dados);}catch(_e){return {state:'legacy',descriptor:null};}
+  return _crmS068cProjetarDescritor(dados?._comprasCliente,lid,String(ano),raw.gid);
+}
+function _crmS057ConferirPreservacaoDetalhe(atual,proposta,lid,ano){
+  if(!atual||atual._apagado===true||proposta?._apagado===true)return;
+  const anterior=_crmS057EstadoDetalheCabeca(atual,lid,ano);
+  if(anterior.state!=='unloaded'&&anterior.state!=='empty')return;
+  const nova=_crmS057EstadoDetalheCabeca(proposta,lid,ano);
+  if(nova.state!=='unloaded'&&nova.state!=='empty')
+    throw new Error('O histórico de compras disponível no servidor não foi carregado nesta sessão; reimporte o histórico antes de publicar.');
 }
 async function _crmS057Publicar(escritas,base,ctx,mod,db,ms,onProgress,validar){
   base=base?JSON.parse(JSON.stringify(base)):null;
@@ -17191,6 +17223,7 @@ async function _crmS057Publicar(escritas,base,ctx,mod,db,ms,onProgress,validar){
     const snapIndice=await tx.get(mod.doc(db,'avatim',indice.id));conferir();
     _crmS057ConferirIndice(snapIndice,atual,par[1],par[2],base);
     const raw=snap.exists()?snap.data():null;
+    _crmS057ConferirPreservacaoDetalhe(raw,cabeca.dados,par[1],par[2]);
     if(cabeca.dados.gid&&raw?.gid===cabeca.dados.gid&&raw?.dados===cabeca.dados.dados
         &&Number(raw.ts)===Number(cabeca.dados.ts)&&!!raw._apagado===!!cabeca.dados._apagado){
       const g=snapIndice.exists()?snapIndice.data()?.geracoes?.[par[1]]?.[par[2]]:null;
@@ -17557,33 +17590,168 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
     sessaoAlterada:!window._s012ContextoValido(ctx)};
 };
 
-/** Sobe todos os cubos que estiverem em memória. */
-/**
- * Sobe os cubos do CRM ao Firestore.
- *
- * [R136] `paresOpt` limita o envio ao que de fato mudou. Sem ele a função
- * reenvia a base INTEIRA — que é o certo para o botão "Reenviar ao Firebase",
- * e era um desastre na importação: subir a planilha de uma loja remandava
- * todos os conjuntos de todas as lojas e anos, cada um com a cabeça mais os
- * pedaços de clientes. Importando as planilhas do mês uma atrás da outra,
- * isso reenviava a base inteira a cada arquivo; com a rede oscilando nada
- * era confirmado, a fila do SDK estourava e o commit morria em
- * "Write stream exhausted maximum allowed queued writes".
- */
+/** Sem pares explícitos, retoma somente operações duráveis com base confirmada. */
+function _crmParesReenvioAcionaveis(ctx){
+  if(!ctx||ctx.perfil!=='admin'||!window._s012ContextoValido(ctx))return [];
+  const pares=[];
+  for(const op of _crmPendenciasMemoria.values()){
+    if(op?.owner!==ctx.owner||op.tipo!=='gravar'||op.confirmada===true
+        ||op._duravelRam!==true||op.exclusaoRemota||op.kind==='conflict'||op._arquivado===true||op.reviewRequired==='base-unknown')continue;
+    const lid=String(op.lid||''),ano=String(op.ano||''),memKey=lid&&ano?_crmMemKey(ctx,lid,ano):null;
+    const cubo=lid&&ano?D.crm?.[lid]?.[ano]:null;
+    if(!memKey||!_crmS075OperacaoAcionavel(ctx,op,cubo))continue;
+    pares.push([lid,ano]);
+  }
+  return pares.sort((a,b)=>a[0].localeCompare(b[0])||a[1].localeCompare(b[1]));
+}
+function _crmS075OperacaoAcionavel(ctx,op,cubo){
+  const proprio=Object.prototype.hasOwnProperty,lid=String(op?.lid||''),ano=String(op?.ano||'');
+  const epoch=ctx?.owner?_crmCacheEpoch.get(ctx.owner):undefined;
+  if(!ctx||ctx.perfil!=='admin'||!lid||!ano||!window.lojaVisivel?.(lid)||!Number.isSafeInteger(epoch)||epoch<0
+      ||!window._s012ContextoValido(ctx)||window.crmPendenciaAtual?.(ctx,lid,ano)!==op
+      ||!op||op.owner!==ctx.owner||op.lid!==lid||String(op.ano)!==ano
+      ||typeof op.opId!=='string'||!op.opId||op._duravelRam!==true
+      ||Number(op.epoch)!==epoch||op.confirmada===true||op.exclusaoRemota
+      ||op.kind==='conflict'||op._arquivado===true||op.reviewRequired==='base-unknown'
+      ||_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))
+      ||!proprio.call(op,'baseRemota')||op.baseRemota===null||!_crmS057BaseValida(op.baseRemota))return false;
+  const base=op.baseRemota;
+  if(base.existe===true&&base.apagado===true){
+    if(!_crmS068bLiberacaoEstruturalValida(op))return false;
+  }else if(proprio.call(op,'liberaExclusao'))return false;
+  if(!cubo||typeof cubo!=='object'||Array.isArray(cubo)||D.crm?.[lid]?.[ano]!==cubo
+      ||!window._crmComprasClienteValido?.(cubo._comprasCliente))return false;
+  const recibo=_crm2ReceiptValido(cubo,ctx,lid,ano);
+  if(!recibo||!['full','projected-full'].includes(recibo.shape)
+      ||!_crmS068bRecibosPendenciaCompletos(cubo,op,recibo,ctx,lid,ano)
+      ||!window._crmS068bMarcadorAtualConfere?.(op,lid,ano,window._crmNaoEnviados,true))return false;
+  return window._s012ContextoValido(ctx)&&D.crm?.[lid]?.[ano]===cubo;
+}
+function _crmS075OcultarRascunhoSemBase(ctx,op){
+  if(!ctx||!op||op._duravelRam!==true||op.reviewRequired!=='base-unknown'||!window._s012ContextoValido(ctx)
+      ||window.crmPendenciaAtual(ctx,op.lid,op.ano)!==op)return false;
+  const lid=String(op.lid),ano=String(op.ano),cubo=D.crm?.[lid]?.[ano];
+  if(!cubo||JSON.stringify(cubo)!==JSON.stringify(op.cubo))return false;
+  window._crmS033PublicacaoAntesDeSubstituir?.(ctx,lid,ano,null);
+  const crm={...(D.crm||{})},loja={...(crm[lid]||{})};
+  delete loja[ano];
+  if(Object.keys(loja).length)crm[lid]=loja;else delete crm[lid];
+  D.crm=crm;
+  window._crmVersao=(window._crmVersao||0)+1;
+  window._crmEmitirAtualizacaoUI?.([{lid,ano}],'rascunho-sem-base');
+  try{window._s012GravarSnapshotLocal?.(ctx,D);}catch(_e){}
+  return true;
+}
+function _crmS075OcultarCuboArquivado(ctx,op){
+  if(!ctx||!op||op.reviewRequired!=='base-unknown'||!window._s012ContextoValido(ctx))return false;
+  const lid=String(op.lid),ano=String(op.ano),cubo=D.crm?.[lid]?.[ano];
+  if(!cubo||_crmS042Json(cubo)!==_crmS042Json(op.cubo))return false;
+  const atual=window.crmPendenciaAtual(ctx,lid,ano);
+  if(atual&&atual.opId!==op.opId)return false;
+  const recibo=_crm2ReceiptValido(cubo,ctx,lid,ano);
+  if(recibo&&_crmS033ReciboConfere(ctx,lid,ano,recibo.ts,recibo.gid))return false;
+  window._crmS033PublicacaoAntesDeSubstituir?.(ctx,lid,ano,null);
+  const crm={...(D.crm||{})},loja={...(crm[lid]||{})};
+  delete loja[ano];
+  if(Object.keys(loja).length)crm[lid]=loja;else delete crm[lid];
+  D.crm=crm;
+  window._crmVersao=(window._crmVersao||0)+1;
+  window._crmEmitirAtualizacaoUI?.([{lid,ano}],'rascunho-arquivado');
+  try{window._s012GravarSnapshotLocal?.(ctx,D);}catch(_e){}
+  return true;
+}
+const _crmS075Recuperacoes=new Map();
+window._crmS075AgendarRecuperacaoCRM=function(ctx){
+  ctx=ctx||window._s012Capturar?.();
+  const epoch=ctx?.owner?_crmCacheEpoch.get(ctx.owner):undefined;
+  if(!ctx||ctx.perfil!=='admin'||!Number.isSafeInteger(epoch)||epoch<0
+      ||!window._s012ContextoValido(ctx))return Promise.resolve({adiada:true});
+  const chave=JSON.stringify([ctx.owner,ctx.geracao,epoch,ctx.browserRevision??null]);
+  const existente=_crmS075Recuperacoes.get(chave);
+  if(existente)return existente.promise;
+  if(!_crmParesReenvioAcionaveis(ctx).length)return Promise.resolve({semPendencias:true});
+  const dados=D;
+  let resolver;
+  const promise=new Promise(resolve=>{resolver=resolve;});
+  const trabalho={ctx,epoch,dados,promise,settled:false,terminar:null};
+  _crmS075Recuperacoes.set(chave,trabalho);
+  const terminar=resultado=>{
+    if(trabalho.settled)return;
+    trabalho.settled=true;
+    if(_crmS075Recuperacoes.get(chave)===trabalho)_crmS075Recuperacoes.delete(chave);
+    resolver(resultado);
+  };
+  trabalho.terminar=terminar;
+  const executar=async()=>{
+    let resultado={adiada:true};
+    try{
+      if(!_crmS012S075ContextoAtual(trabalho))return resultado;
+      const pares=_crmParesReenvioAcionaveis(ctx);
+      if(!pares.length){resultado={semPendencias:true};return resultado;}
+      const capturas=pares.map(([lid,ano])=>{
+        const op=window.crmPendenciaAtual(ctx,lid,ano),cubo=D.crm?.[lid]?.[ano];
+        return {lid,ano,op,cubo,opBytes:JSON.stringify(_crm2OpSnapshot(op)),
+          recibo:_crm2ReceiptValido(cubo,ctx,lid,ano)};
+      });
+      const vigente=()=>_crmS012S075ContextoAtual(trabalho)&&capturas.every(c=>
+        window.crmPendenciaAtual(ctx,c.lid,c.ano)===c.op
+        &&D.crm?.[c.lid]?.[c.ano]===c.cubo
+        &&JSON.stringify(_crm2OpSnapshot(c.op))===c.opBytes
+        &&_crm2ReceiptValido(c.cubo,ctx,c.lid,c.ano)===c.recibo
+        &&_crmS075OperacaoAcionavel(ctx,c.op,c.cubo));
+      if(!vigente())return resultado;
+      // The wrapped no-argument path claims N003's shared import/publication lease.
+      resultado={despachada:true,resultado:await window.crmSincronizar(undefined,ctx)};
+      return resultado;
+    }catch(_e){
+      console.warn('[crm] recuperação automática não concluiu; pendência preservada.');
+      resultado={falha:true};return resultado;
+    }finally{terminar(resultado);}
+  };
+  let agendado=false;
+  try{agendado=window._s033AgendarRecuperacao?.(ctx,executar)===true;}catch(_e){}
+  if(!agendado)terminar({adiada:true});
+  return promise;
+};
+function _crmS012S075ContextoAtual(trabalho){
+  const ctx=trabalho?.ctx;
+  return !!(ctx&&window._s012ContextoValido(ctx)&&D===trabalho.dados
+    &&_crmCacheEpoch.get(ctx.owner)===trabalho.epoch);
+}
+window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+window._s012AoTrocarSessao.push(()=>{
+  for(const trabalho of _crmS075Recuperacoes.values())trabalho.terminar?.({adiada:true});
+  _crmS075Recuperacoes.clear();
+});
 window.crmSincronizar = async function(paresOpt, s012Ctx, onProgress){
   const ctx=s012Ctx||window._s012Capturar?.();
   if(!ctx || ctx.perfil!=='admin' || !window._s012ContextoValido(ctx)){
     showToast('Só o administrador sincroniza o CRM.','err'); return;
   }
   const fonte=D.crm||{};
-  let pares;
-  if(Array.isArray(paresOpt) && paresOpt.length){
-    pares=paresOpt.filter(x=>Array.isArray(x) && ((fonte[x[0]]||{})[x[1]]));
-  }else{
-    pares=[];
-    Object.keys(fonte).forEach(lid=>Object.entries(fonte[lid]||{}).forEach(([ano,cubo])=>{if(cubo)pares.push([lid,ano]);}));
+  const solicitado=Array.isArray(paresOpt)
+    ?paresOpt.filter(x=>Array.isArray(x)
+      &&(((fonte[x[0]]||{})[x[1]])||window.crmPendenciaAtual(ctx,x[0],x[1])?.reviewRequired==='base-unknown'))
+    :_crmParesReenvioAcionaveis(ctx);
+  const reviewRequiredPairs=[];
+  const pares=solicitado.filter(([lid,ano])=>{
+    const op=window.crmPendenciaAtual(ctx,lid,ano);
+    if(op?.reviewRequired==='base-unknown'&&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano))){
+      reviewRequiredPairs.push(lid+'/'+ano);
+      _crmS075OcultarRascunhoSemBase(ctx,op);
+      return false;
+    }
+    return true;
+  });
+  if(!pares.length){
+    if(reviewRequiredPairs.length){
+      const erros=reviewRequiredPairs.map(par=>par+': base remota não confirmada; revisão administrativa necessária');
+      showToast('Rascunho local preservado. A base no servidor ainda não foi confirmada; revise a versão atual antes de reimportar.','warn');
+      return {ok:0,total:solicitado.length,docs:0,erros,reviewRequiredPairs,pendentesLocais:[]};
+    }
+    showToast('Nenhuma operação CRM durável e elegível para sincronizar.','warn');
+    return {ok:0,total:0,docs:0,erros:[],reviewRequiredPairs,pendentesLocais:[],semPendencias:true};
   }
-  if(!pares.length){ showToast('Nenhum dado de CRM para sincronizar.','warn'); return; }
   const cubos={};
   // Capturar somente os pares enviados, antes de qualquer await.
   pares.forEach(([lid,ano])=>{
@@ -17592,16 +17760,19 @@ window.crmSincronizar = async function(paresOpt, s012Ctx, onProgress){
 
   showToast('⏳ Enviando ' + pares.length + ' conjunto(s) de CRM...','ok');
   const _n003Notificar=ev=>{try{onProgress?.(ev);}catch(e){console.warn('[crm] progresso:',e.message||e);}};
-  _n003Notificar({tipo:'envio-iniciado',total:pares.length});
-  let ok=0, docs=0, concluidos=0; const erros=[], pendentesLocais=[];
+  _n003Notificar({tipo:'envio-iniciado',total:solicitado.length});
+  let ok=0, docs=0, concluidos=0;
+  const erros=reviewRequiredPairs.map(par=>par+': base remota não confirmada; revisão administrativa necessária'),pendentesLocais=[];
   for(const [lid,ano] of pares){
     if(!window._s012ContextoValido(ctx)) break;
-    _n003Notificar({tipo:'par-iniciado',lid,ano,concluidos,total:pares.length});
+    _n003Notificar({tipo:'par-iniciado',lid,ano,concluidos,total:solicitado.length});
+    const opEnviada=window.crmPendenciaAtual(ctx,lid,ano);
     try{
       const r=await window.crmSincronizarUm(lid,ano,ctx,(cubos[lid]||{})[ano],_n003Notificar);
+      if(opEnviada?.baseOpId&&!r.pendenteLocal)try{await _crmS075LimparArquivoAposAck(ctx,opEnviada);}catch(_e){}
       ok++; docs+=2+r.partes;
       if(r.pendenteLocal) pendentesLocais.push(lid+'/'+ano);
-      _n003Notificar({tipo:'par-resultado',lid,ano,estado:'confirmado',pendenteLocal:r.pendenteLocal,concluidos:++concluidos,total:pares.length});
+      _n003Notificar({tipo:'par-resultado',lid,ano,estado:'confirmado',pendenteLocal:r.pendenteLocal,concluidos:++concluidos,total:solicitado.length});
     }catch(e){
       const opAtual=window.crmPendenciaAtual(ctx,lid,ano);
       if(D.crm?.[lid]?.[ano]&&JSON.stringify(D.crm[lid][ano])===JSON.stringify(cubos[lid]?.[ano])
@@ -17609,22 +17780,28 @@ window.crmSincronizar = async function(paresOpt, s012Ctx, onProgress){
           &&window._crmNaoEnviados?.[lid+'|'+ano]===undefined)
         window._crmMarcarNaoEnviado?.(ctx,lid,ano,Date.now());
       erros.push(lid+'/'+ano+': '+(e.code||e.message));
+      if(opEnviada&&opAtual?.opId===opEnviada.opId&&opAtual.reviewRequired==='base-unknown'){
+        if(!reviewRequiredPairs.includes(lid+'/'+ano))reviewRequiredPairs.push(lid+'/'+ano);
+        _crmS075OcultarRascunhoSemBase(ctx,opAtual);
+      }
       const incerto=/não confirmou|sem confirmação|em \d+s/i.test(String(e.code||e.message));
       const pendente=window._crmNaoEnviados?.[lid+'|'+ano]!==undefined
         ||(opAtual?.tipo==='gravar'&&!opAtual.confirmada);
-      _n003Notificar({tipo:'par-resultado',lid,ano,estado:incerto?'incerto':'falhou',estadoLocal:pendente?'alteracao-pendente':undefined,concluidos:++concluidos,total:pares.length});
+      _n003Notificar({tipo:'par-resultado',lid,ano,estado:incerto?'incerto':'falhou',estadoLocal:pendente?'alteracao-pendente':undefined,concluidos:++concluidos,total:solicitado.length});
     }
   }
-  if(!window._s012ContextoValido(ctx)) return {ok,total:pares.length,docs,erros,pendentesLocais,cancelada:true};
+  if(!window._s012ContextoValido(ctx)) return {ok,total:solicitado.length,docs,erros,reviewRequiredPairs,pendentesLocais,cancelada:true};
   if(erros.length){
     console.error('[crm] sync com falhas:',erros);
-    showToast('⚠️ ' + ok + ' de ' + pares.length + ' enviados. Falhas: ' + erros.join(' | '),'err');
+    showToast(reviewRequiredPairs.length
+      ?'Rascunho preservado para revisão administrativa; nenhuma publicação foi feita para a base não confirmada.'
+      :'⚠️ ' + ok + ' de ' + solicitado.length + ' enviados. Falhas: ' + erros.join(' | '),'err');
   }else if(pendentesLocais.length){
     showToast('CRM confirmado no servidor; confirmação local pendente em: '+pendentesLocais.join(', ')+'. A revisão local foi preservada.','warn');
   }else{
     showToast('✅ CRM sincronizado: ' + ok + ' conjunto(s) em ' + docs + ' documento(s).','ok');
   }
-  return {ok,total:pares.length,docs,erros,pendentesLocais};
+  return {ok,total:solicitado.length,docs,erros,reviewRequiredPairs,pendentesLocais};
 };
 
 let _crmS033Recibos={owner:null,geracao:null,pares:new Map()};
@@ -21269,6 +21446,7 @@ window.crmGuardar = function(lid, ano, cubo, opcoes={}){
     window._s012InvalidarCrmDuravel?.(ctx);
     window.crmPendenciaRegistrarIdb(ctx,lid,ano,cubo,'gravar',undefined,
       {importacaoExplicita:true,baseAusentePermitida:_crmS057BaseAusentePermitida,
+        ...(Array.isArray(opcoes.mesesImportados)?{mesesImportados:opcoes.mesesImportados}:{}),
         markerOrigem:window._crmNaoEnviados?.[lid+'|'+ano],
         s067cBaseAnterior:_crmS033BaseAnterior,s067cIdb:opcoes.s067cIdb});
   }
@@ -22992,7 +23170,8 @@ function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrack
       const markerProof=markerProofs?.get?.(r.op.opId),markerAllowed=_crmS069MarkerProofConfere(ctx,r,markerProof);
       const contagens=countsFor(lid,ano,r);
       const outros=contagens.total-contagens.archived-contagens.fence+contagens.overlap>0;
-      const head=r.head&&_crm2ValidaHead(r.head,ctx.owner,lid,ano,r.op.epoch);
+      const head=r.head&&_crm2ValidaHead(r.head,ctx.owner,lid,ano,r.op.epoch)
+        ||_crmS075DescarteLocalConfere(ctx,r);
       const semSucessor=(!atual||cercaAtual)
         &&(!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},par)||markerAllowed)
         &&!_crmPendenciasEmGravacao.has(_crmMemKey(ctx,lid,ano));
@@ -23019,7 +23198,8 @@ function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrack
     const cubo=dados.crm?.[lid]?.[ano];
     if(!cubo||_crmS042Json(cubo)!==cuboBytes(r))continue;
     const head=r.head,headValido=head&&_crm2ValidaHead(head,ctx.owner,lid,ano,r.op.epoch);
-    const comprovadamenteObsoleto=headValido&&(head.apagado===true||head.digest!==r.op.digest);
+    const comprovadamenteObsoleto=headValido&&(head.apagado===true||head.digest!==r.op.digest)
+      ||!headValido&&_crmS075DescarteLocalConfere(ctx,r);
     if(!comprovadamenteObsoleto)continue;
     garantirCopia();
     if(!crmClonado||saida.crm===dados.crm){saida.crm={...(saida.crm||{})};crmClonado=true;}
@@ -23030,6 +23210,19 @@ function _crmS069SanitizarSnapshotResolvido(ctx,dados,inPlace=false,allowUntrack
   return saida;
 }
 window._crmS069SanitizarSnapshotResolvido=_crmS069SanitizarSnapshotResolvido;
+const _crmS075DescartesLocais=new WeakMap();
+function _crmS075DescarteLocalConfere(ctx,registro){
+  const prova=registro?.descarteLocal;
+  return !!(prova&&_crmS075DescartesLocais.get(prova.arquivo)===prova
+    &&prova.ctx.owner===ctx?.owner&&prova.ctx.geracao===ctx.geracao
+    &&prova.ctx.email===ctx.email&&prova.ctx.perfil===ctx.perfil&&prova.ctx.loja===ctx.loja
+    &&prova.ctx.browserToken===ctx.browserToken&&prova.ctx.browserRevision===ctx.browserRevision
+    &&window._s012ContextoValido(prova.ctx)&&window._s012ContextoValido(ctx)
+    &&_crmCacheEpoch.get(ctx.owner)===prova.op.epoch&&!window._s065RestauracaoAtiva?.(ctx)
+    &&_crmS069SnapshotOpIgual(registro.op,prova.op)
+    &&_crmS042Json(registro.cubo)===prova.bytes&&(prova.confirmada===true
+      ||typeof prova.validar==='function'&&prova.validar()));
+}
 function _crmS069LimparCopiaResolvida(ctx,dados,registro,canonicoAtual,markerProofs=null){
   if(!dados||typeof dados!=='object'||Array.isArray(dados))return {ok:false,dados};
   const limpo=_crmS069SanitizarSnapshotResolvido(ctx,dados,false,true,markerProofs)||dados;
@@ -23242,8 +23435,9 @@ function _crm2OpMeta(op,rowKey,digest,rowRevision){
     tipo:op.tipo,opId:op.opId,baseOpId:op.baseOpId||null,marker:op.marker,
     epoch:Number(op.epoch)||0,rowKey:rowKey||null,digest:digest||null};
   if(rowKey)meta.rowRevision=Number(rowRevision)||0;
-  for(const k of ['baseRemota','liberaExclusao','exclusaoRemota','confirmada','gid','ts','_crmFenceBaseAbsent'])
+  for(const k of ['baseRemota','liberaExclusao','exclusaoRemota','confirmada','gid','ts','_crmFenceBaseAbsent','mesesImportados'])
     if(Object.prototype.hasOwnProperty.call(op,k))meta[k]=op[k];
+  if(Object.prototype.hasOwnProperty.call(op,'reviewRequired'))meta.reviewRequired=op.reviewRequired;
   return meta;
 }
 function _crm2ValidOwner(v,owner){
@@ -23370,6 +23564,7 @@ async function _crm2MigrarOwner(ctx,db,root,legacy,oldKeys,opcoes={}){
           &&a.baseOpId===(b.baseOpId||null)&&a.rowKey===(b.rowKey||null)&&a.digest===(b.digest||null)
           &&Number(a.epoch)===Number(b.epoch)
           &&JSON.stringify(a.baseRemota??null)===JSON.stringify(b.baseRemota??null)
+          &&JSON.stringify(a.reviewRequired??null)===JSON.stringify(b.reviewRequired??null)
           &&JSON.stringify(a.liberaExclusao??null)===JSON.stringify(b.liberaExclusao??null)
           &&JSON.stringify(a.exclusaoRemota??null)===JSON.stringify(b.exclusaoRemota??null);
         if(existente.head?.rowKey===rowAtual.rowKey&&existente.head.digest===rowAtual.digest
@@ -23738,6 +23933,7 @@ async function _crm2PublicarRow(ctx,db,preparada,opcoes={}){
         if(Object.prototype.hasOwnProperty.call(opcoes,'opBaseEsperada')
             &&(opcoes.opBaseEsperada===null?opAtual!=null
               :!_crm2SnapshotsOperacaoIguais(opAtual,opcoes.opBaseEsperada)))return done(false);
+        if(opcoes.conflito?.obrigatorio&&v.conflito===undefined)return done(false);
         if(opcoes.conflito?.key&&v.conflito!==undefined
             &&JSON.stringify(v.conflito)!==JSON.stringify(opcoes.conflito.valor))return done(false);
         if(opcoes.retencaoCerca?.key
@@ -24605,15 +24801,34 @@ async function _crmS069FinalizarMarkerColdBatch(ctx,batch){
     return false;
   }
 }
+function _crmS075MesesImportadosValidos(op){
+  if(!Object.prototype.hasOwnProperty.call(op||{},'mesesImportados'))return true;
+  const meses=op.mesesImportados;
+  return Array.isArray(meses)&&meses.length>0&&new Set(meses).size===meses.length
+    &&meses.every(m=>typeof m==='string'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(m)&&m.slice(0,4)===String(op.ano));
+}
 function _crm2ValidaOp(op,owner,lid,ano,epoch){
   if(op==null)return true;
+  const reviewValido=!Object.prototype.hasOwnProperty.call(op,'reviewRequired')
+    ||op.reviewRequired==='base-unknown'&&op.tipo==='gravar'
+      &&!Object.prototype.hasOwnProperty.call(op,'baseRemota')&&!op.exclusaoRemota&&!op.liberaExclusao;
   return !!(op&&op.codec===_CRM2_CODEC&&op.kind==='operation'
     &&op.owner===owner&&op.lid===String(lid)&&op.ano===String(ano)
     &&op.epoch===epoch&&typeof op.opId==='string'&&op.opId.trim()
-    &&['gravar','excluir'].includes(op.tipo)
+    &&['gravar','excluir'].includes(op.tipo)&&reviewValido&&_crmS075MesesImportadosValidos(op)
     &&(op.tipo==='gravar'?typeof op.rowKey==='string'&&/^[0-9a-f]{64}$/.test(op.digest||'')
         &&Number.isSafeInteger(op.rowRevision)&&op.rowRevision>0
       :op.rowKey===null&&op.digest===null));
+}
+function _crmS075BaseDesconhecida(op,owner,lid,ano,kind){
+  return !!(op&&op.codec===_CRM2_CODEC&&op.kind===kind&&op.owner===owner
+    &&op.lid===String(lid)&&op.ano===String(ano)&&op.tipo==='gravar'
+    &&op.reviewRequired==='base-unknown'
+    &&!Object.prototype.hasOwnProperty.call(op,'baseRemota')&&!op.exclusaoRemota&&!op.liberaExclusao
+    &&typeof op.opId==='string'&&op.opId.trim()
+    &&Number.isSafeInteger(op.epoch)&&op.epoch>=0
+    &&typeof op.rowKey==='string'&&/^[0-9a-f]{64}$/.test(op.digest||'')
+    &&Number.isSafeInteger(op.rowRevision)&&op.rowRevision>0);
 }
 function _crm2RefIgual(recibo,ctx,lid,ano,head,cubo,shape='full'){
   return !!(recibo&&head&&!head.apagado
@@ -24812,6 +25027,8 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
           if(!op||op.codec!==_CRM2_CODEC||op.kind!=='conflict'||op.owner!==owner
               ||op.lid!==id.lid||op.ano!==id.ano||op.opId!==id.opId
               ||!['gravar','excluir'].includes(op.tipo)
+              ||Object.prototype.hasOwnProperty.call(op,'reviewRequired')
+                &&!_crmS075BaseDesconhecida(op,owner,id.lid,id.ano,'conflict')
               ||Object.prototype.hasOwnProperty.call(op,'markerBinding')&&!_crmS069MarkerBindingValida(op))
             return fail(new Error('registro de conflito CRM v2 inválido'));
           if(op.tipo!=='gravar'){
@@ -24821,6 +25038,7 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
           rm.onsuccess=()=>{
             const meta=rm.result;
             if(!(meta&&meta.codec===_CRM2_CODEC&&meta.kind==='row-meta'&&meta.state==='ready'
+                &&_crm2MetaRowValida(meta,{owner,lid:id.lid,ano:id.ano,epoch:op.epoch,revisao:op.rowRevision,digest:op.digest})
                 &&meta.owner===owner&&meta.lid===id.lid&&meta.ano===id.ano
                 &&meta.rowKey===op.rowKey&&meta.digest===op.digest
                 &&meta.epoch===op.epoch&&meta.revisao===op.rowRevision&&typeof meta.payloadKey==='string'))
@@ -24925,7 +25143,7 @@ async function _crm2LerVisao(ctx,db,rootEsperado,opcoes={}){
         const hydrated={...op,cubo,_duravelRam:true};
         state.entradas[_crmParKey(lid,ano)]=hydrated;operacoes.set(pair,hydrated);
       }
-      if(!(op?.tipo==='excluir'||op?.exclusaoRemota)){
+      if(!(op?.tipo==='excluir'||op?.exclusaoRemota||op?.reviewRequired==='base-unknown')){
         (cubos[lid]||(cubos[lid]={}))[ano]=cubo;
       }
       if(projection==='full'&&proof&&r.row?.codec===_CRM2_CODEC&&proof.codec===_CRM2_CODEC&&proof.kind==='proof'
@@ -24972,14 +25190,18 @@ async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual
         arquivado.digest,arquivado.rowRevision),owner,lid,ano,arquivado.epoch))return false;
   const atual=window.crmPendenciaAtual(ctx,lid,ano);
   if(atual?.opId===opId&&_crm2SnapshotsOperacaoIguais(atual,arquivado))return false;
+  const descarteLocal=_crmS075DescartesLocais.get(arquivado);
+  const localValido=!!descarteLocal&&descarteLocal.confirmada!==true
+    &&typeof descarteLocal.validar==='function'
+    &&_crmS075DescarteLocalConfere(ctx,{op:arquivado,cubo:arquivado.cubo,descarteLocal});
   const headValido=!!head&&_crm2ValidaHead(head,owner,lid,ano,arquivado.epoch);
-  if(!headValido)return false;
+  if(!headValido&&!localValido)return false;
   const cuboAtual=D.crm?.[lid]?.[ano];
   const marker=window._crmNaoEnviados?.[par];
   if(!atual){
     if(marker!==undefined||_crmPendenciasEmGravacao.has(memKey))return false;
-    if(head.apagado===true){if(cuboAtual)return false;}
-    else{
+    if(head?.apagado===true){if(cuboAtual)return false;}
+    else if(headValido){
       const receipt=cuboAtual&&_crm2ReceiptValido(cuboAtual,ctx,lid,ano);
       const nativo=receipt&&receipt.epoch===head.epoch&&receipt.revisao===head.revisao
         &&receipt.rowKey===head.rowKey&&receipt.digest===head.digest;
@@ -24991,8 +25213,9 @@ async function _crmS069PrepararResolucaoArquivo(ctx,arquivado,head,canonicoAtual
   };
   items[opId]={op:_crm2OpMeta(arquivado,arquivado.rowKey,arquivado.digest,arquivado.rowRevision),
     cubo:arquivado.cubo,head:headValido?{...head}:null,
+    ...(localValido?{descarteLocal}:{}),
     // The resolver has just read and matched native head/op; never infer this authority from a snapshot.
-    fence:head.apagado===true&&atual?._duravelRam===true&&atual.tipo==='excluir'
+    fence:head?.apagado===true&&atual?._duravelRam===true&&atual.tipo==='excluir'
       &&atual.confirmada===true&&!atual.exclusaoRemota&&!atual.liberaExclusao
       &&Number(atual.epoch)===Number(head.epoch)&&Number(atual.ts)===Number(head.ts)
       &&(atual.gid||null)===(head.gid||null)
@@ -26296,6 +26519,7 @@ function _crmAplicarPendencias(cubos,pendencias,owner){
   };
   Object.values(pendencias?.entradas||{}).forEach(op=>{
     if(!op||op.owner!==owner||!op.lid||!op.ano) return;
+    if(op.reviewRequired==='base-unknown')return;
     // Uma revisão ainda só em RAM não pode ser substituída pela entrada
     // anterior do sidecar, nem virar prova de durabilidade por overlay.
     const ram=_crmPendenciasMemoria.get(String(owner)+'|'+_crmParKey(op.lid,op.ano));
@@ -26422,8 +26646,15 @@ async function _crm2RegistrarPendencia(ctx,db,op,memKey,memEsperada,epochEsperad
     }else if(liveCube!==atualLive)return false;
     return true;
   };
+  const revisaoArquivo=_crmS075ReviewOperacoes.get(op);
+  if(revisaoArquivo){
+    if(!revisaoArquivo.validar(op)){await _crm2DescartarPreparada(db,preparada);return null;}
+    conflito={key:_crm2Key('c',ctx.owner,lid,ano,revisaoArquivo.arquivo.opId),
+      valor:_crmS069ConflitoEsperado(revisaoArquivo.arquivo),obrigatorio:true};
+  }
+  const validarRevisao=()=>validar()&&(!revisaoArquivo||revisaoArquivo.validar(op));
   const headNova=await _crm2PublicarRow(ctx,db,preparada,{revisaoBase,opIdBase:opAtual?.opId||null,
-    operacao:metaOp,conflito,revisaoNova,invalidarProva:true,validar});
+    operacao:metaOp,conflito,revisaoNova,invalidarProva:true,validar:validarRevisao});
   if(!headNova)return null;
   if(!await _crm2VerificarPublicacao(ctx,db,{owner:ctx.owner,lid,ano,epoch,head:headNova,
       op:metaOp,payloadKey:preparada.payloadKey,payloadBytes:preparada.bytes}))
@@ -26526,8 +26757,30 @@ window.crmPendenciaLerIdb=async function(ctx,rawSnapshot,lidPendente,anoPendente
     return state;
   }finally{ db?.close(); }
 };
+const _crmS075BaseReviewBindings=new WeakMap();
+function _crmS075BaseConfirmadaDaSessao(ctx,lid,ano,anterior,baseVista){
+  const pair=_crmParKey(lid,ano);
+  if(anterior&&anterior._duravelRam===true&&anterior.owner===ctx.owner
+      &&anterior.lid===String(lid)&&String(anterior.ano)===String(ano)
+      &&window.crmPendenciaAtual?.(ctx,lid,ano)===anterior
+      &&Object.prototype.hasOwnProperty.call(anterior,'baseRemota')
+      &&!Object.prototype.hasOwnProperty.call(anterior,'reviewRequired')
+      &&_crmS057BaseValida(anterior.baseRemota))
+    return JSON.parse(JSON.stringify(anterior.baseRemota));
+  const recibo=_crmS033EscopoRecibos(ctx).pares.get(pair);
+  if(recibo?.publication===true&&recibo.owner===ctx.owner&&recibo.geracao===ctx.geracao
+      &&recibo.opId===null&&typeof recibo.gid==='string'&&!!recibo.gid.trim()
+      &&Number.isFinite(Number(recibo.ts))&&Number(recibo.ts)>0
+      &&recibo.cubo===D.crm?.[lid]?.[String(ano)]
+      &&_crmS033ReciboConfere(ctx,lid,String(ano),Number(recibo.ts),recibo.gid)
+      &&_crmS057BaseValida(baseVista)&&baseVista?.existe===true&&baseVista.apagado===false
+      &&baseVista.gid===recibo.gid&&Number(baseVista.ts)===Number(recibo.ts))
+    return {existe:true,gid:recibo.gid,ts:Number(recibo.ts),apagado:false};
+  return null;
+}
 window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsperado,opcoes={}){
   if(!ctx?.owner||!window._s012ContextoValido(ctx)) return Promise.resolve(null);
+  if(!_crmS075MesesImportadosValidos({ano:String(ano),...(Object.prototype.hasOwnProperty.call(opcoes,'mesesImportados')?{mesesImportados:opcoes.mesesImportados}:{})}))return Promise.resolve(null);
   const pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano),storageKey=_crmPendKey(ctx);
   const anterior=_crmPendenciasMemoria.get(memKey);
   const fenceAnterior=_crmOpComExclusaoConfirmada(anterior);
@@ -26546,27 +26799,38 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
   const motivo=_idbMotivo();
   if(motivo==='file://'||motivo==='sem suporte no navegador'||!storageKey)return Promise.resolve(null);
   const vistaInicial=_crmS057BaseVista(ctx,lid,ano);
+  const baseReview=_crmS075BaseReviewBindings.get(opcoes);
+  const baseReviewValida=!!(baseReview&&baseReview.ctx===ctx&&baseReview.owner===ctx.owner
+    &&baseReview.lid===String(lid)&&baseReview.ano===String(ano)
+    &&baseReview.geracao===ctx.geracao&&baseReview.base&&_crmS057BaseValida(baseReview.base)
+    &&window._s012ContextoValido(ctx)&&typeof baseReview.validar==='function'&&baseReview.validar());
   const exclusaoInicial=fenceAnterior?(anterior.exclusaoRemota||{ts:anterior.ts,gid:anterior.gid}):null;
   const baseLegadaExcluida=vistaInicial?.gid===null&&vistaInicial.apagado===true
     &&vistaInicial.ts===Number(exclusaoInicial?.ts)
     &&(vistaInicial.indiceGid||null)===(exclusaoInicial?.gid||null);
   const baseExclusao=baseLegadaExcluida?vistaInicial:exclusaoInicial?.gid
     ?{existe:true,gid:exclusaoInicial.gid,ts:Number(exclusaoInicial.ts),apagado:true}:undefined;
-  const baseInicial=anterior
+  const baseInicial=baseReviewValida?JSON.parse(JSON.stringify(baseReview.base)):anterior
     ?(fenceAnterior?baseExclusao
       :Object.prototype.hasOwnProperty.call(anterior,'baseRemota')?anterior.baseRemota:undefined)
     :vistaInicial;
   const baseInicialConhecida=baseInicial!==null&&baseInicial!==undefined&&_crmS057BaseValida(baseInicial);
+  const baseConfiavelFalha=baseReviewValida?baseInicial
+    :_crmS075BaseConfirmadaDaSessao(ctx,lid,ano,anterior,baseInicialConhecida?baseInicial:null);
   const permiteCriarAusente=opcoes.baseAusentePermitida===true&&!anterior&&baseInicial==null;
   const op={owner:ctx.owner,lid:String(lid),ano:String(ano),tipo,
     ...(baseInicialConhecida?{baseRemota:JSON.parse(JSON.stringify(baseInicial))}:{}),
+    ...(Array.isArray(opcoes.mesesImportados)?{mesesImportados:[...opcoes.mesesImportados].sort()}:{}),
     opId:'crm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
     // Pending row and interface marker describe one edit, not two clock reads.
     marker:opcoes.markerOrigem===undefined?Date.now():opcoes.markerOrigem,cubo:tipo==='gravar'
       ?(manterCerca?cercaEmEspera.cubo:JSON.parse(JSON.stringify(cubo||{}))):null,
-    baseOpId:anterior?.opId||null,epoch:_crmCacheEpoch.get(ctx.owner)||0,_duravelRam:false,
+    baseOpId:baseReviewValida?baseReview.arquivo.opId:anterior?.opId||null,epoch:_crmCacheEpoch.get(ctx.owner)||0,_duravelRam:false,
+    ...(opcoes.importacaoExplicita&&!baseInicialConhecida&&!baseReviewValida
+      ?{reviewRequired:'base-unknown'}:{}),
     ...(manterCerca?{liberaExclusao:{...cercaEmEspera.exclusaoRemota}}
       :!fenceAnterior&&anterior?.liberaExclusao?{liberaExclusao:{...anterior.liberaExclusao}}:{})};
+  if(baseReviewValida)_crmS075ReviewOperacoes.set(op,baseReview);
   const memOpEsperada=manterCerca?cercaEmEspera.opId:op.opId;
   if(!manterCerca)_crmPendenciasMemoria.set(memKey,op);
   if(opcoes.importacaoExplicita&&!manterCerca)
@@ -26578,6 +26842,7 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
   const epochConhecidoNaEntrada=_crmCacheEpoch.has(ctx.owner)?_crmCacheEpoch.get(ctx.owner):undefined;
   const mesmaPendenciaInicial=()=>window._s012ContextoValido(ctx)
       &&_crmPendenciasMemoria.get(memKey)===memoriaEsperadaInicial
+      &&(!baseReviewValida||baseReview.validar(op))
       &&(epochConhecidoNaEntrada===undefined||(_crmCacheEpoch.has(ctx.owner)
         &&_crmCacheEpoch.get(ctx.owner)===epochConhecidoNaEntrada));
   const promise=(async()=>{
@@ -26589,16 +26854,31 @@ window.crmPendenciaRegistrarIdb=function(ctx,lid,ano,cubo,tipo='gravar',epochEsp
     if(opcoes.importacaoExplicita){
       try{
         const baseFresca=await _crmS057LerBase(ctx,lid,ano);
-        if(_crmS057BasesMesmaRevisao(baseInicial,baseFresca))
+        if(_crmS057BasesMesmaRevisao(baseInicial,baseFresca)){
           op.baseRemota=JSON.parse(JSON.stringify(baseInicial));
-        else if(permiteCriarAusente&&baseFresca.existe===false)
+          delete op.reviewRequired;
+        }else if(permiteCriarAusente&&baseFresca.existe===false){
           op.baseRemota={existe:false};
-        else{
+          delete op.reviewRequired;
+        }else{
+          if(baseReviewValida){
+            if(_crmPendenciasMemoria.get(memKey)===op)_crmPendenciasMemoria.delete(memKey);
+            return null;
+          }
           delete op.baseRemota;
+          if(opcoes.importacaoExplicita)op.reviewRequired='base-unknown';
           console.warn("[crm] a cabeça mudou desde a composição; rascunho mantido para revisão.");
         }
+      }catch(e){
+        if(baseConfiavelFalha){
+          op.baseRemota=JSON.parse(JSON.stringify(baseConfiavelFalha));
+          delete op.reviewRequired;
+        }else{
+          delete op.baseRemota;
+          if(opcoes.importacaoExplicita)op.reviewRequired='base-unknown';
+        }
+        console.warn("[crm] base remota da importação não confirmada:",e.message||e);
       }
-      catch(e){console.warn("[crm] base remota da importação não confirmada:",e.message||e);}
       if(!mesmaPendenciaInicial())return null;
     }
     db=reserva?.db||null;
@@ -27164,6 +27444,203 @@ window.crmPendenciaReterExclusaoIdb=async function(ctx,lid,ano,op,remoto,cuboLeg
     return held;
   }finally{db.close();}
 };
+// A review moves the exact durable row; it never recreates financial payloads.
+async function _crmS075ArquivoCAS(ctx,op,descartar=false,ackEsperado=null){
+  const owner=ctx?.owner,lid=String(op?.lid||''),ano=String(op?.ano||''),pair=_crmParKey(lid,ano),key=_crmMemKey(ctx,lid,ano);
+  const kind=descartar?'conflict':'operation';
+  if(ctx?.perfil!=='admin'||!window.lojaVisivel?.(lid)||!window._s012ContextoValido(ctx)
+      ||!_crmS075BaseDesconhecida(descartar?op:_crm2OpMeta(op,op.rowKey,op.digest,op.rowRevision),owner,lid,ano,kind)||op._duravelRam!==true
+      ||_crmPendenciasEmGravacao.has(key)||window._s065RestauracaoAtiva?.(ctx))return false;
+  const meta=JSON.parse(JSON.stringify({..._crm2OpMeta(op,op.rowKey,op.digest,op.rowRevision),kind:'conflict'}));
+  const ckey=_crm2Key('c',owner,lid,ano,op.opId),db=await _idbAbrir();
+  if(!db)return false;
+  let descarteLocal=null;
+  try{
+    const dados=D,cubo=D.crm?.[lid]?.[ano],bytesCubo=cubo?_crmS042Json(cubo):null;
+    const marker=window._crmNaoEnviados?.[pair],ram=window.crmPendenciaAtual(ctx,lid,ano)||null;
+    let base=await _crm2LerMetadadosPar(db,owner,lid,ano);
+    const arquivo=await _crm2Get(db,ckey);
+    const original=await _crm2LerRow(db,op.rowKey,{owner,lid,ano,epoch:op.epoch,revisao:op.rowRevision,digest:op.digest});
+    if(original.meta.codec!==_CRM2_CODEC||original.bytes!==_crmS042Json(op.cubo)
+        ||!_crm2ValidOwner(base.root,owner)||base.root.mode!=='pair'||base.root.epoch!==op.epoch)return false;
+    if(_crm2DeepFreeze(op.cubo)!==op.cubo)return false;
+    const igual=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+    const arquivoEmMemoria=()=>{
+      const c=_crmS069Conflitos.get(owner);
+      return c?.geracao===ctx.geracao&&_crm2SnapshotsOperacaoIguais(c.items?.[op.opId],op);
+    };
+    const atual=()=>window._s012ContextoValido(ctx)&&D===dados&&D.crm?.[lid]?.[ano]===cubo
+      &&(cubo?_crmS042Json(cubo)===bytesCubo:!D.crm?.[lid]?.[ano])
+      &&window.crmPendenciaAtual(ctx,lid,ano)===ram&&window._crmNaoEnviados?.[pair]===marker
+      &&!_crmPendenciasEmGravacao.has(key)&&!window._s065RestauracaoAtiva?.(ctx)
+      &&(descartar?arquivoEmMemoria():ram===op);
+    const jaArquivado=!descartar&&!base.head&&!base.op&&!base.proof&&igual(arquivo,meta);
+    if(!atual()||descartar&&!igual(arquivo,meta)
+        ||!descartar&&!jaArquivado&&(!igual(base.op,_crm2OpMeta(op,op.rowKey,op.digest,op.rowRevision))
+          ||!_crm2ValidaHead(base.head,owner,lid,ano,op.epoch)||base.head.apagado
+          ||base.head.rowKey!==op.rowKey||base.head.digest!==op.digest||base.head.revisao!==op.rowRevision
+          ||arquivo!==undefined&&!igual(arquivo,meta)))return false;
+    if(ackEsperado&&(!igual(base.head,ackEsperado.head)||!igual(base.proof,ackEsperado.proof)||base.op))return false;
+    // Retire the previous canonical snapshot only after this exact local ACK.
+    if(ackEsperado){window._s012GravarSnapshotLocal?.(ctx,D);if(!atual())return false;}
+    if(descartar){
+      descarteLocal={ctx,arquivo:op,op:JSON.parse(JSON.stringify(meta)),bytes:original.bytes,
+        validar:atual,confirmada:false};
+      _crmS075DescartesLocais.set(op,descarteLocal);
+      if(!await _crmS069PrepararResolucaoArquivo(ctx,op,base.head||null,null)||!atual())return false;
+      const depois=await _crm2LerMetadadosPar(db,owner,lid,ano);
+      if(!atual()||!igual(depois.head,base.head)||!igual(depois.op,base.op)||!igual(depois.proof,base.proof)
+          ||!_crm2ValidOwner(depois.root,owner)||depois.root.epoch!==op.epoch)return false;
+      base=depois;
+    }
+    const gravou=jaArquivado||await _crm2Tx(db,'readwrite',(os,_tx,done,fail)=>{
+      const req={root:os.get(_crm2OwnerKey(owner)),head:os.get(_crm2HeadKey(owner,lid,ano)),
+        op:os.get(_crm2OpKey(owner,lid,ano)),proof:os.get(_crm2ProofKey(owner,lid,ano)),
+        conflict:os.get(ckey),row:os.get(op.rowKey),payload:os.get(original.meta.payloadKey)};
+      const v={};let n=Object.keys(req).length;
+      for(const [k,r] of Object.entries(req)){
+        r.onerror=()=>fail(r.error||new Error('Não foi possível guardar a revisão CRM.'));
+        r.onsuccess=()=>{v[k]=r.result;if(--n)return;
+          if(!atual()||!igual(v.root,base.root)||!igual(v.head,base.head)||!igual(v.op,base.op)
+              ||!igual(v.proof,base.proof)||!igual(v.conflict,arquivo)
+              ||!igual(v.row,original.meta)||v.payload!==original.bytes)return done(false);
+          if(descartar)os.delete(ckey);
+          else{os.put(meta,ckey);os.delete(_crm2HeadKey(owner,lid,ano));
+            os.delete(_crm2OpKey(owner,lid,ano));os.delete(_crm2ProofKey(owner,lid,ano));}
+          os.put({...v.root,metadataRevision:(Number(v.root.metadataRevision)||0)+1},_crm2OwnerKey(owner));done(true);
+        };
+      }
+    });
+    if(!gravou)return false;
+    const fim=await _crm2LerMetadadosPar(db,owner,lid,ano),c=await _crm2Get(db,ckey);
+    if(!atual()||!_crm2ValidOwner(fim.root,owner)||fim.root.epoch!==op.epoch
+        ||!jaArquivado&&Number(fim.root.metadataRevision)<Number(base.root.metadataRevision||0)+1
+        ||(descartar?c!==undefined||!igual(fim.head,base.head)||!igual(fim.op,base.op)||!igual(fim.proof,base.proof)
+          :!igual(c,meta)||fim.head||fim.op||fim.proof))return false;
+    const cache=_crmS069Conflitos.get(owner),items={...(cache?.geracao===ctx.geracao?cache.items:{})};
+    if(descartar){descarteLocal.confirmada=true;delete items[op.opId];}else items[op.opId]={...op,...meta,_arquivado:true,_duravelRam:true};
+    _crmS069Conflitos.set(owner,{geracao:ctx.geracao,items});_crmCacheRevisao.set(owner,Number(fim.root.metadataRevision)||0);
+    if(!descartar){
+      if(marker!==undefined){window._crmLimparNaoEnviado(ctx,lid,ano,marker);if(window._crmNaoEnviados?.[pair]!==undefined)return false;}
+      if(window.crmPendenciaAtual(ctx,lid,ano)===op)_crmPendenciasMemoria.delete(key);
+      _crmS075OcultarCuboArquivado(ctx,op);
+    }
+    if(descartar)_crmS075OcultarCuboArquivado(ctx,op);
+    window._s012GravarSnapshotLocal?.(ctx,D);
+    window._crmS068bAgendarColeta?.({owner});
+    return descartar?true:items[op.opId];
+  }finally{
+    // This callback closes over the full pre-CAS D; all attempt paths release it.
+    if(descarteLocal)delete descarteLocal.validar;
+    db.close();
+  }
+}
+const _crmS075ReviewOperacoes=new WeakMap();
+async function _crmS075LimparArquivoAposAck(ctx,op){
+  if(!op?.baseOpId||!window._s012ContextoValido(ctx))return false;
+  const a=_crmS069Conflitos.get(ctx.owner)?.items?.[op.baseOpId],lid=String(op.lid),ano=String(op.ano),pair=_crmParKey(lid,ano);
+  if(!_crmS075BaseDesconhecida(a,ctx.owner,lid,ano,'conflict'))return false;
+  const receipt=_crmS033EscopoRecibos(ctx).pares.get(pair),cubo=D.crm?.[lid]?.[ano];
+  const atual=()=>window._s012ContextoValido(ctx)&&receipt?.publication===true&&receipt.cubo===cubo
+    &&D.crm?.[lid]?.[ano]===cubo&&_crmS033EscopoRecibos(ctx).pares.get(pair)===receipt
+    &&_crmS033ReciboConfere(ctx,lid,ano,receipt.ts,receipt.gid)
+    &&!window.crmPendenciaAtual(ctx,lid,ano)&&window._crmNaoEnviados?.[pair]===undefined
+    &&_crmS042Json(cubo)===_crmS042Json(op.cubo);
+  if(!atual())return false;
+  const db=await _idbAbrir();if(!db)return false;
+  let ack;
+  try{
+    ack=await _crm2LerMetadadosPar(db,ctx.owner,lid,ano);const h=ack.head,q=ack.proof;
+    if(!atual()||ack.op||!_crm2ValidaHead(h,ctx.owner,lid,ano,op.epoch)||h.apagado
+        ||q?.kind!=='proof'||q.owner!==ctx.owner||q.epoch!==h.epoch||q.rowKey!==h.rowKey||q.digest!==h.digest
+        ||q.revisao!==h.revisao||q.gid!==receipt.gid||Number(q.ts)!==Number(receipt.ts))return false;
+    const row=await _crm2LerRow(db,h.rowKey,{owner:ctx.owner,lid,ano,epoch:h.epoch,revisao:h.revisao,digest:h.digest});
+    if(!atual()||row.meta.codec!==_CRM2_CODEC||row.bytes!==_crmS042Json(op.cubo))return false;
+  }finally{db.close();}
+  return _crmS075ArquivoCAS(ctx,a,true,ack);
+}
+async function _crmS075ResolverBaseDesconhecida(ctx,op,reimportar){
+  const lid=String(op.lid),ano=String(op.ano),pair=_crmParKey(lid,ano),key=_crmMemKey(ctx,lid,ano);
+  if(!window.lojaVisivel?.(lid))return false;
+  let arquivo=op;
+  if(op.kind!=='conflict')arquivo=await _crmS075ArquivoCAS(ctx,op);
+  if(!arquivo)return false;
+  if(!reimportar){
+    if(!confirm('Descartar somente este rascunho de importação? Os dados do servidor serão preservados.'))return false;
+    return _crmS075ArquivoCAS(ctx,arquivo,true);
+  }
+  const arquivoMeta=JSON.stringify(_crmS069ConflitoEsperado(arquivo));
+  const dbArquivo=await _idbAbrir();if(!dbArquivo)return false;
+  try{
+    const c=await _crm2Get(dbArquivo,_crm2Key('c',ctx.owner,lid,ano,arquivo.opId));
+    const row=await _crm2LerRow(dbArquivo,arquivo.rowKey,{owner:ctx.owner,lid,ano,epoch:arquivo.epoch,revisao:arquivo.rowRevision,digest:arquivo.digest});
+    if(JSON.stringify(c)!==arquivoMeta||row.meta.codec!==_CRM2_CODEC||row.bytes!==_crmS042Json(arquivo.cubo)
+        ||_crm2DeepFreeze(arquivo.cubo)!==arquivo.cubo)return false;
+  }finally{dbArquivo.close();}
+  const mesmoArquivo=(permitida=null)=>{
+    const atual=_crmS069Conflitos.get(ctx.owner);
+    return window._s012ContextoValido(ctx)&&window.lojaVisivel?.(lid)&&atual?.geracao===ctx.geracao
+      &&!!atual.items?.[arquivo.opId]&&JSON.stringify(_crmS069ConflitoEsperado(atual.items[arquivo.opId]))===arquivoMeta
+      &&(window.crmPendenciaAtual(ctx,lid,ano)||null)===permitida&&window._crmNaoEnviados?.[pair]===undefined
+      &&(permitida||!_crmPendenciasEmGravacao.has(key))&&!window._s065RestauracaoAtiva?.(ctx);
+  };
+  if(!mesmoArquivo())return false;
+  let base=await _crmS057LerBase(ctx,lid,ano),proof={};
+  if(!mesmoArquivo())return false;
+  if(base.existe&&base.apagado){
+    await window.crmAtualizarSeMudou({ctx,forcar:true,detailMode:'full',requireServer:true,_s051ProofSink:proof,_s069Reimport:{lid,ano,opId:arquivo.opId}});
+    return {ok:false,mensagem:'O conjunto foi excluído no servidor. O rascunho foi preservado; selecione a planilha novamente para revisar uma nova importação explícita.'};
+  }
+  if(base.existe){
+    await window.crmAtualizarSeMudou({ctx,forcar:true,detailMode:'full',requireServer:true,_s051ProofSink:proof,_s069Reimport:{lid,ano,opId:arquivo.opId}});
+    if(!mesmoArquivo()||proof.indexServerBacked!==true||proof.complete!==true
+        ||proof.pairs?.[pair]?.complete!==true||proof.pairs?.[pair]?.detailComplete!==true)return false;
+  }
+  const dados=D,cubo=D.crm?.[lid]?.[ano],versao=window._crmVersao,bytes=cubo?_crmS042Json(cubo):null;
+  if(base.existe!==!!cubo)return false;
+  const meta=cubo&&_crmDetalhesCorePorCubo.get(cubo);
+  const vigente=(permitida=null)=>mesmoArquivo(permitida)&&D===dados&&D.crm?.[lid]?.[ano]===cubo&&window._crmVersao===versao
+    &&(cubo?_crmS042Json(cubo)===bytes&&_crmS069IndiceAtual(ctx,proof,meta):true);
+  const fresca=await _crmS057LerBase(ctx,lid,ano);
+  if(!vigente()||!_crmS057BasesMesmaRevisao(base,fresca))return false;
+  base=fresca;
+  const novos=arquivo.mesesImportados;
+  if(!Array.isArray(novos)||!_crmS075MesesImportadosValidos(arquivo)
+      ||novos.some(m=>!window.crmMesesDoCubo(arquivo.cubo).includes(m)))
+    return {ok:false,mensagem:'O rascunho não comprova quais meses vieram da planilha. Ele foi preservado; selecione a planilha novamente para uma nova importação.'};
+  const fora=window.crmMesesDoCubo(arquivo.cubo).filter(m=>!novos.includes(m));
+  let proposta=fora.length?window.crmRemoverMeses(arquivo.cubo,fora):arquivo.cubo;
+  if(!proposta)return false;
+  const conservar=window.crmMesesDoCubo(cubo).filter(m=>!novos.includes(m));
+  if(conservar.length){
+    if(!window._crmComprasClienteValido(cubo?._comprasCliente)
+        ||conservar.some(m=>!cubo._comprasCliente.meses.includes(m)))return false;
+    const podado=window.crmRemoverMeses(cubo,novos);
+    if(!podado||conservar.some(m=>!window.crmMesesDoCubo(podado).includes(m)))return false;
+    proposta=window.crmFundirCubos(podado,proposta);
+  }
+  if(!window._crmComprasClienteValido(proposta?._comprasCliente)||!vigente())return false;
+  if(!confirm('Reimportar os meses '+novos.join(', ')+' deste rascunho após conferir a versão atual do servidor?'
+      +(conservar.length?' Os meses '+conservar.join(', ')+' serão preservados.':'')))return false;
+  if(!vigente())return false;
+  const opts={importacaoExplicita:true,markerOrigem:Date.now(),mesesImportados:[...novos]};
+  const binding={ctx,owner:ctx.owner,geracao:ctx.geracao,lid,ano,base,arquivo,
+    validar:vigente};_crmS075BaseReviewBindings.set(opts,binding);
+  const nova=await window.crmPendenciaRegistrarIdb(ctx,lid,ano,proposta,'gravar',arquivo.epoch,opts);
+  if(!nova||nova._duravelRam!==true||window.crmPendenciaAtual(ctx,lid,ano)?.opId!==nova.opId){
+    const tentativa=window.crmPendenciaAtual(ctx,lid,ano);
+    if(tentativa?._duravelRam===false&&tentativa.baseOpId===arquivo.opId&&!_crmPendenciasEmGravacao.has(key))
+      _crmPendenciasMemoria.delete(key);
+    return false;
+  }
+  if(!window._crmMarcarNaoEnviado(ctx,lid,ano,nova.marker))return false;
+  _crmS033PublicacaoAntesDeSubstituir(ctx,lid,ano,nova.cubo);
+  (D.crm||(D.crm={}))[lid]||(D.crm[lid]={});D.crm[lid][ano]=nova.cubo;window._crmVersao=(window._crmVersao||0)+1;
+  const envio=await window.crmSincronizarUm(lid,ano,ctx,nova.cubo);
+  if(!envio?.pendenteLocal)await _crmS075LimparArquivoAposAck(ctx,nova);
+  return {ok:true,pendenteLocal:envio?.pendenteLocal===true};
+}
+
 async function _crmS069ReimportarArquivado(ctx,arquivado){
   const lid=String(arquivado?.lid||''),ano=String(arquivado?.ano||''),opId=arquivado?.opId;
   const owner=ctx?.owner,pair=_crmParKey(lid,ano),memKey=_crmMemKey(ctx,lid,ano);
@@ -27355,7 +27832,7 @@ async function _crmS069ReimportarArquivado(ctx,arquivado){
 window.crmPendenciasExclusao=function(ctx){
   ctx=ctx||window._s012Capturar?.();
   if(ctx?.perfil!=='admin'||!window._s012ContextoValido(ctx))return [];
-  const ativas=[..._crmPendenciasMemoria.values()].filter(op=>op.owner===ctx.owner&&op.exclusaoRemota);
+  const ativas=[..._crmPendenciasMemoria.values()].filter(op=>op.owner===ctx.owner&&(op.exclusaoRemota||op.reviewRequired==='base-unknown'));
   const arquivo=_crmS069Conflitos.get(ctx.owner);
   const arquivadas=arquivo?.geracao===ctx.geracao?Object.values(arquivo.items||{}):[];
   return [...ativas,...arquivadas];
@@ -27364,6 +27841,20 @@ window.crmResolverExclusaoPendente=async function(lid,ano,opId,reimportar){
   const ctx=window._s012Capturar?.(),op=window.crmPendenciaAtual(ctx,lid,ano);
   const arquivo=_crmS069Conflitos.get(ctx?.owner),arquivado=arquivo?.geracao===ctx?.geracao
     ?arquivo.items?.[opId]:null;
+  const revisao=op?.opId===opId&&op.reviewRequired==='base-unknown'?op
+    :arquivado?.reviewRequired==='base-unknown'?arquivado:null;
+  if(ctx?.perfil==='admin'&&window._s012ContextoValido(ctx)&&revisao){
+    try{
+      const resultado=await _crmS075ResolverBaseDesconhecida(ctx,revisao,reimportar);
+      if(window._s012ContextoValido(ctx)){
+        _crmRenderConjuntos();
+        showToast(resultado?.mensagem||(resultado===true||resultado?.ok===true
+          ?(reimportar?'Importação revisada; confira o status de sincronização.':'Rascunho descartado; dados atuais preservados.')
+          :'Revisão não concluída. O rascunho foi preservado.'),resultado===true||resultado?.ok===true?'ok':'warn');
+      }
+      return resultado===true||resultado?.ok===true;
+    }catch(_e){if(window._s012ContextoValido(ctx))showToast('Não foi possível concluir a revisão; o rascunho foi preservado.','warn');return false;}
+  }
   if(ctx?.perfil==='admin'&&window._s012ContextoValido(ctx)&&arquivado?._arquivado===true
       &&arquivado.owner===ctx.owner&&arquivado.lid===String(lid)&&String(arquivado.ano)===String(ano)){
     if(!confirm(reimportar
@@ -27930,9 +28421,10 @@ function _crm2MesclarMemoriaLida(ctx,state){
   // successor operation for the pair untouched.
   for(const [pair,op] of Object.entries(state.entradas||{})){
     const conflito=state.conflitos?.[op?.opId];
+    const arquivoTipado=_crmS075BaseDesconhecida(conflito,ctx.owner,op?.lid,op?.ano,'conflict');
     if(!op||!conflito||conflito.kind!=='conflict'||conflito.owner!==ctx.owner
         ||conflito.lid!==op.lid||String(conflito.ano)!==String(op.ano)
-        ||conflito.tipo!=='gravar'||!conflito.exclusaoRemota
+        ||conflito.tipo!=='gravar'||!conflito.exclusaoRemota&&!arquivoTipado
         ||!_crmS069SnapshotOpIgual(conflito,op)
         ||_crmS042Json(conflito.cubo)!==_crmS042Json(op.cubo))continue;
     delete state.entradas[pair];
@@ -27950,9 +28442,10 @@ function _crm2MesclarMemoriaLida(ctx,state){
     // byte-identical archived operation; a different successor `p` for this
     // pair remains in `state.entradas` and is installed below.
     const conflito=state.conflitos?.[op?.opId];
+    const arquivoTipado=_crmS075BaseDesconhecida(conflito,ctx.owner,op?.lid,op?.ano,'conflict');
     if(conflito?.kind==='conflict'&&conflito.owner===ctx.owner
         &&conflito.lid===op.lid&&String(conflito.ano)===String(op.ano)
-        &&conflito.tipo==='gravar'&&!!conflito.exclusaoRemota
+        &&conflito.tipo==='gravar'&&(!!conflito.exclusaoRemota||arquivoTipado)
         &&_crmS069SnapshotOpIgual(conflito,op)
         &&_crmS042Json(conflito.cubo)===_crmS042Json(op.cubo)){
       if(persistida?.opId===op.opId)delete state.entradas[pair];
@@ -28001,12 +28494,13 @@ window.crmLerIdb = async function(ctx,opcoes={}){
     _crm2MesclarMemoriaLida(ctx,vista.state);
     const conflitosS069={};
     for(const op of Object.values(vista.state.conflitos||{})){
-      if(op?.owner!==ctx.owner||op.kind!=='conflict'||op.tipo!=='gravar'||!op.exclusaoRemota
+      const arquivoTipado=_crmS075BaseDesconhecida(op,ctx.owner,op?.lid,op?.ano,'conflict');
+      if(op?.owner!==ctx.owner||op.kind!=='conflict'||op.tipo!=='gravar'||!op.exclusaoRemota&&!arquivoTipado
           ||!op.cubo||typeof op.opId!=='string'||!op.opId)continue;
       const idPar=_crm2ParKey(ctx.owner,op.lid,op.ano),head=vista.heads.get(idPar)||null;
       if(Object.prototype.hasOwnProperty.call(op,'markerBinding')
           &&!_crmS069MarkerBindingValida(op,ctx))throw new Error('vínculo typed do marcador CRM arquivado inválido');
-      const item={...op,_arquivado:true,_head:head?{...head}:null,
+      const item={...op,_arquivado:true,...(arquivoTipado?{_duravelRam:true}:{}),_head:head?{...head}:null,
         _remoto:head?{gid:head.gid||null,ts:Number(head.ts)||0,apagado:head.apagado===true,
           revisao:Number(head.revisao)||0}:null};
       if(_crm2DeepFreeze(item)!==item)continue;
@@ -28017,6 +28511,7 @@ window.crmLerIdb = async function(ctx,opcoes={}){
           &&!_crmPendenciasEmGravacao.has(memKey)){
         window._crmLimparNaoEnviado(ctx,op.lid,op.ano,marker);
       }
+      if(arquivoTipado)_crmS075OcultarCuboArquivado(ctx,item);
       conflitosS069[op.opId]=item;
     }
     _crmS069Conflitos.set(ctx.owner,{geracao:ctx.geracao,items:conflitosS069});
@@ -28726,7 +29221,7 @@ window._s005EmailAtivo = function(){
   const email = String(window._currentUser?.email || '').trim().toLowerCase();
   return email && window.USUARIOS && Object.prototype.hasOwnProperty.call(window.USUARIOS, email) ? email : '';
 };
-window._s005PendenteCapturar = function(email){
+window._s005PendenteCapturar = function(email, observarStatus){
   const ctx=window._s012Capturar?.();
   const marcador = window._pendingLocalData;
   let json = null;
@@ -28736,7 +29231,7 @@ window._s005PendenteCapturar = function(email){
     ctx, storage:window._s005PendingStorageCapturar?.(),
     marcador, ts:window._pendingLocalDataTs, json,
     s004:window._s004VendasCapturar?.(ctx,json)||null};
-  window._syncStatusPendenteObservar?.(op);
+  if(observarStatus!==false) window._syncStatusPendenteObservar?.(op);
   return op;
 };
 window._s005PendenteLimparSeAtual = function(op, payload, limparTs){
@@ -33000,6 +33495,164 @@ function showLogin(){
   document.getElementById("loginScreen").style.display="flex";
   document.getElementById("appScreen").style.display="none";
 }
+// S076A: reutiliza a gravação exata da pendência no boot e ao restabelecer conexão.
+// A época impede reutilizar um voo que ficou aguardando atravessar uma restauração.
+window._s076aReplayPendentesEmCurso = window._s076aReplayPendentesEmCurso instanceof Map
+  ? window._s076aReplayPendentesEmCurso : new Map();
+window._s076aReenviarPendenteAtual = function(ctx, opcoes){
+  const _ctx=ctx||window._s012Capturar?.();
+  const _email=window._s005EmailAtivo?.();
+  const _opts=opcoes||{};
+  const _retornar=(motivo)=>Promise.resolve({ok:false,motivo});
+  const _ctxValido=()=>!!_ctx&&window._s012ContextoValido?.(_ctx)
+    &&_ctx.email===_email&&window._s005EmailAtivo?.()===_email;
+  if(!_ctxValido()) return _retornar('sessao-alterada');
+  const _epocaRestauracao=window._s065RestauracaoEpoca?.();
+  const _restauracaoValida=()=>!window._s065RestauracaoAtiva?.(_ctx)
+    &&window._s065RestauracaoEpoca?.()===_epocaRestauracao;
+  if(!_restauracaoValida()) return _retornar('restauracao-em-curso');
+
+  let _pendingStr=null;
+  try{_pendingStr=window._s012PendenteLer?.(_ctx)||null;}
+  catch(e){return _retornar(e?.code||e?.message||'pendencia-indisponivel');}
+  if(typeof _pendingStr!=='string'||!_pendingStr) return _retornar('sem-pendencia');
+  let _pendingStoreOp=null,_pendingEmail='',_pendingRamOp=null;
+  try{
+    _pendingStoreOp=window._s005PendingStorageCapturar?.(_pendingStr);
+    _pendingEmail=window._s005EmailAtivo?.();
+    _pendingRamOp=window._s005PendenteCapturar?.(_pendingEmail,false);
+    const _s004Inicial=window._s004VendasPendentes?.(_ctx);
+    if(!Array.isArray(_s004Inicial)) return _retornar('tokens-pendentes-indisponiveis');
+  }catch(e){return _retornar('tokens-pendentes-indisponiveis');}
+  if(!_pendingStoreOp||!_pendingRamOp||_pendingEmail!==_email
+      ||_pendingStoreOp.owner!==_ctx.owner||_pendingRamOp.email!==_email
+      ||_pendingRamOp.ctx?.owner!==_ctx.owner||_pendingStoreOp.valor!==_pendingStr
+      ||!_pendingStoreOp.chave) return _retornar('tokens-pendentes-incompativeis');
+
+  const _s004Assinatura=token=>token?JSON.stringify({owner:token.owner,chave:token.chave,
+    revision:token.revision,ids:(token.ids||[]).map(item=>[item.key,item.opId])}):'';
+  const _chaveVoo=String(_ctx.owner)+'|'+String(_ctx.geracao)+'|'+String(_epocaRestauracao)+'|'+String(_pendingStoreOp.chave);
+  const _vooAtual=window._s076aReplayPendentesEmCurso.get(_chaveVoo);
+  if(_vooAtual&&_vooAtual.payload===_pendingStr
+      &&_vooAtual.storageRevision===_pendingStoreOp.revisao
+      &&_vooAtual.storageRaw===_pendingStoreOp.raw
+      &&_vooAtual.ramMarker===_pendingRamOp.marcador
+      &&_vooAtual.ramTs===_pendingRamOp.ts
+      &&_vooAtual.ramJson===_pendingRamOp.json
+      &&_vooAtual.storageS004===_s004Assinatura(_pendingStoreOp.s004)
+      &&_vooAtual.ramS004===_s004Assinatura(_pendingRamOp.s004)) return _vooAtual.promise;
+
+  const _voo={payload:_pendingStr,storageRevision:_pendingStoreOp.revisao,
+    storageRaw:_pendingStoreOp.raw,ramMarker:_pendingRamOp.marcador,ramTs:_pendingRamOp.ts,
+    ramJson:_pendingRamOp.json,storageS004:_s004Assinatura(_pendingStoreOp.s004),
+    ramS004:_s004Assinatura(_pendingRamOp.s004),promise:null};
+  _voo.promise=(async()=>{
+    let _silentAnterior;
+    try{
+      const _firebaseOk=await waitForFirebase(5000);
+      if(!_firebaseOk||!window.fsGravar) return {ok:false,motivo:'firebase-indisponivel'};
+      if(!_ctxValido()) return {ok:false,motivo:'sessao-alterada'};
+      if(!_restauracaoValida()) return {ok:false,motivo:'restauracao-alterada'};
+
+      let _pendingAtual=null,_storeAtual=null,_ramOpAtual=null;
+      try{
+        _pendingAtual=window._s012PendenteLer?.(_ctx)||null;
+        _storeAtual=window._s005PendingStorageCapturar?.(_pendingStr);
+        _ramOpAtual=window._s005PendenteCapturar?.(_pendingEmail,false);
+        const _s004Atual=window._s004VendasPendentes?.(_ctx);
+        if(!Array.isArray(_s004Atual)) return {ok:false,motivo:'tokens-pendentes-indisponiveis'};
+      }catch(e){return {ok:false,motivo:'tokens-pendentes-indisponiveis'};}
+      if(_pendingAtual!==_pendingStr
+          ||!_storeAtual||_storeAtual.owner!==_ctx.owner
+          ||_storeAtual.chave!==_pendingStoreOp.chave
+          ||_storeAtual.valor!==_pendingStr
+          ||_storeAtual.revisao!==_pendingStoreOp.revisao
+          ||_storeAtual.raw!==_pendingStoreOp.raw
+          ||!_ramOpAtual||_ramOpAtual.email!==_pendingEmail
+          ||_ramOpAtual.ctx?.owner!==_ctx.owner
+          ||_ramOpAtual.marcador!==_pendingRamOp.marcador
+          ||_ramOpAtual.ts!==_pendingRamOp.ts
+          ||_ramOpAtual.json!==_pendingRamOp.json
+          ||_s004Assinatura(_storeAtual.s004)!==_voo.storageS004
+          ||_s004Assinatura(_ramOpAtual.s004)!==_voo.ramS004){
+        return {ok:false,motivo:'pendencia-sucessora-ou-revisada'};
+      }
+      if(!_ctxValido()||!_restauracaoValida())
+        return {ok:false,motivo:'guarda-alterada'};
+
+      if(_opts.silenciosa){
+        _silentAnterior=!!window._gravacaoSilenciosa;
+        window._gravacaoSilenciosa=true;
+      }
+      try{
+        window._syncStatusPendenteObservar?.(_pendingRamOp);
+        await window.fsGravarComPrazo(_pendingStr,undefined,undefined,_ctx,
+          {storage:_pendingStoreOp,op:_pendingRamOp,payload:_pendingStr});
+      }finally{
+        if(_opts.silenciosa&&_ctxValido())
+          window._gravacaoSilenciosa=_silentAnterior;
+      }
+      if(!_ctxValido()) return {ok:true,obsoleta:true};
+
+      let _pendingDepois=null,_storedDepois=null,_s004Depois=null;
+      try{
+        if(typeof window._s012PendenteLer!=='function'
+            ||typeof window._s005PendingLerArmazenado!=='function'
+            ||typeof window._s004VendasPendentes!=='function') throw new Error('readback indisponível');
+        _pendingDepois=window._s012PendenteLer(_ctx)||null;
+        _storedDepois=window._s005PendingLerArmazenado(_ctx);
+        _s004Depois=window._s004VendasPendentes(_ctx);
+        if(!_storedDepois||!Object.prototype.hasOwnProperty.call(_storedDepois,'raw')
+            ||!Object.prototype.hasOwnProperty.call(_storedDepois,'payload')
+            ||!Array.isArray(_s004Depois)) throw new Error('readback incompleto');
+      }catch(e){
+        console.warn('[Avatim] ACK remoto confirmado; estado local de pendências indeterminado:',e?.code||e?.message||e);
+        return {ok:true,pendenciasRestantes:true};
+      }
+      if(_pendingEmail&&window._s005EmailAtivo?.()===_pendingEmail){
+        try{window._s005PendenteLimparSeAtual?.(_pendingRamOp,_pendingStr,false);}
+        catch(e){
+          console.warn('[Avatim] ACK remoto confirmado; limpeza RAM pendente não confirmada:',e?.code||e?.message||e);
+          return {ok:true,pendenciasRestantes:true};
+        }
+      }
+      if(!_ctxValido()) return {ok:true,obsoleta:true};
+      const _aindaHaPendente=!!_pendingDepois||!!_storedDepois?.payload
+        ||window._pendingLocalData!=null||_s004Depois.length>0;
+      if(!_aindaHaPendente) showToast('✅ Lançamento pendente sincronizado!','ok');
+      else console.warn('[Avatim] Replay confirmou o payload capturado; outra pendência local continua preservada.');
+      console.log('[Avatim] Replay da pendência atual finalizado com ACK remoto.');
+      return {ok:true,pendenciasRestantes:_aindaHaPendente};
+    }catch(e){
+      if(!_ctxValido()) return {ok:false,motivo:'sessao-alterada'};
+      const _msg=String(e&&e.message||'');
+      const _code=String(e&&e.code||'');
+      const _s004Erro=(_code||_msg).indexOf('s004-')===0;
+      if(_s004Erro){
+        if(_ctxValido())
+          showToast('⚠️ Há uma venda local pendente que diverge do servidor. '
+            +'Ela foi mantida sem confirmação; revise o lançamento antes de tentar novamente.','warn');
+        console.warn('[Avatim] Replay da pendência S004 preservado:',_code||_msg);
+      }else if(_msg.indexOf('gravacao-recusada')>=0){
+        try{
+          if(_pendingEmail&&window._s005EmailAtivo?.()===_pendingEmail
+              &&window._s012ContextoValido?.(_ctx)){
+            window._s005PendingStorageRemoverSeAtual?.(_pendingStoreOp);
+            window._s005PendenteLimparSeAtual?.(_pendingRamOp,_pendingStr,false);
+          }
+        }catch(e2){}
+        console.warn('[Avatim] Replay recusado pela proteção contra esvaziamento; remoção exata da pendência capturada solicitada.');
+      }else console.warn('[Avatim] Falha no replay da pendência:',_code||_msg);
+      return {ok:false,motivo:_code||_msg||'falha-no-replay'};
+    }finally{
+      if(window._s076aReplayPendentesEmCurso.get(_chaveVoo)===_voo)
+        window._s076aReplayPendentesEmCurso.delete(_chaveVoo);
+    }
+  })();
+  window._s076aReplayPendentesEmCurso.set(_chaveVoo,_voo);
+  return _voo.promise;
+};
+
 async function showApp(){
   const _s012JaAberta=!!window._s012ContextoAtual?.()&&document.body.classList.contains('logado');
   const _s012Ctx=window._s012AtivarSessao?.();
@@ -33100,64 +33753,8 @@ async function showApp(){
     if(btnAdm) btnAdm.style.display="inline-flex";
   }
 
-  // Se há um lançamento pendente não sincronizado (ex: Firebase falhou antes),
-  // gravar ANTES de carregar do Firebase para não perder o dado
-  const _pendingStr = window._s012PendenteLer?.(_s012Ctx) || null;
-  const _pendingStoreOp = window._s005PendingStorageCapturar(_pendingStr);
-  const _pendingEmail = window._s005EmailAtivo(); // contexto da tentativa, não dono da chave legada
-  const _pendingRamOp = window._s005PendenteCapturar(_pendingEmail);
-  if(_pendingStr){
-    // [R129] Isto é sync de FUNDO: o usuário acabou de entrar e não pediu nada.
-    // Sem balão no começo — ele aparecia em todo login e não dizia nada de útil.
-    console.log("[Avatim] showApp: lançamento pendente encontrado — sincronizando...");
-    (async()=>{
-      const _ok = await waitForFirebase(5000);
-      if(!window._s012ContextoValido(_s012Ctx)) return;
-      if(_ok && window.fsGravar){
-        window._gravacaoSilenciosa = true;   // a trava não deve assustar aqui
-        try{
-          await window.fsGravarComPrazo(_pendingStr,undefined,undefined,_s012Ctx,
-            {storage:_pendingStoreOp,op:_pendingRamOp,payload:_pendingStr});
-          if(window._s012ContextoValido(_s012Ctx) && _pendingEmail && window._s005EmailAtivo() === _pendingEmail){
-            window._s005PendenteLimparSeAtual(_pendingRamOp, _pendingStr, false);
-          }
-          if(!window._s012ContextoValido(_s012Ctx)) return;
-          showToast("✅ Lançamento pendente sincronizado!","ok");
-          console.log("[Avatim] showApp: pending sincronizado com sucesso");
-        }catch(e){
-          const _msg = String(e && e.message || '');
-          const _code=String(e && e.code || '');
-          const _s004Erro=(_code||_msg).indexOf('s004-')===0;
-          if(_s004Erro){
-            // Keep the exact legacy snapshot and pending operation. It has no
-            // causal metadata proving it may replace the server's sale.
-            if(window._s012ContextoValido(_s012Ctx))
-              showToast('⚠️ Há uma venda local pendente que diverge do servidor. '
-                +'Ela foi mantida sem confirmação; revise o lançamento antes de tentar novamente.','warn');
-            console.warn('[Avatim] showApp: venda pendente S004 preservada para revisão:',_code||_msg);
-          }else if(_msg.indexOf('gravacao-recusada') >= 0){
-            // [R129] A trava recusou: este pendente esvaziaria o servidor, ou
-            // seja, ele é PIOR que o que já está lá — sobrou de uma sessão em
-            // que o D ainda não tinha carregado. Guardá-lo só faria a mesma
-            // recusa se repetir em todo login. O servidor tem a versão boa.
-            try{
-              if(_pendingEmail && window._s005EmailAtivo() === _pendingEmail){
-                window._s005PendingStorageRemoverSeAtual(_pendingStoreOp);
-                window._s005PendenteLimparSeAtual(_pendingRamOp, _pendingStr, false);
-              }
-            }catch(e2){}
-            console.warn("[Avatim] R129: pendente antigo descartado — a trava o "
-              + "recusou por esvaziar o servidor (" + _msg + "). Nada foi perdido: "
-              + "o servidor tem a versão completa.");
-          } else {
-            console.warn("[Avatim] showApp: falha ao sincronizar pending:", _msg);
-          }
-        }finally{
-          if(window._s012ContextoValido(_s012Ctx)) window._gravacaoSilenciosa = false;
-        }
-      }
-    })();
-  }
+  // O replay fica em segundo plano: o leitor normal do boot não espera o writer.
+  window._s076aReenviarPendenteAtual?.(_s012Ctx,{silenciosa:true});
 
   // [CRÍTICO] Sincronizar com Firebase ANTES de renderizar qualquer coisa
   console.log("[Avatim] showApp: iniciando carregamento de dados...");
@@ -33175,12 +33772,16 @@ async function showApp(){
   // [R122] Honra o retorno de loadFromFirestore: se o servidor não respondeu,
   // retenta sozinho em vez de deixar a tela zerada esperando o botão manual.
   Promise.resolve(window._carregarComRetentativa(_pintarTelas)).then(
-    ()=>window._s033BootConcluir?.(_s012Ctx),
+    ()=>{
+      window._s033BootConcluir?.(_s012Ctx);
+      window._crmS075AgendarRecuperacaoCRM?.(_s012Ctx);
+    },
     e=>{
       if(!window._s012ContextoValido(_s012Ctx)) return;
       console.error("[Avatim] showApp: erro ao carregar", e.message);
       _pintarTelas();
       window._s033BootConcluir?.(_s012Ctx);
+      window._crmS075AgendarRecuperacaoCRM?.(_s012Ctx);
     }
   );
   // [DIAGNÓSTICO SIMPLES] Log de carregamento
@@ -59875,7 +60476,7 @@ window.excelProcessarUpload = function(event){
                    :                           p.cubo;
         _paresImportados.push([p.lid, p.ano]);
         window._crmN003Progresso.atualizar(_n003Task,{lid:p.lid,ano:p.ano,tipo:'par-iniciado'});
-        const dg = window.crmGuardar(p.lid, p.ano, cubo,{s067cIdb:_s067cIdb});
+        const dg = window.crmGuardar(p.lid, p.ano, cubo,{s067cIdb:_s067cIdb,mesesImportados:window.crmMesesDoCubo(p.cubo)});
         const _cuboAplicado=D.crm?.[p.lid]?.[p.ano];
         const _opRegistro=window.crmPendenciaAtual(_s012CtxExcel,p.lid,p.ano);
         _registrosImportados.push({lid:String(p.lid),ano:String(p.ano),
@@ -60093,10 +60694,14 @@ window.excelProcessarUpload = function(event){
       save();
       if(_envio && _envio.erros && _envio.erros.length){
         window._crmN003Progresso.finalizar(_n003Task,{falha:true,mensagem:`Importação em memória; ${_envio.ok||0}/${_envio.total||_paresImportados.length} confirmado(s) no servidor. ${(_envio.pendentesLocais||[]).length} pendência(s) local(is) sem confirmação.`});
-        showToast('⚠️ ' + _msgLocal + ' — ' + _envio.ok + '/' + _envio.total
-          + ' conjunto(s) confirmados no servidor. Sem confirmação: ' + _envio.erros.join(' | ')
-          + (_envio.pendentesLocais?.length ? '. Confirmação local pendente: '+_envio.pendentesLocais.join(', ') : '')
-          + '. Preserve os dados locais e tente reenviar os conjuntos pendentes.', 'err');
+        if(_envio.reviewRequiredPairs?.length){
+          showToast('⚠️ ' + _msgLocal + ' — rascunho preservado para revisão administrativa; a base atual do servidor não foi confirmada.', 'warn');
+        }else{
+          showToast('⚠️ ' + _msgLocal + ' — ' + _envio.ok + '/' + _envio.total
+            + ' conjunto(s) confirmados no servidor. Sem confirmação: ' + _envio.erros.join(' | ')
+            + (_envio.pendentesLocais?.length ? '. Confirmação local pendente: '+_envio.pendentesLocais.join(', ') : '')
+            + '. Os dados locais foram preservados; confira o estado antes de uma nova ação.', 'err');
+        }
       } else if(_envio){
         const _locaisPendentes=_envio.pendentesLocais||[];
         window._crmN003Progresso.finalizar(_n003Task,{mensagem:_locaisPendentes.length?`Servidor confirmou ${_envio.ok}/${_envio.total}; ${_locaisPendentes.length} pendência(s) local(is) continuam sem confirmação.`:`Servidor confirmou ${_envio.ok}/${_envio.total} conjunto(s).`});
@@ -64755,12 +65360,15 @@ function _crmRenderConjuntos(){
         + 'Quando o sistema consegue preservar os outros meses, ele <strong>substitui apenas os meses repetidos</strong>. '
         + 'Se não conseguir confirmar e preservar os outros meses, a importação será cancelada sem alterar o CRM. '
         + 'Confira o histórico ou inclua no arquivo todos os meses que deseja manter.</div>'
-      + (isAdmin() ? '<div style="margin-top:8px"><button class="btn-s" onclick="window.crmSincronizar()" style="font-size:11px">☁️ Reenviar ao Firebase</button></div>' : '')
     : '<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Nenhum conjunto importado ainda.</div>';
   if(isAdmin())window.crmPendenciasExclusao?.().filter(op=>window.lojaVisivel?.(op.lid)).forEach(op=>{
     const box=document.createElement('div');box.style.cssText='margin-top:10px;padding:10px;border:1px solid var(--ouro);border-radius:6px';
     const text=document.createElement('p'),nome=((LOJAS.find(l=>l.id===op.lid)?.nome)||op.lid);
-    if(op._arquivado===true){
+    const baseDesconhecida=op.reviewRequired==='base-unknown';
+    if(baseDesconhecida){
+      text.textContent=nome+' / '+op.ano+': rascunho preservado para revisão administrativa. '
+        +'A base desta tentativa não foi confirmada; o rascunho não será reenviado automaticamente.';
+    }else if(op._arquivado===true){
       const atual=D.crm?.[op.lid]?.[String(op.ano)];
       text.textContent=nome+' / '+op.ano+': '+(atual
         ?'dados do CRM disponíveis. '
@@ -64768,7 +65376,10 @@ function _crmRenderConjuntos(){
         +'Rascunho de uma importação anterior preservado para revisão, fora dos indicadores.';
     }else text.textContent=nome+' / '+op.ano+': conjunto excluído no servidor. Rascunho pendente preservado, fora dos indicadores.';
     box.appendChild(text);
-    for(const [label,action,value] of [['Reimportar rascunho','reimportar',true],['Descartar rascunho','descartar',false]]){
+    const acoes=baseDesconhecida
+      ?[['Revisar a base e continuar','revisar',true],...(op._arquivado===true?[['Descartar rascunho arquivado','descartar',false]]:[])]
+      :[['Reimportar rascunho','reimportar',true],['Descartar rascunho','descartar',false]];
+    for(const [label,action,value] of acoes){
       const button=document.createElement('button');button.className='btn-s';button.textContent=label;button.dataset.crmConflito=action;
       button.onclick=()=>window.crmResolverExclusaoPendente(op.lid,op.ano,op.opId,value);box.appendChild(button);
     }
