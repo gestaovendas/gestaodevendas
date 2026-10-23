@@ -9754,7 +9754,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-23b';
+window.AVATIM_BUILD = '2026-10-23c';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -12225,12 +12225,18 @@ async function _s033SyncDrenar(st){
     const target=st.targets.get('crm_indice'), seq=target?.seq, marker=target?.marker;
     const proof={expectedMarker:marker,indexServerBacked:false,complete:false,coreComplete:false,pairs:{}};
     const crmCtx=st.ctx, dadosDrenagem=D;
-    let atualizados=0;
+    let atualizados=0, crmRead=null;
     st.crmPulling=true;
-    try{atualizados=await window.crmAtualizarSeMudou({forcar:true,ctx:crmCtx,_s033Proof:proof,
-      _s033Coordinated:true,detailMode:'core'});}
-    catch(error){console.warn('[S033] leitura CRM canônica falhou:',error?.code||error?.message||error);}
-    finally{st.crmPulling=false;}
+    try{
+      crmRead=window.crmAtualizarSeMudou({forcar:true,ctx:crmCtx,_s033Proof:proof,
+        _s033Coordinated:true,detailMode:'core'});
+      st.crmReadPromise=crmRead;
+      atualizados=await crmRead;
+    }catch(error){console.warn('[S033] leitura CRM canônica falhou:',error?.code||error?.message||error);}
+    finally{
+      if(st.crmReadPromise===crmRead) st.crmReadPromise=null;
+      st.crmPulling=false;
+    }
     if(!_s033SyncValido(st)||!window._s012ContextoValido?.(crmCtx)||D!==dadosDrenagem) return;
     // crmCarregar updates D and emits the CRM data event, but that event does
     // not repaint the active page. Reuse the guarded renderer for valid full
@@ -12253,6 +12259,13 @@ async function _s033SyncDrenar(st){
     }
   }
 }
+window._s033CRMReadAguardar=function(ctx){
+  const st=_s033SyncAtual;
+  if(!_s033SyncValido(st)||!window._s012ContextoValido?.(ctx)
+      ||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao||st.crmPulling!==true) return null;
+  const read=st.crmReadPromise;
+  return read&&typeof read.then==='function'?read:null;
+};
 window._s033MainReadStart=function(ctx){
   const st=_s033SyncAtual;
   if(!_s033SyncValido(st)||ctx?.owner!==st.ctx.owner||ctx?.geracao!==st.ctx.geracao) return null;
@@ -12410,7 +12423,7 @@ window._s033Iniciar=function(ctx){
     return true;
   }
   const st={id:++_s033SyncSeq,ctx:Object.assign({},ctx),targets:new Map(),timer:null,
-    boots:0,recoveries:0,pulling:false,crmPulling:false,waitingWrite:false,
+    boots:0,recoveries:0,pulling:false,crmPulling:false,crmReadPromise:null,waitingWrite:false,
     retry:0,paused:false,mainPulls:0};
   _s033SyncAtual=st;
   _s033SyncIds(ctx).forEach(id=>st.targets.set(id,{id,seq:0,dirty:false,serverSeen:false,
@@ -17582,7 +17595,16 @@ window.crmSincronizarUm = async function(lid, ano, s012Ctx, cuboOverride, onProg
     if(recibos.pares.get(lid+'|'+ano)===reciboPublicacaoS033)
       reciboPublicacaoS033.opId=null;
   }
-  if(confirmada) window._crmLimparNaoEnviado?.(ctx,lid,ano,markerEnviado);
+  let marcadorRemovido=false;
+  if(confirmada) marcadorRemovido=window._crmLimparNaoEnviado?.(ctx,lid,ano,markerEnviado)===true;
+  if(confirmarOp&&confirmada&&marcadorRemovido&&reciboPublicacaoS033
+      &&window._s012ContextoValido(ctx)&&D===publicacaoS033.dados
+      &&D.crm?.[lid]?.[ano]===reciboPublicacaoS033.cubo
+      &&reciboPublicacaoS033.opId===null
+      &&_crmS033EscopoRecibos(ctx).pares.get(chavePendente)===reciboPublicacaoS033
+      &&!window.crmPendenciaAtual(ctx,lid,ano)
+      &&!Object.prototype.hasOwnProperty.call(window._crmNaoEnviados||{},chavePendente))
+    window._s033AoPendenteAlterada?.(ctx);
   try{onProgress?.({tipo:'par-publicado',lid,ano,pendenteLocal:!confirmada});}catch(e){console.warn('[crm] progresso:',e.message||e);}
   return {partes: pedacos.length+pedacosCompra.length, partesCompras:pedacosCompra.length,
     clientes: (cubo.clientes||[]).length,
@@ -19319,7 +19341,12 @@ window.crmAtualizarSeMudou = async function(opts){
             &&reciboD.ano===reciboOp.ano&&reciboD.epoch===reciboOp.epoch
             &&reciboD.revisao===reciboOp.revisao&&reciboD.rowKey===reciboOp.rowKey
             &&reciboD.digest===reciboOp.digest;
-          if(mismoFull)return;
+          if(mismoFull){
+            // The listener can race the local native ACK. Keep this exact pair
+            // dirty until the captured operation and marker are both removed.
+            adiados.push([lid,String(ano),gid,Number(ts)]);
+            return;
+          }
         }
       }
       if(reciboIndice?.legacyExactCube===true){
@@ -20466,21 +20493,41 @@ window.crmDetalhesGarantir=async function(paresOpt,s012Ctx,opcoes){
   const permitidas=new Set(window.crmLojasVisiveis?.()||
     (ctx.perfil==='admin'?(typeof LOJAS!=='undefined'?LOJAS.map(l=>l.id):[]):[ctx.loja].filter(Boolean)));
   const entrada=Array.isArray(paresOpt)?paresOpt:[];
-  const pares=[],vistos=new Set();
+  const solicitadas=[],vistos=new Set();
   for(const x of entrada){
     if(!consultaAtual())return cancelada();
     const lid=String(Array.isArray(x)?x[0]:x?.lid||''),ano=String(Array.isArray(x)?x[1]:x?.ano||'');
     const chave=lid+'|'+ano;
     if(!lid||!/^\d{4}$/.test(ano)||!permitidas.has(lid)||vistos.has(chave))continue;
     vistos.add(chave);
+    solicitadas.push({lid,ano,chave,
+      cuboInput:!Array.isArray(x)?(x?.cubo||x?.core):null,
+      gidInput:!Array.isArray(x)?x?.gid:null,
+      tsInput:!Array.isArray(x)?x?.ts:null});
+  }
+  if(!consultaAtual())return cancelada();
+  if(!solicitadas.length)return {ok:true,data:{estado:'completo',pares:[]},error:null};
+  let leituraS033=null;
+  try{leituraS033=window._s033CRMReadAguardar?.(ctx)||null;}catch(_e){}
+  if(leituraS033&&typeof leituraS033.then==='function'){
+    try{await leituraS033;}
+    catch(e){console.warn('[crm] leitura S033 em curso falhou:',e?.code||e?.message||e);}
+  }
+  if(!consultaAtual()||!validarAplicacao())return cancelada();
+  if(!ctx||!window._s012ContextoValido(ctx)||D!==dadosAlvo)
+    return {ok:false,data:{estado:'indisponivel',pares:[]},error:{codigo:'sessao-invalida',mensagem:'A sessão mudou antes da leitura do detalhe.'}};
+  const pares=[];
+  for(const pedido of solicitadas){
+    if(!consultaAtual())return cancelada();
+    const {lid,ano,chave}=pedido;
     const cuboAtual=dadosAlvo.crm?.[lid]?.[ano]||null;
-    const cuboEsperado=(!Array.isArray(x)&&(x?.cubo||x?.core))||cuboAtual;
+    const cuboEsperado=pedido.cuboInput||cuboAtual;
     let meta=cuboEsperado&&_crmDetalhesCorePorCubo.get(cuboEsperado);
     const recibo=_crmS033EscopoRecibos(ctx).pares.get(chave);
     const visto=window._crmTsVisto||{},tsVisto=Number(visto[lid]?.[ano])||0;
     const gidVisto=visto._geracoes?.[lid]?.[ano]||null;
-    const gidEsperado=(!Array.isArray(x)&&x?.gid)||meta?.gid||recibo?.gid||gidVisto||null;
-    const tsEsperado=Number((!Array.isArray(x)&&x?.ts)||meta?.ts||recibo?.ts||tsVisto)||0;
+    const gidEsperado=pedido.gidInput||meta?.gid||recibo?.gid||gidVisto||null;
+    const tsEsperado=Number(pedido.tsInput||meta?.ts||recibo?.ts||tsVisto)||0;
     pares.push({lid,ano,chave,cubo:cuboEsperado,meta,gid:gidEsperado,ts:tsEsperado});
   }
   if(!consultaAtual())return cancelada();
