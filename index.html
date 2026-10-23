@@ -9754,7 +9754,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-23d';
+window.AVATIM_BUILD = '2026-10-23e';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -65226,11 +65226,12 @@ function _s068eCrossIniciar(task){
         throw new Error('Nem todos os conjuntos têm detalhe completo confirmado.');
       for(let i=0;i<rows.length;i++){
         const row=rows[i],capturado=paresCapturados[i];
+        const coreMeta=_crmDetalhesCorePorCubo.get(capturado.cubo);
         if(row?.lid!==capturado.lid||String(row?.ano)!==capturado.ano
             ||!row.gid||!(Number(row.ts)>0)
             ||typeof _crmS068cCoreReciboConfere!=='function'
             ||!_crmS068cCoreReciboConfere(task.ctx,capturado.lid,capturado.ano,capturado.cubo,
-              {gid:row.gid,ts:Number(row.ts)}))
+              {gid:row.gid,ts:Number(row.ts),cacheRevalidated:coreMeta?.cacheRevalidated===true}))
           throw new Error('A leitura retornou detalhe sem a mesma geração core capturada.');
       }
       resultadoPares=rows;
