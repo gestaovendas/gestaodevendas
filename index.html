@@ -7890,13 +7890,13 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-s" onclick="window.toggleDivulgacaoContatos()" style="font-size:12px;padding:8px 14px;background:linear-gradient(135deg,#c9a84c,#e6c672);border:none;color:#111;font-weight:700" title="Ranking de quem mais contatou e de quem mais converteu em compra — PDF para publicar com a equipe">📢 Divulgação</button>
-      <button class="btn-s" onclick="exportarPDFContatos()" style="font-size:12px;padding:8px 14px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Exportar PDF do que está no filtro atual">📄 Exportar PDF</button>
+      <button class="btn-s" onclick="exportarPDFContatos()" style="font-size:12px;padding:8px 14px;background:rgba(220,53,69,.15);border-color:rgba(220,53,69,.4);color:#ff6b7a" title="Exportar PDF dos filtros gerais da aba">📄 Exportar PDF</button>
       <button class="btn-p" onclick="abrirFormContato()">+ Registrar Contato</button>
     </div>
   </div>
 
-  <!-- [R172] LOJA E PERÍODO — valem para a página inteira (KPIs, contatos do
-       mês, lembretes, calendário, ranking, registros, PDF e divulgação).
+  <!-- [R172] LOJA E PERÍODO — valem para KPIs, ranking, PDF e demais blocos;
+       Registros (N007) usa filtros próprios, independentes desta barra.
        Os ids ct-filtro-loja / ct-filtro-de / ct-filtro-ate são os mesmos de
        antes: quem os lia continua lendo, agora a partir daqui. -->
   <div class="sc" id="ct-barra" style="margin-bottom:14px;border:1px solid rgba(201,168,76,.35)">
@@ -8119,6 +8119,51 @@ body:not(.logado) #appScreen{display:none!important}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="st" style="margin:0">📋 Registros</div>
       <div id="contatos-lista-info" style="font-size:10px;color:var(--muted)"></div>
+    </div>
+    <div id="ct-registros-hint" style="font-size:10px;color:var(--muted);line-height:1.4;margin:0 0 10px">
+      Os filtros abaixo alteram apenas esta lista e são independentes dos filtros gerais da aba.
+    </div>
+    <div id="ct-registros-filtros" aria-label="Filtros dos registros"
+      style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px;margin-bottom:12px">
+      <label style="display:grid;gap:4px;font-size:10px;color:var(--muted)">
+        De
+        <input type="date" id="ct-registros-de" aria-label="Data inicial dos registros" onchange="ctRegistrosFiltroMudou()"
+          style="width:100%;box-sizing:border-box;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px">
+      </label>
+      <label style="display:grid;gap:4px;font-size:10px;color:var(--muted)">
+        Até
+        <input type="date" id="ct-registros-ate" aria-label="Data final dos registros" onchange="ctRegistrosFiltroMudou()"
+          style="width:100%;box-sizing:border-box;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px">
+      </label>
+      <label style="display:grid;gap:4px;font-size:10px;color:var(--muted)">
+        Tipo
+        <select id="ct-registros-tipo" aria-label="Tipo dos registros" onchange="ctRegistrosFiltroMudou()"
+          style="width:100%;box-sizing:border-box;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px">
+          <option value="">Todos os tipos</option>
+          <option value="aniversario">🎂 Aniversariantes</option>
+          <option value="inativo">💤 Inativos</option>
+          <option value="pos_venda">📦 Pós-venda</option>
+          <option value="mensagem">💌 Mensagem</option>
+          <option value="imediata">⚡ Imediata</option>
+          <option value="outro">💬 Outros</option>
+        </select>
+      </label>
+      <label style="display:grid;gap:4px;font-size:10px;color:var(--muted)">
+        Vendedor(a)
+        <select id="ct-registros-vend" aria-label="Vendedor(a) dos registros" onchange="ctRegistrosFiltroMudou()"
+          style="width:100%;box-sizing:border-box;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px">
+          <option value="">Todos(as) vendedores</option>
+        </select>
+      </label>
+      <label class="admin-only" style="display:grid;gap:4px;font-size:10px;color:var(--muted)">
+        Loja
+        <select id="ct-registros-loja" data-lojas-operacionais aria-label="Loja dos registros" onchange="ctRegistrosFiltroMudou()"
+          style="width:100%;box-sizing:border-box;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:6px 8px;color:var(--texto);font-size:12px">
+          <option value="">Todas as lojas</option>
+        </select>
+      </label>
+      <button type="button" id="ct-registros-limpar" class="btn-s" onclick="limparFiltrosRegistros()"
+        style="align-self:end;min-height:34px;font-size:11px;padding:6px 10px">Limpar filtros</button>
     </div>
     <div style="overflow-x:auto">
       <table class="dtable" style="min-width:640px" id="contatos-tabela">
@@ -9709,7 +9754,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-22a';
+window.AVATIM_BUILD = '2026-10-22b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -56571,9 +56616,10 @@ function limparFiltrosContatos(){
 // ══════════════════════════════════════════════════════════════════════
 // [R172] BARRA DE LOJA E PERÍODO — Clientes Contatados
 //
-// A loja e o período escolhidos aqui valem para a página inteira. O
+// A loja e o período escolhidos aqui valem para indicadores, ranking e PDF;
+// Registros (N007) usa filtros próprios sem alterar o recorte geral. O
 // período (Dia/Semana/Mês/Ano) vira as datas de ct-filtro-de/ct-filtro-ate
-// — os mesmos campos que os KPIs, o ranking, os registros e o PDF já
+// — os mesmos campos que os KPIs, o ranking e o PDF já
 // liam; no "Período" as datas são livres (vazias = todo o histórico).
 // Dia/Semana/Mês/Ano usam _rkIntervalo, o mesmo recorte dos Rankings.
 // ══════════════════════════════════════════════════════════════════════
@@ -56971,6 +57017,86 @@ window.abrirHistoricoComprasContato=function(lid,nome,origem){
 window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
 window._s012AoTrocarSessao.push(()=>_n001FecharHistoricoCompras(false));
 
+// Os filtros abaixo atuam somente na projeção independente da tabela Registros.
+function _ctRegistrosFiltrosLer(){
+  return {
+    de:document.getElementById('ct-registros-de')?.value||'',
+    ate:document.getElementById('ct-registros-ate')?.value||'',
+    tipo:document.getElementById('ct-registros-tipo')?.value||'',
+    vendId:document.getElementById('ct-registros-vend')?.value||'',
+    loja:document.getElementById('ct-registros-loja')?.value||''
+  };
+}
+
+function _ctRegistrosContexto(){
+  return {
+    admin:isAdmin()===true,
+    lojaId:!isAdmin()?lojaId():'',
+    lojasVisiveis:window._s074IdsLojasVisiveis?.()||[]
+  };
+}
+
+// A lista de Registros é independente dos filtros gerais; aqui permanecem
+// somente a autorização da sessão e as opções locais do próprio bloco.
+function _ctFiltrarRegistros(base,filtros,contexto){
+  if(!Array.isArray(base)||!contexto||!Array.isArray(contexto.lojasVisiveis)) return [];
+  const visiveis=new Set(contexto.lojasVisiveis);
+  const f=filtros||{};
+  if(f.loja&&(!visiveis.has(f.loja)||(!contexto.admin&&f.loja!==contexto.lojaId))) return [];
+  return base.filter(c=>{
+    const loja=String(c?.loja||'');
+    if(!visiveis.has(loja)) return false;
+    if(!contexto.admin&&(!contexto.lojaId||loja!==contexto.lojaId)) return false;
+    if(f.loja&&loja!==f.loja) return false;
+    if(f.vendId&&String(c?.vendId||'')!==String(f.vendId)) return false;
+    if(f.tipo&&c?.tipo!==f.tipo) return false;
+    const data=String(c?.data||'');
+    if((f.de||f.ate)&&!/^\d{4}-\d{2}-\d{2}$/.test(data)) return false;
+    if(f.de&&data<f.de) return false;
+    if(f.ate&&data>f.ate) return false;
+    return true;
+  });
+}
+
+// A lista vem dos contatos de lojas atualmente visíveis. A identidade da
+// vendedora vem de vendId no registro; v.loja/ativa não reescrevem o histórico.
+function _ctRegistrosOpcoesVendedoras(contatos,contexto){
+  if(!Array.isArray(contatos)||!contexto||!Array.isArray(contexto.lojasVisiveis)) return [];
+  const visiveis=new Set(contexto.lojasVisiveis);
+  const porId=new Map();
+  const vendedoresPorId=new Map((D.vendedoras||[]).map(v=>[String(v.id),v]));
+  contatos.forEach(c=>{
+    const id=String(c?.vendId||'');
+    const loja=String(c?.loja||'');
+    if(!id||!visiveis.has(loja)||(!contexto.admin&&loja!==contexto.lojaId)) return;
+    if(!porId.has(id)) porId.set(id,{id,lojas:new Set()});
+    porId.get(id).lojas.add(loja);
+  });
+  return [...porId.values()].map(item=>{
+    const vend=vendedoresPorId.get(item.id);
+    const nome=vend?.nome||item.id;
+    const lojas=[...item.lojas].map(id=>LOJAS.find(l=>l.id===id)?.nome||id).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    return {id:item.id,label:contexto.admin&&lojas.length?`${nome} · ${lojas.join(', ')}`:nome};
+  }).sort((a,b)=>a.label.localeCompare(b.label,'pt-BR')||a.id.localeCompare(b.id));
+}
+
+function _ctRegistrosSincronizarVendedoras(){
+  const sel=document.getElementById('ct-registros-vend');
+  if(!sel) return;
+  const contexto=_ctRegistrosContexto();
+  const opcoes=_ctRegistrosOpcoesVendedoras(D.contatos||[],contexto);
+  const atual=sel.value;
+  const assinatura=opcoes.map(o=>o.id+'\u0001'+o.label).join('\u0002');
+  if(sel.dataset.assinatura===assinatura) return;
+  const vazio=document.createElement('option');vazio.value='';vazio.textContent='Todos(as) vendedores';
+  sel.replaceChildren(vazio);
+  opcoes.forEach(o=>{
+    const option=document.createElement('option');option.value=o.id;option.textContent=o.label;sel.appendChild(option);
+  });
+  sel.dataset.assinatura=assinatura;
+  sel.value=opcoes.some(o=>o.id===atual)?atual:'';
+}
+
 function renderContatos(){
   if(!D.contatos) D.contatos = [];
   if(!window._ctListaPaginacao) window._ctListaPaginacao = {filtro:null,pagina:0};
@@ -56979,6 +57105,10 @@ function renderContatos(){
     window._s012AoTrocarSessao = window._s012AoTrocarSessao || [];
     window._s012AoTrocarSessao.push(()=>{
       window._ctListaPaginacao = {filtro:null,pagina:0};
+      ['ct-registros-de','ct-registros-ate','ct-registros-tipo','ct-registros-vend','ct-registros-loja'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.value='';
+      });
       document.getElementById('contatos-paginacao')?.remove();
     });
   }
@@ -57188,6 +57318,28 @@ function renderContatos(){
   if(typeof _renderContatosRanking === 'function') _renderContatosRanking(contatos);
   window._ctBarraVisual();
 
+  _ctRegistrosSincronizarVendedoras();
+  _ctAtualizarRegistrosContatos();
+}
+
+function ctRegistrosFiltroMudou(){
+  _ctAtualizarRegistrosContatos();
+}
+
+function limparFiltrosRegistros(){
+  ['ct-registros-de','ct-registros-ate','ct-registros-tipo','ct-registros-vend','ct-registros-loja'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.value='';
+  });
+  _ctAtualizarRegistrosContatos();
+}
+
+function _ctAtualizarRegistrosContatos(){
+  const contatos=_ctFiltrarRegistros(D.contatos||[],_ctRegistrosFiltrosLer(),_ctRegistrosContexto());
+  _renderRegistrosContatos(contatos);
+}
+
+function _renderRegistrosContatos(contatos){
   // ── Lista de registros
   const tbody = document.getElementById('contatos-tbody');
   const vazio = document.getElementById('contatos-vazio');
@@ -57195,7 +57347,7 @@ function renderContatos(){
   if(!tbody) return;
 
   const paginaEstado = window._ctListaPaginacao;
-  const filtroAtual = ['ct-filtro-loja','ct-filtro-vend','ct-filtro-tipo','ct-filtro-de','ct-filtro-ate']
+  const filtroAtual = ['ct-registros-de','ct-registros-ate','ct-registros-tipo','ct-registros-vend','ct-registros-loja']
     .map(id => document.getElementById(id)?.value || '').join('\u001f');
   if(paginaEstado.filtro !== filtroAtual){ paginaEstado.filtro = filtroAtual; paginaEstado.pagina = 0; }
 
@@ -57282,7 +57434,7 @@ function renderContatos(){
       const proximaPagina = paginaEstado.pagina+delta;
       if(proximaPagina<0 || proximaPagina>=totalPaginas) return;
       paginaEstado.pagina = proximaPagina;
-      window.renderContatos();
+      _ctAtualizarRegistrosContatos();
       const continuarId = delta>0?'ct-pagina-proxima':'ct-pagina-anterior';
       const retornoId = delta>0?'ct-pagina-anterior':'ct-pagina-proxima';
       const continuar = document.getElementById(continuarId);
@@ -57299,7 +57451,6 @@ function renderContatos(){
     if(contato)window.abrirHistoricoComprasContato(contato.loja,contato.cliente,botao);
   };
 }
-
 
 
 // ══════════════════════════════════════════════════════════════════════
