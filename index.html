@@ -9754,7 +9754,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-23c';
+window.AVATIM_BUILD = '2026-10-23d';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -14935,6 +14935,14 @@ if(!window._s074LojasVisibilidadeListener){
   });
 }
 
+window._s078CapturarRerender = function(){ return _rerenderTimer; };
+window._s078ConsumirRerender = function(timer){
+  if(timer===null||timer===undefined||_rerenderTimer!==timer) return;
+  if(timer) clearTimeout(timer);
+  _rerenderTimer=null;
+  window._rerenderAdiado=false;
+};
+
 /**
  * Agenda um redesenho logo após uma alteração local, agrupando rajadas
  * (vários save() seguidos redesenham uma vez só).
@@ -15938,6 +15946,47 @@ window.crmTemCubos = function(){
   return window.crmLojasVisiveis().some(lid => Object.values(D.crm?.[lid] || {}).some(Boolean));
 };
 
+// S078: only certified immutable inputs can reuse the two private projections.
+const _crmS078Bases = [null, null];
+function _crmS078LimparBases(){ _crmS078Bases.fill(null); }
+window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+window._s012AoTrocarSessao.push(_crmS078LimparBases);
+window.addEventListener('crm-atualizado',_crmS078LimparBases);
+window.addEventListener('avatim:lojas-visibilidade-alterada',_crmS078LimparBases);
+function _crmS078Combinar(lojas,anos,opcoes){
+  const ctx=window._s012Capturar?.(), dados=D;
+  const combinar=window.crmCombinar, chave=window._crmChaveCli;
+  const slot=opcoes?.somenteClientes===true?1:0;
+  const selecao=JSON.stringify([lojas,anos||null,opcoes?.incluirComprasCliente===true]);
+  const entradas=[];
+  let elegivel=!!ctx&&window._s012ContextoValido(ctx)&&opcoes?.incluirComprasCliente!==true;
+  for(const lid of lojas||[]){
+    const porAno=dados.crm?.[lid]||{};
+    for(const ano of anos?.length?anos:Object.keys(porAno)){
+      const cubo=porAno[ano];
+      entradas.push([lid,String(ano),cubo]);
+      if(cubo&&!_crm2ReceiptValido(cubo,ctx,lid,ano)) elegivel=false;
+    }
+  }
+  // The all-years full projection already contains the identical customer merge.
+  const anterior=slot===1&&_crmS078Bases[0]?.selecao===selecao
+    ?_crmS078Bases[0]:_crmS078Bases[slot];
+  if(elegivel&&anterior?.dados===dados&&anterior.owner===ctx.owner
+      &&anterior.geracao===ctx.geracao&&anterior.selecao===selecao
+      &&anterior.combinar===combinar&&anterior.chave===chave
+      &&anterior.entradas.length===entradas.length
+      &&entradas.every((e,i)=>e.every((v,j)=>v===anterior.entradas[i][j])))
+    return anterior.base;
+  _crmS078Bases[slot]=null;
+  const base=combinar(lojas,anos,opcoes);
+  if(elegivel&&D===dados&&window._s012ContextoValido(ctx)
+      &&window.crmCombinar===combinar&&window._crmChaveCli===chave
+      &&entradas.every(([lid,ano,cubo])=>dados.crm?.[lid]?.[ano]===cubo))
+    _crmS078Bases[slot]={dados,owner:ctx.owner,geracao:ctx.geracao,selecao,
+      combinar,chave,entradas,base};
+  return base;
+}
+
 /** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedor(a). */
 window.crmVisao = function(over){
   over = over || {};
@@ -15963,7 +16012,7 @@ window.crmVisao = function(over){
     });
     base = window.crmCombinarDeLinhas(linhas);
   } else {
-    base = window.crmCombinar(lojas, fAno ? [fAno] : null,
+    base = _crmS078Combinar(lojas, fAno ? [fAno] : null,
       fVend && over.incluirAtribuicaoClientes !== false
         ? {incluirComprasCliente:true} : undefined);
   }
@@ -16142,13 +16191,22 @@ window.crmFiltrar = function(cubo, f){
     });
   }
 
-  const _anonFora = clientes.filter(c => window._crmAnonimo(c.nome, c.documento));
+  const _ctxNomes=window._s012Capturar?.(), _memoNomes=window._crmS045Nomes;
+  const _nomes=!!_ctxNomes&&window._s012ContextoValido(_ctxNomes)
+    &&_memoNomes?.owner===_ctxNomes.owner&&_memoNomes.geracao===_ctxNomes.geracao
+    &&_memoNomes.anonimo===window._crmAnonimo?_memoNomes.nomes:null;
+  const _anonFora=[], identificados=[];
+  clientes.forEach(c=>{
+    const anonimo=_nomes?.get(c.nome)?.get(c.documento)?.anonimo
+      ??window._crmAnonimo(c.nome,c.documento);
+    (anonimo?_anonFora:identificados).push(c);
+  });
   const anonimoListas = {
     clientes: _anonFora.length,
     fat: Math.round(_anonFora.reduce((s,c) => s + (c.total||0), 0) * 100) / 100,
     compras: _anonFora.reduce((s,c) => s + (c.compras||0), 0)
   };
-  clientes = clientes.filter(c => !window._crmAnonimo(c.nome, c.documento));
+  clientes = identificados;
 
   // ══════════════════════════════════════════════════════════════
   // [R152] O recorte por MÊS sai da dimensão mês × cliente, não da data
@@ -16386,8 +16444,8 @@ window.crmFiltrar = function(cubo, f){
     clientes: clientes.sort((a,b)=>b.total-a.total),
     vendedoras: [...porVend.values()].sort((a,b)=>b.fat-a.fat),
     cross: (cubo.cross||[]).map(([a,b,n]) => ({a:cubo.prods[a]||'?', b:cubo.prods[b]||'?', n})),
-    prodsTabela: cubo.prods || [],
-    vendsTabela: cubo.vends || [],
+    prodsTabela: (cubo.prods || []).slice(),
+    vendsTabela: (cubo.vends || []).slice(),
     linhas: cubo.linhas || 0,
     linhasAproximadas: _crmLinhasAproximadas(cubo),
     // ══════════════════════════════════════════════════════════════
@@ -16408,7 +16466,7 @@ window.crmFiltrar = function(cubo, f){
       return {ini: ms[0] + '-01',
               fim: ult + '-' + String(new Date(y2, m2, 0).getDate()).padStart(2,'0')};
     })(),
-    periodo: cubo.periodo || {}
+    periodo: {...cubo.periodo}
   };
 };
 
@@ -34015,6 +34073,7 @@ function nav(pg){
   // active only. Drop them as soon as an accepted navigation leaves that view.
   if(pg!=='excel') window._s068eCrossAbandonarVista?.();
   window._s062NavSeq=(Number(window._s062NavSeq)||0)+1;
+  const _s078RerenderAnterior=window._s078CapturarRerender?.();
   // Um pull em outra página pode ter alterado a população ativa.
   preencherSelectVends(true);
   if(pg !== 'vendedoras') window._cancelarEdicaoVendaVend?.();
@@ -34152,6 +34211,8 @@ function nav(pg){
           : hoje();
       }
       renderPainelDia();carregarVendsForm();setTimeout(()=>gerarDiagnostico(),600);}})[pg]?.();
+  if(['excel','contatos'].includes(pg)&&_s012NavValido())
+    window._s078ConsumirRerender?.(_s078RerenderAnterior);
   // Atualiza buscas que permaneceram montadas enquanto outra tela estava ativa.
   if(['estoque','lanc','fluxo'].includes(pg)) window._estqCatalogoAtualizado?.();
 }
@@ -64496,7 +64557,7 @@ window.crmClientesTodosAnos = function(over){
   if(!lojas.length){ window._crmS045Nomes=null; return []; }
 
   let cubo;
-  try{ cubo = window.crmCombinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
+  try{ cubo = _crmS078Combinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
   catch(e){ window._crmS045Nomes=null; console.warn('[R149] base de clientes:', e.message); return []; }
 
   // [R115] Flow contributes only the latest positive sale and is rebuilt each call.
@@ -65641,8 +65702,18 @@ window.renderInativos180 = function(){
   if(tipoDoc !== 'todos')      inativos = inativos.filter(c => _crmDocTipo(c.documento) === tipoDoc);
 
   // Cruzar com quem já foi contatado — a régua não pode repetir abordagem
-  const _norm = s => String(s||'').trim().toLowerCase()
+  const _normalizar = s => String(s||'').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  const _ctxNomes=window._s012Capturar?.(), _memoNomes=window._crmS045Nomes;
+  const _nomes=!!_ctxNomes&&window._s012ContextoValido(_ctxNomes)
+    &&_memoNomes?.owner===_ctxNomes.owner&&_memoNomes.geracao===_ctxNomes.geracao
+    &&_memoNomes.anonimo===window._crmAnonimo?_memoNomes.nomes:null;
+  const _norm = s => {
+    const info=_nomes?.get(s)?.values().next().value;
+    if(!info) return _normalizar(s);
+    if(info.normalizado===null) info.normalizado=_normalizar(s);
+    return info.normalizado;
+  };
   const contatados = new Map();
   (D.contatos||[]).forEach(ct => {
     const k = _norm(ct.cliente);
@@ -65761,10 +65832,9 @@ window.renderInativos180 = function(){
 
   // [R79] Guardar a lista já filtrada e ordenada: o Excel exporta ESTA,
   // não uma recalculada — assim planilha e tela nunca discordam.
-  window._ctInatLista = inativos.map(c => Object.assign({}, c, {
-    ultimoContato: _ultCt(c) || '',
-    reabordar: _venceuFollowUp(c)          // [R114] voltou por vencimento do prazo
-  }));
+  // These rows were already copied for this render; the export shares this local list.
+  inativos.forEach(c=>{c.ultimoContato=_ultCt(c)||'';c.reabordar=_venceuFollowUp(c);});
+  window._ctInatLista = inativos;
 
   const cnt = document.getElementById('ct-inat-count');
   if(cnt) cnt.textContent = inativos.length.toLocaleString('pt-BR');
