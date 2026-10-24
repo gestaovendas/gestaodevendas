@@ -5349,11 +5349,8 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
                   // em todo carregamento, e a limpeza mais adiante concluia que
                   // tinha sido relancado e apagava a lapide de vez.
                   if(window._lapideBarra(base, 'venda', l, _dt2, _val2)) return;
-                  // [FIX cross-device] Merge timestamp-aware
-                  const _lvL = base.vendas[l][_dt2];
-                  const _lTL = (_lvL && _lvL._savedAt) || 0;
-                  const _rTL = (_val2 && _val2._savedAt) || 0;
-                  if(!_lvL || _rTL > _lTL) base.vendas[l][_dt2]=_val2;
+                  // O documento da loja é a base de venda deste perfil; principal pode ser legado.
+                  base.vendas[l][_dt2]=_val2;
                 });
               });
               if(!base.vendasVend) base.vendasVend={};
@@ -5374,13 +5371,10 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
                     window._s007AvisarAtribuicaoPendente?.(proje.pendencias[0]?.motivo);
                 }
                 if(!base.vendasVend[vid]) base.vendasVend[vid]={};
-                // [FIX cross-device] Merge seguro vendasVend timestamp-aware
+                // O documento da loja é a base de venda deste perfil; principal pode ser legado.
                 Object.entries(dias||{}).forEach(([_dt,_val])=>{
                   if(window._lapideBarra(base, 'vend', vid, _dt, _val)) return; // [R130]
-                  const _lvvL = base.vendasVend[vid][_dt];
-                  const _lTvL = (_lvvL && _lvvL._savedAt) || 0;
-                  const _rTvL = (_val && _val._savedAt) || 0;
-                  if(!_lvvL || _rTvL > _lTvL) base.vendasVend[vid][_dt]=_val;
+                  base.vendasVend[vid][_dt]=_val;
                 });
               });
               // [S020] A lápide da loja também faz parte da leitura, mesmo
@@ -9754,7 +9748,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-23e';
+window.AVATIM_BUILD = '2026-10-24a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -29605,6 +29599,7 @@ window._s004VendasEstadoParaWriter=function(tipo,id,data,localRoot,remoteRoot,ct
   const remoto=_s004EstadoNo(remoteRoot,tipo,id,data);
   if(!decisao || !decisao.marcada) return {ok:true,estado:remoto,marcada:false};
   if(decisao.conflito){
+    window._s004VendasObservarConflito?.(ctx,tipo,id,data,remoteRoot,decisao);
     const e=new Error('conflito S004 na venda '+id+' em '+data+'; pendência preservada, sincronização cancelada');
     e.code='s004-conflito-venda'; throw e;
   }
@@ -38565,7 +38560,8 @@ async function lancarVendaVend(){
     }catch(e){
       if(!window._s012ContextoValido?.(_s012CtxVendaVend)) return;
       console.warn("[Avatim] lancarVendaVend FB erro:", e.message);
-      showToast("\u26a0\ufe0f Salvo localmente. Sincronizando...","warn");
+      if(String(e?.code||e?.message||'')!=='s004-conflito-venda')
+        showToast("\u26a0\ufe0f Salvo localmente. Sincronizando...","warn");
     }
   } else {
     // [R177] sem conexão: antes, silêncio depois do "lançada"
