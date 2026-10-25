@@ -653,6 +653,291 @@ window._crmRegistrarAliasRenomeacao = function(v, nomeAnterior, lojaAnterior){
   return true;
 };
 
+// S086: fatos de ciclo de vida são aditivos, identificados por evento e
+// revisão. A data efetiva é informativa; recordedAt nunca é reescrito.
+window._s086Falhar=function(code){
+  const error=new Error(code);
+  error.code=code;
+  throw error;
+};
+window._s086DataLocalHoje=function(){
+  const d=new Date();
+  return String(d.getFullYear()).padStart(4,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+};
+window._s086DataValida=function(value){
+  if(typeof value!=='string'||!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value)) return false;
+  const [y,m,d]=value.split('-').map(Number), leap=y%4===0&&(y%100!==0||y%400===0);
+  const days=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+  return y>0&&d<=days[m-1];
+};
+window._s086EventoValido=function(event){
+  if(!event||typeof event!=='object'||Array.isArray(event)||event.version!==1
+      ||typeof event.eventId!=='string'||!event.eventId
+      ||!['vendedora','loja'].includes(event.entityType)||!String(event.entityId||'')
+      ||!window._s086DataValida(event.effectiveDate)
+      ||!Number.isFinite(event.recordedAt)||event.recordedAt<=0
+      ||!['admin','store'].includes(event.actor)
+      ||!['observed-action','admin-attested-history'].includes(event.origin)) return false;
+  if(event.origin==='admin-attested-history'&&event.actor!=='admin') return false;
+  if(['cadastro','arquivado','reativado'].includes(event.kind))
+    return event.revision===1&&event.previousRevision===undefined
+      &&event.targetEventId===undefined&&event.expectedRevision===undefined
+      &&event.priorEffectiveDate===undefined;
+  if(event.kind==='date-correction')
+    return typeof event.targetEventId==='string'&&!!event.targetEventId
+      &&Number.isSafeInteger(event.expectedRevision)&&event.expectedRevision>=1
+      &&event.revision===event.expectedRevision+1
+      &&window._s086DataValida(event.priorEffectiveDate)
+      &&event.actor==='admin'&&event.origin==='admin-attested-history'
+      &&['vendedora','loja'].includes(event.entityType);
+  return false;
+};
+window._s086EstadoEventos=function(events,expected={}){
+  const facts=new Map(), corrections=[], seen=new Map(), conflicts=[];
+  if(events!=null&&!Array.isArray(events))return {atuais:[],conflitos:['histórico inválido']};
+  (Array.isArray(events)?events:[]).forEach(event=>{
+    const id=String(event?.eventId||'(evento inválido)');
+    if(!window._s086EventoValido(event)){conflicts.push(id);return;}
+    if(expected.entityType&&event.entityType!==expected.entityType
+        ||expected.entityId&&String(event.entityId)!==String(expected.entityId)){
+      conflicts.push(id);return;
+    }
+    const duplicate=seen.get(event.eventId);
+    if(duplicate){if(!window._vendCampoIgual(duplicate,event)) conflicts.push(id);return;}
+    seen.set(event.eventId,event);
+    if(event.kind==='date-correction') corrections.push(event);
+    else facts.set(event.eventId,event);
+  });
+  const correctionsByTarget=new Map();
+  corrections.forEach(event=>{
+    const target=facts.get(event.targetEventId);
+    if(!target||target.entityType!==event.entityType||String(target.entityId)!==String(event.entityId)){
+      conflicts.push(event.targetEventId);return;
+    }
+    const list=correctionsByTarget.get(event.targetEventId)||[];
+    list.push(event);correctionsByTarget.set(event.targetEventId,list);
+  });
+  const atuais=[];
+  facts.forEach((fact,eventId)=>{
+    const list=(correctionsByTarget.get(eventId)||[]).slice()
+      .sort((a,b)=>a.expectedRevision-b.expectedRevision||String(a.eventId).localeCompare(String(b.eventId)));
+    let revision=1,effectiveDate=fact.effectiveDate,valid=true;
+    const byExpectedRevision=new Map();
+    list.forEach(item=>{
+      const entries=byExpectedRevision.get(item.expectedRevision)||[];
+      entries.push(item);byExpectedRevision.set(item.expectedRevision,entries);
+    });
+    const applied=[];
+    for(let i=0;i<list.length;i++){
+      const item=list[i], sameRevision=byExpectedRevision.get(item.expectedRevision)||[];
+      if(sameRevision.length!==1||item.expectedRevision!==revision||item.priorEffectiveDate!==effectiveDate){
+        conflicts.push(eventId);valid=false;break;
+      }
+      revision=item.revision;effectiveDate=item.effectiveDate;applied.push(item);
+    }
+    atuais.push({...fact,originalEffectiveDate:fact.effectiveDate,
+      effectiveDate:valid?effectiveDate:fact.effectiveDate,revision:valid?revision:1,
+      corrections:valid?applied:[]});
+  });
+  corrections.forEach(event=>{if(!facts.has(event.targetEventId)) conflicts.push(event.targetEventId);});
+  return {atuais,conflitos:[...new Set(conflicts)]};
+};
+window._s086UnirEventos=function(a,b,strict=false,expected={}){
+  const entradas=[];
+  [a,b].forEach(list=>{
+    if(list==null) return;
+    if(Array.isArray(list)) list.forEach(e=>entradas.push(e));
+    else{if(strict) window._s086Falhar('s086-evento-invalido');entradas.push(list);}
+  });
+  const vistos=new Map(), saida=[];
+  for(const event of entradas){
+    if(!window._s086EventoValido(event)
+        ||expected.entityType&&event.entityType!==expected.entityType
+        ||expected.entityId&&String(event.entityId)!==String(expected.entityId)){
+      if(strict) return window._s086Falhar('s086-evento-invalido');
+      saida.push(event); continue;
+    }
+    const anteriores=vistos.get(event.eventId);
+    if(anteriores){
+      if(anteriores.some(anterior=>window._vendCampoIgual(anterior,event))) continue;
+      if(strict) return window._s086Falhar('s086-lifecycle-conflict');
+      anteriores.push(event);saida.push(event);
+      continue;
+    }
+    vistos.set(event.eventId,[event]);saida.push(event);
+  }
+  const state=window._s086EstadoEventos(saida,expected);
+  if(strict&&state.conflitos.length) return window._s086Falhar('s086-lifecycle-conflict');
+  return saida.sort((x,y)=>Number(x?.recordedAt||0)-Number(y?.recordedAt||0)
+    ||String(x?.eventId||'').localeCompare(String(y?.eventId||'')));
+};
+window._s086NovoEvento=function(kind,effectiveDate,ctx,eventId,origin,entityType,entityId){
+  if(!['cadastro','arquivado','reativado'].includes(kind)||!window._s086DataValida(effectiveDate)
+      ||!ctx||!window._s012ContextoValido?.(ctx)
+      ||!['vendedora','loja'].includes(entityType)||!String(entityId||'')
+      ||(origin!==undefined&&!['observed-action','admin-attested-history'].includes(origin))) return null;
+  const event={version:1,eventId:eventId||('s086-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,11)),
+    entityType,entityId:String(entityId),revision:1,kind,effectiveDate,recordedAt:Date.now(),
+    actor:ctx.perfil==='admin'?'admin':'store',
+    origin:origin==='admin-attested-history'?'admin-attested-history':'observed-action'};
+  return window._s086EventoValido(event)?event:null;
+};
+window._s086AdicionarCorrecao=function(events,eventId,expectedRevision,effectiveDate,ctx){
+  if(!ctx||ctx.perfil!=='admin'||!window._s012ContextoValido?.(ctx)
+      ||!window._s086DataValida(effectiveDate)) return null;
+  const state=window._s086EstadoEventos(events), current=state.atuais.find(e=>e.eventId===eventId);
+  if(state.conflitos.includes(eventId)) return null;
+  const existing=(Array.isArray(events)?events:[]).filter(e=>e?.kind==='date-correction'
+    &&e.targetEventId===eventId&&e.expectedRevision===expectedRevision);
+  if(existing.length){
+    if(existing.length===1&&existing[0].effectiveDate===effectiveDate
+        &&window._s086EventoValido(existing[0])) return {...existing[0]};
+    return null;
+  }
+  if(!current||current.revision!==expectedRevision||current.effectiveDate===effectiveDate) return null;
+  const correction={version:1,eventId:'s086-date-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,11),
+    entityType:current.entityType,entityId:current.entityId,kind:'date-correction',
+    targetEventId:current.eventId,expectedRevision,revision:expectedRevision+1,
+    priorEffectiveDate:current.effectiveDate,effectiveDate,recordedAt:Date.now(),
+    actor:'admin',origin:'admin-attested-history'};
+  return window._s086EventoValido(correction)?correction:null;
+};
+window._s086UnirPayload=function(current,proposed,strict=false,docId='principal'){
+  current=current&&typeof current==='object'?current:{};
+  proposed=proposed&&typeof proposed==='object'?proposed:{};
+  const out={...proposed};
+  const sourceStore=typeof docId==='string'&&docId.startsWith('loja_')?docId.slice(5):null;
+  const rows=new Map((Array.isArray(current.vendedoras)?current.vendedoras:[])
+    .filter(v=>v?.id).map(v=>[String(v.id),v]));
+  const proposedRows=new Map((Array.isArray(out.vendedoras)?out.vendedoras:[])
+    .filter(v=>v?.id).map(v=>[String(v.id),v]));
+  const currentMeta=current._vendsExcluidasMeta&&typeof current._vendsExcluidasMeta==='object'
+    ?current._vendsExcluidasMeta:{};
+  const proposedMeta=out._vendsExcluidasMeta&&typeof out._vendsExcluidasMeta==='object'
+    ?out._vendsExcluidasMeta:{};
+  const historyFor=(row,meta,id)=>{
+    const expected={entityType:'vendedora',entityId:String(id)};
+    const parts=[];
+    if(row&&!row._crmIdentidadeSomente&&(!sourceStore||!row.loja||row.loja===sourceStore))
+      parts.push(row._s086Lifecycle);
+    if(meta&&!meta._crmIdentidadeSomente&&(!sourceStore||!meta.loja||meta.loja===sourceStore))
+      parts.push(meta._s086Lifecycle);
+    return parts.reduce((acc,part)=>window._s086UnirEventos(acc,part,strict,expected),[]);
+  };
+  if(Array.isArray(out.vendedoras)) out.vendedoras=out.vendedoras.map(v=>{
+    if(!v?.id) return v;
+    const c=rows.get(String(v.id));
+    const expected={entityType:'vendedora',entityId:String(v.id)};
+    const hCurrent=historyFor(c,currentMeta[String(v.id)],String(v.id));
+    const history=window._s086UnirEventos(hCurrent,v._s086Lifecycle,strict,expected);
+    if(sourceStore&&v.loja&&v.loja!==sourceStore){const copy={...v};delete copy._s086Lifecycle;return copy;}
+    if(history.length||c?._s086Lifecycle||v._s086Lifecycle||currentMeta[String(v.id)]?._s086Lifecycle)
+      return {...v,_s086Lifecycle:history};
+    return v;
+  });
+  if(Object.keys(currentMeta).length||Object.keys(proposedMeta).length){
+    out._vendsExcluidasMeta={...proposedMeta};
+    const ids=new Set([...Object.keys(currentMeta),...Object.keys(proposedMeta),
+      ...(Array.isArray(current.vendedoras)?current.vendedoras
+        .filter(v=>v?.id&&!proposedRows.has(String(v.id))).map(v=>String(v.id)):[])]);
+    ids.forEach(id=>{
+      const before=currentMeta[id],target=out._vendsExcluidasMeta[id],row=rows.get(String(id));
+      if(sourceStore&&before?.loja&&before.loja!==sourceStore
+          &&target?.loja&&target.loja!==sourceStore){
+        if(target&&typeof target==='object'){
+          const copy={...target};delete copy._s086Lifecycle;
+          out._vendsExcluidasMeta[id]=copy;
+        }
+        return;
+      }
+      const expected={entityType:'vendedora',entityId:String(id)};
+      const history=window._s086UnirEventos(historyFor(row,before,String(id)),target?._s086Lifecycle,strict,expected);
+      if(target&&typeof target==='object'&&!target._crmIdentidadeSomente){
+        if(history.length||target._s086Lifecycle||before?._s086Lifecycle)
+          out._vendsExcluidasMeta[id]={...target,_s086Lifecycle:history};
+      }else if(!target&&!proposedRows.has(String(id))&&history.length
+          &&(!sourceStore||before?.loja===sourceStore||row?.loja===sourceStore)){
+        out._vendsExcluidasMeta[id]={loja:sourceStore||before?.loja||row?.loja||null,_s086Lifecycle:history};
+      }else if(target&&target._crmIdentidadeSomente){
+        const copy={...target};delete copy._s086Lifecycle;
+        out._vendsExcluidasMeta[id]=copy;
+      }
+    });
+  }else if(Array.isArray(current.vendedoras)){
+    current.vendedoras.filter(v=>v?.id&&!proposedRows.has(String(v.id))).forEach(row=>{
+      const history=historyFor(row,null,String(row.id));
+      if(history.length&&(!sourceStore||row.loja===sourceStore)){
+        if(!out._vendsExcluidasMeta) out._vendsExcluidasMeta={};
+        out._vendsExcluidasMeta[String(row.id)]={loja:row.loja||sourceStore||null,_s086Lifecycle:history};
+      }
+    });
+  }
+  if(sourceStore){
+    delete out._s086StoreLifecycle;
+    if(out._vendsExcluidasMeta&&typeof out._vendsExcluidasMeta==='object'){
+      Object.keys(out._vendsExcluidasMeta).forEach(id=>{
+        const meta=out._vendsExcluidasMeta[id];
+        if(!meta||typeof meta!=='object') return;
+        if(meta._crmIdentidadeSomente===true||meta.loja&&meta.loja!==sourceStore){
+          const copy={...meta};delete copy._s086Lifecycle;
+          out._vendsExcluidasMeta[id]=copy;
+        }
+      });
+    }
+  }
+  const currentStores=current._s086StoreLifecycle&&typeof current._s086StoreLifecycle==='object'
+    ?current._s086StoreLifecycle:{};
+  const proposedStores=out._s086StoreLifecycle&&typeof out._s086StoreLifecycle==='object'
+    ?out._s086StoreLifecycle:{};
+  if(!sourceStore&&(Object.keys(currentStores).length||Object.keys(proposedStores).length)){
+    const stores={...proposedStores};
+    new Set([...Object.keys(currentStores),...Object.keys(proposedStores)]).forEach(lid=>{
+      const history=window._s086UnirEventos(currentStores[lid],proposedStores[lid],strict,
+        {entityType:'loja',entityId:String(lid)});
+      if(history.length) stores[lid]=history; else delete stores[lid];
+    });
+    out._s086StoreLifecycle=stores;
+  }
+  return out;
+};
+window._s086TimelineSnapshot=function(kind,id){
+  const ctx=window._s012Capturar?.();
+  if(!ctx||ctx.perfil!=='admin'||!window._s012ContextoValido?.(ctx)
+      ||!['vendedora','loja'].includes(kind)||!String(id||''))
+    return {ok:false,kind,id:String(id||''),owner:null,events:[],conflicts:[]};
+  let events=[];
+  if(kind==='loja') events=D._s086StoreLifecycle?.[String(id)]||[];
+  else{
+    const row=(D.vendedoras||[]).find(v=>String(v?.id)===String(id));
+    const tomb=D._vendsExcluidasMeta?.[String(id)];
+    events=row?row._s086Lifecycle:(tomb?._s086Lifecycle||[]);
+  }
+  const expected={entityType:kind==='loja'?'loja':'vendedora',entityId:String(id)};
+  const state=window._s086EstadoEventos(events,expected);
+  return {ok:true,status:state.conflitos.length?'conflict':state.atuais.length?'ok':'unknown',
+    kind,id:String(id),owner:ctx.owner,events:Array.isArray(events)?events.map(e=>e&&typeof e==='object'?{...e}:e):[],
+    current:state.atuais,conflicts:state.conflitos};
+};
+window._s086RestringirPerfil=function(dados,ctx){
+  if(!dados||typeof dados!=='object'||ctx?.perfil==='admin') return dados;
+  delete dados._s086StoreLifecycle;
+  const lid=String(ctx?.loja||'');
+  if(Array.isArray(dados.vendedoras)&&dados.vendedoras.some(v=>v&&v.loja!==lid&&v._s086Lifecycle!==undefined)) dados.vendedoras=dados.vendedoras.map(v=>{
+    if(!v||v.loja===lid||v._s086Lifecycle===undefined) return v;
+    const row={...v};delete row._s086Lifecycle;return row;
+  });
+  if(dados._vendsExcluidasMeta&&typeof dados._vendsExcluidasMeta==='object'){
+    let mudou=false;const meta={...dados._vendsExcluidasMeta};
+    Object.entries(meta).forEach(([id,v])=>{
+      if(v&&v._s086Lifecycle!==undefined&&(v._crmIdentidadeSomente||v.loja!==lid)){
+        meta[id]={...v};delete meta[id]._s086Lifecycle;mudou=true;
+      }
+    });
+    if(mudou)dados._vendsExcluidasMeta=meta;
+  }
+  return dados;
+};
+
 window._vendMesclarLocal = function(bvi, rv, opts){
   bvi = bvi || {}; rv = rv || {};
   const _vid = bvi.id || rv.id;
@@ -824,6 +1109,8 @@ window._vendMesclarLocal = function(bvi, rv, opts){
   // serializar undefined em registros antigos que ainda não têm aliases.
   const _aliasesCRM = window._vendCrmAliasesUnir(bvi.crmAliases, rv.crmAliases);
   if(_aliasesCRM !== undefined) _mesclado.crmAliases = _aliasesCRM;
+  const _s086Vend = window._s086UnirEventos(bvi._s086Lifecycle,rv._s086Lifecycle,false);
+  if(_s086Vend.length||bvi._s086Lifecycle||rv._s086Lifecycle) _mesclado._s086Lifecycle=_s086Vend;
   return _mesclado;
 };
 
@@ -1538,6 +1825,7 @@ window._mesclarVendedoras = function(remoto){
       if(!D._vendsExcluidas.includes(vid)){ D._vendsExcluidas.push(vid); n++; }
     });
   }
+  n += window._mesclarAtribuicaoVendsExcluidas(D, remoto);
   const excl = D._vendsExcluidas || [];
   if(!D.vendedoras || !D.vendedoras.length){
     D.vendedoras = remoto.vendedoras.filter(rv => !excl.includes(rv.id));
@@ -1923,6 +2211,8 @@ window._filtrarVendsExcluidasMetaLoja = function(mapa, lid){
     const aliases = window._vendCrmClaimsExcluida(meta).filter(a => a.loja === lid);
     if(meta.loja === lid){
       filtrado[id] = {...meta, crmAliases:aliases};
+      if(Array.isArray(meta._s086Lifecycle))
+        filtrado[id]._s086Lifecycle=window._s086UnirEventos([],meta._s086Lifecycle,false);
       delete filtrado[id]._crmIdentidadeSomente;
     }else if(aliases.length){
       // Só a reivindicação de identidade daquela loja atravessa o filtro.
@@ -1937,12 +2227,24 @@ window._filtrarVendsExcluidasMetaLoja = function(mapa, lid){
 };
 
 window._mesclarAtribuicaoVendsExcluidas = function(alvo, fonte){
-  if(!alvo || !fonte || !fonte._vendsExcluidasMeta
-      || typeof fonte._vendsExcluidasMeta !== 'object'
-      || Array.isArray(fonte._vendsExcluidasMeta)) return 0;
+  if(!alvo || !fonte) return 0;
   const local = alvo._vendsExcluidasMeta && typeof alvo._vendsExcluidasMeta === 'object'
       && !Array.isArray(alvo._vendsExcluidasMeta) ? alvo._vendsExcluidasMeta : {};
-  const remoto = fonte._vendsExcluidasMeta;
+  const remoto = fonte._vendsExcluidasMeta && typeof fonte._vendsExcluidasMeta === 'object'
+      && !Array.isArray(fonte._vendsExcluidasMeta) ? {...fonte._vendsExcluidasMeta} : {};
+  // A lápide pode chegar enquanto uma data é corrigida no cadastro ainda aberto.
+  // Guardar seu histórico antes que o filtro de excluídos remova a linha.
+  const excluidas=new Set([...(Array.isArray(alvo._vendsExcluidas)?alvo._vendsExcluidas:[]),
+    ...(Array.isArray(fonte._vendsExcluidas)?fonte._vendsExcluidas:[])]);
+  if(excluidas.size)for(const row of [...(Array.isArray(alvo.vendedoras)?alvo.vendedoras:[]),
+      ...(Array.isArray(fonte.vendedoras)?fonte.vendedoras:[])]){
+    if(!row?.id||!excluidas.has(row.id)||row._crmIdentidadeSomente
+        ||row._s086Lifecycle==null)continue;
+    const meta=remoto[row.id]||local[row.id]||{loja:row.loja||null};
+    if(meta._crmIdentidadeSomente)continue;
+    remoto[row.id]={...meta,_s086Lifecycle:window._s086UnirEventos(
+      meta._s086Lifecycle,row._s086Lifecycle,false,{entityType:'vendedora',entityId:String(row.id)})};
+  }
   let n = 0;
   const unido = Object.assign({}, local);
   Object.entries(remoto).forEach(([id, meta])=>{
@@ -1959,6 +2261,16 @@ window._mesclarAtribuicaoVendsExcluidas = function(alvo, fonte){
         : ambasSomenteIdentidade
           ? {...anterior, ...meta}
           : {...meta};
+    // O histórico pertence ao ID, inclusive após transferência. Aliases sem
+    // cadastro continuam sem carregar o histórico de outra pessoa/loja.
+    const s086Local=!anterior._crmIdentidadeSomente
+      ?anterior._s086Lifecycle:null;
+    const s086Remoto=!meta._crmIdentidadeSomente
+      ?meta._s086Lifecycle:null;
+    const s086=window._s086UnirEventos(s086Local,s086Remoto,false,
+      {entityType:'vendedora',entityId:String(id)});
+    if(s086.length) mesclada._s086Lifecycle=s086;
+    else delete mesclada._s086Lifecycle;
     mesclada.crmAliases = window._vendCrmAliasesUnir(
       window._vendCrmClaimsExcluida(anterior),
       window._vendCrmClaimsExcluida(meta)
@@ -2142,6 +2454,15 @@ window._mesclarRemotoComum = function(remoto){
     if(_estqMudou && typeof window.aplicarOverridesProdutos === 'function'){
       try{ window.aplicarOverridesProdutos(D); }catch(eA){ console.warn('[R166] aplicar estoque:', eA.message); }
     }
+  }
+  if(window._userLoja?.admin===true){
+    const map=window._s086UnirPayload?.({_s086StoreLifecycle:D._s086StoreLifecycle},
+      {_s086StoreLifecycle:remoto._s086StoreLifecycle},false)?._s086StoreLifecycle;
+    if(map) D._s086StoreLifecycle=map;
+  }else{
+    // O modal de histórico é administrativo. Não reter no cache de loja o
+    // mapa de ciclos de vida de todas as lojas recebido junto do principal.
+    delete D._s086StoreLifecycle;
   }
   // [R166] objetivos de campanha: por id, com lápide (as lápides já foram
   // unidas acima, em _LAPIDES_LISTA)
@@ -2953,20 +3274,70 @@ window.fbGetToken = async function(operacao){
 
   // Admin's ordinary principal snapshot remains a one-family S007 transaction.
   // It does not fan out to the seven stores or publish S053 records.
-  async function _s053PublicarSnapshotPrincipal(ctx,payload,extras,validarContexto){
+  async function _s053PublicarSnapshotPrincipal(ctx,payload,extras,validarContexto,s004Guard){
     const valido=()=>!!ctx&&window._s012ContextoValido?.(ctx)===true
       &&(!validarContexto||validarContexto());
     return window._s012Publicacao(()=>runTransaction(db,async tx=>{
       if(!valido()) throw new Error('s012-sessao-alterada');
       const atual=await _s007LerFamiliaTx(tx,'principal');
       if(!valido()) throw new Error('s012-sessao-alterada');
-      const saida=_s053PreservarCamposWriter(atual?.obj||{},payload);
+      if(s004Guard){
+        const docs={principal:{exists:!!atual,obj:atual?.obj||null}};
+        const fontes=[...new Set(s004Guard.targets.map(x=>x.source))];
+        for(const source of fontes){
+          const familia=await _s007LerFamiliaTx(tx,source);
+          docs[source]={exists:!!familia,obj:familia?.obj||null};
+        }
+        if(!valido()||window._s004VendasValidarGuardaTransacao?.(ctx,s004Guard,docs)!==true)
+          throw new Error('s004-fontes-alteradas-durante-publicacao-principal');
+      }
+      const propostaBase=_s053PreservarCamposWriter(atual?.obj||{},payload);
+      const proposta=window._s086UnirPayload(atual?.obj||{},propostaBase,true,'principal');
+      // Vendas pertencem à loja: esta publicação de configuração conserva
+      // a projeção principal exata, inclusive se o fanout precisar de retry.
+      const saida=s004Guard
+        ?window._s004VendasPreservarAlvosPrincipal?.(s004Guard,atual?.obj||{},proposta)
+        :proposta;
+      if(!saida) throw new Error('s004-preservacao-principal-indisponivel');
       const familia=_s007PrepararFamiliaTx('principal',saida,extras);
       if(!valido()) throw new Error('s012-sessao-alterada');
       _s007EscreverFamiliaTx(tx,familia);
       return saida;
     },{maxAttempts:5}));
   }
+
+  window._s086LerPrincipalAtual=async function(ctx,kind,id){
+    const valido=()=>ctx?.perfil==='admin'&&window._s012ContextoValido?.(ctx)===true;
+    if(!valido()) throw new Error('s012-sessao-alterada');
+    const sellerId=kind==='vendedora'?String(id||''):null;
+    const local=sellerId&&(D.vendedoras||[]).find(v=>String(v.id)===sellerId);
+    const localLid=local?.loja||D._vendsExcluidasMeta?.[sellerId]?.loja;
+    return window._s012Publicacao(()=>runTransaction(db,async tx=>{
+      if(!valido()) throw new Error('s012-sessao-alterada');
+      const familia=await _s007LerFamiliaTx(tx,'principal');
+      if(!valido()) throw new Error('s012-sessao-alterada');
+      if(!familia) throw new Error('s086-principal-indisponivel');
+      if(!sellerId) return familia.obj;
+      const current=familia.obj;
+      const row=(current.vendedoras||[]).find(v=>String(v.id)===sellerId);
+      const meta=current._vendsExcluidasMeta?.[sellerId];
+      const expected={entityType:'vendedora',entityId:sellerId};
+      let history=window._s086UnirEventos(row?._s086Lifecycle,meta?._s086Lifecycle,false,expected);
+      // O cadastro pode nascer em loja_* antes de chegar à projeção principal.
+      const lojas=[...new Set([localLid,row?.loja,meta?.loja].filter(lid=>
+        typeof lid==='string'&&typeof _S033_LOJAS_SYNC!=='undefined'
+          &&Array.isArray(_S033_LOJAS_SYNC)&&_S033_LOJAS_SYNC.includes(lid)))];
+      for(const lid of lojas){
+        const loja=await _s007LerFamiliaTx(tx,'loja_'+lid);
+        if(!valido()) throw new Error('s012-sessao-alterada');
+        const r=(loja?.obj?.vendedoras||[]).find(v=>String(v.id)===sellerId);
+        const m=loja?.obj?._vendsExcluidasMeta?.[sellerId];
+        const detalhe=window._s086UnirEventos(r?._s086Lifecycle,m?._s086Lifecycle,false,expected);
+        history=window._s086UnirEventos(history,detalhe,false,expected);
+      }
+      return {...current,vendedoras:[{id:sellerId,_s086Lifecycle:history}],_vendsExcluidasMeta:{}};
+    },{maxAttempts:5}));
+  };
 
   // Backup restore replaces ordinary family data, but it must preserve the
   // tx-current S053 fields. Read, prepare, and write the entire S007 family in
@@ -3012,7 +3383,9 @@ window.fbGetToken = async function(operacao){
         if(!_s065MesmaIdentidadeCabecaS007(before,expectedHead))
           throw new Error('s065-cabeca-divergente:'+docId);
       }
-      const restaurado=adapters.preserveCurrentFields({current:atual?.obj||{},proposed:proposta});
+      const atualObj=atual?.obj||{};
+      const restauradoBase=adapters.preserveCurrentFields({current:atualObj,proposed:proposta});
+      const restaurado=window._s086UnirPayload(atualObj,restauradoBase,true,docId);
       const familia=_s007PrepararFamiliaTx(docId,restaurado,metadados);
       const header=familia.escritas.find(write=>write?.id===docId)?.dados;
       const after=fence?_s065IdentidadeCabecaS007(true,header):null;
@@ -3408,17 +3781,25 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
   // Recusa um payload montado sobre uma família que mudou. A releitura
   // dentro da transação também protege contra transferência confirmada depois
   // da preparação: nenhuma escrita comum pode ressuscitar a cópia removida.
-  async function _s007PublicarLoja(ctx,lid,payload,base,extras){
+  async function _s007PublicarLoja(ctx,lid,payload,base,extras,s004Guard,validarAntesDeGravar){
     return window._s012Publicacao(()=>runTransaction(db,async tx=>{
       if(!window._s012ContextoValido?.(ctx)) throw new Error('s012-sessao-alterada');
       const principal=await _s007LerFamiliaTx(tx,'principal');
       const atual=await _s007LerFamiliaTx(tx,'loja_'+lid);
       if(!principal) throw new Error('s007-principal-ausente');
+      const docs={principal:{exists:!!principal,obj:principal.obj||null},
+        ['loja_'+lid]:{exists:!!atual,obj:atual?.obj||null}};
+      if(s004Guard&&window._s004VendasValidarGuardaTransacao?.(
+          ctx,s004Guard,docs)!==true)
+        throw new Error('s004-fontes-alteradas-durante-publicacao-loja');
+      if(validarAntesDeGravar&&validarAntesDeGravar(docs)!==true)
+        throw new Error('s004-recuperacao-guard-recusado');
       const baseSemS053=_s053PreservarCamposWriter(atual?.obj||{},base||{});
       if(!window._vendCampoIgual(atual?.obj||{},baseSemS053))
         throw new Error('s007-loja-alterada-releia-e-tente-novamente');
       const mapa=principal.obj._s007Transferencias||{};
-      const saida=_s053PreservarCamposWriter(atual?.obj||{},payload);
+      const saidaBase=_s053PreservarCamposWriter(atual?.obj||{},payload);
+      const saida=window._s086UnirPayload(atual?.obj||{},saidaBase,true,'loja_'+lid);
       for(const [id,dias] of Object.entries(saida.vendasVend||{})){
         if(!Object.prototype.hasOwnProperty.call(mapa,id)) continue;
         for(const [data,reg] of Object.entries(dias||{})){
@@ -3442,6 +3823,299 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
       return saida;
     },{maxAttempts:5}));
   }
+// S083: uma pendência S004 durável pode ser recuperada sem serializar o D
+  // inteiro. A leitura prévia é direcionada ao principal e à loja-alvo; a
+  // publicação continua pelo writer S007, com CAS e rota de vendedor na tx.
+  async function _s007LerS004Recuperacao(ctx,docId){
+    if(typeof window._comPrazo!=='function') throw new Error('s004-prazo-indisponivel');
+    let evidencia=null;
+    const objeto=await window._comPrazo(
+      _lerDocObj(db,doc,getDoc,docId,e=>{evidencia=e;}),
+      'a leitura da recuperação S004',window._prazoGravacao?.());
+    if(!window._s012ContextoValido?.(ctx)) throw new Error('s012-sessao-alterada');
+    const provas=[evidencia?.head,...(evidencia?.parts||[])];
+    if(!evidencia?.head||!provas.every(p=>p?.serverBacked===true))
+      throw new Error('s004-leitura-remota-nao-confirmada:'+docId);
+    return {exists:objeto!==null&&objeto!==undefined,
+      obj:objeto&&typeof objeto==='object'&&!Array.isArray(objeto)?objeto:null};
+  }
+  function _s007S004MesmaOperacao(a,b){
+    return !!a&&!!b&&a.tipo===b.tipo&&String(a.id)===String(b.id)
+      &&String(a.data)===String(b.data)&&a.opId===b.opId
+      &&window._vendCampoIgual?.(a.base,b.base)===true
+      &&window._vendCampoIgual?.(a.depois,b.depois)===true
+      &&window._vendCampoIgual?.(a.baseLida,b.baseLida)===true;
+  }
+  function _s007S004EstadoS005(ctx){
+    if(window._pendingLocalData!=null) return 'presente';
+    if(typeof window._s012PendenteLer!=='function'
+        ||typeof window._s005PendingLerArmazenado!=='function') return 'indisponivel';
+    try{
+      if(window._s012PendenteLer(ctx)!=null) return 'presente';
+      const salvo=window._s005PendingLerArmazenado(ctx);
+      if(salvo?.raw===null&&salvo?.payload===null) return 'ausente';
+      if(salvo?.raw!==null||salvo?.payload!==null) return 'presente';
+    }catch(_e){}
+    return 'indisponivel';
+  }
+  window._s007S004EstadoS005=_s007S004EstadoS005;
+  function _s007S004PendenciaSemS005(ctx){
+    return _s007S004EstadoS005(ctx)==='ausente';
+  }
+  function _s007S004AlvoValido(ctx,lid,principal,entrada){
+    const lojas=typeof _S033_LOJAS_SYNC==='undefined'?null:_S033_LOJAS_SYNC;
+    if(!Array.isArray(lojas)||!lojas.includes(String(lid))) return false;
+    if(ctx.perfil==='loja'&&String(ctx.loja||'')!==String(lid)) return false;
+    if(ctx.perfil!=='admin'&&ctx.perfil!=='loja') return false;
+    if(entrada.tipo==='venda') return String(entrada.id)===String(lid);
+    if(entrada.tipo!=='vend'||typeof window._s007ResolverLojaVend!=='function') return false;
+    const id=String(entrada.id);
+    const legado=(principal.vendedoras||[]).find(v=>String(v?.id)===id)?.loja
+      ||principal._vendsExcluidasMeta?.[id]?.loja||null;
+    const rota=window._s007ResolverLojaVend(id,String(entrada.data),
+      principal._s007Transferencias||{},legado);
+    return rota?.ok===true&&String(rota.loja)===String(lid);
+  }
+  function _s007S004MiniRoot(entradas,estados){
+    const root={};
+    entradas.forEach(entrada=>window._s004VendasRestaurarEstado(
+      entrada.tipo,entrada.id,entrada.data,estados(entrada),root));
+    return root;
+  }
+  function _s007S004PayloadLoja(base,entradas){
+    const payload=Object.assign({},base||{}),copiados=new Set();
+    entradas.forEach(entrada=>{
+      const venda=entrada.tipo==='venda';
+      const campo=venda?'vendas':'vendasVend';
+      const exclusoes=venda?'_vendasExcluidas':'_vendasVendExcluidas';
+      const carimbos=venda?'_vendasExcluidasTs':'_vendasVendExcluidasTs';
+      const id=String(entrada.id),idCampo=campo+'|'+id,idExclusao=exclusoes+'|'+id;
+      if(!copiados.has(campo)){
+        payload[campo]=Object.assign({},base?.[campo]||{});copiados.add(campo);
+      }
+      if(!copiados.has(idCampo)){
+        payload[campo][entrada.id]=Object.assign({},base?.[campo]?.[entrada.id]||{});
+        copiados.add(idCampo);
+      }
+      if(!copiados.has(exclusoes)){
+        payload[exclusoes]=Object.assign({},base?.[exclusoes]||{});copiados.add(exclusoes);
+      }
+      if(!copiados.has(idExclusao)){
+        const atual=base?.[exclusoes]?.[entrada.id];
+        payload[exclusoes][entrada.id]=Array.isArray(atual)?atual.slice():atual;
+        copiados.add(idExclusao);
+      }
+      if(!copiados.has(carimbos)){
+        payload[carimbos]=Object.assign({},base?.[carimbos]||{});copiados.add(carimbos);
+      }
+    });
+    entradas.forEach(entrada=>window._s004VendasRestaurarEstado(
+      entrada.tipo,entrada.id,entrada.data,entrada.depois,payload));
+    return payload;
+  }
+  window._s007RecuperarVendasS004=async function(ctx,dadosAlvo,entradas,capturados,
+      restoreEpoch,aoConfirmar){
+    const resultados=[];
+    const valido=()=>!!ctx&&window._s012ContextoValido?.(ctx)===true&&D===dadosAlvo
+      &&!window._s065RestauracaoAtiva?.(ctx)
+      &&window._s065RestauracaoEpoca?.()===restoreEpoch
+      &&_s007S004PendenciaSemS005(ctx);
+    const mesmoEstado=(a,b)=>window._vendCampoIgual?.(a,b)===true;
+    const localAceito=(entrada,estado)=>mesmoEstado(estado,entrada.base)
+      ||mesmoEstado(estado,entrada.depois)
+      // Exceção S004 existente: união apenas da lápide-base exata no relançamento.
+      ||(estado?.valor!==null&&!entrada.depois?.lapide
+        &&mesmoEstado(estado.valor,entrada.depois?.valor)&&!!estado.lapide
+        &&!!entrada.base?.lapide&&estado.lapideTs===entrada.base.lapideTs);
+    const entradasAtuais=()=>window._s004VendasPendentes?.(ctx)||[];
+    const grupoAtual=(grupo)=>{
+      const atuais=entradasAtuais();
+      return grupo.every(entrada=>atuais.some(atual=>_s007S004MesmaOperacao(entrada,atual)));
+    };
+    const capturado=entrada=>(capturados||[]).find(item=>_s007S004MesmaOperacao(item.entrada,entrada));
+    const estadoAtualIgual=grupo=>grupo.every(entrada=>{
+      const c=capturado(entrada);
+      return !!c&&mesmoEstado(window._s004VendasEstado(entrada.tipo,entrada.id,
+        entrada.data,dadosAlvo),c.local);
+    });
+    const ignoradas=[];
+    if(!valido()||!Array.isArray(entradas)||!entradas.length||!Array.isArray(capturados)
+        ||typeof window._s004VendasDecidir!=='function'
+        ||typeof window._s004VendasObservarConflito!=='function'
+        ||typeof window._s004VendasRestaurarEstado!=='function')
+      return {grupos:resultados,ignoradas,completa:false};
+    try{
+      const authOp={email:ctx.email,owner:ctx.owner,geracao:ctx.geracao};
+      if(!window._fbSdkUsuarioCompativel(authOp,auth.currentUser)){
+        await window.fbLogin(ctx.email,authOp);
+        if(!valido()) return {grupos:resultados};
+        if(!window._fbSdkUsuarioCompativel(authOp,auth.currentUser))
+          throw new Error('s012-sdk-identidade-incompativel');
+      }
+      const principalLeitura=await _s007LerS004Recuperacao(ctx,'principal');
+      const principal=principalLeitura?.obj;
+      if(principalLeitura?.exists!==true||!principal)
+        throw new Error('s007-principal-ausente');
+      const porLoja=new Map();
+      for(const entrada of entradas){
+        if(!entrada||!['venda','vend'].includes(entrada.tipo)||entrada.id==null
+            ||typeof entrada.opId!=='string'||!entrada.opId||!entrada.data){
+          ignoradas.push({entrada,motivo:'operacao-invalida'});continue;
+        }
+        const lid=entrada.tipo==='venda'?String(entrada.id):(()=>{
+          const id=String(entrada.id);
+          const legado=(principal.vendedoras||[]).find(v=>String(v?.id)===id)?.loja
+            ||principal._vendsExcluidasMeta?.[id]?.loja||null;
+          const rota=window._s007ResolverLojaVend?.(id,String(entrada.data),
+            principal._s007Transferencias||{},legado);
+          return rota?.ok===true?String(rota.loja):'';
+        })();
+        if(!lid||!_s007S004AlvoValido(ctx,lid,principal,entrada)){
+          ignoradas.push({entrada,motivo:'rota-invalida'});continue;
+        }
+        if(!porLoja.has(lid)) porLoja.set(lid,[]);
+        porLoja.get(lid).push(entrada);
+      }
+      for(const [lid,grupo] of porLoja){
+        const status={lid,entradas:grupo,confirmada:false};
+        resultados.push(status);
+        if(!valido()||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+          status.erro='operacao-ou-estado-alterado';continue;
+        }
+        if(!grupo.every(entrada=>{
+          const c=capturado(entrada),estado=c?.local;
+          return !!c&&localAceito(entrada,estado);
+        })){
+          status.erro='estado-local-fora-do-contrato-s004';continue;
+        }
+        const baseLeitura=await _s007LerS004Recuperacao(ctx,'loja_'+lid);
+        if(!valido()||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+          status.erro='operacao-ou-estado-alterado';continue;
+        }
+        const remoto=baseLeitura?.obj||{},esperado=_s007S004MiniRoot(grupo,e=>e.depois);
+        const opcoesObservacao={sources:{principal:principalLeitura,store:baseLeitura}};
+        const paraGravar=[],confirmadas=[];
+        let conflito=false,confirmacaoIndeterminada=false,marcada=false;
+        for(const entrada of grupo){
+          const decisao=window._s004VendasDecidir(entrada.tipo,entrada.id,
+            entrada.data,esperado,remoto,ctx,opcoesObservacao);
+          if(!decisao?.marcada){conflito=true;break;}
+          marcada=true;
+          if(decisao.conflito){
+            window._s004VendasObservarConflito(ctx,entrada.tipo,entrada.id,
+              entrada.data,remoto,decisao);
+            conflito=true;
+          }else if(decisao.confirmada){
+            if(window._s004VendasConfirmadaEmFontes?.(
+                ctx,entrada,opcoesObservacao)!==true){
+              confirmacaoIndeterminada=true;break;
+            }
+            confirmadas.push(entrada);
+          }else paraGravar.push(entrada);
+        }
+        if(conflito||confirmacaoIndeterminada||!marcada||!valido()
+            ||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+          status.erro=conflito?'conflito-remoto':confirmacaoIndeterminada
+            ?'confirmacao-remota-s004-indeterminada':'operacao-ou-estado-alterado';continue;
+        }
+        if(!paraGravar.length){
+          if(!grupo.every(entrada=>{
+            const decisao=window._s004VendasDecidir(entrada.tipo,entrada.id,
+              entrada.data,esperado,remoto,ctx,opcoesObservacao);
+            return decisao?.marcada===true&&decisao.confirmada===true&&!decisao.conflito
+              &&window._s004VendasConfirmadaEmFontes?.(
+                ctx,entrada,opcoesObservacao)===true;
+          })){status.erro='confirmacao-remota-indeterminada';continue;}
+          if(!valido()||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+            status.erro='operacao-ou-estado-alterado';continue;
+          }
+          status.servidorConfirmado=true;
+          if(typeof aoConfirmar!=='function'||aoConfirmar(ctx,lid,grupo,capturados,restoreEpoch)!==true){
+            status.erro='durabilidade-local-ou-ack-s004-nao-confirmado';continue;
+          }
+          status.localDuravel=true;status.ackS004=true;
+          try{window._s007ConfirmarCacheEscrita?.(ctx,lid,baseLeitura?.obj?.vendasVend);}catch(_e){}
+          status.confirmada=true;
+          continue;
+        }
+        if(!valido()||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+          status.erro='operacao-ou-estado-alterado';continue;
+        }
+        const precisaGuarda=paraGravar.some(entrada=>entrada.baseLida?.v===2);
+        const s004Guard=window._s004VendasCriarGuardaTransacao?.(
+          ctx,paraGravar,'loja-preimage',()=>opcoesObservacao)||null;
+        if(precisaGuarda&&!s004Guard){
+          status.erro='guarda-s004-transacional-indisponivel';continue;
+        }
+        const payload=_s007S004PayloadLoja(remoto,paraGravar);
+        const validarAntesDeGravar=docs=>{
+          const principalAtual=docs?.principal?.obj;
+          const fontesJaAplicadas={sources:{principal:docs?.principal,
+            store:docs?.['loja_'+lid]}};
+          const fontesPropostas={sources:{principal:docs?.principal,
+            store:{exists:true,obj:payload}}};
+          return !!principalAtual&&valido()&&grupoAtual(grupo)&&estadoAtualIgual(grupo)
+            &&grupo.every(entrada=>_s007S004AlvoValido(ctx,lid,principalAtual,entrada))
+            &&confirmadas.every(entrada=>
+              window._s004VendasConfirmadaEmFontes?.(
+                ctx,entrada,fontesJaAplicadas)===true)
+            &&paraGravar.every(entrada=>
+              window._s004VendasConfirmadaEmFontes?.(
+                ctx,entrada,fontesPropostas)===true);
+        };
+        try{
+          const envio=_s007PublicarLoja(ctx,lid,payload,remoto,
+            {lojaId:lid,por:String(ctx.email||'')+(ctx.perfil==='admin'?' (admin)':'')},
+            s004Guard,validarAntesDeGravar);
+          await window._comPrazo(envio,'a recuperação das vendas',window._prazoGravacao?.());
+          if(!valido()||!grupoAtual(grupo)||!estadoAtualIgual(grupo)){
+            status.erro='operacao-ou-estado-alterado-apos-ack-remoto';continue;
+          }
+          status.servidorConfirmado=true;
+          if(typeof aoConfirmar!=='function'||aoConfirmar(ctx,lid,grupo,capturados,restoreEpoch)!==true){
+            status.erro='durabilidade-local-ou-ack-s004-nao-confirmado';continue;
+          }
+          status.localDuravel=true;status.ackS004=true;
+          try{window._s007ConfirmarCacheEscrita?.(ctx,lid,payload.vendasVend);}catch(_e){}
+          status.confirmada=true;
+        }catch(erro){
+          status.erro=String(erro?.code||erro?.message||'s007-recuperacao-nao-confirmada');
+          if(status.erro.includes('s007-loja-alterada-releia-e-tente-novamente')){
+            try{
+              if(valido()&&grupoAtual(grupo)&&estadoAtualIgual(grupo)){
+                const principalAtual=await _s007LerS004Recuperacao(ctx,'principal');
+                if(valido()&&grupoAtual(grupo)&&estadoAtualIgual(grupo)
+                    &&principalAtual?.exists===true&&principalAtual.obj){
+                  const storeAtual=await _s007LerS004Recuperacao(ctx,'loja_'+lid);
+                  if(valido()&&grupoAtual(grupo)&&estadoAtualIgual(grupo)
+                      &&grupo.every(entrada=>_s007S004AlvoValido(
+                        ctx,lid,principalAtual.obj,entrada))){
+                    const decisorAtual=_s007S004MiniRoot(grupo,e=>e.depois);
+                    const fontesAtuais={sources:{principal:principalAtual,store:storeAtual}};
+                    const remotoAtual=storeAtual?.obj||{};
+                    grupo.forEach(entrada=>{
+                      const decisao=window._s004VendasDecidir(entrada.tipo,entrada.id,
+                        entrada.data,decisorAtual,remotoAtual,ctx,fontesAtuais);
+                      if(decisao?.conflito) window._s004VendasObservarConflito(ctx,
+                        entrada.tipo,entrada.id,entrada.data,remotoAtual,decisao);
+                    });
+                  }
+                }
+              }
+            }catch(_e){}
+          }
+        }
+      }
+      const contadas=resultados.reduce((n,g)=>n+g.entradas.length,0);
+      return {grupos:resultados,ignoradas,
+        completa:entradas.length>0&&ignoradas.length===0&&contadas===entradas.length
+          &&resultados.length>0&&resultados.every(g=>g.confirmada===true)};
+    }catch(erro){
+      if(window._s012ContextoValido?.(ctx))
+        console.warn('[S004] recuperação owner-scoped não confirmada:',erro?.code||erro?.message||erro);
+      return {grupos:resultados,ignoradas,completa:false};
+    }
+  };
   // Expostos para as ferramentas que vivem fora deste módulo (diagnósticos e
   // correções manuais). Elas liam e gravavam o "principal" cru — com o
   // documento fatiado leriam JSON pela metade e, pior, gravariam de volta SEM
@@ -3540,10 +4214,11 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           return r.ok?r.loja:null;
         };
         const _s004PendenciasAdmin = window._s004VendasPendentes?.(s012Ctx) || [];
-        const _s004AplicarPendenciasDaLoja = (lid, remoto, vendas, vendasVend) => {
+        const _s004AplicarPendenciasDaLoja = (lid, remoto, vendas, vendasVend,options) => {
           _s004PendenciasAdmin.forEach(p=>{
             if(_s004LojaDaEntrada(p)!==lid) return;
-            const estado=window._s004VendasEstadoParaWriter(p.tipo,p.id,p.data,D2,remoto,s012Ctx).estado;
+            const estado=window._s004VendasEstadoParaWriter(
+              p.tipo,p.id,p.data,D2,remoto,s012Ctx,options).estado;
             if(p.tipo==='venda') window._s004VendasAplicarAoMapa(vendas,p.data,estado);
             else {
               if(!vendasVend[p.id]) vendasVend[p.id]={};
@@ -3742,6 +4417,8 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           // Associação mínima para fatos vendidos de cadastros excluídos;
           // valores continuam somente em vendasVend nos documentos de loja.
           _vendsExcluidasMeta: D2._vendsExcluidasMeta || {},
+          // S086: histórico administrativo de ciclo das lojas fica no principal.
+          _s086StoreLifecycle: D2._s086StoreLifecycle || {},
           // S007: a atribuição temporal tem autoridade admin e atravessa sessões.
           _s007Transferencias: D2._s007Transferencias || {},
           // [NEW 27/07] lojas arquivadas — só admin decide, vai no principal
@@ -3945,6 +4622,14 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         // do admin. A leitura é seguida de setDoc, não uma transação multi-doc:
         // o fanout relê a loja e repete a validação antes do próprio setDoc.
         const _s004PreflightRemotos=new Map();
+        const _s004PreflightExiste=new Map();
+        const _s004FontesDe=(lid,principalObj=_principalRemoto,principalExiste=!!_principalRemoto,
+            storeObj=_s004PreflightRemotos.get(lid),storeExiste=_s004PreflightExiste.get(lid)===true)=>({
+          sources:{
+            principal:{exists:principalExiste===true,obj:principalObj||null},
+            store:{exists:storeExiste===true,obj:storeObj||null}
+          }
+        });
         for(const p of _s004PendenciasAdmin){
           const lid=_s004LojaDaEntrada(p);
           if(!lid) throw new Error('s004-venda-sem-loja-associada');
@@ -3952,9 +4637,11 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             const remotoVenda=await _lerDocObj(db,doc,getDoc,'loja_'+lid);
             _s012Exigir();
             _s004PreflightRemotos.set(lid,remotoVenda||{});
+            _s004PreflightExiste.set(lid,!!remotoVenda);
           }
           const remotoVenda=_s004PreflightRemotos.get(lid);
-          window._s004VendasEstadoParaWriter(p.tipo,p.id,p.data,D2,remotoVenda||{},s012Ctx);
+          window._s004VendasEstadoParaWriter(p.tipo,p.id,p.data,D2,remotoVenda||{},s012Ctx,
+            _s004FontesDe(lid));
         }
 
         // Pendências anteriores à S004 não têm sidecar. Validar cada destino
@@ -3979,7 +4666,13 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         // [R125] fatiado — este documento passou de 1 MiB e a gravação
         // vinha sendo recusada pelo Firestore com invalid-argument.
         _s012Exigir();
-        await _s053PublicarSnapshotPrincipal(s012Ctx,D2_principal,{por:email},_s012Valido);
+        const _s004GuardaPrincipal=window._s004VendasCriarGuardaTransacao?.(
+          s012Ctx,_s004PendenciasAdmin,'principal-preimage',
+          p=>_s004FontesDe(_s004LojaDaEntrada(p)))||null;
+        if(_s004PendenciasAdmin.some(p=>p.baseLida?.v===2)&&!_s004GuardaPrincipal)
+          throw new Error('s004-guarda-principal-indisponivel');
+        const _saidaPrincipal=await _s053PublicarSnapshotPrincipal(
+          s012Ctx,D2_principal,{por:email},_s012Valido,_s004GuardaPrincipal);
         // Se a sessão mudou durante o documento, sua cabeça já confirmou
         // somente o principal. Não iniciar novas leituras/escritas de fanout
         // nem sinalizar ACK do snapshot administrativo completo.
@@ -4129,9 +4822,11 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           await Promise.all(_lojasMudadas.map(async (lidA) => {
             _s012Exigir();
             const docIdA = "loja_"+lidA;
-            let remotoA = {};
+            let remotoA = {}, remotoAExiste=false;
             try{
-              remotoA = (await _lerDocObj(db, doc, getDoc, docIdA)) || {};
+              const lidoA=await _lerDocObj(db, doc, getDoc, docIdA);
+              remotoAExiste=!!lidoA;
+              remotoA = lidoA || {};
               _s012Exigir();
             }catch(eR){
               // [R140] O payload desta loja é montado MESCLANDO o que está no
@@ -4145,6 +4840,15 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
                 + "por cima do que já está lá.");
               return;   // sem entrar em _lojasOk: a próxima gravação tenta de novo
             }
+
+            const remotoABase=remotoA;
+            const _s004FontesFanout=_s004FontesDe(
+              lidA,_saidaPrincipal,!!_saidaPrincipal,remotoABase,remotoAExiste);
+            const _s004OpcoesFanout=_s004FontesFanout;
+            const _s004PendenciasDaLoja=_s004PendenciasAdmin.filter(
+              p=>_s004LojaDaEntrada(p)===lidA);
+            remotoA=window._s004VendasSnapshotRemotoParaWriter(remotoABase,
+              _s004PendenciasDaLoja,s012Ctx,D2,_s004OpcoesFanout);
 
             const _s004LegadoAdmin=window._s004VendasBloquearPendenteLegado(
               s012Ctx,dadosJSON,D2,remotoA,lidA);
@@ -4167,9 +4871,11 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
               vendasA[dt] = dados;
             });
             Object.entries(D2.vendas?.[lidA] || {}).forEach(([dt,dados])=>{
-              const _s004=window._s004VendasDecidir?.('venda',lidA,dt,D2,remotoA,s012Ctx);
+              const _s004=window._s004VendasDecidir?.(
+                'venda',lidA,dt,D2,remotoA,s012Ctx,_s004OpcoesFanout);
               if(_s004?.marcada){
-                const _estado=window._s004VendasEstadoParaWriter('venda',lidA,dt,D2,remotoA,s012Ctx);
+                const _estado=window._s004VendasEstadoParaWriter(
+                  'venda',lidA,dt,D2,remotoA,s012Ctx,_s004OpcoesFanout);
                 window._s004VendasAplicarAoMapa(vendasA,dt,_estado.estado);
                 return;
               }
@@ -4204,9 +4910,11 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
               Object.entries(diasLocais).forEach(([dt,d])=>{
                 const rota=window._s007ResolverLojaVend(id,dt,D2._s007Transferencias||{},lidA);
                 if(!rota.ok || rota.loja!==lidA) return;
-                const _s004=window._s004VendasDecidir?.('vend',id,dt,D2,remotoA,s012Ctx);
+              const _s004=window._s004VendasDecidir?.(
+                'vend',id,dt,D2,remotoA,s012Ctx,_s004OpcoesFanout);
                 if(_s004?.marcada){
-                  const _estado=window._s004VendasEstadoParaWriter('vend',id,dt,D2,remotoA,s012Ctx);
+                const _estado=window._s004VendasEstadoParaWriter(
+                  'vend',id,dt,D2,remotoA,s012Ctx,_s004OpcoesFanout);
                   window._s004VendasAplicarAoMapa(vendVendA[id],dt,_estado.estado);
                   return;
                 }
@@ -4218,7 +4926,8 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
 
             // Inclui também operações de remoção sem linha local. Sem percorrer
             // o sidecar, um lançamento remoto antigo ficava no mapa do admin.
-            _s004AplicarPendenciasDaLoja(lidA,remotoA,vendasA,vendVendA);
+            _s004AplicarPendenciasDaLoja(
+              lidA,remotoA,vendasA,vendVendA,_s004OpcoesFanout);
 
             const payloadA = Object.assign({}, remotoA, {
               vendas:     { [lidA]: vendasA },
@@ -4345,7 +5054,7 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
                     // parecer mais velha que o cache que ela substituiu.
                     _s008AplicarCargoMesVendedorPrincipal(_mg,rv,false);
                     const _sobre = {};
-                    ['nome','cargo','loja','crmAliases','metaMes','superMetaMes',
+                    ['nome','cargo','loja','crmAliases','_s086Lifecycle','metaMes','superMetaMes',
                      'ticketAlvo','metaAniv','metaInativ','ativa','ativaTs',
                      'metasMes','diasTrab','metasMesTs','diasTrabTs',
                      'cargoMes','cargoMesTs','camposTs']
@@ -4422,8 +5131,12 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             // enxurrada que derrubou o R129 ("Write stream exhausted").
             try{
               _s012Exigir();
-              const confirmadoA=await _s007PublicarLoja(s012Ctx,lidA,payloadA,remotoA,
-                {lojaId:lidA,por:email+" (admin)"});
+              const _s004GuardaLoja=window._s004VendasCriarGuardaTransacao?.(
+                s012Ctx,_s004PendenciasDaLoja,'loja-preimage',_s004OpcoesFanout)||null;
+              if(_s004PendenciasDaLoja.some(p=>p.baseLida?.v===2)&&!_s004GuardaLoja)
+                throw new Error('s004-guarda-loja-indisponivel');
+              const confirmadoA=await _s007PublicarLoja(s012Ctx,lidA,payloadA,remotoABase,
+                {lojaId:lidA,por:email+" (admin)"},_s004GuardaLoja);
               // O documento lógico iniciado termina com o snapshot capturado;
               // não consultar D nem iniciar outro destino nesta continuação.
               _lojasOk.add(lidA);
@@ -4531,7 +5244,8 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         // vendedoras, montado depois, o referenciava — ReferenceError
         // em toda gravação de loja. O ramo do admin já declarava o
         // equivalente (`remotoA`) fora do bloco; este não.
-        let existing = null;
+        let existing = null, existingBase=null;
+        let _s004PendenciasDesteDoc=[],_s004OpcoesLoja=null;
         let _s004LegadoLoja=false;
         // [R166] A LEITURA e a MESCLA têm destinos diferentes quando falham:
         // sem ler o servidor, adiar (R165); com um erro na mescla, o que já
@@ -4540,6 +5254,25 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         try{
           existing = await _lerDocObj(db, doc, getDoc, docId);
           _s012Exigir();
+          existingBase=existing||{};
+          const _s004PendenciasLoja=window._s004VendasPendentes?.(s012Ctx)||[];
+          _s004PendenciasDesteDoc=_s004PendenciasLoja.filter(p=>{
+            if(p.tipo==='venda') return String(p.id)===String(lid);
+            const legado=(D2.vendedoras||[]).find(v=>String(v.id)===String(p.id))?.loja
+              ||D2._vendsExcluidasMeta?.[p.id]?.loja||null;
+            const rota=window._s007ResolverLojaVend(p.id,p.data,D2._s007Transferencias||{},legado);
+            return rota.ok&&rota.loja===String(lid);
+          });
+          if(_s004PendenciasDesteDoc.some(p=>p.baseLida?.v===2)){
+            const principalBaseS004=await _lerDocObj(db,doc,getDoc,'principal');
+            _s012Exigir();
+            _s004OpcoesLoja={sources:{
+              principal:{exists:!!principalBaseS004,obj:principalBaseS004},
+              store:{exists:!!existing,obj:existing}
+            }};
+          }
+          if(existing) existing=window._s004VendasSnapshotRemotoParaWriter(
+            existingBase,_s004PendenciasDesteDoc,s012Ctx,D2,_s004OpcoesLoja);
           _s004LegadoLoja=window._s004VendasBloquearPendenteLegado(s012Ctx,dadosJSON,D2,existing||{},lid);
           // [R167] as lápides do servidor antes de tudo — e refiltrar o que já
           // foi montado com a cópia local (ela pode não ter a exclusão feita
@@ -4547,13 +5280,13 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           if(existing){
             window._unirLapidesEm(D2, existing);
             Object.keys(vendasLoja).forEach(dt => {
-              const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,existing,s012Ctx);
+              const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
               if(_s004?.marcada) return; // S004 valida se a lápide é sua base ou conflito.
               if(window._lapideBarraLocal(D2, 'venda', lid, dt, vendasLoja[dt])) delete vendasLoja[dt];
             });
             Object.entries(vendasVendLoja).forEach(([vid, dias]) => {
               Object.keys(dias).forEach(dt => {
-                const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,existing,s012Ctx);
+                const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
                 if(_s004?.marcada) return;
                 if(window._lapideBarraLocal(D2, 'vend', vid, dt, dias[dt])) delete dias[dt];
               });
@@ -4575,9 +5308,9 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           // Um snapshot sem marca é cache: usa o remoto e nunca o reenfileira.
           const _s004Remoto=existing||{};
           Object.keys(vendasLoja).forEach(dt=>{
-            const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,_s004Remoto,s012Ctx);
+            const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,_s004Remoto,s012Ctx,_s004OpcoesLoja);
             if(_s004?.marcada){
-              const _estado=window._s004VendasEstadoParaWriter('venda',lid,dt,D2,_s004Remoto,s012Ctx);
+              const _estado=window._s004VendasEstadoParaWriter('venda',lid,dt,D2,_s004Remoto,s012Ctx,_s004OpcoesLoja);
               window._s004VendasAplicarAoMapa(vendasLoja,dt,_estado.estado);
             }else{
               window._s004VendasAplicarAoMapa(vendasLoja,dt,
@@ -4586,9 +5319,9 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
           });
           Object.keys(vendasVendLoja).forEach(vid=>{
             Object.keys(vendasVendLoja[vid]||{}).forEach(dt=>{
-              const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,_s004Remoto,s012Ctx);
+              const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,_s004Remoto,s012Ctx,_s004OpcoesLoja);
               if(_s004?.marcada){
-                const _estado=window._s004VendasEstadoParaWriter('vend',vid,dt,D2,_s004Remoto,s012Ctx);
+                const _estado=window._s004VendasEstadoParaWriter('vend',vid,dt,D2,_s004Remoto,s012Ctx,_s004OpcoesLoja);
                 window._s004VendasAplicarAoMapa(vendasVendLoja[vid],dt,_estado.estado);
               }else{
                 window._s004VendasAplicarAoMapa(vendasVendLoja[vid],dt,
@@ -4602,9 +5335,9 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             // barrava o relançamento feito pelo admin DEPOIS da exclusão, e a
             // gravação da loja o sobrescrevia
             Object.entries(existing.vendas?.[lid] || {}).forEach(([dt,dados]) => {
-              const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,existing,s012Ctx);
+              const _s004=window._s004VendasDecidir?.('venda',lid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
               if(_s004?.marcada){
-                const _estado=window._s004VendasEstadoParaWriter('venda',lid,dt,D2,existing,s012Ctx);
+                const _estado=window._s004VendasEstadoParaWriter('venda',lid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
                 window._s004VendasAplicarAoMapa(vendasLoja,dt,_estado.estado);
               }else if(!(dt in vendasLoja) && !window._lapideBarra(D2, 'venda', lid, dt, dados)){
                 vendasLoja[dt] = dados;
@@ -4614,9 +5347,9 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             Object.entries(existing.vendasVend||{}).forEach(([vid,dias]) => {
               if(!vendasVendLoja[vid]) vendasVendLoja[vid] = {};
               Object.entries(dias||{}).forEach(([dt,d]) => {
-                const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,existing,s012Ctx);
+                const _s004=window._s004VendasDecidir?.('vend',vid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
                 if(_s004?.marcada){
-                  const _estado=window._s004VendasEstadoParaWriter('vend',vid,dt,D2,existing,s012Ctx);
+                  const _estado=window._s004VendasEstadoParaWriter('vend',vid,dt,D2,existing,s012Ctx,_s004OpcoesLoja);
                   window._s004VendasAplicarAoMapa(vendasVendLoja[vid],dt,_estado.estado);
                 }else if(!(dt in vendasVendLoja[vid]) && !window._lapideBarra(D2, 'vend', vid, dt, d)){
                   vendasVendLoja[vid][dt] = d;
@@ -4721,8 +5454,12 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             _campExcluidos:       D2._campExcluidos       || []
         };
         _s012Exigir();
-        const confirmadoLoja=await _s007PublicarLoja(s012Ctx,lid,_dadosLoja,existing||{},
-          {lojaId:lid,por:email});
+        const guardaS004Loja=window._s004VendasCriarGuardaTransacao?.(
+          s012Ctx,_s004PendenciasDesteDoc,'loja-preimage',_s004OpcoesLoja)||null;
+        if(_s004PendenciasDesteDoc.some(p=>p.baseLida?.v===2)&&!guardaS004Loja)
+          throw new Error('s004-guarda-loja-indisponivel');
+        const confirmadoLoja=await _s007PublicarLoja(s012Ctx,lid,_dadosLoja,existingBase||{},
+          {lojaId:lid,por:email},guardaS004Loja);
         if(_s012Valido()) window._s007ConfirmarCacheEscrita(s012Ctx,lid,confirmadoLoja.vendasVend);
         // Não usar PATCH REST sem precondição como fallback de uma transação:
         // falha mantém a pendência para releitura/reenvio pelo mesmo caminho.
@@ -5001,26 +5738,12 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             // [R130] As lapides do doc da loja entram ANTES do merge de vendas.
             // Se a loja excluiu um dia e o principal ainda nao sabe, o filtro
             // logo abaixo rodaria com a lista vazia e o dia voltaria.
-            if(pedaco._vendasExcluidas){
-              if(!base._vendasExcluidas) base._vendasExcluidas={};
-              Object.entries(pedaco._vendasExcluidas).forEach(([_l,_ds])=>{
-                if(!Array.isArray(_ds)) return;
-                if(!base._vendasExcluidas[_l]) base._vendasExcluidas[_l]=[];
-                _ds.forEach(_d=>{ if(!base._vendasExcluidas[_l].includes(_d)) base._vendasExcluidas[_l].push(_d); });
-              });
-            }
-            if(pedaco._vendasVendExcluidas){
-              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
-              Object.entries(pedaco._vendasVendExcluidas).forEach(([_v,_ds])=>{
-                if(!Array.isArray(_ds)) return;
-                if(!base._vendasVendExcluidas[_v]) base._vendasVendExcluidas[_v]=[];
-                _ds.forEach(_d=>{ if(!base._vendasVendExcluidas[_v].includes(_d)) base._vendasVendExcluidas[_v].push(_d); });
-              });
-            }
-            if(pedaco._vendasExcluidasTs)
-              base._vendasExcluidasTs = Object.assign({}, pedaco._vendasExcluidasTs, base._vendasExcluidasTs||{});
-            if(pedaco._vendasVendExcluidasTs)
-              base._vendasVendExcluidasTs = Object.assign({}, pedaco._vendasVendExcluidasTs, base._vendasVendExcluidasTs||{});
+            window._unirLapidesEm(base, {
+              _vendasExcluidas: pedaco._vendasExcluidas,
+              _vendasVendExcluidas: pedaco._vendasVendExcluidas,
+              _vendasExcluidasTs: pedaco._vendasExcluidasTs,
+              _vendasVendExcluidasTs: pedaco._vendasVendExcluidasTs
+            });
             // Merge vendas da loja
             if(!base.vendas) base.vendas={};
             Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
@@ -5176,26 +5899,12 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             // merge de vendas logo abaixo. Estavam sendo mescladas depois (e só
             // as de vendasVend), então o filtro rodava com a lista vazia: o dia
             // excluído voltava, e a limpeza adiante concluía que era relançamento.
-            if(pedaco._vendasExcluidas){
-              if(!base._vendasExcluidas) base._vendasExcluidas={};
-              Object.entries(pedaco._vendasExcluidas).forEach(([_l,_ds])=>{
-                if(!Array.isArray(_ds)) return;
-                if(!base._vendasExcluidas[_l]) base._vendasExcluidas[_l]=[];
-                _ds.forEach(_d=>{ if(!base._vendasExcluidas[_l].includes(_d)) base._vendasExcluidas[_l].push(_d); });
-              });
-            }
-            if(pedaco._vendasVendExcluidas){
-              if(!base._vendasVendExcluidas) base._vendasVendExcluidas={};
-              Object.entries(pedaco._vendasVendExcluidas).forEach(([_v,_ds])=>{
-                if(!Array.isArray(_ds)) return;
-                if(!base._vendasVendExcluidas[_v]) base._vendasVendExcluidas[_v]=[];
-                _ds.forEach(_d=>{ if(!base._vendasVendExcluidas[_v].includes(_d)) base._vendasVendExcluidas[_v].push(_d); });
-              });
-            }
-            if(pedaco._vendasExcluidasTs)
-              base._vendasExcluidasTs = Object.assign({}, pedaco._vendasExcluidasTs, base._vendasExcluidasTs||{});
-            if(pedaco._vendasVendExcluidasTs)
-              base._vendasVendExcluidasTs = Object.assign({}, pedaco._vendasVendExcluidasTs, base._vendasVendExcluidasTs||{});
+            window._unirLapidesEm(base, {
+              _vendasExcluidas: pedaco._vendasExcluidas,
+              _vendasVendExcluidas: pedaco._vendasVendExcluidas,
+              _vendasExcluidasTs: pedaco._vendasExcluidasTs,
+              _vendasVendExcluidasTs: pedaco._vendasVendExcluidasTs
+            });
             // [FIX] vendedoras e metasLoja da loja_* sobrepõem o principal para dados desta loja
             // [FIX BUG ressurreição] Mesclar tombstones do loja_* PRIMEIRO
             // Lojas também podem ter exclusões registradas que o admin precisa respeitar
@@ -5247,6 +5956,7 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
                 });
               });
             }
+            window._mesclarAtribuicaoVendsExcluidas(base,pedaco);
             if(pedaco.vendedoras && pedaco.vendedoras.length){
               if(!base.vendedoras) base.vendedoras=[];
               // Respeitar tombstone _vendsExcluidas do principal
@@ -5313,6 +6023,7 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         });
         // [FIX BUG ressurreição] Aplicar tombstone FINAL após merge de todos os loja_*
         // Garante que vendedoras excluídas por qualquer admin/loja não voltem
+        window._mesclarAtribuicaoVendsExcluidas(base,base);
         if(base._vendsExcluidas?.length && base.vendedoras){
           const _exFinal = base._vendsExcluidas;
           base.vendedoras = base.vendedoras.filter(v=>!_exFinal.includes(v.id));
@@ -5339,6 +6050,14 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
             if(!pedacoLoja) _s007RegistrarLeitura(lid,null,null);
             if(pedacoLoja){
               const pedaco = pedacoLoja;
+              // As lápides de vendas da loja precisam acompanhar os dados
+              // usados para compor esta leitura, antes do merge das vendas.
+              window._unirLapidesEm(base, {
+                _vendasExcluidas: pedaco._vendasExcluidas,
+                _vendasVendExcluidas: pedaco._vendasVendExcluidas,
+                _vendasExcluidasTs: pedaco._vendasExcluidasTs,
+                _vendasVendExcluidasTs: pedaco._vendasVendExcluidasTs
+              });
               // Copiar vendas do doc loja_* para o base (objeto retornado ao loadFromFirestore)
               if(!base.vendas) base.vendas={};
               Object.entries(pedaco.vendas||{}).forEach(([l,dias])=>{
@@ -5465,6 +6184,7 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
               }
               // [FIX CRITICO] vendedoras e metasLoja do loja_* sobrepõem o principal
               // A loja edita metas localmente → salva no loja_* → ao recarregar deve LER do loja_*
+              window._mesclarAtribuicaoVendsExcluidas(base,pedaco);
               if(pedaco.vendedoras && pedaco.vendedoras.length){
                 if(!base.vendedoras) base.vendedoras=[];
                 const _excLj = base._vendsExcluidas||[];
@@ -5513,6 +6233,7 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         // base.vendedoras vem do principal com TODAS as vendedoras
         // → filtrar para retornar apenas as da própria loja
         // [FIX BUG ressurreição] + filtrar tombstoneadas (_vendsExcluidas)
+        window._mesclarAtribuicaoVendsExcluidas(base,base);
         if(lid && base.vendedoras){
           const _exLojaFinal = base._vendsExcluidas||[];
           base.vendedoras = base.vendedoras.filter(v => v.loja === lid && !_exLojaFinal.includes(v.id));
@@ -5551,6 +6272,15 @@ function _s066ValidarVendedorNaTransacao({ctx,intent,currentSnapshots}={}){
         if(!isAdm){
           base._vendsExcluidasMeta = window._filtrarVendsExcluidasMetaLoja(
             base._vendsExcluidasMeta, lid || null);
+          // O perfil recebe a linha de vida somente dos seus próprios
+          // cadastros. O mapa de lojas é exclusivamente administrativo.
+          delete base._s086StoreLifecycle;
+          if(Array.isArray(base.vendedoras)) base.vendedoras=base.vendedoras.map(v=>{
+            if(v&&String(v.loja||'')!==String(lid||'')){
+              const copia={...v};delete copia._s086Lifecycle;return copia;
+            }
+            return v;
+          });
         }
       }
 
@@ -6743,6 +7473,10 @@ body:not(.logado) #appScreen{display:none!important}
       <div class="st">Cadastrar Vendedor(a)</div>
       <div class="igrid">
         <div class="ig"><label>Nome</label><input type="text" id="vn-nome" placeholder="Nome completo"></div>
+        <div class="ig admin-item" style="display:none"><label>Data efetiva do cadastro (opcional)</label>
+          <input type="date" id="vn-effective-date" aria-describedby="vn-effective-date-hint">
+          <div id="vn-effective-date-hint" style="font-size:9.5px;color:var(--muted);margin-top:3px">Data informativa. Não agenda nem altera a situação da vendedora.</div>
+        </div>
         <div class="ig admin-item" style="display:none"><label>Loja</label>
           <select id="vn-loja" data-lojas-operacionais>
           </select>
@@ -6865,6 +7599,8 @@ body:not(.logado) #appScreen{display:none!important}
       </div>
     </div>
   </div>
+
+
 
   <!-- MEU HISTÓRICO (aba vendedor(a) / admin) -->
   <div id="vend-hist-bloco" style="display:none">
@@ -9735,6 +10471,36 @@ service cloud.firestore {
 </div><!-- /page-historico -->
 
 </main>
+  <dialog id="s086-timeline-modal" aria-labelledby="s086-title" style="width:min(760px,94vw);max-height:88vh;overflow:auto;border:1px solid var(--borda);border-radius:14px;background:var(--card);color:var(--texto);padding:18px;box-shadow:0 20px 70px #0008">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <h2 id="s086-title" style="margin:0">Histórico de atividade</h2>
+      <button class="btn-s" id="s086-close" type="button" aria-label="Fechar histórico">Fechar</button>
+    </header>
+    <p id="s086-status" role="status" style="color:var(--muted);font-size:12px"></p>
+    <p id="s086-draft-status" role="status" aria-live="polite" style="font-size:12px;line-height:1.5"></p>
+    <div id="s086-review-actions" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+    <div id="s086-seller-picker-wrap" style="display:none;margin:12px 0">
+      <label for="s086-seller-id">Vendedor(a) desta loja</label>
+      <select id="s086-seller-id" style="max-width:100%;width:100%"></select>
+    </div>
+    <section id="s086-current-section" aria-label="Eventos registrados">
+      <div id="s086-events" style="display:grid;gap:8px;margin:12px 0"></div>
+    </section>
+    <section id="s086-add-section" style="border-top:1px solid var(--borda);padding-top:12px;margin-top:14px">
+      <div style="font-weight:700;margin-bottom:8px">Informar um fato histórico conhecido</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">A data é informativa e não altera nem agenda a situação atual.</div>
+      <label for="s086-add-kind">Fato</label>
+      <select id="s086-add-kind">
+        <option value="">Selecione...</option>
+        <option value="cadastro">Cadastro / início conhecido</option>
+        <option value="arquivado">Arquivamento conhecido</option>
+        <option value="reativado">Reativação conhecida</option>
+      </select>
+      <label for="s086-add-date" style="margin-left:8px">Data efetiva</label>
+      <input id="s086-add-date" type="date" required>
+      <button class="btn-p" id="s086-add-event" type="button">Registrar data conhecida</button>
+    </section>
+  </dialog>
 </div><!-- /appScreen -->
 <div class="toast" id="toast"></div>
 
@@ -9748,7 +10514,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-24a';
+window.AVATIM_BUILD = '2026-10-25h';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -10679,6 +11445,7 @@ window.renderCfgLojas = function(){
         ${arq
           ? `<button onclick="reativarLoja('${l.id}')" style="background:var(--verde);color:var(--preto);border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">↩️ Reativar</button>`
           : `<button onclick="arquivarLoja('${l.id}')" style="background:transparent;border:1px solid var(--borda);color:var(--muted);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📦 Arquivar</button>`}
+        <button type="button" data-s086-open-kind="loja" data-s086-open-id="${l.id}" aria-label="Histórico de ${l.nome}" onclick="window.s086AbrirHistorico('loja','${l.id}')" style="margin-left:4px;background:transparent;border:1px solid var(--borda);color:var(--texto);border-radius:6px;padding:5px 8px;font-size:10px;cursor:pointer">📅 Histórico</button>
       </td>
     </tr>`;
   }).join('');
@@ -10769,6 +11536,21 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
   const _lojaValida=()=>!!_ctxLoja && _ctxLoja.perfil==='admin'
     && window._s012ContextoValido(_ctxLoja) && D===_dadosLoja;
   if(!_lojaValida()) return false;
+  if(lojaArquivada(lid)===!!arquivar) return true;
+  const eventoLoja=window._s086NovoEvento?.(arquivar?'arquivado':'reativado',
+    window._s086DataLocalHoje?.(),_ctxLoja,undefined,'observed-action','loja',String(lid));
+  if(!eventoLoja) return false;
+  let historicoLoja;
+  try{
+    historicoLoja=window._s086UnirEventos(_dadosLoja._s086StoreLifecycle?.[lid],
+      [eventoLoja],true,{entityType:'loja',entityId:String(lid)});
+  }catch(e){
+    showToast('Não foi possível registrar o histórico da loja: '+(e.code||'s086-conflito'),'err');
+    return false;
+  }
+  if(!_dadosLoja._s086StoreLifecycle||typeof _dadosLoja._s086StoreLifecycle!=='object')
+    _dadosLoja._s086StoreLifecycle={};
+  _dadosLoja._s086StoreLifecycle[lid]=historicoLoja;
   const _s074IdsAntes=window._s074IdsLojasVisiveis?.()||[];
   if(!Array.isArray(_dadosLoja._lojasArquivadas)) _dadosLoja._lojasArquivadas = [];
   if(arquivar){
@@ -10810,6 +11592,234 @@ async function _toggleLojaArquivada(lid, arquivar, nome){
     showToast('⚠️ '+nome+' salva localmente. Firebase: '+(eL.code||eL.message),'warn');
   }
 }
+
+// S086: o editor altera somente fatos/datas; os campos de situação continuam independentes.
+(function(){
+  let editor=null;
+  const el=id=>document.getElementById(id);
+  const valido=e=>!!e&&editor===e&&e.ctx.perfil==='admin'
+    &&window._s012ContextoValido?.(e.ctx)&&isAdmin();
+  const nomeKind={cadastro:'Cadastro / início',arquivado:'Arquivamento',reativado:'Reativação'};
+  const dataHora=t=>new Date(t).toLocaleString('pt-BR');
+  function elemento(tag,text,classe){
+    const n=document.createElement(tag);if(text!==undefined)n.textContent=text;
+    if(classe)n.className=classe;return n;
+  }
+  function entidade(e,fonte=D){
+    if(e.kind==='loja') return LOJAS_TODAS.find(l=>l.id===e.id);
+    return (fonte.vendedoras||[]).find(v=>String(v.id)===e.id)
+      ||fonte._vendsExcluidasMeta?.[e.id];
+  }
+  function eventos(e,fonte=D){
+    if(e.kind==='loja') return fonte._s086StoreLifecycle?.[e.id]||[];
+    return window._s086UnirEventos(
+      (fonte.vendedoras||[]).find(v=>String(v.id)===e.id)?._s086Lifecycle,
+      fonte._vendsExcluidasMeta?.[e.id]?._s086Lifecycle,false,
+      {entityType:'vendedora',entityId:e.id});
+  }
+  function definirEventos(e,lista){
+    if(!valido(e)||!entidade(e)) throw new Error('s012-sessao-alterada');
+    if(e.kind==='loja'){
+      D._s086StoreLifecycle=D._s086StoreLifecycle||{};D._s086StoreLifecycle[e.id]=lista;
+    }else entidade(e)._s086Lifecycle=lista;
+  }
+  function mensagem(e,texto){if(valido(e))el('s086-draft-status').textContent=texto;}
+  function botao(texto,acao){
+    const b=elemento('button',texto,'btn-s');b.type='button';b.onclick=acao;return b;
+  }
+  async function enviar(e){
+    if(!valido(e))return false;
+    const json=JSON.stringify(D);
+    window._pendingLocalData=JSON.parse(json);window._pendingLocalDataTs=Date.now();
+    const pendenteDuravel=_persistirPendente(json,e.ctx);
+    if(!pendenteDuravel)window._s012RegistrarRetencao?.(e.ctx,D);
+    _persistirLocal();
+    const op=window._s005PendenteCapturar();
+    const avisoPendente=pendenteDuravel?'':' Reenvio após recarregar ainda não confirmado; mantenha esta aba aberta.';
+    mensagem(e,'Alteração pendente nesta máquina; aguardando confirmação do servidor.'+avisoPendente);
+    try{
+      await window.fsGravarComPrazo(json,undefined,undefined,e.ctx,{op,payload:json});
+      if(!valido(e))return false;
+      e.needsRetry=false;mensagem(e,'Gravação confirmada no servidor.');return true;
+    }catch(error){
+      if(!valido(e))return false;
+      e.needsRetry=true;
+      mensagem(e,/s086-/.test(error.message||'')
+        ?'Correção local preservada. Há uma revisão diferente; confira o servidor e revise a pendência abaixo.'+avisoPendente
+        :'Sem confirmação do servidor. A alteração foi mantida para nova tentativa.'+avisoPendente);
+      return false;
+    }
+  }
+  async function principalAtual(e){
+    if(!valido(e)||typeof window._s086LerPrincipalAtual!=='function')throw new Error('s086-leitura-indisponivel');
+    const atual=await window._comPrazo(window._s086LerPrincipalAtual(e.ctx,e.kind,e.id),'a conferência do histórico');
+    if(!valido(e))throw new Error('s012-sessao-alterada');
+    return atual;
+  }
+  async function conferir(e){
+    if(!valido(e)||e.busy)return false;
+    e.busy=true;mensagem(e,'Conferindo o histórico no servidor…');
+    try{
+      const atual=await principalAtual(e);if(!valido(e))return false;
+      e.remote=eventos(e,atual);
+      definirEventos(e,window._s086UnirEventos(eventos(e),e.remote,false,
+        {entityType:e.kind,entityId:e.id}));
+      mensagem(e,'Histórico do servidor consultado. Pendências locais continuam separadas para revisão.');
+      return true;
+    }catch(error){mensagem(e,'Não foi possível conferir o servidor. Nenhuma pendência foi descartada.');return false;}
+    finally{if(valido(e)){e.busy=false;render(e);}}
+  }
+  async function descartar(e,evento){
+    if(!valido(e)||e.busy||evento.kind!=='date-correction')return false;
+    e.busy=true;
+    try{
+      const atual=await principalAtual(e);if(!valido(e))return false;
+      const remoto=eventos(e,atual),local=eventos(e);
+      if(remoto.some(r=>r?.eventId===evento.eventId)){
+        mensagem(e,'Esta correção já consta no servidor e foi mantida.');return false;
+      }
+      const iguais=local.filter(r=>r?.eventId===evento.eventId);
+      if(iguais.length!==1||!window._vendCampoIgual(iguais[0],evento)){
+        mensagem(e,'A pendência mudou durante a conferência. Consulte novamente.');return false;
+      }
+      const restante=local.filter(r=>r?.eventId!==evento.eventId);
+      definirEventos(e,window._s086UnirEventos(restante,remoto,false,
+        {entityType:e.kind,entityId:e.id}));
+      e.remote=remoto;e.dates.delete(evento.targetEventId);
+      const confirmado=await enviar(e);
+      if(valido(e))mensagem(e,confirmado
+        ?'Somente a correção local não enviada foi descartada. O histórico do servidor foi preservado.'
+        :'Correção descartada nesta máquina. As alterações restantes ainda estão pendentes, sem confirmação do servidor.');
+      return true;
+    }catch(error){mensagem(e,'Não foi possível conferir ou salvar a revisão. O rascunho foi mantido.');return false;}
+    finally{if(valido(e)){e.busy=false;render(e);}}
+  }
+  async function salvarData(e,fato,input){
+    if(!valido(e)||e.busy)return false;
+    const data=input.value;
+    if(!window._s086DataValida(data)){mensagem(e,'Informe uma data de vigência válida.');input.focus();return false;}
+    if(data===fato.effectiveDate&&e.needsRetry){
+      e.busy=true;
+      try{return await enviar(e);}
+      finally{if(valido(e)){e.busy=false;render(e);}}
+    }
+    const correcao=window._s086AdicionarCorrecao(eventos(e),fato.eventId,fato.revision,data,e.ctx);
+    if(!correcao){
+      mensagem(e,data===fato.effectiveDate?'A vigência já tem esta data.'
+        :'O histórico mudou. A data digitada foi mantida; confira o servidor antes de revisar.');return false;
+    }
+    e.busy=true;
+    try{
+      definirEventos(e,window._s086UnirEventos(eventos(e),[correcao],true,
+        {entityType:e.kind,entityId:e.id}));
+      const ok=await enviar(e);
+      if(ok&&valido(e))e.dates.delete(fato.eventId);
+      return ok;
+    }catch(error){mensagem(e,'Não foi possível preparar a correção. A data digitada foi mantida.');return false;}
+    finally{if(valido(e)){e.busy=false;render(e);}}
+  }
+  async function adicionar(e){
+    if(!valido(e)||e.busy)return false;
+    const kind=el('s086-add-kind').value,date=el('s086-add-date').value;
+    if(!nomeKind[kind]||!window._s086DataValida(date)){
+      mensagem(e,'Selecione o fato e informe sua data de vigência conhecida.');return false;
+    }
+    if(e.addDraft&&(e.addDraft.kind!==kind||e.addDraft.effectiveDate!==date)){
+      mensagem(e,'Há um fato desta tentativa aguardando confirmação. Tente novamente com a data capturada.');return false;
+    }
+    const fato=e.addDraft||window._s086NovoEvento(kind,date,e.ctx,undefined,
+      'admin-attested-history',e.kind,e.id);
+    if(!fato)return false;
+    e.addDraft=fato;e.busy=true;
+    try{
+      definirEventos(e,window._s086UnirEventos(eventos(e),[fato],true,
+        {entityType:e.kind,entityId:e.id}));
+      const ok=await enviar(e);
+      if(ok&&valido(e)){e.addDraft=null;el('s086-add-kind').value='';el('s086-add-date').value=window._s086DataLocalHoje();}
+      return ok;
+    }catch(error){mensagem(e,'O fato ainda precisa ser revisto antes de ser enviado.');return false;}
+    finally{if(valido(e)){e.busy=false;render(e);}}
+  }
+  function render(e){
+    if(!valido(e))return;
+    const snapshot=window._s086TimelineSnapshot(e.kind,e.id),lista=el('s086-events');lista.replaceChildren();
+    if(!snapshot.current.length){
+      const vazio=elemento('p','Sem histórico registrado. Datas antigas desconhecidas não são inferidas.');
+      vazio.dataset.s086Empty='true';lista.append(vazio);
+    }
+    if(snapshot.conflicts.length)lista.append(elemento('p','Há correções divergentes neste histórico. Confira o servidor e revise as pendências.','sbadge warn'));
+    snapshot.current.forEach((fato,index)=>{
+      const card=elemento('article');card.dataset.eventId=fato.eventId;
+      card.style.cssText='border:1px solid var(--borda);border-radius:8px;padding:12px;min-width:0';
+      card.append(elemento('strong',nomeKind[fato.kind]||fato.kind));
+      const registro=elemento('p',(fato.origin==='observed-action'?'Ação registrada em ':'Fato histórico informado em ')+dataHora(fato.recordedAt));
+      registro.style.cssText='font-size:11px;color:var(--muted);overflow-wrap:anywhere';card.append(registro);
+      const linha=elemento('div');linha.style.cssText='display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+      const input=elemento('input');input.type='date';input.value=e.dates.get(fato.eventId)||fato.effectiveDate;
+      input.id='s086-date-'+index;input.dataset.s086EventDate='';input.dataset.eventId=fato.eventId;
+      input.style.cssText='max-width:100%;min-width:0';input.oninput=()=>{
+        e.dates.set(fato.eventId,input.value);mensagem(e,'Data digitada ainda não enviada. Clique em Salvar data para confirmar.');
+      };
+      const label=elemento('label','Vigência');label.htmlFor=input.id;linha.append(label,input);
+      const save=botao('Salvar data',()=>salvarData(e,fato,input));save.dataset.s086SaveEvent='';save.dataset.eventId=fato.eventId;
+      save.disabled=e.busy||snapshot.conflicts.length>0;linha.append(save);card.append(linha);
+      for(const correcao of fato.corrections||[]){
+        const nota=elemento('p','Correção registrada em '+dataHora(correcao.recordedAt)+' · '+correcao.priorEffectiveDate+' → '+correcao.effectiveDate);
+        nota.style.cssText='font-size:11px;color:var(--muted);overflow-wrap:anywhere';card.append(nota);
+      }
+      lista.append(card);
+    });
+    const acoes=el('s086-review-actions');acoes.replaceChildren();
+    const conferirBtn=botao('Conferir no servidor',()=>conferir(e));conferirBtn.disabled=e.busy;acoes.append(conferirBtn);
+    if(e.remote) snapshot.events.filter(r=>r?.kind==='date-correction'
+      &&!e.remote.some(remote=>remote?.eventId===r.eventId)).forEach(r=>{
+      const b=botao('Descartar correção local de '+r.effectiveDate,()=>descartar(e,r));
+      b.dataset.s086Discard=r.eventId;b.disabled=e.busy;acoes.append(b);
+    });
+    el('s086-add-event').disabled=e.busy||snapshot.conflicts.length>0;
+  }
+  window._s086FecharHistorico=function(opcoes={}){
+    const anterior=editor;editor=null;window._s086EditorOwner=null;
+    const dialog=el('s086-timeline-modal');if(dialog?.open)dialog.close();
+    for(const id of ['s086-title','s086-status','s086-draft-status','s086-events','s086-review-actions','s086-seller-id'])el(id)?.replaceChildren();
+    if(dialog){delete dialog.dataset.kind;delete dialog.dataset.entityId;}
+    if(el('s086-add-kind'))el('s086-add-kind').value='';
+    if(el('s086-add-date'))el('s086-add-date').value='';
+    if(el('s086-add-event'))el('s086-add-event').onclick=null;
+    if(el('s086-close'))el('s086-close').onclick=null;
+    if(el('s086-seller-id'))el('s086-seller-id').onchange=null;
+    if(dialog)dialog.oncancel=null;
+    if(!opcoes.limparRascunho&&anterior&&window._s012ContextoValido?.(anterior.ctx)&&anterior.opener?.isConnected)anterior.opener.focus();
+  };
+  window.s086AbrirHistorico=function(kind,id){
+    const ctx=window._s012Capturar?.();
+    if(!ctx||ctx.perfil!=='admin'||!window._s012ContextoValido?.(ctx)||!isAdmin()
+        ||!['loja','vendedora'].includes(kind))return false;
+    const novo={kind,id:String(id),ctx,busy:false,dates:new Map(),remote:null,addDraft:null,opener:document.activeElement};
+    const alvo=entidade(novo);if(!alvo||alvo._crmIdentidadeSomente)return false;
+    if(editor)window._s086FecharHistorico({limparRascunho:true});
+    editor=novo;window._s086EditorOwner=ctx.owner;
+    const dialog=el('s086-timeline-modal');dialog.dataset.kind=kind;dialog.dataset.entityId=novo.id;
+    el('s086-title').textContent='Histórico de atividade — '+(alvo.nome||novo.id);
+    el('s086-status').textContent='As datas são informativas: não alteram nem agendam a situação atual, metas ou vendas. O horário original da ação é preservado.';
+    el('s086-draft-status').textContent='Histórico disponível nesta sessão. Novas alterações precisam da confirmação do servidor.';
+    const lid=kind==='loja'?novo.id:alvo.loja,picker=el('s086-seller-id');picker.replaceChildren();
+    el('s086-seller-picker-wrap').style.display=lid?'block':'none';
+    if(lid){
+      const option=elemento('option','Histórico da loja');option.value='';picker.append(option);
+      (D.vendedoras||[]).filter(v=>v.loja===lid).forEach(v=>{
+        const option=elemento('option',v.nome+(v.ativa===false?' (arquivado)':''));option.value=v.id;picker.append(option);
+      });
+      picker.value=kind==='vendedora'?novo.id:'';
+      picker.onchange=()=>picker.value?window.s086AbrirHistorico('vendedora',picker.value):window.s086AbrirHistorico('loja',lid);
+    }
+    el('s086-add-kind').value='';el('s086-add-date').value=window._s086DataLocalHoje();
+    el('s086-close').onclick=()=>window._s086FecharHistorico();
+    el('s086-add-event').onclick=()=>adicionar(novo);
+    dialog.oncancel=event=>{event.preventDefault();window._s086FecharHistorico();};
+    render(novo);dialog.showModal();return true;
+  };
+})();
 
 // Hashes PBKDF2-SHA256, 100.000 iterações + salt derivado do email
 // Torna brute-force e rainbow tables ineficazes (custo ~100.000x maior que SHA-256 puro)
@@ -10967,6 +11977,7 @@ window._s012LerSnapshotLocal=function(ctx,restaurarCrm=false){
   if(!chave) return null;
   try{ const v=JSON.parse(localStorage.getItem(chave)||'null');
     if(!v||typeof v!=='object'||Array.isArray(v))return null;
+    window._s086RestringirPerfil(v,ctx||window._s012ContextoAtual());
     if(restaurarCrm)return window._crmRestaurarSnapshotLocal?.(ctx||window._s012ContextoAtual(),v)||v;
     delete v._crmPendenciasSnapshot;
     return v;
@@ -10995,6 +12006,7 @@ window._s012GravarSnapshotLocal=function(ctx,dados){
 };
 function _s012PrepararEstadoLocal(ctx,dados){
   const preparado=window._crmPrepararSnapshotLocal?.(ctx,dados)||dados;
+  window._s086RestringirPerfil(preparado,ctx);
   const c=_s012CapturarCrm(ctx,preparado);
   if(c?.projecao.refs.length)
     return {dados:{...preparado,crm:_s012MapaInline(c.projecao),_crmOmitidoLocal:true},compacto:true};
@@ -11167,6 +12179,24 @@ function _s012CloneEstado(ctx,dados,estrito=false,mapaCompleto=false){
   if(Object.prototype.hasOwnProperty.call(dados,'crm'))privado.crm=c.crm;
   return privado;
 }
+// S086 projects only its newly added lifecycle fields at the existing owner
+// clone boundary; unrelated S012 state and the current owner's seller retries
+// keep their established copy/retention contract.
+const _s012CloneEstadoBaseS086=_s012CloneEstado;
+_s012CloneEstado=function(ctx,dados,estrito=false,mapaCompleto=false){
+  const privado=_s012CloneEstadoBaseS086(ctx,dados,estrito,mapaCompleto);
+  return window._s086RestringirPerfil(privado,ctx);
+};
+window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
+window._s012AoTrocarSessao.push(ctx=>{
+  const donoAtual=ctx?.owner||null;
+  if(!donoAtual||donoAtual!==window._s086EditorOwner){
+    window._s086FecharHistorico?.({limparRascunho:true});
+  }
+  if(ctx?.perfil==='loja'&&typeof D!=='undefined'&&D&&typeof D==='object'){
+    window._s086RestringirPerfil(D,ctx);
+  }
+});
 function _s012EstadoComparavelLegado(ctx,dados){
   const c=_s012CapturarCrm(ctx,dados);
   if(!c||!dados||typeof dados!=='object'||Array.isArray(dados))return _s012JsonSeguro(dados);
@@ -13123,6 +14153,7 @@ if(!D.vendedoras) D.vendedoras=[];
   });
 
   if(idsParaTombstonar.size > 0){
+    window._mesclarAtribuicaoVendsExcluidas(D,{_vendsExcluidas:[...idsParaTombstonar]});
     // Remover de D.vendedoras
     D.vendedoras = D.vendedoras.filter(v=>!idsParaTombstonar.has(v.id));
     // Adicionar ao tombstone para propagar para Firebase
@@ -14704,7 +15735,7 @@ const _RENDER_PAGINA = {
   lanc:        () => { renderPainelDia(); carregarVendsForm(); },
   performance: () => renderPerformance(),
   metas:       () => renderMetas(),
-  vendedoras:  () => { renderVendRanking(_tabVend); renderTabelaVend(); },
+  vendedoras:  () => { renderVendRanking(_tabVend); renderTabelaVend(); window._s085AtualizarHistoricoVend?.(); },
   comissao:    () => renderComissao(),
   semana:      () => { renderSemana(); window.renderPadroesSemana?.(); },
   fluxo:       () => renderFluxo(),
@@ -14744,7 +15775,15 @@ const _RENDER_PAGINA = {
     const blocoVend = document.getElementById('hist-bloco-vend');
     if(blocoVend && blocoVend.style.display !== 'none'){
       const resultado = document.getElementById('hist-pg-resultado');
-      const vendId = document.getElementById('hist-pg-sel-vend')?.value;
+      const selVend = document.getElementById('hist-pg-sel-vend');
+      const vendAntes = selVend?.value || '';
+      window._preencherSelHistPg?.(false);
+      if(vendAntes&&window._s085VendedoraArquivada?.(vendAntes)){
+        if(selVend) selVend.value='';
+        window._s074LimparResultadoHistoricoVend?.('pagina');
+        return;
+      }
+      const vendId = selVend?.value;
       const de = document.getElementById('hist-pg-de')?.value;
       const ate = document.getElementById('hist-pg-ate')?.value;
       if(resultado && resultado.style.display !== 'none' && vendId && de && ate)
@@ -15940,20 +16979,79 @@ window.crmTemCubos = function(){
   return window.crmLojasVisiveis().some(lid => Object.values(D.crm?.[lid] || {}).some(Boolean));
 };
 
-// S078: only certified immutable inputs can reuse the two private projections.
-const _crmS078Bases = [null, null];
+// S078: only certified immutable inputs can reuse bounded CRM projections.
+const _crmS078Bases = [null, null, null, null];
 function _crmS078LimparBases(){ _crmS078Bases.fill(null); }
 window._s012AoTrocarSessao=window._s012AoTrocarSessao||[];
 window._s012AoTrocarSessao.push(_crmS078LimparBases);
 window.addEventListener('crm-atualizado',_crmS078LimparBases);
 window.addEventListener('avatim:lojas-visibilidade-alterada',_crmS078LimparBases);
+function _crmS085AssinaturaElegibilidade(){
+  const vendedoras=(D.vendedoras||[]).map(v=>[
+    String(v?.id||''),String(v?.loja||''),String(v?.nome||''),v?.ativa===false,
+    (Array.isArray(v?.crmAliases)?v.crmAliases:[]).map(a=>[String(a?.loja||''),String(a?.nome||'')])
+  ]);
+  const excluidas=Object.entries(D._vendsExcluidasMeta||{}).map(([id,meta])=>[
+    String(id),(window._vendCrmClaimsExcluida?.(meta)||[])
+      .map(a=>[String(a?.loja||''),String(a?.nome||'')])
+  ]);
+  return JSON.stringify([vendedoras,excluidas]);
+}
+function _crmS085ComprasCliente(lojas,anos,vendedor){
+  const conjuntos=[],itens=[],alvo=String(vendedor||''),visibilidade=new Map();
+  const visivel=(lid,nome)=>{
+    const chave=String(lid||'')+'\u0000'+String(nome||'');
+    if(!visibilidade.has(chave))
+      visibilidade.set(chave,!window._crmS085RotuloArquivadoUnicoLoja?.(lid,nome));
+    return visibilidade.get(chave);
+  };
+  (lojas||[]).filter(lojaVisivel).forEach(lid=>{
+    const porAno=D.crm?.[lid]||{};
+    (anos?.length?anos:Object.keys(porAno)).forEach(ano=>{
+      const c=porAno[ano];if(!c)return;
+      const detalhe=c._comprasCliente,vendedorasMes=[];
+      if(Array.isArray(c.mesVend)&&Array.isArray(c.vends)) c.mesVend.forEach(([mi,vi])=>{
+        const mes=c.meses?.[mi],nome=c.vends?.[vi];
+        if(mes&&nome&&(!alvo||nome===alvo)
+            &&visivel(lid,nome)
+            &&!vendedorasMes.some(p=>p[0]===mes&&p[1]===nome))
+          vendedorasMes.push([mes,nome]);
+      });
+      conjuntos.push({loja:lid,ano:String(ano),mesesConjunto:window.crmMesesDoCubo(c),
+        vendedorasMesDisponiveis:Array.isArray(c.mesVend)&&Array.isArray(c.vends),
+        vendedorasMes,
+        mesesDetalhados:detalhe?.versao===1&&detalhe.disponivel===true?(detalhe.meses||[]):[],
+        disponivel:window._crmComprasClienteValido(detalhe)});
+      if(window._crmComprasClienteValido(detalhe)) (detalhe.itens||[]).forEach(r=>{
+        const nome=String(r?.[9]||'');
+        if((!alvo||nome===alvo)&&visivel(lid,nome))
+          itens.push([lid,String(ano),...r]);
+      });
+    });
+  });
+  return {versao:1,conjuntos,itens};
+}
 function _crmS078Combinar(lojas,anos,opcoes){
   const ctx=window._s012Capturar?.(), dados=D;
   const combinar=window.crmCombinar, chave=window._crmChaveCli;
-  const slot=opcoes?.somenteClientes===true?1:0;
-  const selecao=JSON.stringify([lojas,anos||null,opcoes?.incluirComprasCliente===true]);
+  const pessoa=opcoes?.s085Pessoa===true;
+  const incluirCompras=pessoa&&opcoes?.incluirComprasCliente===true;
+  // Detailed, non-person projections keep their original direct/no-cache path.
+  if(opcoes?.incluirComprasCliente===true&&!pessoa)
+    return combinar(lojas,anos,opcoes);
+  const combinarOpcoes=opcoes?{...opcoes}:undefined;
+  if(incluirCompras&&combinarOpcoes){
+    delete combinarOpcoes.incluirComprasCliente;
+    delete combinarOpcoes.s085Vendedor;
+  }
+  const somenteClientes=combinarOpcoes?.somenteClientes===true;
+  const slot=pessoa?(somenteClientes?3:2):(somenteClientes?1:0);
+  const elegibilidade=pessoa?_crmS085AssinaturaElegibilidade():null;
+  const selecao=JSON.stringify([lojas,anos||null,combinarOpcoes?.incluirComprasCliente===true,
+      pessoa?{s085Pessoa:true,somenteClientes}:null,
+    elegibilidade]);
   const entradas=[];
-  let elegivel=!!ctx&&window._s012ContextoValido(ctx)&&opcoes?.incluirComprasCliente!==true;
+  let elegivel=!!ctx&&window._s012ContextoValido(ctx);
   for(const lid of lojas||[]){
     const porAno=dados.crm?.[lid]||{};
     for(const ano of anos?.length?anos:Object.keys(porAno)){
@@ -15967,18 +17065,19 @@ function _crmS078Combinar(lojas,anos,opcoes){
     ?_crmS078Bases[0]:_crmS078Bases[slot];
   if(elegivel&&anterior?.dados===dados&&anterior.owner===ctx.owner
       &&anterior.geracao===ctx.geracao&&anterior.selecao===selecao
+      &&anterior.elegibilidade===elegibilidade
       &&anterior.combinar===combinar&&anterior.chave===chave
       &&anterior.entradas.length===entradas.length
       &&entradas.every((e,i)=>e.every((v,j)=>v===anterior.entradas[i][j])))
-    return anterior.base;
+    return incluirCompras?{...anterior.base,_comprasCliente:_crmS085ComprasCliente(lojas,anos,opcoes?.s085Vendedor)}:anterior.base;
   _crmS078Bases[slot]=null;
-  const base=combinar(lojas,anos,opcoes);
+  const base=combinar(lojas,anos,combinarOpcoes);
   if(elegivel&&D===dados&&window._s012ContextoValido(ctx)
       &&window.crmCombinar===combinar&&window._crmChaveCli===chave
       &&entradas.every(([lid,ano,cubo])=>dados.crm?.[lid]?.[ano]===cubo))
-    _crmS078Bases[slot]={dados,owner:ctx.owner,geracao:ctx.geracao,selecao,
+    _crmS078Bases[slot]={dados,owner:ctx.owner,geracao:ctx.geracao,selecao,elegibilidade,
       combinar,chave,entradas,base};
-  return base;
+  return incluirCompras?{...base,_comprasCliente:_crmS085ComprasCliente(lojas,anos,opcoes?.s085Vendedor)}:base;
 }
 
 /** Cubo da visão atual, respeitando perfil e filtros de ano/mês/loja/vendedor(a). */
@@ -15989,11 +17088,14 @@ window.crmVisao = function(over){
   const fLoja = document.getElementById('excel-filtro-loja')?.value || '';
   // [R86] O card de produtos tem seu próprio filtro de vendedor(a), que se
   // soma aos filtros gerais de ano/mês/loja.
-  const fVend = over.vend !== undefined ? over.vend
-              : (document.getElementById('excel-filtro-vend')?.value || '');
+  let fVend = over.vend !== undefined ? over.vend
+            : (document.getElementById('excel-filtro-vend')?.value || '');
 
   let lojas = window.crmLojasVisiveis();
   if(fLoja) lojas = lojas.filter(l => l === fLoja);
+  const vendedorArquivado=!!fVend
+    &&window._crmS085RotuloArquivadoEscopo?.(fVend,lojas)===true;
+  if(vendedorArquivado) fVend='__s085_arquivada__';
 
   // Sem cubo: montar um na hora a partir das linhas antigas
   let base;
@@ -16002,13 +17104,18 @@ window.crmVisao = function(over){
       if(!lojaVisivel(r.loja)) return false;
       if(!isAdmin() && r.loja !== lojaId()) return false;
       if(fLoja && r.loja !== fLoja) return false;
+      if(fVend && !vendedorArquivado
+          && window._crmS085RotuloArquivadoUnicoLoja?.(r.loja,r.vendedora)) return false;
       return true;
     });
     base = window.crmCombinarDeLinhas(linhas);
   } else {
-    base = _crmS078Combinar(lojas, fAno ? [fAno] : null,
-      fVend && over.incluirAtribuicaoClientes !== false
-        ? {incluirComprasCliente:true} : undefined);
+    const pessoa=fVend&&!vendedorArquivado;
+    const opcoes=pessoa?{s085Pessoa:true,
+      ...(over.incluirAtribuicaoClientes!==false?{incluirComprasCliente:true,s085Vendedor:fVend}:{})}:undefined;
+    base = pessoa
+      ? _crmS078Combinar(lojas, fAno ? [fAno] : null, opcoes)
+      : _crmS078Combinar(lojas, fAno ? [fAno] : null);
   }
 
   return window.crmFiltrar(base, {ano:fAno, mes:fMes, vend:fVend, loja:fLoja});
@@ -19122,12 +20229,14 @@ window.crmCarregar = async function(paresOpt, s012Ctx, s033Proof, onProgress, op
         }
       }
     }catch(e){
+      if(!window._s012ContextoValido(ctx)||D!==dadosAlvo) return 0;
       if(_marcaLegadaSemOperacao)_avisarMarcaPreservada();
       _n003EstadoPar='falha-na-leitura'; falhasN003++;
       _invalidarVistoSeFalhou();
       console.warn('[crm] falha lendo', lid, ano, e.code||e.message);
     }finally{
-      _n003Notificar({tipo:'leitura-par-resultado',lid,ano,estado:_n003EstadoPar,concluidos:_n003Indice+1,total:_pares.length});
+      if(window._s012ContextoValido(ctx)&&D===dadosAlvo)
+        _n003Notificar({tipo:'leitura-par-resultado',lid,ano,estado:_n003EstadoPar,concluidos:_n003Indice+1,total:_pares.length});
     }
   }
   if(_s069VistosPendentes.size||_s069MarkerBatch.archives.length){
@@ -21596,6 +22705,15 @@ window.crmCombinar = function(lojas, anos, opcoes){
   let linhas=0, faturamento=0, ini=null, fim=null, cubosContados=0, prodMetricasAnuaisDisponiveis=true;
   let prodTotalClientesAproximados=false;
   let linhasAproximadas=false;
+  const somentePessoas=opcoes?.s085Pessoa===true;
+  const visibilidadePessoas=new Map();
+  const pessoaVisivel=(lid,nome)=>{
+    if(!somentePessoas) return true;
+    const chave=String(lid||'')+'\u0000'+String(nome||'');
+    if(!visibilidadePessoas.has(chave))
+      visibilidadePessoas.set(chave,!window._crmS085RotuloArquivadoUnicoLoja?.(lid,nome));
+    return visibilidadePessoas.get(chave);
+  };
   const incluirCompras=opcoes?.incluirComprasCliente===true;
   const comprasCliente=[], coberturaCompras=[];
 
@@ -21606,6 +22724,7 @@ window.crmCombinar = function(lojas, anos, opcoes){
       if(!c) return;
       const mV = (c.vends||[]).map(v => idx(tVend,iVend,v));
       (c.clientes||[]).forEach(([nome,vi,priMi,ult,compras,total,itens,doc,tel])=>{
+        if(!pessoaVisivel(lid,c.vends?.[vi])) return;
         // [R67] agrupar por documento quando houver — nome é fallback
         const k = window._crmChaveCli(nome, doc);
         const e = clientes.get(k);
@@ -21634,7 +22753,8 @@ window.crmCombinar = function(lojas, anos, opcoes){
         const vendedorasMes=[];
         if(Array.isArray(c.mesVend)&&Array.isArray(c.vends)) c.mesVend.forEach(([mi,vi])=>{
           const mes=c.meses?.[mi], vendedor=c.vends?.[vi];
-          if(mes&&vendedor&&!vendedorasMes.some(p=>p[0]===mes&&p[1]===vendedor))
+        if(mes&&vendedor&&pessoaVisivel(lid,vendedor)
+            &&!vendedorasMes.some(p=>p[0]===mes&&p[1]===vendedor))
             vendedorasMes.push([mes,vendedor]);
         });
         coberturaCompras.push({loja:lid,ano:String(ano),mesesConjunto:window.crmMesesDoCubo(c),
@@ -21643,7 +22763,9 @@ window.crmCombinar = function(lojas, anos, opcoes){
           mesesDetalhados:detalhe?.versao===1&&detalhe.disponivel===true?(detalhe.meses||[]):[],
           disponivel:window._crmComprasClienteValido(detalhe)});
         if(window._crmComprasClienteValido(detalhe))
-          (detalhe.itens||[]).forEach(r=>comprasCliente.push([lid,String(ano),...r]));
+          (detalhe.itens||[]).forEach(r=>{
+            if(pessoaVisivel(lid,r?.[9])) comprasCliente.push([lid,String(ano),...r]);
+          });
       }
       linhas += c.linhas||0; faturamento += c.faturamento||0;
       if(_crmLinhasAproximadas(c)) linhasAproximadas=true;
@@ -21663,6 +22785,7 @@ window.crmCombinar = function(lojas, anos, opcoes){
         mesCli.set(k,a);
       });
       (c.mesVend||[]).forEach(([mi,vi,f,cup,it,cli])=>{
+        if(!pessoaVisivel(lid,c.vends?.[vi])) return;
         const k = mM[mi]+'|'+mV[vi];
         const a = mesVend.get(k) || {f:0,c:0,i:0,cl:0};
         a.f+=f; a.c+=cup; a.i+=it; a.cl+=cli; mesVend.set(k,a);
@@ -21673,11 +22796,13 @@ window.crmCombinar = function(lojas, anos, opcoes){
         a.q+=q; a.f+=f; mesProd.set(k,a);
       });
       coberturaMVP.linhas.forEach(([mi,vi,pi,q,f])=>{
+        if(!pessoaVisivel(lid,c.vends?.[vi])) return;
         if(mM[mi]===undefined||mV[vi]===undefined||mP[pi]===undefined) return;
         const k=mM[mi]+'|'+mV[vi]+'|'+mP[pi], a=mesVendProd.get(k)||{q:0,f:0};
         a.q+=q||0; a.f+=f||0; mesVendProd.set(k,a);
       });
       (c.vendProd||[]).forEach(([vi,pi,q,f])=>{
+        if(!pessoaVisivel(lid,c.vends?.[vi])) return;
         const k = mV[vi]+'|'+mP[pi];
         const a = vendProd.get(k) || {q:0,f:0};
         a.q+=q; a.f+=f; vendProd.set(k,a);
@@ -29382,6 +30507,153 @@ function _s004Canon(v){
     .map(k=>JSON.stringify(k)+':'+_s004Canon(v[k])).join(',')+'}';
 }
 function _s004VendaKey(tipo,id,data){ return JSON.stringify([tipo,String(id),String(data)]); }
+function _s004FonteVenda(ctx,tipo,id,data,root=D){
+  let lid;
+  if(tipo==='venda') lid=String(id);
+  else if(tipo==='vend'){
+    if(ctx?.perfil==='loja') lid=String(ctx.loja||'');
+    else{
+      const legado=(root?.vendedoras||[]).find(v=>String(v.id)===String(id))?.loja
+        ||root?._vendsExcluidasMeta?.[id]?.loja||null;
+      const rota=window._s007ResolverLojaVend?.(id,data,root?._s007Transferencias||{},legado);
+      if(!rota?.ok) return null;
+      lid=String(rota.loja||'');
+    }
+  }else return null;
+  if(!lid || (ctx?.perfil==='loja'&&lid!==String(ctx.loja||''))) return null;
+  return 'loja_'+lid;
+}
+function _s004EstadoBaseLidaEfetivo(w,parAtual=false){
+  if(w?.v!==2||!w.sources?.principal||!w.sources?.store) return null;
+  const principal=w.sources.principal,store=w.sources.store;
+  const listed=principal.listed===true||store.listed===true;
+  if(!parAtual&&!listed) return null;
+  let tsPresent=principal.tsPresent===true||store.tsPresent===true;
+  let ts=principal.tsPresent===true?principal.ts:null;
+  if(store.tsPresent===true&&(!principal.tsPresent||!(Number(ts)>=Number(store.ts)))) ts=store.ts;
+  if(tsPresent&&!Number.isFinite(Number(ts))) return null;
+  if(!parAtual&&(!listed||!tsPresent||Number(ts)<=0)) return null;
+  // fsCarregar starts from principal, unions store tombstones, and replaces
+  // the row only when that row passes _lapideBarra. _aposentar then removes
+  // a dated marker when the surviving row is newer. For a current-pair proof,
+  // also model no-list and timestamp-only states exactly as the reader leaves
+  // them; persisted S053 witnesses keep the stricter positive-marker rule.
+  let row=principal.rowPresent?principal.row:null;
+  const tsExc=Number(ts||0);
+  if(store.rowPresent&&(!listed||(tsExc&&Number(store.row?._savedAt||0)>tsExc))) row=store.row;
+  if(!listed)
+    return {valor:row?_s004Clone(row):null,lapide:tsPresent,lapideTs:tsPresent?ts:null};
+  if(row&&(!tsExc||Number(row._savedAt||0)>tsExc))
+    return {valor:_s004Clone(row),lapide:false,lapideTs:null};
+  return {valor:null,lapide:true,lapideTs:tsPresent?ts:null};
+}
+function _s004EstadoRawAlvo(root,tipo,id,data){
+  const loja=tipo==='venda',entity=loja?'vendas':'vendasVend';
+  const campo=loja?'_vendasExcluidas':'_vendasVendExcluidas';
+  const tsCampo=loja?'_vendasExcluidasTs':'_vendasVendExcluidasTs';
+  const key=String(id),date=String(data),rowMap=root?.[entity]?.[key];
+  const rowPresent=!!rowMap&&typeof rowMap==='object'
+    &&Object.prototype.hasOwnProperty.call(rowMap,date);
+  const marks=root?.[campo]?.[key],tsMap=root?.[tsCampo]||{},tsKey=key+'|'+date;
+  const tsPresent=Object.prototype.hasOwnProperty.call(tsMap,tsKey);
+  return {rowPresent,row:rowPresent?_s004Clone(rowMap[date]):null,
+    listed:Array.isArray(marks)&&marks.includes(date),tsPresent,ts:tsPresent?_s004Clone(tsMap[tsKey]):null};
+}
+function _s004BaseLidaTargetValido(p,source){
+  if(!p||p.source!==source||p.exists!==true||typeof p.rowPresent!=='boolean'
+      ||typeof p.listed!=='boolean'||typeof p.tsPresent!=='boolean') return false;
+  if(p.rowPresent?!(p.row&&typeof p.row==='object'&&!Array.isArray(p.row)):p.row!==null) return false;
+  return p.tsPresent?(p.ts===null||typeof p.ts==='number'||typeof p.ts==='string'):p.ts===null;
+}
+function _s004BaseLidaPersistidaValida(w,e,owner){
+  if(!w||typeof w!=='object'||Array.isArray(w)||w.owner!==owner
+      ||w.opId!==e?.opId||w.tipo!==e?.tipo||w.id!==String(e?.id)||w.data!==String(e?.data)
+      ||!['admin','loja'].includes(w.perfil)
+      ||(w.perfil==='loja'?typeof w.loja!=='string'||!w.loja:w.loja!==null)
+      ||!Number.isSafeInteger(w.geracao)||w.geracao<1
+      ||!Number.isSafeInteger(w.readId)||w.readId<1) return false;
+  if(w.v!==2||typeof w.source!=='string'||!/^loja_[a-z0-9_-]+$/.test(w.source)
+      ||(w.perfil==='loja'&&w.source!=='loja_'+w.loja)
+      ||!w.sources||!_s004BaseLidaTargetValido(w.sources.principal,'principal')
+      ||!_s004BaseLidaTargetValido(w.sources.store,w.source)) return false;
+  const eff=w.effective;
+  if(!eff||typeof eff!=='object'||Array.isArray(eff)||typeof eff.lapide!=='boolean'
+      ||(eff.valor!==null&&(!eff.valor||typeof eff.valor!=='object'||Array.isArray(eff.valor)))
+      ||(eff.lapideTs!==null&&typeof eff.lapideTs!=='number'&&typeof eff.lapideTs!=='string')) return false;
+  const derived=_s004EstadoBaseLidaEfetivo(w);
+  return !!derived&&_s004Canon(derived)===_s004Canon(eff);
+}
+function _s004BaseLidaIdentidade(w,entry,ctx,tipo,id,data,source){
+  if(!w||w.v!==2||w.owner!==ctx?.owner||w.perfil!==ctx?.perfil
+      ||w.loja!==(ctx?.perfil==='loja'?String(ctx.loja||''):null)
+      ||w.source!==source||w.opId!==entry?.opId
+      ||w.tipo!==tipo||w.id!==String(id)||w.data!==String(data)
+      ||!Number.isSafeInteger(w.geracao)||w.geracao<1
+      ||!Number.isSafeInteger(w.readId)||w.readId<1
+      ||!_s004BaseLidaTargetValido(w.sources?.principal,'principal')
+      ||!_s004BaseLidaTargetValido(w.sources?.store,source)) return false;
+  return true;
+}
+function _s004RawFonte(options,name){
+  const item=options?.sources?.[name];
+  return item&&typeof item==='object'&&typeof item.exists==='boolean'
+    ?item:{exists:false,obj:null};
+}
+function _s004FonteLeituraCompleta(item){
+  if(!item||typeof item!=='object'||Array.isArray(item)
+      ||!Object.prototype.hasOwnProperty.call(item,'exists')
+      ||typeof item.exists!=='boolean') return false;
+  if(item.exists) return Object.prototype.hasOwnProperty.call(item,'obj')
+    &&!!item.obj&&typeof item.obj==='object'&&!Array.isArray(item.obj);
+  if(!Object.prototype.hasOwnProperty.call(item,'obj')||item.obj==null) return true;
+  return typeof item.obj==='object'&&!Array.isArray(item.obj)&&Object.keys(item.obj).length===0;
+}
+function _s004FontesObservacaoCompletas(options){
+  const sources=options?.sources;
+  return !!sources&&typeof sources==='object'&&!Array.isArray(sources)
+    &&Object.prototype.hasOwnProperty.call(sources,'principal')
+    &&Object.prototype.hasOwnProperty.call(sources,'store')
+    &&_s004FonteLeituraCompleta(sources.principal)
+    &&_s004FonteLeituraCompleta(sources.store);
+}
+function _s004BaseLidaValida(w,entry,ctx,tipo,id,data,source,options){
+  if(!_s004BaseLidaIdentidade(w,entry,ctx,tipo,id,data,source)) return false;
+  const pDoc=_s004RawFonte(options,'principal'),sDoc=_s004RawFonte(options,'store');
+  if(pDoc.exists!==true||sDoc.exists!==true||!pDoc.obj||!sDoc.obj) return false;
+  const principal=_s004EstadoRawAlvo(pDoc.obj,tipo,id,data);
+  const store=_s004EstadoRawAlvo(sDoc.obj,tipo,id,data);
+  const pAtual=Object.assign({source:'principal',exists:true},principal);
+  const sAtual=Object.assign({source,exists:true},store);
+  if(_s004Canon(sAtual)!==_s004Canon(w.sources.store)
+      ||_s004Canon(pAtual)!==_s004Canon(w.sources.principal)) return false;
+  const effective=_s004EstadoBaseLidaEfetivo(w);
+  return !!effective&&_s004Canon(effective)===_s004Canon(entry.base)
+    &&_s004Canon(effective)===_s004Canon(w.effective);
+}
+function _s004BaseLidaProjetar(ctx,entry,tipo,id,data,localRoot,remoteRoot,options){
+  const source=_s004FonteVenda(ctx,tipo,String(id),String(data),localRoot||D);
+  const w=entry?.baseLida;
+  if(!source||!_s004BaseLidaValida(w,entry,ctx,tipo,String(id),String(data),source,options))
+    return null;
+  const effective=_s004EstadoBaseLidaEfetivo(w);
+  return effective&&_s004Canon(effective)===_s004Canon(entry.base)?effective:null;
+}
+function _s004WitnessBase(ctx,change,base,opId,root=D){
+  if(_s004Canon(_s004EstadoNo(root,change.tipo,String(change.id),String(change.data)))
+      !==_s004Canon(change.depois)) return null;
+  const source=_s004FonteVenda(ctx,change.tipo,String(change.id),String(change.data),root);
+  const witness=source&&window._s053CapturarBaseVenda?.(
+    ctx,change.tipo,String(change.id),String(change.data),source,opId);
+  const effective=_s004EstadoBaseLidaEfetivo(witness);
+  return effective&&_s004Canon(effective)===_s004Canon(base)?witness:null;
+}
+function _s004RebindBaseLida(w,anterior,ctx,tipo,id,data,base,opId,root=D){
+  const source=_s004FonteVenda(ctx,tipo,String(id),String(data),root);
+  const effective=_s004EstadoBaseLidaEfetivo(w);
+  if(!_s004BaseLidaIdentidade(w,anterior,ctx,tipo,String(id),String(data),source)
+      ||!effective||_s004Canon(effective)!==_s004Canon(base)) return null;
+  return Object.assign({},w,{opId});
+}
 function _s004EstadoNo(root,tipo,id,data){
   const loja=tipo==='venda', campo=loja?'vendas':'vendasVend';
   const vendas=root?.[campo]?.[id];
@@ -29394,6 +30666,72 @@ function _s004EstadoNo(root,tipo,id,data){
   return {valor,lapide,lapideTs:ts?.[String(id)+'|'+String(data)]??null};
 }
 window._s004VendasEstado=(tipo,id,data,root=D)=>_s004EstadoNo(root,tipo,id,data);
+function _s004VendasProjecaoDepois(entry,source){
+  const depois=entry?.depois;
+  if(!depois||typeof depois!=='object'||Array.isArray(depois)
+      ||typeof depois.lapide!=='boolean'
+      ||(depois.valor!==null&&(!depois.valor||typeof depois.valor!=='object'||Array.isArray(depois.valor)))
+      ||(depois.lapideTs!==null&&typeof depois.lapideTs!=='number'&&typeof depois.lapideTs!=='string')
+      ||(!depois.lapide&&depois.lapideTs!==null)) return null;
+  const rowPresent=depois.valor!==null;
+  return {source,exists:true,rowPresent,row:rowPresent?_s004Clone(depois.valor):null,
+    listed:depois.lapide,tsPresent:depois.lapideTs!==null,
+    ts:depois.lapideTs!==null?_s004Clone(depois.lapideTs):null};
+}
+function _s004VendasParAtual(ctx,entry,options){
+  const tipo=entry?.tipo,id=String(entry?.id??''),data=String(entry?.data??'');
+  if(!ctx?.owner||!window._s012ContextoValido?.(ctx)
+      ||!['venda','vend'].includes(tipo)||!id||!data||typeof entry?.opId!=='string'||!entry.opId
+      ||!_s004FontesObservacaoCompletas(options)) return null;
+  const pDoc=_s004RawFonte(options,'principal'),sDoc=_s004RawFonte(options,'store');
+  if(pDoc.exists!==true||sDoc.exists!==true||!pDoc.obj||!sDoc.obj) return null;
+  // Seller routing must use the current principal read, never stale D.
+  const source=_s004FonteVenda(ctx,tipo,id,data,pDoc.obj);
+  if(!source) return null;
+  const principal=Object.assign({source:'principal',exists:true},
+    _s004EstadoRawAlvo(pDoc.obj,tipo,id,data));
+  const store=Object.assign({source,exists:true},
+    _s004EstadoRawAlvo(sDoc.obj,tipo,id,data));
+  return {tipo,id,data,source,principal,store,principalDoc:pDoc,storeDoc:sDoc};
+}
+window._s004VendasConfirmadaEmFontes=function(ctx,entry,options){
+  try{
+    const par=_s004VendasParAtual(ctx,entry,options);
+    if(!par||_s004Canon(_s004EstadoNo(par.storeDoc.obj,par.tipo,par.id,par.data))
+        !==_s004Canon(entry.depois)) return false;
+    const witness=entry.baseLida;
+    if(witness!==undefined&&witness!==null){
+      if(witness.v!==2||!_s004BaseLidaPersistidaValida(witness,entry,ctx.owner)
+          ||!_s004BaseLidaIdentidade(witness,entry,ctx,par.tipo,par.id,par.data,par.source)
+          ||_s004Canon(par.principal)!==_s004Canon(witness.sources.principal)) return false;
+      const original=_s004EstadoBaseLidaEfetivo(witness);
+      if(!original||_s004Canon(original)!==_s004Canon(entry.base)
+          ||_s004Canon(original)!==_s004Canon(witness.effective)) return false;
+    }
+    const current={v:2,tipo:par.tipo,id:par.id,data:par.data,
+      sources:{principal:par.principal,store:par.store}};
+    const effective=_s004EstadoBaseLidaEfetivo(current,true);
+    return !!effective&&_s004Canon(effective)===_s004Canon(entry.depois);
+  }catch(_e){ return false; }
+};
+function _s004VendasPropostaEfetivaEmFontes(ctx,entry,options){
+  try{
+    const w=entry?.baseLida;
+    if(w?.v!==2) return false;
+    const par=_s004VendasParAtual(ctx,entry,options);
+    if(!par||par.source!==w.source
+        ||!_s004BaseLidaValida(w,entry,ctx,par.tipo,par.id,par.data,par.source,options)) return false;
+    const base=_s004EstadoBaseLidaEfetivo(w);
+    if(!base||_s004Canon(base)!==_s004Canon(entry.base)
+        ||_s004Canon(base)!==_s004Canon(w.effective)) return false;
+    const storeDepois=_s004VendasProjecaoDepois(entry,par.source);
+    if(!storeDepois) return false;
+    const proposta={v:2,tipo:par.tipo,id:par.id,data:par.data,
+      sources:{principal:par.principal,store:storeDepois}};
+    const effective=_s004EstadoBaseLidaEfetivo(proposta,true);
+    return !!effective&&_s004Canon(effective)===_s004Canon(entry.depois);
+  }catch(_e){ return false; }
+}
 function _s004VendasValidarRaw(raw,owner){
   if(raw===null) return {valido:true,revision:0,valor:{v:1,owner,revision:0,entries:{}}};
   try{
@@ -29405,6 +30743,9 @@ function _s004VendasValidarRaw(raw,owner){
           ||key!==_s004VendaKey(e.tipo,e.id,e.data)||typeof e.opId!=='string'
           ||!Object.prototype.hasOwnProperty.call(e,'base')
           ||!Object.prototype.hasOwnProperty.call(e,'depois'))
+        return {valido:false,revision:null,valor:null};
+      const w=e.baseLida;
+      if(w!==undefined&&w!==null&&!_s004BaseLidaPersistidaValida(w,e,owner))
         return {valido:false,revision:null,valor:null};
     }
     return {valido:true,revision:Number(x.revision)||0,valor:x};
@@ -29455,13 +30796,23 @@ window._s004VendasRegistrar=function(ctx,changes){
     // operation was pending. Only that matching opId may seed an explicit
     // replacement; a later/older response cannot rebase a newer operation.
     const observado=anterior?.observado;
+    const observacaoAtual=observado?.opId===anterior?.opId;
     const base=anterior
-      ? (observado?.opId===anterior.opId ? _s004Clone(observado.estado) : anterior.base)
+      ? (observacaoAtual ? _s004Clone(observado.estado) : anterior.base)
       : _s004Clone(c.base);
     const depois=_s004Clone(c.depois);
     if(_s004Canon(base)===_s004Canon(depois)){ delete state.entries[key]; continue; }
     const opId=(window.crypto?.randomUUID?.()||('s004-'+(++_s004Sequencia)));
-    state.entries[key]={tipo:c.tipo,id:String(c.id),data:String(c.data),base,depois,opId};
+    const witnessChange={tipo:c.tipo,id:String(c.id),data:String(c.data),depois};
+    const baseLida=anterior
+      ? (observacaoAtual
+          ? _s004WitnessBase(ctx,witnessChange,base,opId,D)
+          : (_s004Canon(base)===_s004Canon(anterior.base)
+              ?_s004RebindBaseLida(anterior.baseLida,anterior,ctx,c.tipo,String(c.id),String(c.data),base,opId,D)
+              :null))
+      : _s004WitnessBase(ctx,witnessChange,base,opId,D);
+    state.entries[key]={tipo:c.tipo,id:String(c.id),data:String(c.data),base,depois,opId,
+      ...(baseLida?{baseLida}: {})};
     ids.push({key,opId});
   }
   state.revision=(Number(state.revision)||0)+1;
@@ -29521,7 +30872,8 @@ window._s004VendasRegistrarObservacao=function(ctx,tipo,id,data,remoteRoot,opId)
   return _s004VendasPersistir(ctx,l.valor);
 };
 window._s004VendasObservarConflito=function(ctx,tipo,id,data,remoteRoot,decisao){
-  if(!decisao?.marcada || !decisao.conflito || !decisao.entrada?.opId) return false;
+  if(!decisao?.marcada || !decisao.conflito || decisao.observacaoIncompleta===true
+      || !decisao.entrada?.opId) return false;
   const registrado=window._s004VendasRegistrarObservacao(
     ctx,tipo,id,data,remoteRoot,decisao.entrada.opId);
   if(typeof showToast==='function' && !window._gravacaoSilenciosa){
@@ -29563,13 +30915,73 @@ window._s004VendasRestaurarEstado=function(tipo,id,data,estado,root=D){
   if(estado?.lapideTs!==null && estado?.lapideTs!==undefined) root[tsCampo][k]=estado.lapideTs;
   else delete root[tsCampo][k];
 };
-window._s004VendasDecidir=function(tipo,id,data,localRoot,remoteRoot,ctx){
+function _s004MarcadorUnido(w){
+  const p=w?.sources?.principal,s=w?.sources?.store;
+  if(!p||!s) return null;
+  const listed=p.listed===true||s.listed===true;
+  let tsPresent=p.tsPresent===true||s.tsPresent===true;
+  let ts=p.tsPresent===true?p.ts:null;
+  if(s.tsPresent===true&&(!p.tsPresent||!(Number(ts)>=Number(s.ts)))) ts=s.ts;
+  return {listed,tsPresent,ts:tsPresent?ts:null};
+}
+function _s004MarcadorUnidoComDepois(w,depois){
+  const base=_s004MarcadorUnido(w);
+  if(!base||depois?.lapide!==true) return null;
+  const propostaTsPresent=depois.lapideTs!==null&&depois.lapideTs!==undefined;
+  if(propostaTsPresent&&(!Number.isFinite(Number(depois.lapideTs))||Number(depois.lapideTs)<=0)) return null;
+  const proposta={listed:true,
+    tsPresent:propostaTsPresent,ts:propostaTsPresent?depois.lapideTs:null};
+  // Writer merge order is local proposal first, then raw remote tombstones.
+  let tsPresent=proposta.tsPresent||base.tsPresent,ts=proposta.tsPresent?proposta.ts:null;
+  if(base.tsPresent&&(!proposta.tsPresent||!(Number(ts)>=Number(base.ts)))) ts=base.ts;
+  return {listed:proposta.listed||base.listed,tsPresent,ts:tsPresent?ts:null};
+}
+window._s004VendasDecidir=function(tipo,id,data,localRoot,remoteRoot,ctx,options){
   const l=_s004VendasLer(ctx); if(!l) return null;
   if(l.erro){ const e=new Error(l.erro); e.code='s004-pendencia-indisponivel'; throw e; }
   const entry=l.valor.entries[_s004VendaKey(tipo,id,data)];
   if(!entry) return {marcada:false};
+  const observacaoIncompleta=entry.baseLida?.v===2
+    &&!_s004FontesObservacaoCompletas(options)?true:undefined;
   let local=_s004EstadoNo(localRoot,tipo,id,data);
-  const remoto=_s004EstadoNo(remoteRoot,tipo,id,data);
+  let remoto=_s004EstadoNo(remoteRoot,tipo,id,data);
+  const projetado=_s004BaseLidaProjetar(ctx,entry,tipo,id,data,localRoot,remoteRoot,options);
+  if(projetado&&_s004Canon(remoto)!==_s004Canon(entry.base)) remoto=projetado;
+  const witness=entry.baseLida;
+  const exclusaoProposta=entry.depois?.valor===null&&entry.depois?.lapide===true;
+  if(exclusaoProposta){
+    const ts=Number(entry.depois.lapideTs);
+    const row=entry.base?.valor;
+    const savedAt=row?Number(row._savedAt??0):null;
+    if(!Number.isFinite(ts)||ts<=0
+        ||(row&&(!Number.isFinite(savedAt)||savedAt>=ts)))
+      return {marcada:true,conflito:true,estado:local,entrada:entry,remoto:remoto,
+        observacaoIncompleta:observacaoIncompleta};
+  }
+  let removerLapideWitness=false;
+  let preservarLapideWitnessUnida=false;
+  if(projetado&&!projetado.lapide&&!entry.base?.lapide
+      &&_s004Canon(local?.valor)===_s004Canon(entry.depois?.valor)
+      &&witness?.v===2){
+    const localRaw=_s004EstadoRawAlvo(localRoot,tipo,id,data);
+    const unido=_s004MarcadorUnido(witness);
+    const yaLimpou=!localRaw.listed&&!localRaw.tsPresent;
+    const marcadorExato=!!unido&&localRaw.listed===unido.listed
+      &&localRaw.tsPresent===unido.tsPresent&&_s004Canon(localRaw.ts)===_s004Canon(unido.ts);
+    const depoisExcluiu=entry.depois?.valor===null&&entry.depois?.lapide===true;
+    const uniaoProposta=depoisExcluiu?_s004MarcadorUnidoComDepois(witness,entry.depois):null;
+    const uniaoPropostaExata=!!uniaoProposta&&!localRaw.rowPresent
+      &&localRaw.listed===uniaoProposta.listed
+      &&localRaw.tsPresent===uniaoProposta.tsPresent
+      &&_s004Canon(localRaw.ts)===_s004Canon(uniaoProposta.ts);
+    if(depoisExcluiu&&uniaoPropostaExata){
+      local=entry.depois;
+      preservarLapideWitnessUnida=true;
+    }else if(!depoisExcluiu&&(yaLimpou||marcadorExato)){
+      local=entry.depois;
+      removerLapideWitness=marcadorExato;
+    }
+  }
   // The writer may have just unioned the exact base tombstone from the
   // server into its outgoing snapshot. That metadata does not invalidate a
   // relaunch explicitly registered against the same tombstone.
@@ -29584,18 +30996,32 @@ window._s004VendasDecidir=function(tipo,id,data,localRoot,remoteRoot,ctx){
     && _s004Canon(remoto)===_s004Canon(entry.base);
   if(relancamentoComBaseRemota) local=entry.depois;
   if(_s004Canon(local)!==_s004Canon(entry.depois))
-    return {marcada:true,conflito:true,estado:local,entrada:entry,remoto:remoto};
-  if(_s004Canon(remoto)===_s004Canon(entry.base))
+    return {marcada:true,conflito:true,estado:local,entrada:entry,remoto:remoto,
+      observacaoIncompleta:observacaoIncompleta};
+  if(_s004Canon(remoto)===_s004Canon(entry.base)){
+    if(witness?.v===2
+        &&(!_s004FontesObservacaoCompletas(options)
+          ||!_s004VendasPropostaEfetivaEmFontes(ctx,entry,options)))
+      return {marcada:true,conflito:true,estado:local,entrada:entry,remoto:remoto,
+        observacaoIncompleta:observacaoIncompleta};
     return {marcada:true,conflito:false,estado:entry.depois,entrada:entry,
       remoto:remoto,removerLapideUnida:relancamentoComBaseRemota,
-      removerLapideBase:removerLapideBase};
-  if(_s004Canon(remoto)===_s004Canon(entry.depois))
+      removerLapideBase:removerLapideBase,removerLapideWitness:removerLapideWitness,
+      preservarLapideWitnessUnida:preservarLapideWitnessUnida};
+  }
+  if(_s004Canon(remoto)===_s004Canon(entry.depois)){
+    const exigeParAtual=witness?.v===2||_s004FontesObservacaoCompletas(options);
+    if(exigeParAtual&&!window._s004VendasConfirmadaEmFontes?.(ctx,entry,options))
+      return {marcada:true,conflito:true,estado:local,entrada:entry,remoto:remoto,
+        observacaoIncompleta:observacaoIncompleta};
     return {marcada:true,conflito:false,estado:remoto,confirmada:true,entrada:entry,
       remoto:remoto,removerLapideUnida:relancamentoComBaseRemota};
-  return {marcada:true,conflito:true,estado:entry.depois,entrada:entry,remoto:remoto};
+  }
+  return {marcada:true,conflito:true,estado:entry.depois,entrada:entry,remoto:remoto,
+    observacaoIncompleta:observacaoIncompleta};
 };
-window._s004VendasEstadoParaWriter=function(tipo,id,data,localRoot,remoteRoot,ctx){
-  const decisao=window._s004VendasDecidir(tipo,id,data,localRoot,remoteRoot,ctx);
+window._s004VendasEstadoParaWriter=function(tipo,id,data,localRoot,remoteRoot,ctx,options){
+  const decisao=window._s004VendasDecidir(tipo,id,data,localRoot,remoteRoot,ctx,options);
   const remoto=_s004EstadoNo(remoteRoot,tipo,id,data);
   if(!decisao || !decisao.marcada) return {ok:true,estado:remoto,marcada:false};
   if(decisao.conflito){
@@ -29606,10 +31032,240 @@ window._s004VendasEstadoParaWriter=function(tipo,id,data,localRoot,remoteRoot,ct
   // Apply the accepted operation to the writer snapshots. This also removes
   // only the exact base tombstone for an explicit relaunch; unrelated or
   // newer tombstones still conflict above.
-  window._s004VendasRestaurarEstado(tipo,id,data,decisao.estado,localRoot);
-  if(decisao.removerLapideBase)
+  if(!decisao.preservarLapideWitnessUnida)
+    window._s004VendasRestaurarEstado(tipo,id,data,decisao.estado,localRoot);
+  if(decisao.removerLapideBase||decisao.removerLapideWitness||decisao.preservarLapideWitnessUnida)
     window._s004VendasRestaurarEstado(tipo,id,data,decisao.estado,remoteRoot);
   return {ok:true,estado:decisao.estado,marcada:true};
+};
+// Isola apenas os ramos alterados para o S007 comparar a leitura original.
+window._s004VendasSnapshotRemotoParaWriter=function(root,pendencias,ctx,localRoot=D,options){
+  const relancamentos=(pendencias||[]).filter(p=>
+    p?.base?.lapide && !p?.depois?.lapide && p?.depois?.valor!=null
+      && (p.tipo==='venda'||p.tipo==='vend'));
+  const projetadas=[];
+  if(ctx?.owner&&root&&typeof root==='object') (pendencias||[]).forEach(p=>{
+    if(!p||!['venda','vend'].includes(p.tipo)||p.id==null||!p.data||!p.baseLida) return;
+    const estado=_s004BaseLidaProjetar(ctx,p,p.tipo,String(p.id),String(p.data),localRoot||D,root,options);
+    if(estado) projetadas.push({p,estado});
+  });
+  const alvos=new Map();
+  [...relancamentos,...projetadas.map(x=>x.p)].forEach(p=>
+    alvos.set(_s004VendaKey(p.tipo,p.id,p.data),p));
+  if(!alvos.size) return root;
+  const copia=Object.assign({},root||{}),copiados=new Set(),idsCopiados=new Set();
+  alvos.forEach(p=>{
+    const venda=p.tipo==='venda';
+    const campo=venda?'vendas':'vendasVend';
+    const excl=venda?'_vendasExcluidas':'_vendasVendExcluidas';
+    const ts=venda?'_vendasExcluidasTs':'_vendasVendExcluidasTs';
+    const id=String(p.id);
+    if(!copiados.has(campo)){
+      copia[campo]=Object.assign({},root?.[campo]||{});copiados.add(campo);
+    }
+    if(!idsCopiados.has(campo+'|'+id)){
+      if(Object.prototype.hasOwnProperty.call(root?.[campo]||{},p.id))
+        copia[campo][p.id]=Object.assign({},root[campo][p.id]||{});
+      idsCopiados.add(campo+'|'+id);
+    }
+    if(!copiados.has(excl)){
+      copia[excl]=Object.assign({},root?.[excl]||{});copiados.add(excl);
+    }
+    if(!idsCopiados.has(excl+'|'+id)){
+      if(Object.prototype.hasOwnProperty.call(root?.[excl]||{},p.id))
+        copia[excl][p.id]=Array.isArray(root[excl][p.id])?root[excl][p.id].slice():root[excl][p.id];
+      idsCopiados.add(excl+'|'+id);
+    }
+    if(!copiados.has(ts)){
+      copia[ts]=Object.assign({},root?.[ts]||{});copiados.add(ts);
+    }
+  });
+  projetadas.forEach(({p,estado})=>
+    window._s004VendasRestaurarEstado(p.tipo,String(p.id),String(p.data),estado,copia));
+  return copia;
+};
+window._s004VendasCriarGuardaTransacao=function(ctx,pendencias,modo,fontesOuResolver){
+  if(!ctx?.owner||!window._s012ContextoValido?.(ctx)
+      ||!['principal-preimage','loja-preimage'].includes(modo)
+      ||(modo==='principal-preimage'&&ctx.perfil!=='admin')) return null;
+  const targets=[];
+  for(const entry of pendencias||[]){
+    const w=entry?.baseLida;
+    if(w?.v!==2) continue;
+    let sourceOptions=null;
+    try{
+      sourceOptions=typeof fontesOuResolver==='function'
+        ?fontesOuResolver(entry):fontesOuResolver;
+    }catch(_e){ sourceOptions=null; }
+    const currentPrincipal=_s004RawFonte(sourceOptions,'principal');
+    const routeRoot=currentPrincipal.exists===true&&currentPrincipal.obj
+      ?currentPrincipal.obj:D;
+    const source=_s004FonteVenda(ctx,entry.tipo,String(entry.id),String(entry.data),routeRoot);
+    if(!source||source!==w.source||!_s004BaseLidaIdentidade(
+        w,entry,ctx,entry.tipo,String(entry.id),String(entry.data),source)) return null;
+    const key=_s004VendaKey(entry.tipo,entry.id,entry.data);
+    const localCanon=_s004Canon(_s004EstadoNo(D,entry.tipo,String(entry.id),String(entry.data)));
+    let sourceBasis='witness',currentSources=null;
+    const pDoc=sourceOptions?.sources?.principal,sDoc=sourceOptions?.sources?.store;
+    const principalCurrent=_s004FonteLeituraCompleta(pDoc)&&pDoc.exists===true
+      ?Object.assign({source:'principal',exists:true},
+        _s004EstadoRawAlvo(pDoc.obj,entry.tipo,String(entry.id),String(entry.data))):null;
+    if(_s004FontesObservacaoCompletas(sourceOptions)
+        &&_s004FonteLeituraCompleta(pDoc)&&pDoc.exists===true
+        &&_s004FonteLeituraCompleta(sDoc)&&sDoc.exists===true
+        &&_s004Canon(principalCurrent)===_s004Canon(w.sources.principal)
+        &&_s004Canon(_s004EstadoNo(D,entry.tipo,String(entry.id),String(entry.data)))
+          ===_s004Canon(entry.depois)
+        &&window._s004VendasConfirmadaEmFontes?.(ctx,entry,sourceOptions)===true){
+      sourceBasis='current-after';
+      currentSources={
+        principal:principalCurrent,
+        store:Object.assign({source,exists:true},
+          _s004EstadoRawAlvo(sDoc.obj,entry.tipo,String(entry.id),String(entry.data)))};
+    }
+    targets.push({key,opId:entry.opId,tipo:entry.tipo,id:String(entry.id),data:String(entry.data),
+      source,witness:w,baseCanon:_s004Canon(entry.base),
+      depoisCanon:_s004Canon(entry.depois),localCanon,sourceBasis,currentSources});
+  }
+  if(!targets.length) return null;
+  return {v:1,modo,token:window.crypto?.randomUUID?.()||('s004-tx-'+(++_s004Sequencia)),
+    owner:ctx.owner,geracao:ctx.geracao,perfil:ctx.perfil,
+    loja:ctx.perfil==='loja'?String(ctx.loja||''):null,targets};
+};
+function _s004VendasAlvoGuardaValido(guard,target){
+  const w=target?.witness;
+  return !!guard&&guard.v===1&&['principal-preimage','loja-preimage'].includes(guard.modo)
+    &&typeof guard.token==='string'&&!!guard.token
+    &&!!target&&['venda','vend'].includes(target.tipo)
+    &&typeof target.id==='string'&&!!target.id&&typeof target.data==='string'&&!!target.data
+    &&target.key===_s004VendaKey(target.tipo,target.id,target.data)
+    &&typeof target.opId==='string'&&!!target.opId
+    &&typeof target.source==='string'&&target.source===w?.source
+    &&w?.v===2&&w.owner===guard.owner&&w.opId===target.opId
+    &&w.perfil===guard.perfil&&w.loja===guard.loja
+    &&w.tipo===target.tipo&&w.id===target.id&&w.data===target.data
+    &&(target.sourceBasis==='witness'
+      ?target.currentSources===null
+      :target.sourceBasis==='current-after'
+        &&_s004BaseLidaTargetValido(target.currentSources?.principal,'principal')
+        &&_s004BaseLidaTargetValido(target.currentSources?.store,target.source)
+        &&_s004Canon(target.currentSources.principal)===_s004Canon(w.sources.principal))
+    &&_s004BaseLidaTargetValido(w.sources?.principal,'principal')
+    &&_s004BaseLidaTargetValido(w.sources?.store,target.source)
+    &&target.baseCanon===_s004Canon(w.effective)
+    &&typeof target.depoisCanon==='string'&&typeof target.localCanon==='string';
+}
+window._s004VendasPreservarAlvosPrincipal=function(guard,current,proposed){
+  try{
+    if(!guard||guard.v!==1||guard.modo!=='principal-preimage'||guard.perfil!=='admin'
+        ||guard.loja!==null||!guard.owner||!Array.isArray(guard.targets)||!guard.targets.length
+        ||!current||typeof current!=='object'||Array.isArray(current)
+        ||!proposed||typeof proposed!=='object'||Array.isArray(proposed)) return null;
+    let out=proposed;
+    const seen=new Set(),copiedFields=new Set(),copiedRows=new Set(),copiedLists=new Set();
+    const objectMap=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+    const ensureField=field=>{
+      if(!copiedFields.has(field)){
+        const next=Object.assign({},out,{[field]:Object.assign({},objectMap(out[field]))});
+        out=next;
+        copiedFields.add(field);
+      }
+      return out[field];
+    };
+    const ensureRows=(field,id)=>{
+      const map=ensureField(field),key=field+'\u001f'+id;
+      if(!copiedRows.has(key)){
+        map[id]=Object.assign({},objectMap(map[id]));
+        copiedRows.add(key);
+      }
+      return map[id];
+    };
+    const ensureList=(field,id)=>{
+      const map=ensureField(field),key=field+'\u001f'+id;
+      if(!copiedLists.has(key)){
+        map[id]=Array.isArray(map[id])?map[id].slice():[];
+        copiedLists.add(key);
+      }
+      return map[id];
+    };
+    for(const target of guard.targets){
+      if(!_s004VendasAlvoGuardaValido(guard,target)||seen.has(target.key)) return null;
+      seen.add(target.key);
+      const {tipo,id,data}=target,w=target.witness;
+      const expected=target.sourceBasis==='current-after'?target.currentSources:w.sources;
+      if(_s004Canon(_s004EstadoNo(D,tipo,id,data))!==target.localCanon) return null;
+      const raw=_s004EstadoRawAlvo(current,tipo,id,data);
+      const actual=Object.assign({source:'principal',exists:true},raw);
+      if(_s004Canon(actual)!==_s004Canon(expected.principal)) return null;
+      const aggregate=tipo==='venda',entity=aggregate?'vendas':'vendasVend';
+      const listField=aggregate?'_vendasExcluidas':'_vendasVendExcluidas';
+      const tsField=aggregate?'_vendasExcluidasTs':'_vendasVendExcluidasTs';
+      const tsKey=id+'|'+data;
+
+      const proposedRows=objectMap(out[entity]?.[id]);
+      const hasRow=Object.prototype.hasOwnProperty.call(proposedRows,data);
+      if(hasRow!==raw.rowPresent
+          ||(hasRow&&_s004Canon(proposedRows[data])!==_s004Canon(raw.row))){
+        const rows=ensureRows(entity,id);
+        if(raw.rowPresent) rows[data]=_s004Clone(raw.row);
+        else delete rows[data];
+      }
+
+      const proposedMarks=out[listField]?.[id];
+      const hasMarker=Array.isArray(proposedMarks)&&proposedMarks.includes(data);
+      if(hasMarker!==raw.listed){
+        const marks=ensureList(listField,id);
+        for(let i=marks.length-1;i>=0;i--) if(marks[i]===data) marks.splice(i,1);
+        if(raw.listed) marks.push(data);
+      }
+
+      const proposedTs=objectMap(out[tsField]);
+      const hasTs=Object.prototype.hasOwnProperty.call(proposedTs,tsKey);
+      if(hasTs!==raw.tsPresent
+          ||(hasTs&&_s004Canon(proposedTs[tsKey])!==_s004Canon(raw.ts))){
+        const timestamps=ensureField(tsField);
+        if(raw.tsPresent) timestamps[tsKey]=_s004Clone(raw.ts);
+        else delete timestamps[tsKey];
+      }
+    }
+    return out;
+  }catch(_e){ return null; }
+};
+window._s004VendasValidarGuardaTransacao=function(ctx,guard,docs){
+  try{
+    if(!guard||guard.v!==1||!Array.isArray(guard.targets)||!guard.targets.length
+        ||!['principal-preimage','loja-preimage'].includes(guard.modo)
+        ||(guard.modo==='principal-preimage'&&ctx?.perfil!=='admin')
+        ||guard.owner!==ctx?.owner||guard.geracao!==ctx?.geracao
+        ||guard.perfil!==ctx?.perfil
+        ||guard.loja!==(ctx?.perfil==='loja'?String(ctx.loja||''):null)
+        ||!window._s012ContextoValido?.(ctx)||!docs||typeof docs!=='object') return false;
+    const pDoc=docs.principal;
+    if(!pDoc||pDoc.exists!==true||!pDoc.obj) return false;
+    const atuais=window._s004VendasPendentes?.(ctx);
+    if(!Array.isArray(atuais)) return false;
+    const seen=new Set();
+    for(const target of guard.targets){
+      if(!_s004VendasAlvoGuardaValido(guard,target)||seen.has(target.key)) return false;
+      seen.add(target.key);
+      if(target.localCanon!==_s004Canon(_s004EstadoNo(D,target.tipo,target.id,target.data))) return false;
+      const atual=atuais.find(x=>_s004VendaKey(x.tipo,x.id,x.data)===target.key);
+      if(!atual||atual.opId!==target.opId||_s004Canon(atual.base)!==target.baseCanon
+          ||_s004Canon(atual.depois)!==target.depoisCanon
+          ||_s004Canon(atual.baseLida)!==_s004Canon(target.witness)) return false;
+      const source=target.source,sDoc=docs[source],w=target.witness;
+      const expected=target.sourceBasis==='current-after'?target.currentSources:w.sources;
+      if(!sDoc||sDoc.exists!==true||!sDoc.obj
+          ||_s004FonteVenda(ctx,target.tipo,target.id,target.data,D)!==source) return false;
+      const pAtual=Object.assign({source:'principal',exists:true},
+        _s004EstadoRawAlvo(pDoc.obj,target.tipo,target.id,target.data));
+      const sAtual=Object.assign({source,exists:true},
+        _s004EstadoRawAlvo(sDoc.obj,target.tipo,target.id,target.data));
+      if(_s004Canon(pAtual)!==_s004Canon(expected.principal)
+          ||_s004Canon(sAtual)!==_s004Canon(expected.store)) return false;
+    }
+    return true;
+  }catch(_e){ return false; }
 };
 window._s004VendasPendenteLegado=function(ctx,payload){
   if(!ctx?.owner || !payload) return false;
@@ -29664,6 +31320,9 @@ window._s004VendasEstadoSemMarca=function(tipo,id,data,localRoot,remoteRoot,lega
     const local=_s004EstadoNo(localRoot,tipo,id,data);
     if(local.valor!==null && !local.lapide) return local;
   }
+  if(remoto.valor!==null&&typeof window._lapideBarra==='function'
+      &&!window._lapideBarra(remoteRoot,tipo,String(id),String(data),remoto.valor))
+    return Object.assign({},remoto,{lapide:false});
   return remoto;
 };
 window._s004VendasAplicarAoMapa=function(mapa,data,estado){
@@ -31057,6 +32716,8 @@ async function loadFromFirestore(onMainDataReady,s051Retry){
       window._mergeCarimbado('arquivos', remoto.arquivos, remoto.arquivosTs);
       if(_aceitaRemoto(D.metasProd, remoto.metasProd)) D.metasProd = remoto.metasProd;
       if(_aceitaRemoto(D.realProd, remoto.realProd)) D.realProd = remoto.realProd;
+      // S086: preservar o histórico local antes do primeiro filtro de lápides.
+      window._mesclarAtribuicaoVendsExcluidas(D, remoto);
       // [FIX] vendedoras: merge respeitando tombstone _vendsExcluidas
       if(remoto.vendedoras && remoto.vendedoras.length){
         console.log("[Avatim] loadFromFirestore: vendedor(es) encontradas", remoto.vendedoras.length);
@@ -32160,6 +33821,13 @@ function vendsAtivas(lid){
   return vendsReais(lid).filter(v=>v.ativa !== false);
 }
 
+// S085: archived current identities remain available for history, but not
+// for person-level operations. Missing historical IDs remain unresolved.
+window._s085VendedoraArquivada = function(id){
+  const alvo=String(id||'');
+  return !!alvo && (D.vendedoras||[]).some(v=>v&&String(v.id)===alvo&&v.ativa===false);
+};
+
 // [FIX CRÍTICO SINCRONIZAÇÃO] Função para forçar reload completo dos dados
 
 // ── Arquivar / reativar vendedora
@@ -32245,7 +33913,7 @@ function forcarSincronizacao(){
     showToast("❌ Erro ao sincronizar: " + e.message, "err");
   });
 }
-function arquivarVendedora(vid, arquivar){
+function arquivarVendedora(vid, arquivar, effectiveDate){
   if(!isAdmin()){ showToast("Apenas o administrador pode arquivar ou reativar vendedores.","err"); return; }
   const _ctxVend=window._s012Capturar?.(), _dadosVend=D;
   const _vendValida=()=>!!_ctxVend && _ctxVend.perfil==='admin'
@@ -32253,6 +33921,22 @@ function arquivarVendedora(vid, arquivar){
   if(!_vendValida()) return false;
   const idx = _dadosVend.vendedoras.findIndex(v=>v.id===vid);
   if(idx<0){ showToast("Vendedor(a) não encontrada","err"); return; }
+  const ativoAntes=_dadosVend.vendedoras[idx].ativa!==false;
+  const ativoDepois=!arquivar;
+  if(ativoAntes===ativoDepois) return true;
+  const dataEfetiva=effectiveDate||window._s086DataLocalHoje?.();
+  if(!window._s086DataValida?.(dataEfetiva)){
+    showToast("Informe uma data efetiva válida no histórico da vendedora.","err");return false;
+  }
+  const evento=window._s086NovoEvento?.(arquivar?'arquivado':'reativado',
+    dataEfetiva,_ctxVend,undefined,effectiveDate&&effectiveDate!==window._s086DataLocalHoje?.()
+      ?'admin-attested-history':'observed-action','vendedora',String(vid));
+  if(!evento) return false;
+  let historico;
+  try{historico=window._s086UnirEventos(_dadosVend.vendedoras[idx]._s086Lifecycle,[evento],true,
+    {entityType:'vendedora',entityId:String(vid)});}
+  catch(e){showToast("Não foi possível registrar o histórico: "+(e.code||"s086-conflito"),"err");return false;}
+  _dadosVend.vendedoras[idx]._s086Lifecycle=historico;
   _dadosVend.vendedoras[idx].ativa = !arquivar; // false=arquivada, true=ativa
   _dadosVend.vendedoras[idx]._savedAt = Date.now(); // [FIX cross-device] timestamp para merge
   // [R157] carimbo exclusivo do arquivamento: _savedAt muda por qualquer
@@ -32277,6 +33961,7 @@ function arquivarVendedora(vid, arquivar){
   renderTabelaVend();
   carregarVendsForm();
   preencherSelectVends();
+  window.rerenderPaginaAtiva?.('seller-archive');
 
   (async () => {
     let _payloadVend = null;
@@ -32546,28 +34231,9 @@ window.setMetaVendDoMes = function(vendId, mesRef, valor, superValor){
   return true;
 };
 
-/**
- * [R148] Quem deve aparecer na tela de metas de um mês.
- *
- * Mês corrente: todas as pessoas ativas da loja — metas e vínculos pessoais
- * não dependem do cargo operacional usado pelos formulários de lançamento.
- * Mês passado: quem importava NAQUELE mês — tem meta registrada nele, ou
- * vendeu nele — mesmo estando arquivado(a) hoje. Sem isto, cadastrar a
- * meta de janeiro exigiria desarquivar a equipe de janeiro e rearquivar
- * depois, em sete lojas, com risco de deixar alguém solto no ranking atual.
- */
+/** Person-level target operations include only sellers currently active. */
 window.vendsDoMesMeta = function(lid, mesRef){
-  mesRef = mesRef || mesAtual();
-  // A elegibilidade do formulário de lançamento continua em vendsReais.
-  // Metas são ligadas à pessoa ativa mesmo quando o cargo atual é VRLL.
-  const pessoas = vendsPessoasDaLoja(lid);
-  if(mesRef === mesAtual()) return pessoas.filter(v => v.ativa !== false);
-  return pessoas.filter(v => {
-    if(v.ativa !== false) return true;                       // ativo hoje
-    if(v.metasMes && Number((v.metasMes[mesRef]||{}).mes) > 0) return true;
-    return _s074RegistrosVendVisiveis(v.id,mesRef+'-01',mesRef+'-31').some(([,reg])=>
-      (Number(reg?.val)||0)>0 || _vendasVendAtend(reg)>0);
-  });
+  return vendsPessoasDaLoja(lid).filter(v => v.ativa !== false);
 };
 
 /** Meta individual proporcional aos dias trabalhados. */
@@ -38057,6 +39723,8 @@ function toggleFormVend(){
   window._s052LimparRascunhosPrefixo('vendedora:',D);
   f.style.display=opening?"block":"none";
   if(opening){
+    const inputData=document.getElementById('vn-effective-date');
+    if(inputData) inputData.value=window._s086DataLocalHoje?.()||'';
     // Mostrar prévia da meta automática
     const lid=isAdmin()?(document.getElementById("vn-loja")?.value||lojaId()):lojaId();
     const metaLoja=getMetas(lid);
@@ -38107,6 +39775,13 @@ function salvarVend(){
   if(!_s052Op) return false;
   const nome=document.getElementById("vn-nome").value.trim();
   if(!nome){showToast("Informe o nome!","err");return;}
+  const _dataInput=document.getElementById('vn-effective-date');
+  const _dataSolicitada=isAdmin()?String(_dataInput?.value||''):'';
+  const _hojeS086=window._s086DataLocalHoje?.();
+  const _dataCriacao=_dataSolicitada||_hojeS086;
+  if(!window._s086DataValida?.(_dataCriacao)){
+    showToast('Informe uma data efetiva válida para o cadastro.','err');return false;
+  }
   const lid=isAdmin()?document.getElementById("vn-loja").value:lojaId();
   if(!window.lojaVisivel(lid)){showToast('Selecione uma loja ativa para cadastrar.','warn');return false;}
   const cargo=document.getElementById("vn-cargo")?.value||"ESP";
@@ -38124,6 +39799,16 @@ function salvarVend(){
   },_s052Op,'vendedoras','id');
   if(!_s052Id) return false;
   const _existNovo=window._s052RascunhoRegistro(_s052Slot,_s052Op);
+  const _eventoCriacaoExistente=(_existNovo?._s086Lifecycle||[])
+    .filter(e=>e?.kind==='cadastro')
+    .sort((a,b)=>Number(b.revision||0)-Number(a.revision||0))[0];
+  if(_eventoCriacaoExistente){
+    if(_dataInput&&isAdmin()) _dataInput.value=_eventoCriacaoExistente.effectiveDate;
+    if(_dataSolicitada&&_dataSolicitada!==_eventoCriacaoExistente.effectiveDate){
+      showToast('Este cadastro pendente já tem uma data efetiva capturada. Revise o rascunho antes de tentar novamente.','warn');
+      return false;
+    }
+  }
   // Sugere a meta da nova pessoa pela divisão entre ativos, preservando as metas já definidas.
   const metaLoja=getMetas(lid);
   const vendsAtual=window.vendsDoMesMeta(lid, mesAtual()).filter(v=>v.id!==_s052Id);   // [R158] ver salvarMetaLoja
@@ -38145,6 +39830,15 @@ function salvarVend(){
   const _novoVend=_existNovo||{id:_s052Id,nome,loja:lid,metaMes:metaMesAuto,
                    superMetaMes:superMetaMesAuto,cargo,
                    metasMes:{}, _savedAt: _tsCargoNovo};
+  if(!_eventoCriacaoExistente){
+    const _eventoCriacao=window._s086NovoEvento?.('cadastro',_dataCriacao,_s052Op.ctx,
+      's086-create-'+_s052Id,_dataSolicitada&&_dataSolicitada!==_hojeS086
+        ?'admin-attested-history':'observed-action','vendedora',String(_s052Id));
+    if(!_eventoCriacao){showToast('Não foi possível capturar a data de criação.','err');return false;}
+    try{_novoVend._s086Lifecycle=window._s086UnirEventos(_novoVend._s086Lifecycle,[_eventoCriacao],true,
+      {entityType:'vendedora',entityId:String(_s052Id)});}
+    catch(e){showToast('O histórico desta tentativa precisa ser revisado: '+(e.code||'s086-conflito'),'err');return false;}
+  }
   // Somente o admin pode confirmar a vigência administrativa; a criação
   // feita pelo perfil de loja conserva o campo atual sem inventar o mapa.
   if(!_existNovo){
@@ -38390,6 +40084,7 @@ function excluirVend(id){
       cargo:vObj.cargo || metaAnterior.cargo || null,
       cargoMes:{...(metaAnterior.cargoMes||{}),...(vObj.cargoMes||{})},
       cargoMesTs:{...(metaAnterior.cargoMesTs||{}),...(vObj.cargoMesTs||{})},
+      _s086Lifecycle:window._s086UnirEventos(metaAnterior._s086Lifecycle,vObj._s086Lifecycle,true),
     };
     delete D._vendsExcluidasMeta[id]._crmIdentidadeSomente;
   }
@@ -38510,6 +40205,11 @@ async function lancarVendaVend(){
     produtos: _reg.produtos || [],
     tm: tmV, ts:Date.now(), _savedAt:Date.now()
   });
+  // A base capturada permite desfazer o relançamento se o registro S004 falhar.
+  const _exclusoesVend=D._vendasVendExcluidas?.[id];
+  if(Array.isArray(_exclusoesVend))
+    D._vendasVendExcluidas[id]=_exclusoesVend.filter(dt=>dt!==data);
+  if(D._vendasVendExcluidasTs) delete D._vendasVendExcluidasTs[id+"|"+data];
   const _s004TokenVend=window._s004VendasRegistrar(_s012CtxVendaVend,[{
     tipo:'vend',id,data,base:_s004BaseVend,
     depois:window._s004VendasEstado('vend',id,data,D)
@@ -38591,7 +40291,7 @@ function tabPgVend(aba, el){
   }
 }
 
-function preencherSelHistVend(){
+function preencherSelHistVend(preencherDatas=true){
   const sel = document.getElementById('hist-sel-vend');
   if(!sel) return;
   const selecaoAnterior=sel.value;
@@ -38617,12 +40317,41 @@ function preencherSelHistVend(){
   // pré-selecionar a própria vendedora se for loja
   if(!isAdmin() && vends.length===1 && !sel.value) sel.value=vends[0].id;
   // datas padrão: mês atual
-  const hoje_=hoje();
-  const de=document.getElementById('hist-de');
-  const ate=document.getElementById('hist-ate');
-  if(de && !de.value)  de.value = hoje_.slice(0,7)+'-01';
-  if(ate && !ate.value) ate.value = hoje_;
+  if(preencherDatas){
+    const hoje_=hoje();
+    const de=document.getElementById('hist-de');
+    const ate=document.getElementById('hist-ate');
+    if(de && !de.value)  de.value = hoje_.slice(0,7)+'-01';
+    if(ate && !ate.value) ate.value = hoje_;
+  }
 }
+
+window._s074LimparResultadoHistoricoVend=function(tipo){
+  const pagina=tipo==='pagina';
+  const raiz=document.getElementById(pagina?'hist-pg-resultado':'hist-vend-resultado');
+  const filhos=pagina
+    ?['hist-pg-kpis','hist-pg-crescimento','hist-pg-tabela','hist-pg-conciliacao']
+    :['hist-vend-kpis','hist-vend-crescimento','hist-vend-tabela','hist-vend-campanhas'];
+  filhos.forEach(id=>document.getElementById(id)?.replaceChildren());
+  if(raiz){
+    raiz.style.display='none';
+    delete raiz.dataset.s074VendId;
+    delete raiz.dataset.s074De;
+    delete raiz.dataset.s074Ate;
+  }
+};
+
+window._s085AtualizarHistoricoVend=function(){
+  const sel=document.getElementById('hist-sel-vend');
+  const resultado=document.getElementById('hist-vend-resultado');
+  const id=String(resultado?.dataset.s074VendId||sel?.value||'');
+  if(id&&window._s085VendedoraArquivada?.(id)){
+    if(sel) sel.value='';
+    window._s074LimparResultadoHistoricoVend('seller');
+    showToast('O histórico individual foi ocultado porque a vendedora foi arquivada.','warn');
+  }
+  preencherSelHistVend(false);
+};
 
 // ── Editar lançamento de vendedora individual ──────────
 function editarLancVend(vendId, data){
@@ -38812,6 +40541,11 @@ function buscarHistVend(){
   if(de > ate){ showToast('Data inicial deve ser anterior à final.','err'); return; }
   const v = D.vendedoras.find(v2=>v2.id===vendId);
   if(!v){ showToast('Vendedor(a) não encontrada','err'); return; }
+  if(window._s085VendedoraArquivada?.(vendId)){
+    window._s074LimparResultadoHistoricoVend('seller');
+    showToast('Esta vendedora está arquivada. O histórico individual não está disponível enquanto permanecer arquivada.','warn');
+    return;
+  }
   const vd = Object.fromEntries((window._s074RegistrosVendVisiveis?.(vendId)||[]));
 
   // Excluir fatos futuros da consulta sem apagar nem alterar o histórico salvo.
@@ -39390,7 +41124,7 @@ window.addEventListener('avatim:lojas-visibilidade-alterada',()=>{
   if(resultadoHist?.style.display!=='none'){
     const id=resultadoHist.dataset.s074VendId, de=resultadoHist.dataset.s074De, ate=resultadoHist.dataset.s074Ate;
     const regs=id&&de&&ate?(window._s074RegistrosVendVisiveis?.(id,de,ate)||[]):[];
-    if(!regs.length){resultadoHist.style.display='none';resultadoHist.replaceChildren();}
+    if(!regs.length) window._s074LimparResultadoHistoricoVend('seller');
     else if(document.getElementById('hist-sel-vend')?.value===id
       &&document.getElementById('hist-de')?.value===de&&document.getElementById('hist-ate')?.value===ate) buscarHistVend();
   }
@@ -39514,6 +41248,7 @@ function renderTabelaVend(){
   document.getElementById("tbody-vend").innerHTML=vendsFiltradas.length?vendsFiltradas.map(v=>{
     const loja=LOJAS.find(l=>l.id===v.loja);
     const isArquivada = v.ativa === false;
+    const btnHistorico=isAdmin()?`<button type="button" onclick="window.s086AbrirHistorico('vendedora','${v.id}')" data-s086-open-kind="vendedora" data-s086-open-id="${v.id}" aria-label="Histórico de datas" title="Histórico de datas" style="background:transparent;border:1px solid var(--borda);color:var(--texto);border-radius:6px;padding:3px 7px;font-size:10px;cursor:pointer">📅</button>`:'';
     const btnReativar = isAdmin() ? `<button onclick="arquivarVendedora('${v.id}',false)" title="Reativar vendedora" style="background:rgba(46,204,135,.15);border:1px solid rgba(46,204,135,.3);color:var(--verde);border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer">✅ Reativar</button>` : '';
     const _cargoAtual=window._cargoVendDoMes?.(v,mesAtual());
     const _cargoLabel=_cargoAtual?.conhecido?_cargoAtual.cargo:null;
@@ -39527,7 +41262,7 @@ function renderTabelaVend(){
         <td>${cargoBadge}</td>
         <td style="font-size:11px">${loja?.nome||v.loja}</td>
         <td colspan="5" style="font-size:11px;color:var(--muted)">— dados históricos preservados —</td>
-        <td>${btnReativar}</td>
+        <td>${btnHistorico} ${btnReativar}</td>
       </tr>`;
     }
     const vm=calcVendPer(v.id,"mes");
@@ -39557,7 +41292,7 @@ function renderTabelaVend(){
       <td style="font-weight:600">${fmt(vm)}</td>
       <td><span class="sbadge ${cls}">${pct.toFixed(0)}%</span></td>
       <td style="font-size:11px;color:${projC}">${proj?fmt(proj):"--"}</td>
-      <td style="white-space:nowrap">${btnEditar}${btnArquivar}${btnExcluir}</td>
+      <td style="white-space:nowrap">${btnHistorico}${btnEditar}${btnArquivar}${btnExcluir}</td>
     </tr>`;
   }).join(""):"<tr><td colspan='10' style='color:var(--muted);text-align:center;padding:20px'>Nenhum(a) vendedor(a) encontrado(a).</td></tr>";
 }
@@ -41456,7 +43191,7 @@ function renderRelCamp(){
     reaisAll.forEach(r=>{
       if(!r.vendedoras) return;
       Object.entries(r.vendedoras).forEach(([vId,val])=>{
-        if(!porVend[vId]) porVend[vId]={fat:0, lojas:new Set(), nome:''};
+        if(!porVend[vId]) porVend[vId]={id:vId, fat:0, lojas:new Set(), nome:''};
         porVend[vId].fat += Number(val)||0;
         const lojaRegistro=LOJAS.find(l=>l.id===r.lojaId);
         if(lojaRegistro) porVend[vId].lojas.add(lojaRegistro.nome);
@@ -41466,7 +43201,10 @@ function renderRelCamp(){
         }
       });
     });
-    const rvList2 = Object.values(porVend).map(v=>({...v,loja:v.lojas.size===1?[...v.lojas][0]:'Lojas ativas'})).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+    const rvList2 = Object.values(porVend)
+      .filter(v=>{const atual=D.vendedoras.find(x=>String(x.id)===String(v.id));return !atual||atual.ativa!==false;})
+      .map(v=>({...v,loja:v.lojas.size===1?[...v.lojas][0]:'Lojas ativas'}))
+      .filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
     const rvMax2  = rvList2[0]?.fat||1;
     const medals3 = ['🥇','🥈','🥉'];
     rankVendEl.innerHTML = rvList2.length
@@ -41631,7 +43369,9 @@ function exportarPDFCamp(){
     });
   });
   Object.values(porVendMap).forEach(v=>{v.loja=v.lojas.size===1?[...v.lojas][0]:'Lojas ativas';});
-  const rankVends = Object.values(porVendMap).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+  const rankVends = Object.entries(porVendMap)
+    .filter(([vId])=>{const atual=D.vendedoras.find(x=>String(x.id)===String(vId));return !atual||atual.ativa!==false;})
+    .map(([,v])=>v).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
 
   // ── KPIs gerais ───────────────────────────────────────────────
   const totalFatC = reaisAll.reduce((s,r)=>s+_fatLancamento(r),0);
@@ -41667,7 +43407,11 @@ function exportarPDFCamp(){
             if(r.vendObss?.[vId] && !vendDetalhe[vId].obss.includes(r.vendObss[vId])) vendDetalhe[vId].obss.push(r.vendObss[vId]);
           });
         });
-        const vendRows2 = Object.values(vendDetalhe).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat).map(v=>`
+        const vendRows2 = Object.entries(vendDetalhe)
+          .filter(([vId,v])=>{
+            const atual=D.vendedoras.find(x=>String(x.id)===String(vId));
+            return v?.fat>0&&(!atual||atual.ativa!==false);
+          }).map(([,v])=>v).sort((a,b)=>b.fat-a.fat).map(v=>`
           <tr style="background:#fafaf0">
             <td style="padding-left:20px;color:#888;font-size:10px">↳ ${v.nome||'?'}</td>
             <td style="color:#888;font-size:10px">${fmt(v.fat)}</td>
@@ -42389,6 +44133,26 @@ function getVendCampVals(){
   return {vendedoras:vals, vendQtds:qtds, vendKits:kits, vendNrs:nrs, vendObss:obss};
 }
 
+function _s085CampArquivadaAlterada(registro, dados){
+  const mapas=['vendedoras','vendQtds','vendKits','vendNrs','vendObss'];
+  const anteriores=registro||{}, atuais=dados||{};
+  for(const v of D.vendedoras||[]){
+    // The campaign record can still belong to the seller's former store
+    // after a transfer. A stale form must not create activity for an archived
+    // identity in any store.
+    if(v?.ativa!==false) continue;
+    const id=String(v.id||'');
+    if(!id) continue;
+    for(const chave of mapas){
+      const antes=!!anteriores[chave]&&Object.prototype.hasOwnProperty.call(anteriores[chave],id);
+      const depois=!!atuais[chave]&&Object.prototype.hasOwnProperty.call(atuais[chave],id);
+      if(antes!==depois) return true;
+      if(antes&&!Object.is(anteriores[chave][id],atuais[chave][id])) return true;
+    }
+  }
+  return false;
+}
+
 function atualizarProgrCamp(){
   const campId = document.getElementById('camp-sel-real')?.value;
   if(!campId) return;
@@ -42439,7 +44203,7 @@ function renderHistoricoCamp(campId, lid){
   lista.innerHTML = lancs.map(l=>{
     // Vendedoras deste lançamento
     const vendRows = l.vendedoras && Object.keys(l.vendedoras).length
-      ? D.vendedoras.filter(v=>l.vendedoras[v.id]>0).map(v=>{
+      ? D.vendedoras.filter(v=>v.ativa!==false&&l.vendedoras[v.id]>0).map(v=>{
           const qtd = l.vendQtds?.[v.id] ? ` · <span style="color:var(--azul)">${l.vendQtds[v.id]} un.</span>` : '';
           const kit = l.vendKits?.[v.id] ? ` · <span style="color:#e879f9">🎁 ${l.vendKits[v.id]} kit${l.vendKits[v.id]>1?'s':''}</span>` : '';
           const nr  = l.vendNrs?.[v.id]  ? ` · <span style="color:var(--verde)">Nº ${l.vendNrs[v.id]}</span>` : '';
@@ -42493,7 +44257,10 @@ function renderHistoricoCamp(campId, lid){
         });
       }
     });
-    const rvList = Object.values(rankVend).filter(v=>v.fat>0).sort((a,b)=>b.fat-a.fat);
+    const rvList = Object.values(rankVend).filter(v=>{
+      const atual=D.vendedoras.find(x=>String(x.id)===String(v.id));
+      return v.fat>0&&(!atual||atual.ativa!==false);
+    }).sort((a,b)=>b.fat-a.fat);
     const rvMax  = rvList[0]?.fat||1;
     const medals3 = ['🥇','🥈','🥉'];
     if(rvList.length){
@@ -42667,6 +44434,11 @@ async function salvarCampReal(){
     const editId = window._editandoLancCampId || null;
     const existIdx = editId ? D.campRealizados.findIndex(r=>r.id===editId) : -1;
     const _vendData = getVendCampVals();
+    const _registroAnterior=existIdx>=0?D.campRealizados[existIdx]:null;
+    if(_s085CampArquivadaAlterada(_registroAnterior,_vendData)){
+      showToast('❌ Não é possível lançar ou alterar valores de vendedora arquivada. Os dados históricos foram preservados.','err');
+      return;
+    }
     // Keep the edit token/capture until durable intent staging succeeds.
     // [FIX] Total de kits da loja = soma dos kits das vendedoras
     const totalKits = Object.values(_vendData.vendKits||{}).reduce((s,n)=>s+(Number(n)||0),0);
@@ -43163,6 +44935,7 @@ function renderCampLista(){
         const vObj = D.vendedoras.find(x=>x.id===v.vId);
         return !vObj || vObj.loja===lid; // loja só vê seus(uas) vendedor(es)
       })
+      .filter(v=>{const atual=D.vendedoras.find(x=>String(x.id)===String(v.vId));return !atual||atual.ativa!==false;})
       .sort((a,b)=>b.val-a.val);
     const rankVendHTML = rankVendArr.length ? `
       <div style="border-top:1px solid var(--borda);padding-top:14px;margin-top:4px">
@@ -44917,6 +46690,16 @@ window._crmDonosRotuloLoja = function(lid, rotulo){
   return donos;
 };
 
+// S085: recognize only an alias whose existing per-store CRM mapping points
+// to one current, explicitly archived seller. Unknown/deleted and ambiguous
+// labels remain raw rather than being assigned to another person.
+window._crmS085RotuloArquivadoUnicoLoja = function(lid, rotulo){
+  const donos=window._crmDonosRotuloLoja?.(lid,rotulo);
+  if(!(donos instanceof Set)||donos.size!==1) return false;
+  const id=String([...donos][0]||'');
+  return !!id&&(D.vendedoras||[]).some(v=>v&&String(v.id)===id&&v.ativa===false);
+};
+
 window._crmNomesVinculadosVend = function(vid, lid){
   if(!vid || !lid) return new Set();
   const norm = x => typeof window._crmNorm === 'function'
@@ -45889,16 +47672,22 @@ window._s074FaixaVendedoresPeriodo=function(per,lid,dataRef){
   return {inicio:mes+'-01',fim:ref.slice(0,7)===mes?ref:mes+'-31'};
 };
 
-// Current-roster sellers remain eligible at active stores, and historical
-// identities are added only when their dated S007 facts belong to visible stores.
+// Individual views include current active sellers and historical deleted or
+// transferred identities. A seller still present in the roster but archived
+// is omitted from person-level output; aggregate readers keep their own roster.
 window._s074CandidatosVend=function(inicio,fim,lid){
   if(lid&&!window.lojaVisivel?.(lid)) return [];
   const porId=new Map();
   const pessoas=new Map((D.vendedoras||[]).filter(Boolean).map(v=>[v.id,v]));
-  [...pessoas.values()].filter(v=>window.lojaVisivel?.(v.loja)&&(!lid||v.loja===lid))
+  [...pessoas.values()].filter(v=>v.ativa!==false&&window.lojaVisivel?.(v.loja)&&(!lid||v.loja===lid))
     .forEach(v=>porId.set(v.id,v));
   (window._s074VendedorasComHistoricoVisivel?.(inicio,fim,lid||null)||[])
-    .forEach(v=>{if(v?.id) porId.set(v.id,pessoas.get(v.id)||v);});
+    .forEach(v=>{
+      if(!v?.id) return;
+      const atual=pessoas.get(v.id);
+      if(atual?.ativa===false) return;
+      porId.set(v.id,atual||v);
+    });
   return [...porId.values()];
 };
 window._s074CandidatosPeriodo=function(per,ref,lid){
@@ -48727,7 +50516,7 @@ function exportarPDFRelatorio(origem) {
   // Tabela de vendedoras do mês
   const idsVendsPdf=new Set((D.vendedoras||[]).map(v=>v.id));
   const vendsPdf = window._s074CandidatosPeriodo('mes',hj,_adm?null:lid)
-    .filter(v=>idsVendsPdf.has(v.id)&&(v.ativa!==false||calcVendPer(v.id,'mes')>0));
+    .filter(v=>idsVendsPdf.has(v.id)&&v.ativa!==false);
   const vends = vendsPdf.map(v=>{
       const vm=calcVendPer(v.id,'mes');
       const meta=window._s074MetaVendVisivel?.(v,Number(v.metaMes)||0)??null;
@@ -49270,7 +51059,7 @@ function iniciarPaginaHistorico(){
   buscarHistoricoLoja();
 }
 
-function _preencherSelHistPg(){
+function _preencherSelHistPg(preencherDatas=true){
   const sel = document.getElementById('hist-pg-sel-vend');
   if(!sel) return;
   // BUG 4 FIX: admin vê todas as vendedoras reais (sem placeholders)
@@ -49279,8 +51068,10 @@ function _preencherSelHistPg(){
   const hj = hoje();
   const de  = document.getElementById('hist-pg-de');
   const ate = document.getElementById('hist-pg-ate');
-  if(de  && !de.value)  de.value  = hj.slice(0,7)+'-01';
-  if(ate && !ate.value) ate.value = hj;
+  if(preencherDatas){
+    if(de  && !de.value)  de.value  = hj.slice(0,7)+'-01';
+    if(ate && !ate.value) ate.value = hj;
+  }
   const selecionada=sel.value;
   const vends=window._s074CandidatosVend?.('0000-01-01',hj,isAdmin()?null:lid)
     ||(isAdmin()?vendsPessoasDaRede():vendsPessoasDaLoja(lid)).filter(v=>window.lojaVisivel?.(v.loja));
@@ -50739,6 +52530,18 @@ async function buscarHistoricoVend(){
 
   const v = D.vendedoras.find(v2=>v2.id===vendId);
   if(!v){ showToast('Vendedor(a) não encontrada','err'); return; }
+  const _s055Arquivada=()=>window._s085VendedoraArquivada?.(vendId)===true;
+  const _s055LimparSeArquivada=()=>{
+    if(!_s055Arquivada()) return false;
+    const sel=document.getElementById('hist-pg-sel-vend');
+    if(sel) sel.value='';
+    window._s074LimparResultadoHistoricoVend?.('pagina');
+    return true;
+  };
+  if(_s055LimparSeArquivada()){
+    showToast('Esta vendedora está arquivada. O histórico individual não está disponível enquanto permanecer arquivada.','warn');
+    return;
+  }
 
   const _s055UIValida=()=>_s055LeituraValida()
     &&window._s055HistVendReq===_s055Req
@@ -50746,7 +52549,8 @@ async function buscarHistoricoVend(){
     &&document.getElementById('hist-bloco-vend')?.style.display!=='none'
     &&document.getElementById('hist-pg-sel-vend')?.value===vendId
     &&document.getElementById('hist-pg-de')?.value===de
-    &&document.getElementById('hist-pg-ate')?.value===ate;
+    &&document.getElementById('hist-pg-ate')?.value===ate
+    &&!_s055Arquivada();
 
   // Se não há dados locais para o período, buscar do Firebase
   const vdCheck = Object.fromEntries(window._s074RegistrosVendVisiveis(vendId,de,ate));
@@ -50757,11 +52561,15 @@ async function buscarHistoricoVend(){
       const leitura = {};
       _s055Aguardou=true;
       const json = await window.fsCarregar(leitura,_s055Ctx);
-      if(!_s055UIValida()) return;
+      if(!_s055UIValida()){
+        _s055LimparSeArquivada();
+        return;
+      }
       if(json){
         const remoto = JSON.parse(json);
         // [R162] com a lápide — ver window._mesclarVendasSobDemanda
         window._mesclarVendasSobDemanda(remoto, {vendas:false});
+        if(_s055LimparSeArquivada()) return;
         _persistirLocal();
       }
       if(json && leitura.completa === true) window._syncMarcarPull?.(leitura);
@@ -50772,7 +52580,10 @@ async function buscarHistoricoVend(){
     }catch(e){ console.warn('[Avatim] buscarHistoricoVend Firebase:', e.message); }
   }
 
-  if(_s055Aguardou&&!_s055UIValida()) return;
+  if(_s055Aguardou&&!_s055UIValida()){
+    _s055LimparSeArquivada();
+    return;
+  }
   const vd = Object.fromEntries(window._s074RegistrosVendVisiveis(vendId,de,ate));
 
   const dias = Object.keys(vd).filter(d=>d>=de && d<=ate && d<=hoje()).sort();
@@ -52987,8 +54798,8 @@ function renderPerformance(){
     el.innerHTML = '<div class="sc"><div style="padding:20px;color:var(--muted)">Sessão de loja indisponível. Saia e entre novamente.</div></div>'; return;
   }
 
-  // Se a vendedora selecionada não pertence à loja atual, limpar seleção
-  if(window._perfVendSel && !D.vendedoras?.some(v=>v.id===window._perfVendSel && v.loja===lid)){
+  // Clear a stale selection when the seller was moved or archived.
+  if(window._perfVendSel && !D.vendedoras?.some(v=>v.id===window._perfVendSel && v.loja===lid && v.ativa!==false)){
     window._perfVendSel = null;
   }
   const vendId = window._perfVendSel || null; // null = loja inteira
@@ -55035,7 +56846,8 @@ window._relBenchSemParApurar = function(vends, mesIni, mesFim){
     const soma = new Map();
     mapa.forEach((val, k) => {
       const nome = k.slice(0, k.lastIndexOf('|'));
-      if(!nome || cadastradas.has(nome)) return;
+      if(!nome || cadastradas.has(nome)
+          || window._crmS085RotuloArquivadoUnicoLoja?.(lid,nome)) return;
       const donos = window._crmDonosRotuloLoja(lid, nome);
       const atual = soma.get(nome) || {fat:0, ambiguo:false, foraDaLista:false};
       atual.fat += Number(val.fat) || 0;
@@ -55149,10 +56961,11 @@ window._relBenchSemanal = function(vends, de, ate){
   }).filter(d => d.real > 0).sort((a,b) => b.real - a.real);
 };
 
-window._relBenchInativos = window._relBenchInativos || false;
+window._relBenchInativos = false;
 window._relBenchToggleInativos = function(){
-  if(!isAdmin()){ showToast('Só o administrador vê inativos no ranking.','err'); return; }
-  window._relBenchInativos = !window._relBenchInativos;
+  // Kept as a compatibility handler for an already-open DOM; archived
+  // sellers are never eligible for this individual report or its exports.
+  window._relBenchInativos = false;
   renderRelatorios();
 };
 
@@ -55172,7 +56985,7 @@ window._relBenchAtingimento = function(vends, ano, mesRef){
   const ultimo  = Number(String(mesRef).slice(5,7)) || 12;
   const meses   = [];
   for(let m = 1; m <= ultimo; m++) meses.push(ano + '-' + String(m).padStart(2,'0'));
-  return (vends || []).filter(v=>window.lojaVisivel(v.loja)).map(v => {
+  return (vends || []).filter(v=>v.ativa!==false&&window.lojaVisivel(v.loja)).map(v => {
     let comMeta = 0, bateu = 0, superB = 0, somaReal = 0, somaMeta = 0;
     meses.forEach(mes => {
       const meta = window.metaVendDoMes(v.id, mes) || 0;
@@ -55199,10 +57012,10 @@ function _relBenchVends(){
   const mesAtual = _relRef('benchvends');
   const ano      = mesAtual.slice(0,4);
   const lojaIds  = new Set(lojas.map(l => l.id));
-  const verInativos = isAdmin() && window._relBenchInativos;
+  const verInativos = false;
   const historicos=new Set(lojas.flatMap(l=>window._s074VendedorasComHistoricoVisivel(ano+'-01-01',mesAtual+'-31',l.id).map(v=>v.id)));
   const vends = (D.vendedoras || []).filter(v =>
-    (lojaIds.has(v.loja)||historicos.has(v.id)) && (verInativos || v.ativa !== false)
+    (lojaIds.has(v.loja)||historicos.has(v.id)) && v.ativa !== false
   );
 
   const mensal  = window._relBenchApurar(vends, mesAtual, mesAtual);
@@ -55327,11 +57140,7 @@ function _relBenchVends(){
 
   const btn = 'background:var(--cinza);border:1px solid var(--borda);border-radius:8px;'
             + 'padding:7px 12px;color:var(--texto);font-size:11.5px;cursor:pointer';
-  const botaoInativos = isAdmin()
-    ? `<button onclick="window._relBenchToggleInativos()" style="${btn}${
-        verInativos ? ';border-color:var(--laranja);color:var(--laranja)' : ''}">
-         ${verInativos ? '☑' : '☐'} Incluir inativos(as)</button>`
-    : '';
+  const botaoInativos = '';
   const _dt = x => x.split('-').reverse().join('/');
 
   return _relBarra('benchvends', {}) + `
@@ -56804,7 +58613,7 @@ function exportarModoDivulgacaoFluxo(){
   });
   const vendsRank = Object.entries(porVend).map(([id,d]) => {
     const v = (D.vendedoras||[]).find(x => x.id === id);
-    if(!v) return null;
+    if(!v||v.ativa===false) return null;
     const conv = d.n > 0 ? d.comprou/d.n*100 : 0;
     const lj = LOJAS.find(l => l.id === v.loja)?.nome || '';
     // Uma informação por linha. Concatenado com " · " o texto quebrava no
@@ -56942,7 +58751,7 @@ function exportarModoDivulgacaoCamp(){
   reaisAll.forEach(r => {
     if(!r.vendedoras) return;
     Object.entries(r.vendedoras).forEach(([vId, val]) => {
-      if(!porVend[vId]) porVend[vId] = {fat:0, nome:'', loja:'', atend:0};
+      if(!porVend[vId]) porVend[vId] = {id:vId, fat:0, nome:'', loja:'', atend:0};
       porVend[vId].fat += Number(val) || 0;
       if(!porVend[vId].nome){
         const vObj = D.vendedoras.find(v => v.id === vId);
@@ -56964,7 +58773,8 @@ function exportarModoDivulgacaoCamp(){
     }
   });
   const rankVends = Object.values(porVend)
-    .filter(v => v.fat > 0 && v.nome)
+    .filter(v => v.fat > 0 && v.nome
+      && !(D.vendedoras||[]).some(atual=>String(atual.id)===String(v.id)&&atual.ativa===false))
     .sort((a,b) => b.fat - a.fat)
     .map(v => {
       const tm = v.atend > 0 ? v.fat/v.atend : 0;
@@ -57047,6 +58857,11 @@ function abrirFormContato(id){
   if(id){
     const c = D.contatos.find(x => x.id === id);
     if(!c||!window.lojaVisivel(c.loja)){ window._s053ContatoForm=null; showToast('Contato indisponível nesta loja.','err'); return; }
+    if(window._s085VendedoraArquivada?.(c.vendId)){
+      window._s053ContatoForm=null;
+      showToast('Este contato histórico está associado a uma vendedora arquivada e permanece somente para consulta.','warn');
+      return;
+    }
     const _s053Capture=_s053ContatoSafely(()=>window._s053CapturarBase?.('contatos',String(id),_s053Ctx,c.loja));
     if(!_s053Capture?.leituraCompleta){window._s053ContatoForm=null;showToast('Não foi possível validar a versão remota do contato. Recarregue e tente novamente.','warn');return;}
     window._s053ContatoForm.capture=_s053Capture;
@@ -57229,6 +59044,10 @@ function excluirContato(id){
   if(!D.contatos) D.contatos = [];
   const c = D.contatos.find(x => x.id === id);
   if(!c) return;
+  if(window._s085VendedoraArquivada?.(c.vendId)){
+    showToast('O contato histórico de uma vendedora arquivada foi preservado.','warn');
+    return false;
+  }
   if(window._ultimoDaRede(D.contatos, 'o último contato')) return;   // [R174]
   if(!confirm('Excluir este contato de "' + c.cliente + '"?')) return;
   if(!window._s052OperacaoValida(_s052Op)) return false;
@@ -57291,6 +59110,7 @@ function _filtrarContatos(opts){
   const fTipo = document.getElementById('ct-filtro-tipo')?.value  || '';
   const fDe   = opts.semData ? '' : (document.getElementById('ct-filtro-de')?.value    || '');
   const fAte  = opts.semData ? '' : (document.getElementById('ct-filtro-ate')?.value   || '');
+  if(fVend&&window._s085VendedoraArquivada?.(fVend)) return [];
 
   return D.contatos.filter(c => {
     if(!window.lojaVisivel?.(c.loja)) return false;
@@ -57422,7 +59242,9 @@ window._ctDivDados = function(){
     porVend[k].total++;
     if(_normalizarRetornoContato(c.retorno) === 'comprou') porVend[k].comprou++;
   });
-  const linhas = Object.entries(porVend).map(([vid, st]) => {
+  const linhas = Object.entries(porVend).filter(([vid])=>
+    !(D.vendedoras||[]).some(v=>String(v.id)===String(vid)&&v.ativa===false)
+  ).map(([vid, st]) => {
     const v = (D.vendedoras || []).find(x => x.id === vid);
     const lojaVisivel=window.lojaVisivel?.(v?.loja)===true;
     return {vid, nome: v?.nome || vid, loja: lojaVisivel ? (LOJAS.find(l => l.id === v?.loja)?.nome || v?.loja || '') : '—',
@@ -57747,6 +59569,7 @@ function _ctFiltrarRegistros(base,filtros,contexto){
   if(!Array.isArray(base)||!contexto||!Array.isArray(contexto.lojasVisiveis)) return [];
   const visiveis=new Set(contexto.lojasVisiveis);
   const f=filtros||{};
+  if(f.vendId&&window._s085VendedoraArquivada?.(f.vendId)) return [];
   if(f.loja&&(!visiveis.has(f.loja)||(!contexto.admin&&f.loja!==contexto.lojaId))) return [];
   return base.filter(c=>{
     const loja=String(c?.loja||'');
@@ -57774,6 +59597,7 @@ function _ctRegistrosOpcoesVendedoras(contatos,contexto){
     const id=String(c?.vendId||'');
     const loja=String(c?.loja||'');
     if(!id||!visiveis.has(loja)||(!contexto.admin&&loja!==contexto.lojaId)) return;
+    if(vendedoresPorId.get(id)?.ativa===false) return;
     if(!porId.has(id)) porId.set(id,{id,lojas:new Set()});
     porId.get(id).lojas.add(loja);
   });
@@ -57940,6 +59764,7 @@ function renderContatos(){
   if(porVendEl){
     const porVend = {};
     contatos.forEach(c => {
+      if(window._s085VendedoraArquivada?.(c.vendId)) return;
       if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, posVenda:0, mensagem:0, imediata:0, outro:0, comprou:0, engajou:0, semResp:0 };
       porVend[c.vendId].total++;
       // [FIX 13/08] 6 tipos
@@ -58088,6 +59913,8 @@ function _renderRegistrosContatos(contatos){
   tbody.innerHTML = paginaOrdenada.map((c,indiceLocal) => {
     const indice = inicioPagina+indiceLocal;
     const v = D.vendedoras.find(x => x.id === c.vendId);
+    const vendArquivada=window._s085VendedoraArquivada?.(c.vendId)===true;
+    // Archive removes operational controls, not historical attribution.
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
     const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
@@ -58103,17 +59930,20 @@ function _renderRegistrosContatos(contatos){
       <td>${vNome}</td>
       <td style="color:var(--muted);font-size:11px">${lNome}</td>
       <td>
-        <select onchange="marcarRetornoContato('${c.id}', this.value, this)"
+        ${vendArquivada
+          ? `<span style="color:var(--muted);font-size:10px">${retInfo.emoji} ${retInfo.label}</span>`
+          : `<select onchange="marcarRetornoContato('${c.id}', this.value, this)"
           style="background:var(--cinza);border:1px solid var(--borda);border-radius:5px;padding:4px 6px;color:${retInfo.cor};font-size:10px;font-weight:600;cursor:pointer;max-width:200px">
           ${Object.entries(CT_RETORNOS).map(([k,v])=>`<option value="${k}" ${(_normalizarRetornoContato(c.retorno)||'pendente')===k?'selected':''}>${v.emoji} ${v.label}</option>`).join('')}
-        </select>
+        </select>`}
         ${c.proximoContato ? `<div style="font-size:9px;color:var(--ouro);margin-top:3px" title="Data programada para retomar">🔁 ${c.proximoContato.split('-').reverse().join('/')}</div>` : ''}
       </td>
       <td style="white-space:nowrap;text-align:center">
+        ${vendArquivada ? '' : `
         <button onclick="abrirFormContato('${c.id}')" title="Editar"
           style="background:none;border:none;color:var(--azul);cursor:pointer;font-size:15px;padding:2px 4px">✏️</button>
         <button onclick="excluirContato('${c.id}')" title="Excluir"
-          style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>
+          style="background:none;border:none;color:var(--verm);cursor:pointer;font-size:15px;padding:2px 4px">🗑️</button>`}
       </td>
     </tr>${linhaObs}`;
   }).join('');
@@ -58228,6 +60058,7 @@ function exportarPDFContatos(){
   // Agregado por vendedora
   const porVend = {};
   contatos.forEach(c => {
+    if(window._s085VendedoraArquivada?.(c.vendId)) return;
     if(!porVend[c.vendId]) porVend[c.vendId] = { total:0, aniv:0, inativo:0, posVenda:0, mensagem:0, imediata:0, outro:0, comprou:0, engajou:0, semResp:0, pendentes:0 };
     porVend[c.vendId].total++;
     if(c.tipo === 'aniversario')     porVend[c.vendId].aniv++;
@@ -58276,6 +60107,7 @@ function exportarPDFContatos(){
   );
   const rowsRegs = ordenados.map(c => {
     const v = D.vendedoras.find(x => x.id === c.vendId);
+    // Keep the historical seller name in an unfiltered transaction export.
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
     const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
@@ -58991,6 +60823,87 @@ window.autoSyncDadosPresos = async function(){
   );
   const temContatos = (dadosAlvo.contatos||[]).length > 0;
 
+  // Sem S005, o journal owner-scoped é a única intenção durável disponível.
+  // Trate-o antes do retorno por D vazio e não caia no snapshot genérico se a
+  // recuperação ficar pendente, conflitar ou não puder provar durabilidade.
+  try{
+    const entradasS004=window._s004VendasPendentes?.(ctx)||[];
+    if(entradasS004.length){
+      const estadoS005=window._s007S004EstadoS005?.(ctx)||'indisponivel';
+      if(estadoS005==='indisponivel') return false;
+      if(estadoS005==='ausente'){
+        const capturadosS004=entradasS004.map(entrada=>({entrada,
+          local:window._s004VendasEstado(entrada.tipo,entrada.id,entrada.data,dadosAlvo)}));
+        const igualOperacao=(a,b)=>!!a&&!!b&&a.tipo===b.tipo
+          &&String(a.id)===String(b.id)&&String(a.data)===String(b.data)
+          &&a.opId===b.opId
+          &&window._vendCampoIgual?.(a.base,b.base)===true
+          &&window._vendCampoIgual?.(a.depois,b.depois)===true
+          &&window._vendCampoIgual?.(a.baseLida,b.baseLida)===true;
+        const confirmarGrupo=(ctxAck,lid,grupo,capturas,epoch)=>{
+          const vigente=()=>ctxAck===ctx&&D===dadosAlvo
+            &&window._s012ContextoValido?.(ctxAck)===true
+            &&!window._s065RestauracaoAtiva?.(ctxAck)
+            &&window._s065RestauracaoEpoca?.()===epoch
+            &&window._s007S004EstadoS005?.(ctxAck)==='ausente';
+          if(!vigente()||!Array.isArray(grupo)||!grupo.length) return false;
+          const atuais=window._s004VendasPendentes?.(ctxAck)||[];
+          if(!grupo.every(e=>atuais.some(a=>igualOperacao(e,a)))) return false;
+          const antes=grupo.map(entrada=>{
+            const c=capturas.find(x=>igualOperacao(x.entrada,entrada));
+            const local=window._s004VendasEstado(entrada.tipo,entrada.id,entrada.data,dadosAlvo);
+            return c&&window._vendCampoIgual?.(local,c.local)===true?c:null;
+          });
+          if(antes.some(x=>!x)) return false;
+          const todasDepois={};
+          atuais.forEach(e=>window._s004VendasRestaurarEstado(
+            e.tipo,e.id,e.data,e.depois,todasDepois));
+          const capturado=window._s004VendasCapturar?.(ctxAck,todasDepois);
+          const opIds=new Set(grupo.map(e=>e.opId));
+          const ids=(capturado?.ids||[]).filter(x=>opIds.has(x.opId));
+          if(!capturado||capturado.owner!==ctxAck.owner
+              ||capturado.chave!==window._s012StorageKey?.('s004-sales',ctxAck)
+              ||opIds.size!==grupo.length||ids.length!==grupo.length) return false;
+          const token={...capturado,ids};
+          const grupoDepois={};
+          grupo.forEach(e=>window._s004VendasRestaurarEstado(
+            e.tipo,e.id,e.data,e.depois,grupoDepois));
+          let json;
+          try{json=JSON.stringify(grupoDepois);}catch(_e){return false;}
+          try{
+            grupo.forEach(e=>window._s004VendasRestaurarEstado(
+              e.tipo,e.id,e.data,e.depois,dadosAlvo));
+            let localDuravel=false;
+            try{localDuravel=typeof _persistirLocal==='function'&&_persistirLocal()===true;}
+            catch(_e){}
+            if(!localDuravel){
+              grupo.forEach((e,i)=>{
+                const atual=window._s004VendasEstado(e.tipo,e.id,e.data,dadosAlvo);
+                if(window._vendCampoIgual?.(atual,e.depois)===true)
+                  window._s004VendasRestaurarEstado(e.tipo,e.id,e.data,antes[i].local,dadosAlvo);
+              });
+              return false;
+            }
+            if(!vigente()||!grupo.every(e=>window._vendCampoIgual?.(
+                window._s004VendasEstado(e.tipo,e.id,e.data,dadosAlvo),e.depois)===true))
+              return false;
+            const acked=window._s004VendasAck?.({ctx:ctxAck,json,s004:token},json)===true;
+            if(acked&&vigente()&&D===dadosAlvo)
+              window.rerenderPaginaAtiva?.('s004-recuperacao');
+            return acked;
+          }catch(_e){return false;}
+        };
+        const recuperacao=await window._s007RecuperarVendasS004?.(
+          ctx,dadosAlvo,entradasS004,capturadosS004,restoreEpoch,confirmarGrupo);
+        return recuperacao?.completa===true;
+      }
+    }
+  }catch(e){
+    if(window._s012ContextoValido(ctx)&&D===dadosAlvo)
+      console.warn('[S004] recuperação automática não confirmada:',e?.code||e?.message||e);
+    return false;
+  }
+
   if(!temVendasVend && !temVendas && !temContatos){
     return false; // nada a sincronizar
   }
@@ -59422,7 +61335,8 @@ function _renderContatosPorLoja(contatos){
 function _renderContatosRanking(contatos){
   const el = document.getElementById('contatos-ranking');
   if(!el) return;
-  contatos=(contatos||[]).filter(c=>window.lojaVisivel?.(c.loja));
+  contatos=(contatos||[]).filter(c=>window.lojaVisivel?.(c.loja)
+    &&!window._s085VendedoraArquivada?.(c.vendId));
 
   // Agregar por vendedora
   const porVend = {};
@@ -61542,6 +63456,30 @@ function _crmNorm(s){
     .replace(/\s+/g,' ');
 }
 
+// S085: a network-wide CRM label is excluded only when every visible source
+// store maps it uniquely to a current archived identity. A collision or an
+// unknown label remains available as raw/unattributed CRM data.
+function _crmS085RotuloArquivadoEscopo(rotulo,lojas){
+  const alvo=_crmNorm(rotulo);
+  if(!alvo||!Array.isArray(lojas)) return false;
+  let visto=false;
+  for(const lid of lojas){
+    const cubos=Object.values(D.crm?.[lid]||{});
+    const emCubo=cubos.some(c=>(c?.vends||[]).some(n=>_crmNorm(n)===alvo));
+    const emLinhas=(D.excelDados||[]).some(r=>String(r?.loja||'')===String(lid)
+      &&_crmNorm(r?.vendedora)===alvo);
+    if(!emCubo&&!emLinhas) continue;
+    visto=true;
+    if(!window._crmS085RotuloArquivadoUnicoLoja?.(lid,rotulo)) return false;
+  }
+  return visto;
+}
+function _crmS085LojasEscopo(lid){
+  const escolhido=String(lid||'');
+  const lojas=escolhido?[escolhido]:(window.crmLojasVisiveis?.()||[]);
+  return lojas.filter(id=>window.lojaVisivel?.(id));
+}
+
 // Popular filtro de VENDEDORAS respeitando loja e perfil
 function _excelPopularVendedoras(){
   const sel = document.getElementById('excel-filtro-vend');
@@ -61559,6 +63497,7 @@ function _excelPopularVendedoras(){
     if(lidPerf && r.loja && r.loja !== lidPerf) return;
     // Loja: só mostra vendedoras dessa loja (r.loja===lid) ou sem loja definida
     if(lidPerf && !r.loja) return; // ignora as sem loja quando filtrando
+    if(window._crmS085RotuloArquivadoUnicoLoja?.(r.loja,r.vendedora)) return;
     const norm = _crmNorm(r.vendedora);
     if(!conjunto.has(norm)) conjunto.set(norm, r.vendedora);
   });
@@ -61585,6 +63524,7 @@ function _excelPopularCarteiraVend(){
     if(!r.vendedora) return;
     if(lidPerf && r.loja && r.loja !== lidPerf) return;
     if(lidPerf && !r.loja) return;
+    if(window._crmS085RotuloArquivadoUnicoLoja?.(r.loja,r.vendedora)) return;
     const norm = _crmNorm(r.vendedora);
     if(!conjunto.has(norm)) conjunto.set(norm, r.vendedora);
   });
@@ -61632,6 +63572,7 @@ window._excelFiltrarComPerfil = function(){
   const fDia = document.getElementById('excel-filtro-dia')?.value || '';
   const fLoja = isAdm ? (document.getElementById('excel-filtro-loja')?.value || '') : lidPerfilFixo;
   const fVend = document.getElementById('excel-filtro-vend')?.value || '';
+  if(fVend&&_crmS085RotuloArquivadoEscopo(fVend,_crmS085LojasEscopo(fLoja))) return [];
 
   return D.excelDados.filter(r => {
     if(!window.lojaVisivel?.(r.loja)) return false;
@@ -61650,6 +63591,7 @@ window._excelFiltrarComPerfil = function(){
 function _excelRenderRankingVendedoras(dados){
   const el = document.getElementById('excel-rank-vends');
   if(!el) return;
+  dados=(dados||[]).filter(r=>!window._crmS085RotuloArquivadoUnicoLoja?.(r?.loja,r?.vendedora));
 
   const porVend = {};
   dados.forEach(r => {
@@ -62991,6 +64933,12 @@ function _fxRenderSelecionados(){
 
 // salvarFluxo REESCRITO — grava data aniversário + perfil usado no cálculo
 window.salvarFluxo = function(){
+  const vendId=document.getElementById("fx-vend")?.value||"";
+  const vend=D.vendedoras.find(v=>v.id===vendId);
+  if(vendId&&(!vend||vend.ativa===false)){
+    showToast("❌ Vendedora inativa ou indisponível. Atualize a tela e selecione alguém ativo.","err");
+    return false;
+  }
   const _s052Op=window._s052IniciarOperacao();
   if(!_s052Op) return false;
   // [R123] Um clique = um registro.
@@ -63029,7 +64977,6 @@ window.salvarFluxo = function(){
 
   const nome=document.getElementById("fx-nome").value.trim();
   const origem=document.getElementById("fx-origem").value;
-  const vendId=document.getElementById("fx-vend").value;
   const valor=parseBR(document.getElementById("fx-valor").value)||0;
   const data=document.getElementById("fx-data").value||hoje();
   const obs=document.getElementById("fx-obs").value.trim();
@@ -63037,7 +64984,6 @@ window.salvarFluxo = function(){
   if(valor < 0){ showToast("❌ O valor não pode ser negativo.","err"); return; }
   if(data > hoje()){ showToast("❌ A data ("+data.split('-').reverse().join('/')+") está no futuro.","err"); return; }
   const nomeF = nome || "Cliente Anônimo";
-  const vend=D.vendedoras.find(v=>v.id===vendId);
   const loja=vend?vend.loja:lojaId();
   if(!D.fluxo) D.fluxo=[];
   const canal = document.getElementById("fx-canal")?.value||"loja";
@@ -64479,6 +66425,9 @@ function _crmPopularFiltros(){
       if(!isAdmin() && r.loja !== lojaId()) return;
       nomes.add(r.vendedora);
     });
+    [...nomes].forEach(n=>{
+      if(_crmS085RotuloArquivadoEscopo(n,lojasConsideradas)) nomes.delete(n);
+    });
 
     // Repopular quando a loja muda — antes um guard de "options.length<=1"
     // congelava a lista na primeira montagem.
@@ -64550,10 +66499,16 @@ window.crmClientesTodosAnos = function(over){
   const fVend = over.vend !== undefined ? over.vend : (document.getElementById('excel-filtro-vend')?.value || '');
   let lojas = window.crmLojasVisiveis();
   if(fLoja) lojas = lojas.filter(l => l === fLoja);
+  if(fVend&&_crmS085RotuloArquivadoEscopo(fVend,lojas)){
+    window._crmS045Nomes=null;
+    return [];
+  }
   if(!lojas.length){ window._crmS045Nomes=null; return []; }
 
   let cubo;
-  try{ cubo = _crmS078Combinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
+  try{ cubo = fVend
+    ? _crmS078Combinar(lojas, null, {somenteClientes:true,s085Pessoa:true})
+    : _crmS078Combinar(lojas, null, {somenteClientes:true}); }   // null = todos os anos
   catch(e){ window._crmS045Nomes=null; console.warn('[R149] base de clientes:', e.message); return []; }
 
   // [R115] Flow contributes only the latest positive sale and is rebuilt each call.
@@ -64681,8 +66636,10 @@ function _crmRenderProdutos(v){
     // Só quem tem movimento na visão atual. Usar a tabela crua do cubo
     // listava gente sem venda no período (e de outras lojas), e escolher
     // um desses devolvia lista vazia — parecia que o filtro não funcionava.
+    const lojasEscopo=_crmS085LojasEscopo(document.getElementById('excel-filtro-loja')?.value||'');
     const nomes = (v.vendedoras || []).map(x => x.nome)
-      .filter(n => n && n !== '(sem vendedor(a))').sort();
+      .filter(n => n && n !== '(sem vendedor(a))'
+        && !_crmS085RotuloArquivadoEscopo(n,lojasEscopo)).sort();
     const assinatura = nomes.join('|');
     if(selP.dataset.assinatura !== assinatura){
       const atual = selP.value;
@@ -64730,7 +66687,29 @@ function _crmRenderProdutos(v){
 function _crmRenderVendedoras(v){
   const el = document.getElementById('excel-rank-vends');
   if(!el) return;
-  const linhas = v.vendedoras.map((x,i) =>
+  const lojaSel=document.getElementById('excel-filtro-loja')?.value||'';
+  const lojasEscopo=lojaSel?[lojaSel]:window.crmLojasVisiveis();
+  const ano=document.getElementById('excel-filtro-ano')?.value||'';
+  const mes=document.getElementById('excel-filtro-mes')?.value||'';
+  const vend=document.getElementById('excel-filtro-vend')?.value||'';
+  let visiveis=[];
+  try{
+    let base;
+    if(window.crmTemCubos?.())
+      base=_crmS078Combinar(lojasEscopo,ano?[ano]:null,{s085Pessoa:true});
+    else{
+      const linhas=(D.excelDados||[]).filter(r=>window.lojaVisivel?.(r?.loja)
+        &&(!lojaSel||String(r.loja)===lojaSel)
+        &&(!ano||String(r.data||'').slice(0,4)===ano)
+        &&(!mes||String(r.data||'').slice(5,7)===mes)
+        &&!window._crmS085RotuloArquivadoUnicoLoja?.(r?.loja,r?.vendedora));
+      base=window.crmCombinarDeLinhas(linhas);
+    }
+    visiveis=window.crmFiltrar(base,{ano,mes,vend}).vendedoras||[];
+  }catch(e){
+    console.warn('[S085] ranking individual CRM indisponível:',e.code||e.name||'erro');
+  }
+  const linhas = visiveis.map((x,i) =>
     '<tr><td style="color:var(--muted)">'+(i+1)+'</td>'
     + '<td><strong>'+x.nome+'</strong></td>'
     + '<td style="text-align:center">'+x.cupons.toLocaleString('pt-BR')+'</td>'
@@ -65640,7 +67619,14 @@ window.renderInativos180 = function(){
     el.dataset.histClienteBound='1';
   }
   const dias = parseInt(document.getElementById('ct-inat-dias')?.value || '180', 10);
-  const fVend = document.getElementById('ct-inat-vend')?.value || '';
+  let fVend = document.getElementById('ct-inat-vend')?.value || '';
+  const _fLojaCt = isAdmin() ? (document.getElementById('ct-filtro-loja')?.value || '') : '';
+  const _lojasEscopoInativos=_crmS085LojasEscopo(_fLojaCt);
+  if(fVend&&fVend!=='__sem__'&&_crmS085RotuloArquivadoEscopo(fVend,_lojasEscopoInativos)){
+    fVend='';
+    const stale=document.getElementById('ct-inat-vend');
+    if(stale) stale.value='';
+  }
   const tipoDoc = document.getElementById('ct-inat-doc')?.value || 'todos';
   const lbl = document.getElementById('ct-inat-dias-lbl');
   if(lbl) lbl.textContent = dias;
@@ -65657,7 +67643,6 @@ window.renderInativos180 = function(){
   // Clientes: com um ano escolhido lá, quem parou no ano anterior — o caso
   // que a régua existe para achar — sumia desta lista; e a compra lançada na
   // Origem do Fluxo (R115) não tirava o cliente da régua.
-  const _fLojaCt = isAdmin() ? (document.getElementById('ct-filtro-loja')?.value || '') : '';
   // Sem base (planilha antiga, sem cubos): o recorte de sempre — pior, mas
   // nunca uma tela vazia (mesmo recurso do _crmRenderInativos).
   let v;
@@ -65683,7 +67668,8 @@ window.renderInativos180 = function(){
   // Popular o seletor de vendedoras com quem realmente tem inativo na lista
   const selV = document.getElementById('ct-inat-vend');
   if(selV){
-    const nomes = [...new Set(inativos.map(c => c.vendedora).filter(Boolean))].sort();
+    const nomes = [...new Set(inativos.map(c => c.vendedora).filter(Boolean))]
+      .filter(n=>!_crmS085RotuloArquivadoEscopo(n,_lojasEscopoInativos)).sort();
     const marcado = selV.value;
     const assinatura = nomes.join('|');
     if(selV.dataset.assinatura !== assinatura){
@@ -69852,6 +71838,65 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     }
   };
 
+  // S004 keeps bounded raw projections of the two relevant source documents.
+  // The effective state is the target row after this read's normal tombstone
+  // union and _savedAt comparison; it is not a replacement for the raw S007
+  // transaction preimage.
+  window._s053CapturarBaseVenda=function(ctx,tipo,id,data,source,opId){
+    try{
+      if(!contextValid(ctx)||!['venda','vend'].includes(tipo)||id==null||!data
+          ||typeof source!=='string'||!source||typeof opId!=='string'||!opId) return null;
+      const rec=reads.get(ctx.owner);
+      if(!rec||rec.complete!==true||rec.geracao!==ctx.geracao
+          ||!sameContext(rec.context,ctx)||readsInFlight.has(ctx.owner)
+          ||rec.originalReferences?.destino!==D||!rec.expected.includes(source)) return null;
+      const principal=rec.copies?.principal,store=rec.copies?.[source];
+      if(!principal||principal.exists!==true||!store||store.exists!==true) return null;
+      const key=String(id),date=String(data);
+      const entity=tipo==='venda'?'vendas':'vendasVend';
+      const field=tipo==='venda'?'_vendasExcluidas':'_vendasVendExcluidas';
+      const tsField=tipo==='venda'?'_vendasExcluidasTs':'_vendasVendExcluidasTs';
+      const target=(obj,sourceName)=>{
+        const root=obj||{},rowMap=root[entity]?.[key];
+        const rowPresent=!!rowMap&&typeof rowMap==='object'
+          &&Object.prototype.hasOwnProperty.call(rowMap,date);
+        const marks=root[field]?.[key],tsKey=key+'|'+date,tsMap=root[tsField]||{};
+        const tsPresent=Object.prototype.hasOwnProperty.call(tsMap,tsKey);
+        return {source:sourceName,exists:true,rowPresent,
+          row:rowPresent?clone(rowMap[date]):null,
+          listed:Array.isArray(marks)&&marks.includes(date),
+          tsPresent,ts:tsPresent?clone(tsMap[tsKey]):null};
+      };
+      const p=target(principal.obj,'principal'),s=target(store.obj,source);
+
+      // An admin read may contain another physical copy of this same key.
+      // Its effect on the logical merge cannot be justified by a two-source
+      // witness, so decline the exception instead of silently widening it.
+      for(const [otherName,other] of Object.entries(rec.copies||{})){
+        if(otherName==='principal'||otherName===source) continue;
+        const extra=target(other?.obj,otherName);
+        if(extra.rowPresent||extra.listed||extra.tsPresent) return null;
+      }
+
+      // Match _unirLapidesEm: union the dated list and keep the numerically
+      // greatest TS value; ties retain the already-present principal value.
+      const listed=p.listed||s.listed;
+      let tsPresent=p.tsPresent||s.tsPresent,ts=p.tsPresent?p.ts:null;
+      if(s.tsPresent&&(!p.tsPresent||!(Number(ts)>=Number(s.ts)))) ts=s.ts;
+      if(!listed||!tsPresent||!Number.isFinite(Number(ts))||Number(ts)<=0) return null;
+
+      const logical=rec.logicalSnapshot||{},rowMap=logical[entity]?.[key];
+      const rowPresent=!!rowMap&&typeof rowMap==='object'
+        &&Object.prototype.hasOwnProperty.call(rowMap,date);
+      const row=rowPresent?clone(rowMap[date]):null;
+      const effective=rowPresent&&Number(row?._savedAt||0)>Number(ts)
+        ?{valor:row,lapide:false,lapideTs:null}
+        :{valor:null,lapide:true,lapideTs:ts};
+      return {v:2,owner:ctx.owner,geracao:ctx.geracao,perfil:ctx.perfil,
+        loja:ctx.perfil==='loja'?String(ctx.loja||''):null,source,readId:rec.id,
+        opId,tipo,id:key,data:date,sources:{principal:p,store:s},effective};
+    }catch(_e){ return null; }
+  };
   window._s053ReadStart=beginRead;
   window._s053RegistrarLeitura=recordRead;
   window._s053ReadEnd=endRead;
