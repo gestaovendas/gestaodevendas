@@ -2430,7 +2430,12 @@ window._mesclarRemotoComum = function(remoto){
     window._mergeCarimbado('_metasGrupo',      remoto._metasGrupo,      remoto._metasGrupoTs);
     window._mergeCarimbado('_superMetaAno',    remoto._superMetaAno,    remoto._superMetaAnoTs);
     window._mergeCarimbado('_vrllSuperPct',    remoto._vrllSuperPct,    remoto._vrllSuperPctTs);   // [R164]
-    window._mergeCarimbado('configFollowUp',   remoto.configFollowUp,   null);
+    if(remoto.configFollowUp!=null){
+      const catalogo=window._n008CatalogEngine().admit(D.configFollowUp,remoto.configFollowUp);
+      window._mergeCarimbado('configFollowUp',remoto.configFollowUp,null);
+      D.configFollowUp={...(D.configFollowUp||{}),_n008Catalog:catalogo};
+      window._n008CatalogAtualizado?.();
+    }
     window._mergeCarimbado('_lojasArquivadas', remoto._lojasArquivadas, remoto._lojasArquivadasTs);
     const permissoes=remoto.painelLancamentoAtivo;
     if(permissoes && typeof permissoes==='object' && !Array.isArray(permissoes)){
@@ -3272,6 +3277,24 @@ window.fbGetToken = async function(operacao){
     return window._s053PreservarCampos({current,proposed});
   }
 
+  // N008 catalog writes compare the captured revision inside the physical transaction.
+  let _n008CatalogEngineInstance=null;
+  window._n008CatalogEngine=function(){
+    if(_n008CatalogEngineInstance) return _n008CatalogEngineInstance;
+    if(typeof window._n008CreateCatalog!=='function') throw new Error('n008-catalogo-indisponivel');
+    const defaults=window._n008CatalogDefaults;
+    _n008CatalogEngineInstance=window._n008CreateCatalog({storage:localStorage,
+      keyFor:(kind,ctx)=>window._s012StorageKey(kind,ctx),
+      valid:ctx=>window._s012ContextoValido?.(ctx)===true,defaults,
+      restoreActive:ctx=>window._s065RestauracaoAtiva?.(ctx)??true,
+      runTransaction:fn=>window._s012Publicacao(()=>runTransaction(db,fn,{maxAttempts:5})),
+      readPrincipal:async tx=>(await _s007LerFamiliaTx(tx,'principal'))?.obj||null,
+      writePrincipal:async(tx,obj)=>_s007EscreverFamiliaTx(tx,_s007PrepararFamiliaTx('principal',obj,
+        {por:String(window._currentUser?.email||'')}))});
+    return _n008CatalogEngineInstance;
+  };
+  window._n008CatalogPublish=ctx=>window._comPrazo(window._n008CatalogEngine().publish(ctx),'o catálogo');
+
   // Admin's ordinary principal snapshot remains a one-family S007 transaction.
   // It does not fan out to the seven stores or publish S053 records.
   async function _s053PublicarSnapshotPrincipal(ctx,payload,extras,validarContexto,s004Guard){
@@ -3291,7 +3314,7 @@ window.fbGetToken = async function(operacao){
         if(!valido()||window._s004VendasValidarGuardaTransacao?.(ctx,s004Guard,docs)!==true)
           throw new Error('s004-fontes-alteradas-durante-publicacao-principal');
       }
-      const propostaBase=_s053PreservarCamposWriter(atual?.obj||{},payload);
+      const propostaBase=window._n008PreserveCatalog(atual?.obj||{},_s053PreservarCamposWriter(atual?.obj||{},payload));
       const proposta=window._s086UnirPayload(atual?.obj||{},propostaBase,true,'principal');
       // Vendas pertencem à loja: esta publicação de configuração conserva
       // a projeção principal exata, inclusive se o fanout precisar de retry.
@@ -3385,6 +3408,17 @@ window.fbGetToken = async function(operacao){
       }
       const atualObj=atual?.obj||{};
       const restauradoBase=adapters.preserveCurrentFields({current:atualObj,proposed:proposta});
+      if(docId==='principal'){
+        if(proposta.configFollowUp?._n008Catalog!==undefined){
+          if(!fence) throw new Error('n008-restauracao-exige-cerca');
+          const catalogo=window._n008CatalogEngine().restore(atualObj.configFollowUp,
+            proposta.configFollowUp,fence.operationId,ctx.owner);
+          restauradoBase.configFollowUp={...(restauradoBase.configFollowUp||{}),_n008Catalog:catalogo};
+        }else{
+          const preservado=window._n008PreserveCatalog(atualObj,restauradoBase);
+          restauradoBase.configFollowUp=preservado.configFollowUp;
+        }
+      }
       const restaurado=window._s086UnirPayload(atualObj,restauradoBase,true,docId);
       const familia=_s007PrepararFamiliaTx(docId,restaurado,metadados);
       const header=familia.escritas.find(write=>write?.id===docId)?.dados;
@@ -6962,6 +6996,7 @@ body:not(.logado) #appScreen{display:none!important}
     <button class="ni" onclick="nav('semana')" id="nav-semana"><span class="ic">&#11041;</span>Semana</button>
     <button class="ni" onclick="nav('fluxo')" id="nav-fluxo"><span class="ic">&#128202;</span>Origem do Fluxo</button>
     <button class="ni" onclick="nav('contatos')" id="nav-contatos"><span class="ic">&#128222;</span>Clientes Contatados</button>
+    <button class="ni" onclick="nav('followups')" id="nav-followups"><span class="ic">🔁</span>Follow-ups</button>
     <button class="ni" onclick="nav('excel')" id="nav-excel"><span class="ic">&#128202;</span>CRM Clientes</button>
     <button class="ni" onclick="nav('prospec')" id="nav-prospec"><span class="ic">🏢</span>Prospecção B2B</button>
     <button class="ni" onclick="nav('relatorios')" id="nav-relatorios"><span class="ic">📋</span>Relatórios Estratégicos</button>
@@ -8612,6 +8647,17 @@ body:not(.logado) #appScreen{display:none!important}
 </div>
 
 
+<div class="page" id="page-followups">
+<div class="ph"><h1 class="pt">Follow-ups</h1><p class="ps">Retornos programados e histórico de atendimento</p></div>
+<div class="sc" id="fu-today" role="status" aria-live="polite" style="border-color:var(--ouro);font-weight:600"></div>
+<div class="sc" style="display:flex;gap:12px;flex-wrap:wrap"><label id="fu-loja-wrap">Loja <select id="fu-loja" aria-label="Loja dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todas as lojas</option></select></label><label>Vendedor(a) <select id="fu-vend" aria-label="Vendedor dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todos(as) vendedores</option></select></label></div>
+<section class="sc" aria-labelledby="fu-title-hoje"><h2 class="st" id="fu-title-hoje">Retornos de hoje · <span id="fu-count-hoje">0</span></h2><div id="fu-hoje" data-fu-list></div><div id="fu-page-hoje" style="display:flex;gap:10px;align-items:center"></div></section>
+<section class="sc" aria-labelledby="fu-title-atrasados"><h2 class="st" id="fu-title-atrasados">Retornos atrasados · <span id="fu-count-atrasados">0</span></h2><div id="fu-atrasados" data-fu-list></div><div id="fu-page-atrasados" style="display:flex;gap:10px;align-items:center"></div></section>
+<section class="sc" aria-labelledby="fu-title-proximos"><h2 class="st" id="fu-title-proximos">Próximos retornos · <span id="fu-count-proximos">0</span></h2><div id="fu-proximos" data-fu-list></div><div id="fu-page-proximos" style="display:flex;gap:10px;align-items:center"></div></section>
+<section class="sc" aria-labelledby="fu-title-concluidos"><h2 class="st" id="fu-title-concluidos">Retornos concluídos · <span id="fu-count-concluidos">0</span></h2><div id="fu-concluidos" data-fu-list></div><div id="fu-page-concluidos" style="display:flex;gap:10px;align-items:center"></div></section>
+<section class="sc" aria-labelledby="fu-title-reagendados"><h2 class="st" id="fu-title-reagendados">Histórico de reagendamentos · <span id="fu-count-reagendados">0</span></h2><div id="fu-reagendados" data-fu-list></div><div id="fu-page-reagendados" style="display:flex;gap:10px;align-items:center"></div></section>
+</div>
+
 <div class="page" id="page-contatos">
   <div class="ph">
     <div>
@@ -8624,6 +8670,8 @@ body:not(.logado) #appScreen{display:none!important}
       <button class="btn-p" onclick="abrirFormContato()">+ Registrar Contato</button>
     </div>
   </div>
+
+  <details class="sc admin-only" style="display:none"><summary>Gerenciar tipos de contato</summary><div id="n008-catalog-contact"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
 
   <!-- [R172] LOJA E PERÍODO — valem para KPIs, ranking, PDF e demais blocos;
        Registros (N007) usa filtros próprios, independentes desta barra.
@@ -8846,9 +8894,9 @@ body:not(.logado) #appScreen{display:none!important}
 
   <!-- Lista -->
   <div class="sc">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="margin-bottom:12px">
       <div class="st" style="margin:0">📋 Registros</div>
-      <div id="contatos-lista-info" style="font-size:10px;color:var(--muted)"></div>
+      <div id="contatos-lista-info" style="font-size:10px;color:var(--muted);margin-top:4px"></div>
     </div>
     <div id="ct-registros-hint" style="font-size:10px;color:var(--muted);line-height:1.4;margin:0 0 10px">
       Os filtros abaixo alteram apenas esta lista e são independentes dos filtros gerais da aba.
@@ -8924,6 +8972,7 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
     <div style="display:grid;gap:12px">
       <input type="hidden" id="ct-form-id" value="">
+      <div id="n008-origin-info" class="sc" hidden></div>
 
       <div>
         <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">DATA</label>
@@ -8963,6 +9012,8 @@ body:not(.logado) #appScreen{display:none!important}
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
         </select>
       </div>
+
+      <div><label for="ct-form-campanha" style="font-size:10px;color:var(--muted)">CAMPANHA (OPCIONAL)</label><select id="ct-form-campanha" style="width:100%;margin-top:4px"><option value="">Sem campanha</option></select></div>
 
       <div>
         <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">RESPOSTA DO CLIENTE</label>
@@ -9211,6 +9262,8 @@ body:not(.logado) #appScreen{display:none!important}
       <button class="btn-s loja-only" onclick="abrirFormCampReal()" style="display:none">+ Realizado</button>
     </div>
   </div>
+
+  <details class="sc admin-only" style="display:none"><summary>Gerenciar tipos de campanha</summary><div id="n008-catalog-campaign"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
 
   <!-- RELATÓRIO E RANKING DE CAMPANHAS -->
   <div id="painel-rel-camp" style="display:none;margin-bottom:16px">
@@ -10514,7 +10567,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-25h';
+window.AVATIM_BUILD = '2026-10-29a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -15427,6 +15480,10 @@ window.backupFirebase = async function(s012Ctx,s065CaptureOut){
 
     const lojasSemDoc=(typeof LOJAS!=='undefined'?LOJAS:[])
       .filter(l=>!pacote.docs['loja_'+l.id]).map(l=>l.nome||l.id);
+    // O rascunho privado não faz parte deste backup de dados confirmados.
+    let avisoRascunho='';
+    try{if(window._n008CatalogEngine().readDraft(ctx)) avisoRascunho=' Há um rascunho de catálogo pendente neste navegador que não está neste backup.';}
+    catch(_e){avisoRascunho=' Não foi possível conferir rascunhos de catálogo locais; eles não fazem parte deste backup.';}
     const txt = JSON.stringify(pacote);
     const nomeArq = 'avatim-backup-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
     const blob = new Blob([txt], {type:'application/json'});
@@ -15441,8 +15498,8 @@ window.backupFirebase = async function(s012Ctx,s065CaptureOut){
       ? ' ⚠️ Sem documento remoto: '+lojasSemDoc.join(', ')+'. Confirme se os dados locais foram sincronizados.'
       : '';
     showToast('✅ Backup gerado: ' + lidos + ' documento(s), '
-      + (txt.length/1048576).toFixed(2) + ' MB — ' + nomeArq+avisoAusentes,
-      lojasSemDoc.length?'warn':'ok');
+      + (txt.length/1048576).toFixed(2) + ' MB — ' + nomeArq+avisoAusentes+avisoRascunho,
+      lojasSemDoc.length||avisoRascunho?'warn':'ok');
     console.log('[Avatim] backup:', nomeArq, lidos, 'docs,', (bytes/1048576).toFixed(2), 'MB de dados');
     return true;
   }catch(e){
@@ -15740,6 +15797,7 @@ const _RENDER_PAGINA = {
   semana:      () => { renderSemana(); window.renderPadroesSemana?.(); },
   fluxo:       () => renderFluxo(),
   contatos:    () => renderContatos(),
+  followups:   () => window.renderFollowups?.(),
   excel:       () => window.excelRender?.(),
   prospec:     () => window.renderProspec?.(),
   relatorios:  () => window.renderRelatorios?.(),
@@ -16740,6 +16798,22 @@ window.backupRestaurar = async function(){
         +String(_s065Preview?.reason||'preparação indisponível')+'. Nenhuma família foi publicada.','err');
       return false;
     }
+    let _n008Fence=null;
+    try{
+      if(window._n008CatalogEngine().readDraft(ctx)) throw new Error('rascunho de catálogo pendente');
+      const principal=_s065Preview.payloads?.principal;
+      const incluiCatalogo=principal?.configFollowUp?._n008Catalog!==undefined;
+      if(incluiCatalogo){
+        if(typeof crypto?.randomUUID!=='function') throw new Error('identidade de restauração indisponível');
+        _n008Fence=window._n008RestoreFence(ctx,_s065Inventory,
+          window._s065BuildBackupRestoreCapture,crypto.randomUUID());
+        // Validate backup and current metadata before any restore publication.
+        const atual=window._bkLerJsonAplicacao?.(_s065Inventory.docs,'principal');
+        if(!atual?.ok) throw new Error('principal atual indisponível');
+        window._n008CatalogEngine().restore(atual.valor?.configFollowUp,
+          principal.configFollowUp,_n008Fence.operationId,ctx.owner);
+      }
+    }catch(e){showToast('Restauração bloqueada: '+(e?.message||e)+'.','err');return false;}
     let _s065Admission;
     if(_s065Preview.groups.length){
       const groups=_s065Preview.groups;
@@ -16763,6 +16837,16 @@ window.backupRestaurar = async function(){
     if(!_s053RestorePlan?.ok){
       showToast('Restauração bloqueada para preservar contatos/campanhas: '+String(_s053RestorePlan?.reason||'preparação indisponível')+'. Nenhuma família foi publicada.','err');
       return false;
+    }
+    if(_n008Fence){
+      if(_s053RestorePlan.headFence){
+        if(!window._s053CoreSame?.(_s053RestorePlan.headFence.initialHeads,_n008Fence.initialHeads)){
+          showToast('Restauração bloqueada: as cabeças do inventário divergiram.','err');return false;
+        }
+      }else _s053RestorePlan.headFence=_n008Fence;
+    }
+    if(window._n008CatalogEngine().readDraft(ctx)){
+      showToast('Restauração bloqueada: há rascunho de catálogo pendente.','warn');return false;
     }
     // Instalar os IDs imutáveis antes de qualquer cabeça. Uma falha deixa
     // apenas órfãos da restauração e mantém as cabeças atuais sem alteração.
@@ -32834,7 +32918,12 @@ async function loadFromFirestore(onMainDataReady,s051Retry){
         window._mergeCarimbado('_metasGrupo',   remoto._metasGrupo,   remoto._metasGrupoTs);
         window._mergeCarimbado('_superMetaAno', remoto._superMetaAno, remoto._superMetaAnoTs);
         window._mergeCarimbado('_vrllSuperPct', remoto._vrllSuperPct, remoto._vrllSuperPctTs);   // [R164]
-        window._mergeCarimbado('configFollowUp',remoto.configFollowUp, null);
+        if(remoto.configFollowUp!=null){
+          const catalogo=window._n008CatalogEngine().admit(D.configFollowUp,remoto.configFollowUp);
+          window._mergeCarimbado('configFollowUp',remoto.configFollowUp,null);
+          D.configFollowUp={...(D.configFollowUp||{}),_n008Catalog:catalogo};
+      window._n008CatalogAtualizado?.();
+        }
         // ══════════════════════════════════════════════════════════
         // [R156] _lojasArquivadas SUBIA e NUNCA VOLTAVA.
         //
@@ -35835,6 +35924,7 @@ function nav(pg){
     },
     relatorios:()=>{ if(typeof renderRelatorios==="function") renderRelatorios(); },
     contatos:()=>{ if(typeof renderContatos==="function") renderContatos(); },
+    followups:()=>window.renderFollowups?.(),
     excel:()=>{ if(typeof window.excelRender==="function") window.excelRender(); },
     config:()=>{
       // [R97] painel de lojas ativas/arquivadas
@@ -43238,7 +43328,7 @@ function renderRelCamp(){
 
   objs.forEach(obj=>{
     const reaisObj = reaisAll.filter(r=>r.campId===obj.id);
-    const info2 = CAMP_TIPOS[obj.tipo]||{emoji:'📌',label:obj.tipo};
+    const info2 = window._n008TipoCampanhaInfo(obj.tipo,obj.tipoRotulo);
     if(isAdmin()){
       lojasVisiveis.forEach(l=>{
         // SOMAR todos os lançamentos diários desta loja (não só o primeiro)
@@ -43296,7 +43386,7 @@ function exportarRelCamp(){
 
   let csv = 'Campanha;Tipo;Loja;Faturamento;Meta;%;Atendimentos;TM;Período;Observações\n';
   objs.forEach(obj=>{
-    const info2 = CAMP_TIPOS[obj.tipo]||{label:obj.tipo};
+    const info2 = window._n008TipoCampanhaInfo(obj.tipo,obj.tipoRotulo);
     LOJAS.forEach(l=>{
       const lancs = reaisAll.filter(x=>x.campId===obj.id&&x.lojaId===l.id);
       const metaL = (obj.metasPorLoja&&obj.metasPorLoja[l.id])||obj.metaLoja||0;
@@ -43448,7 +43538,7 @@ function exportarPDFCamp(){
 
   // ── Tabela: Detalhe por Campanha ──────────────────────────────
   const rowsCamps = objs.map(o=>{
-    const info2 = CAMP_TIPOS[o.tipo]||{emoji:'📌',label:o.tipo};
+    const info2 = window._n008TipoCampanhaInfo(o.tipo,o.tipoRotulo);
     const reaisO = reaisAll.filter(r=>r.campId===o.id);
     const fatO   = reaisO.reduce((s,r)=>s+_fatLancamento(r),0);
     const atdO   = reaisO.reduce((s,r)=>s+_atendLancamento(r),0);
@@ -43461,7 +43551,7 @@ function exportarPDFCamp(){
     const lojasO = [...new Set(reaisO.map(r=>r.lojaId))].length;
     return `<tr>
       <td>${info2.emoji} <strong>${o.nome}</strong></td>
-      <td>${info2.label}</td>
+      <td>${_n001EscHtml(info2.label)}</td>
       <td>${fatO>0?fmt(fatO):'<span style="color:#aaa">Sem lançamento</span>'}</td>
       <td>${metaO>0?fmt(metaO):'<span style="color:#aaa">—</span>'}</td>
       <td>${pctO!==null?'<span class="badge-'+badge+'">'+pctO.toFixed(0)+'%</span>':'<span style="color:#aaa">—</span>'}</td>
@@ -43832,6 +43922,14 @@ function salvarCampObj(){
   if(!nome){ showToast('Informe um nome para a campanha','err'); return; }
   if(!ini || !fim){ showToast('Informe as datas','err'); return; }
   const _objOriginalEdicao=_editandoCampObjId?D.campObjetivos.find(o=>o.id===_editandoCampObjId):null;
+  const _tipoAnterior=_editandoCampObjId?window._s053CampObjFormCapture?.capture?.base?.tipo:null;
+  let _tipoInfo;
+  try{
+    if(tipo!==_tipoAnterior&&!window._n008TipoCampanhaPermitido(tipo)){
+      showToast('Selecione um tipo de campanha ativo.','warn');return false;
+    }
+    _tipoInfo=window._n008TipoCampanhaInfo(tipo);
+  }catch(_e){showToast('Não foi possível validar os tipos de campanha. Tente novamente.','warn');return false;}
   const metasPorLoja = _objOriginalEdicao?.metasPorLoja&&typeof _objOriginalEdicao.metasPorLoja==='object'
     ? {..._objOriginalEdicao.metasPorLoja} : {};
   const lojaIds = LOJAS.map(l=>l.id);
@@ -43855,7 +43953,7 @@ function salvarCampObj(){
     if(!_s053Form||_s053Form.id!==String(_editandoCampObjId)||!_s053Base){
       showToast('Não foi possível validar a base original da campanha. Reabra a edição.','warn');return false;
     }
-    const _s053Draft={..._s053Base,tipo,nome,ini,fim,metaRede,metasPorLoja,obs,
+    const _s053Draft={..._s053Base,tipo,...(tipo===_s053Base.tipo?{}:{tipoRotulo:_tipoInfo.label}),nome,ini,fim,metaRede,metasPorLoja,obs,
       produtos:[..._campProdsObj],editadoEm:hoje(),_savedAt:Date.now()};
     const _s053Stage=window._s053ProdStage('campObjetivos',String(_editandoCampObjId),_s053Draft,
       _s052Op.ctx,null,_s053Form.capture,null);
@@ -43864,13 +43962,13 @@ function salvarCampObj(){
     // Keep the edit ID until save() accepts the owner-scoped snapshot.
   } else {
     // CRIAR nova campanha
-    const _s052Slot=window._s052SlotPorIntencao('campanha:',{tipo,nome,ini,fim,metaRede,metasPorLoja,obs,produtos:[..._campProdsObj]});
+    const _s052Slot=window._s052SlotPorIntencao('campanha:',{tipo,tipoRotulo:_tipoInfo.label,nome,ini,fim,metaRede,metasPorLoja,obs,produtos:[..._campProdsObj]});
     const _s052Id=window._s052RascunhoId(_s052Slot,()=> 'obj_'+Date.now()+'_'+Math.random().toString(36).slice(2,10),_s052Op,'campObjetivos','id');
     if(!_s052Id) return false;
     _s052SaveSlot=_s052Slot;
     const _s052Existente=window._s052RascunhoRegistro(_s052Slot,_s052Op);
     const obj = _s052Existente || {
-      id: _s052Id, tipo, nome, ini, fim,
+      id: _s052Id, tipo, tipoRotulo:_tipoInfo.label, nome, ini, fim,
       metaRede, metasPorLoja, obs,
       produtos: [..._campProdsObj],
       criadoEm: hoje(), criadoPor: 'admin', _savedAt: Date.now()   // [R166]
@@ -44820,7 +44918,7 @@ function renderCampLista(){
   }
 
   el.innerHTML = objs.map(obj=>{
-    const info      = CAMP_TIPOS[obj.tipo]||{label:obj.tipo,emoji:'📌'};
+    const info      = window._n008TipoCampanhaInfo(obj.tipo,obj.tipoRotulo);
     const reais     = D.campRealizados.filter(r=>r.campId===obj.id&&window.lojaVisivel?.(r.lojaId));
     const totalReal = reais.reduce((s,r)=>s+_fatLancamento(r),0);
     const pctRede   = obj.metaRede>0 ? totalReal/obj.metaRede*100 : 0;
@@ -44860,7 +44958,7 @@ function renderCampLista(){
           <div>
             <div style="font-size:15px;font-weight:700;letter-spacing:-.2px">${obj.nome}${obj.arquivada?' <span style="font-size:10px;color:var(--muted);font-weight:400;background:rgba(255,255,255,.06);border:1px solid var(--borda);border-radius:12px;padding:2px 8px">📦 Arquivada</span>':''}</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">
-              <span style="font-size:10px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 10px;border-radius:20px;font-weight:600">${info.label}</span>
+              <span style="font-size:10px;background:rgba(201,168,76,.12);color:var(--ouro);padding:2px 10px;border-radius:20px;font-weight:600">${_n001EscHtml(info.label)}</span>
               <span style="font-size:10px;color:var(--muted)">📅 ${fmtData(obj.ini)} → ${fmtData(obj.fim)}</span>
               ${isAdmin()&&obj.metaRede>0?`<span style="font-size:10px;color:var(--muted)">🎯 Meta rede: <strong style="color:var(--texto)">${fmt(obj.metaRede)}</strong></span>`:''}
               ${metaLoja>0?`<span style="font-size:10px;color:var(--muted)">🏪 Meta loja: <strong style="color:var(--texto)">${fmt(metaLoja)}</strong></span>`:''}
@@ -58829,6 +58927,11 @@ function _normalizarRetornoContato(codigo){
 }
 
 function _s053ContatoSafely(call){try{return call();}catch(error){console.warn('[S053] ação de contato preservada:',error?.message||error);return null;}}
+function _ctMesmoConteudo(a,b){
+  if(!a||!b||typeof window._s053CoreSame!=='function') return false;
+  const {ts:_a,...conteudoA}=a, {ts:_b,...conteudoB}=b;
+  return window._s053CoreSame(conteudoA,conteudoB);
+}
 
 // ── ABRIR/FECHAR FORMULÁRIO ──────────────────────────────────────────
 function abrirFormContato(id){
@@ -58884,13 +58987,13 @@ function abrirFormContato(id){
     document.getElementById('ct-form-proximo').value = '';
     document.getElementById('ct-form-obs').value     = '';
   }
-  _ctAtualizarProximoContatoUI(); // mostra/esconde campo próximo contato
+  _ctAtualizarProximoContatoUI(!id); // mostra/esconde campo próximo contato
   modal.style.display = 'block';
 }
 
 // [NEW 12/08] Mostra o campo "próximo contato" apenas para os status que fazem sentido
 // e ajusta o rótulo/data padrão
-function _ctAtualizarProximoContatoUI(){
+function _ctAtualizarProximoContatoUI(sugerir=false){
   const sel = document.getElementById('ct-form-retorno');
   const wrap = document.getElementById('ct-form-proximo-wrap');
   const lbl  = document.getElementById('ct-form-proximo-label');
@@ -58898,7 +59001,7 @@ function _ctAtualizarProximoContatoUI(){
   if(!sel || !wrap) return;
   const v = sel.value;
   // Mostrar para status que envolvem retomada de contato
-  const mostrar = ['pediu_retorno','agendou_visita','sem_interesse','pendente'].includes(v);
+  const mostrar = true; // N008: scheduling is independent of the customer response.
   wrap.style.display = mostrar ? '' : 'none';
   if(!mostrar) return;
   // Rótulo por contexto
@@ -58907,7 +59010,7 @@ function _ctAtualizarProximoContatoUI(){
   else if(v === 'sem_interesse') lbl.textContent = 'PRÓXIMA TENTATIVA (SUGERIDA)';
   else lbl.textContent = 'PRÓXIMO CONTATO (OPCIONAL)';
   // Sugerir data se vazia
-  if(!inp.value){
+  if(sugerir&&!inp.value){
     const [y,m,d] = hoje().split('-').map(Number);
     const diasSug = v === 'agendou_visita' ? 3 : (v === 'sem_interesse' ? 30 : 7);
     const nova = new Date(y, m-1, d + diasSug);
@@ -58954,6 +59057,7 @@ function salvarContato(){
   const retorno = document.getElementById('ct-form-retorno').value;
   const proximoContato = document.getElementById('ct-form-proximo').value || '';
   const obs     = document.getElementById('ct-form-obs').value.trim();
+  const campanhaId = document.getElementById('ct-form-campanha')?.value || '';
 
   if(!window.lojaVisivel(loja)){showToast('Selecione uma loja ativa antes de salvar.','warn');return false;}
   if(!cliente){ showToast('Informe o nome do cliente.','err'); return; }
@@ -58967,6 +59071,8 @@ function salvarContato(){
     return;
   }
 
+  const _n008Old=id?_s053Form.capture?.base:null;
+  if(window._n008TipoContatoPermitido&&!window._n008TipoContatoPermitido(tipo)&&_n008Old?.tipo!==tipo){showToast('O tipo foi retirado. Selecione um tipo disponível.','warn');return false;}
   const now = Date.now();
   if(id){
     // Edição: preserve the form-open base unless chaining a verified pending intent.
@@ -58977,8 +59083,19 @@ function salvarContato(){
     const _s053Snapshot=_s053ContatoSafely(()=>window._s053SnapshotIntencoes?.(_s052Op.ctx));
     const _s053Pendentes=(_s053Snapshot?.intents||[]).filter(item=>item.entidade==='contatos'&&item.id===String(id)&&item.draft?.present);
     const _s053Anterior=_s053Pendentes.at(-1)||null;
-    const _s053MesmoConteudo=(a,b)=>!!a&&!!b&&['id','data','cliente','tipo','loja','vendId','retorno','proximoContato','obs'].every(k=>a[k]===b[k]);
-    const _s053Proposto={...(_s053Anterior&&_s053Atual&&_s053MesmoConteudo(_s053Atual,_s053Anterior.draft.value)?_s053Atual:_s053Base),data,cliente,tipo,loja,vendId,retorno,proximoContato,obs,ts:now};
+    const _s053MesmoConteudo=_ctMesmoConteudo;
+    const _n008AgendaBase=_s053Anterior&&_s053Atual&&_s053MesmoConteudo(_s053Atual,_s053Anterior.draft.value)?_s053Atual:_s053Base;
+    const _n008AgendaAlterada=_n008AgendaBase!==_s053Base&&!window._s053Core.same(
+      {data:_s053Base.proximoContato,itens:_s053Base.followups||null},
+      {data:_n008AgendaBase.proximoContato,itens:_n008AgendaBase.followups||null});
+    if(_n008AgendaAlterada){
+      const proposto={..._s053Base,data,cliente,tipo,loja,vendId,retorno,proximoContato,obs,campanhaId,ts:now};
+      const held=_s053ContatoSafely(()=>window._s053ReterContatoParaRevisao?.('contatos',String(id),_s053Base,proposto,_s052Op.ctx,_s053Form.capture));
+      showToast(held?.ok?'O agendamento mudou desde a abertura. Seu rascunho foi preservado para revisão.':'O agendamento mudou desde a abertura. O formulário foi mantido; confira a aba Follow-ups antes de salvar.','warn');
+      return false;
+    }
+    let _s053Proposto={..._n008AgendaBase,data,cliente,tipo,tipoRotulo:tipo===_s053Base.tipo?(_s053Base.tipoRotulo||window._n008TipoContatoInfo(tipo).label):window._n008TipoContatoInfo(tipo).label,loja,vendId,retorno,proximoContato,obs,campanhaId,ts:now};
+    try{_s053Proposto=window._n008ContatoComAgenda(_s053Proposto,_n008AgendaBase);}catch(error){showToast(error.message,'warn');return false;}
     const _s053Reter=()=>_s053ContatoSafely(()=>window._s053ReterContatoParaRevisao?.('contatos',String(id),_s053Base,_s053Proposto,_s052Op.ctx,_s053Form.capture));
     if(idx===-1){const held=_s053Reter();showToast(held?.ok?'O contato mudou desde a abertura. Seu rascunho foi preservado para revisão; nada foi enviado.':'Não foi possível preservar o rascunho do contato. Recarregue e tente novamente.','warn');return false;}
     let _s053Draft=_s053Proposto;
@@ -59001,7 +59118,7 @@ function salvarContato(){
     }
     D.contatos[idx]=_s053Draft;
   } else {
-    _s052Slot=window._s052SlotPorIntencao('contato:',{data,cliente,tipo,loja,vendId,retorno,proximoContato,obs});
+    _s052Slot=window._s052SlotPorIntencao('contato:',{data,cliente,tipo,loja,vendId,retorno,proximoContato,obs,campanhaId});
     const _s052Id=window._s052RascunhoId(_s052Slot,()=> 'ct' + now + Math.random().toString(36).slice(2,7),_s052Op,'contatos','id');
     if(!_s052Id) return false;
     const _s052Existente=window._s052RascunhoRegistro(_s052Slot,_s052Op);
@@ -59011,7 +59128,8 @@ function salvarContato(){
       _s053Form.createId='';_s053Form.createCapture=null;
     }
     _s053Form.createSlot=_s052Slot;
-    const _s053Proposto=_s052Existente||{id:_s052Id,data,cliente,tipo,loja,vendId,retorno,proximoContato,obs,ts:now};
+    let _s053Proposto=_s052Existente||{id:_s052Id,data,cliente,tipo,tipoRotulo:window._n008TipoContatoInfo(tipo).label,loja,vendId,retorno,proximoContato,obs,campanhaId,ts:now};
+    if(!_s052Existente){try{_s053Proposto=window._n008ContatoComAgenda(_s053Proposto,null);}catch(error){showToast(error.message,'warn');return false;}}
     const _s053Snapshot=_s053ContatoSafely(()=>window._s053SnapshotIntencoes?.(_s052Op.ctx));
     const _s053Pendentes=(_s053Snapshot?.intents||[]).filter(item=>item.entidade==='contatos'&&item.id===String(_s052Id)&&item.draft?.present);
     const _s053Anterior=_s053Pendentes.at(-1)||null;
@@ -59084,7 +59202,7 @@ function marcarRetornoContato(id, retorno, selectEl){
   const _s053Pendentes=(_s053Snapshot?.intents||[]).filter(item=>item.entidade==='contatos'&&item.id===String(id)&&item.draft?.present);
   const _s053Anterior=_s053Pendentes.at(-1)||null;
   const _s053Proposto={...contato,retorno,ts:Date.now()};
-  const _s053MesmoConteudo=(a,b)=>!!a&&!!b&&['id','data','cliente','tipo','loja','vendId','retorno','proximoContato','obs'].every(k=>a[k]===b[k]);
+  const _s053MesmoConteudo=_ctMesmoConteudo;
   let _s053Draft=_s053Proposto;
   if(_s053Anterior&&_s053MesmoConteudo(_s053Proposto,_s053Anterior.draft.value)){
     _s053Draft=_s053Anterior.draft.value;
@@ -59627,6 +59745,7 @@ function _ctRegistrosSincronizarVendedoras(){
 }
 
 function renderContatos(){
+  window._n008AtualizarOpcoes?.();
   if(!D.contatos) D.contatos = [];
   if(!window._ctListaPaginacao) window._ctListaPaginacao = {filtro:null,pagina:0};
   if(!window._ctListaPaginacaoHook){
@@ -59875,6 +59994,7 @@ function _renderRegistrosContatos(contatos){
   const vazio = document.getElementById('contatos-vazio');
   const info  = document.getElementById('contatos-lista-info');
   if(!tbody) return;
+  if(info) info.textContent = `${contatos.length.toLocaleString('pt-BR')} registro${contatos.length===1?'':'s'}`;
 
   const paginaEstado = window._ctListaPaginacao;
   const filtroAtual = ['ct-registros-de','ct-registros-ate','ct-registros-tipo','ct-registros-vend','ct-registros-loja']
@@ -59894,11 +60014,9 @@ function _renderRegistrosContatos(contatos){
           : 'Nenhum contato no filtro selecionado.<br><span style="font-size:11px">Existem '+totalContatosD+' contato(s) em outros filtros. Tente Limpar filtros.</span>';
       }
     }
-    if(info) info.textContent = '';
     return;
   }
   if(vazio) vazio.style.display = 'none';
-  if(info) info.textContent = `${contatos.length} registro${contatos.length===1?'':'s'}`;
 
   // Ordenar por data desc, depois ts desc
   const ordenados = [...contatos].sort((a,b) =>
@@ -59917,7 +60035,7 @@ function _renderRegistrosContatos(contatos){
     // Archive removes operational controls, not historical attribution.
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
-    const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
+    const tipoInfo = window._n008TipoContatoInfo(c.tipo,c.tipoRotulo);
     const retInfo = CT_RETORNOS[_normalizarRetornoContato(c.retorno)] || CT_RETORNOS.pendente;
     const dataFmt = (c.data||'').split('-').reverse().join('/');
     // [FIX 13/08] linha 1: dados principais; linha 2 (opcional): observação
@@ -59926,7 +60044,7 @@ function _renderRegistrosContatos(contatos){
     return `<tr>
       <td style="font-size:11px;white-space:nowrap">${dataFmt}</td>
       <td><button type="button" class="ct-n001-historico" data-ct-n001="${indice}" aria-label="Ver histórico de compras de ${nomeSeguro}" title="Ver histórico de compras" style="background:none;border:0;padding:0;color:inherit;text-align:left;cursor:pointer;text-decoration:underline;text-decoration-style:dotted"><strong>${nomeSeguro}</strong></button></td>
-      <td><span style="color:${tipoInfo.cor};font-weight:600;font-size:11px;white-space:nowrap">${tipoInfo.emoji} ${tipoInfo.label}</span></td>
+      <td><span style="color:${tipoInfo.cor};font-weight:600;font-size:11px;white-space:nowrap">${tipoInfo.emoji} ${_n001EscHtml(tipoInfo.label)}</span></td>
       <td>${vNome}</td>
       <td style="color:var(--muted);font-size:11px">${lNome}</td>
       <td>
@@ -60110,13 +60228,13 @@ function exportarPDFContatos(){
     // Keep the historical seller name in an unfiltered transaction export.
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
-    const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
+    const tipoInfo = window._n008TipoContatoInfo(c.tipo,c.tipoRotulo);
     const retInfo = CT_RETORNOS[_normalizarRetornoContato(c.retorno)] || CT_RETORNOS.pendente;
     const dataFmt = (c.data||'').split('-').reverse().join('/');
     return `<tr>
       <td style="white-space:nowrap">${dataFmt}</td>
       <td><strong>${c.cliente}</strong></td>
-      <td>${tipoInfo.emoji} ${tipoInfo.label}</td>
+      <td>${tipoInfo.emoji} ${_n001EscHtml(tipoInfo.label)}</td>
       <td>${vNome}</td>
       <td>${lNome}</td>
       <td>${retInfo.emoji} ${retInfo.label}</td>
@@ -60268,21 +60386,18 @@ function _calcularLembretes(){
   const _matchLoja = (obj) => window.lojaVisivel(obj.loja) && (isAd ? (!_fLojaCt || obj.loja === _fLojaCt) : (obj.loja === _lidUser));
 
   // ── (1) Retorno programado venceu ──
-  const programados = contatos.filter(c =>
-    _matchLoja(c) &&
-    c.proximoContato &&
-    c.proximoContato <= hj &&
-    !['comprou','sem_interesse','numero_invalido'].includes(_normalizarRetornoContato(c.retorno)) // ainda vale retomar
-  ).map(c => ({
-    ...c,
-    diasAtraso: _ctDiffDias(hj, c.proximoContato)
-  })).sort((a,b) => b.diasAtraso - a.diasAtraso);
+  const programados = contatos.filter(c => _matchLoja(c)
+    && !window._s085VendedoraArquivada?.(c.vendId) && !D._contatosExcluidos?.[c.id])
+    .flatMap(c => window._n008AgendaItens(c,false)
+      .filter(item=>item.data && item.data<=hj && item.status!=='Concluído' && item.status!=='Reagendado')
+      .map(item=>({...c,proximoContato:item.data,diasAtraso:_ctDiffDias(hj,item.data)})))
+    .sort((a,b) => b.diasAtraso - a.diasAtraso);
 
   // ── (2) Pendentes antigos (sem próximo contato programado) ──
   const pendentes = contatos.filter(c =>
     _matchLoja(c) &&
     (_normalizarRetornoContato(c.retorno) === 'pendente' || !_normalizarRetornoContato(c.retorno)) &&
-    !c.proximoContato && // se tem programado, entra no (1)
+    !c.proximoContato && window._n008AgendaItens(c,false).length===0 &&
     c.data &&
     _ctDiffDias(hj, c.data) >= dias
   ).map(c => ({
@@ -60334,43 +60449,18 @@ function _renderLembretes(){
     return;
   }
 
-  // ── (1) Programados vencidos
-  const _programHtml = programados.slice(0, 15).map(c => {
-    const v = (D.vendedoras || []).find(x => x.id === c.vendId);
-    const vNome = v?.nome || '—';
-    const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
-    const retInfo = CT_RETORNOS[_normalizarRetornoContato(c.retorno)] || CT_RETORNOS.pendente;
-    const proxFmt = c.proximoContato.split('-').reverse().join('/');
-    const corAtraso = c.diasAtraso >= 3 ? 'var(--verm)' : (c.diasAtraso >= 1 ? 'var(--ouro)' : '#a78bfa');
-    const lblAtraso = c.diasAtraso === 0 ? 'HOJE' : (c.diasAtraso > 0 ? `${c.diasAtraso}d atraso` : 'em breve');
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600">${c.cliente}</div>
-        <div style="font-size:10px;color:var(--muted)">
-          ${retInfo.emoji} ${retInfo.label} · ${vNome} · ${lNome} · Retomar: ${proxFmt}
-        </div>
-        ${c.obs ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${c.obs}"</div>` : ''}
-      </div>
-      <div style="text-align:right;font-size:10px;color:${corAtraso};font-weight:700;white-space:nowrap">
-        ${lblAtraso}
-      </div>
-      <button onclick="abrirFormContato('${c.id}')" title="Retomar contato"
-        style="background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.5);color:#a78bfa;padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;white-space:nowrap">🔁 Retomar</button>
-    </div>`;
-  }).join('');
-
   // ── (2) Pendentes há muito
   const _pendentesHtml = pendentes.slice(0, 15).map(c => {
     const v = (D.vendedoras || []).find(x => x.id === c.vendId);
     const vNome = v?.nome || '—';
     const lNome = LOJAS.find(l => l.id === c.loja)?.nome || c.loja || '—';
-    const tipoInfo = CT_TIPOS[c.tipo] || CT_TIPOS.outro;
+    const tipoInfo = window._n008TipoContatoInfo(c.tipo,c.tipoRotulo);
     const dataFmt = (c.data||'').split('-').reverse().join('/');
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:600">${c.cliente}</div>
         <div style="font-size:10px;color:var(--muted)">
-          ${tipoInfo.emoji} ${tipoInfo.label} · ${vNome} · ${lNome} · Contato: ${dataFmt}
+          ${tipoInfo.emoji} ${_n001EscHtml(tipoInfo.label)} · ${vNome} · ${lNome} · Contato: ${dataFmt}
         </div>
         ${c.obs ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${c.obs}"</div>` : ''}
       </div>
@@ -60411,10 +60501,9 @@ function _renderLembretes(){
     ${programados.length ? `
       <div style="margin-bottom:14px">
         <div style="font-size:11px;color:#a78bfa;letter-spacing:.5px;margin-bottom:6px;font-weight:600">
-          🔁 RETOMAR HOJE — ${programados.length} contato${programados.length===1?'':'s'} programado${programados.length===1?'':'s'}
+          🔁 RETORNOS DE HOJE E ATRASADOS — ${programados.length.toLocaleString('pt-BR')}
         </div>
-        ${_programHtml}
-        ${programados.length > 15 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--muted)">Mostrando 15 de ${programados.length}</div>` : ''}
+        <button type="button" class="btn-s" onclick="nav('followups')">Abrir Follow-ups</button>
       </div>` : ''}
     ${pendentes.length ? `
       <div style="margin-bottom:${fluxoSemFollowup.length ? '14px' : '0'}">
@@ -60499,12 +60588,13 @@ function _renderCalendarioContatos(){
   });
 
   // Marcar dias que têm próximo contato programado
-  (D.contatos || []).forEach(c => {
-    if(!c.proximoContato) return;
-    if(!c.proximoContato.startsWith(mesRef)) return;
-    if(['comprou','sem_interesse','numero_invalido'].includes(_normalizarRetornoContato(c.retorno))) return;
-    if(!porDia[c.proximoContato]) porDia[c.proximoContato] = { total:0, ganhou:0, aguardando:0, semResp:0, prog:0 };
-    porDia[c.proximoContato].prog++;
+  _filtrarContatos({semData:true}).forEach(c => {
+    if(window._s085VendedoraArquivada?.(c.vendId)||D._contatosExcluidos?.[c.id]) return;
+    window._n008AgendaItens(c,false).forEach(item=>{
+      if(!item.data?.startsWith(mesRef)||item.status==='Concluído'||item.status==='Reagendado') return;
+      if(!porDia[item.data]) porDia[item.data] = { total:0, ganhou:0, aguardando:0, semResp:0, prog:0 };
+      porDia[item.data].prog++;
+    });
   });
 
   const nomesDia = ['D','S','T','Q','Q','S','S'];
@@ -60538,7 +60628,7 @@ function _renderCalendarioContatos(){
 
     const partesToolTip = [];
     if(total > 0) partesToolTip.push(`${total} contato${total>1?'s':''} (${stats.ganhou} 💚 · ${stats.aguardando} ⏳ · ${stats.semResp} 📵)`);
-    if(prog > 0) partesToolTip.push(`${prog} retomar hoje 🔁`);
+    if(prog > 0) partesToolTip.push(`${prog} retorno${prog===1?'':'s'} programado${prog===1?'':'s'} 🔁`);
     const tooltip = `${dt.split('-').reverse().join('/')}: ${partesToolTip.join(' · ') || 'sem movimentação'}`;
 
     html += `<div title="${tooltip}"
@@ -67530,7 +67620,7 @@ window.TIPOS_CONTATO_FOLLOWUP = [
 function _followUpConfig(){
   if(!D.configFollowUp || typeof D.configFollowUp !== 'object') D.configFollowUp = {};
   window.TIPOS_CONTATO_FOLLOWUP.forEach(t => {
-    if(!(t.id in D.configFollowUp)) D.configFollowUp[t.id] = t.padrao;
+    if(!(t.id in D.configFollowUp)&&Number.isFinite(t.padrao)) D.configFollowUp[t.id] = t.padrao;
   });
   return D.configFollowUp;
 }
@@ -67539,7 +67629,7 @@ function _followUpConfig(){
 window.followUpDias = function(tipoContato){
   const cfg = _followUpConfig();
   const v = Number(cfg[tipoContato]);
-  return isFinite(v) && v >= 0 ? v : 45;
+  return isFinite(v) && v >= 0 ? v : (window._n008CadenciaPadrao?.(tipoContato)??45);
 };
 
 window.salvarFollowUp = function(sufixo){
@@ -67587,8 +67677,8 @@ function _renderFollowUpEm(sufixo){
     '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
     + window.TIPOS_CONTATO_FOLLOWUP.map(t =>
         '<div class="ig" style="min-width:150px">'
-        + '<label style="font-size:10px">' + t.nome + '</label>'
-        + '<input type="number" min="0" id="fup-' + t.id + sufixo + '" value="' + cfg[t.id] + '"'
+        + '<label style="font-size:10px">' + _n001EscHtml(t.nome) + '</label>'
+        + '<input type="number" min="0" id="fup-' + t.id + sufixo + '" value="' + (Number.isFinite(cfg[t.id])?cfg[t.id]:'') + '" placeholder="' + window.followUpDias(t.id) + '" title="Sem valor específico, mantém a regra geral de reabordagem"'
         + ' style="background:var(--cinza);border:1px solid var(--borda);border-radius:6px;'
         + 'padding:6px 8px;color:var(--texto);font-size:12px;width:100%"></div>').join('')
     + '<button class="btn-p" onclick="window.salvarFollowUp(\'' + sufixo + '\')" style="font-size:12px;padding:7px 14px">Salvar prazos</button>'
@@ -68416,6 +68506,9 @@ window._s065IniciarFluxoRestauracao=function(ctx,dadosAlvo){
   if(!ctx||ctx.perfil!=='admin'||D!==dadosAlvo
       ||!window._s012ContextoValido?.(ctx)) return null;
   try{
+    if(typeof window._n008CatalogEngine!=='function'||window._n008CatalogEngine().readDraft(ctx)) {
+      showToast('Há um rascunho de catálogo pendente. Resolva-o antes de restaurar.','warn'); return null;
+    }
     const queue=window._gravFilaEstado?.(),pending=window._s012PublicacoesPendentes?.();
     if(!queue||typeof queue.emCurso!=='boolean'||typeof queue.pendente!=='boolean'
         ||!Number.isSafeInteger(pending)||pending<0||queue.emCurso||queue.pendente||pending
@@ -68865,10 +68958,21 @@ window._s053ProdStageBatch=function(operations,ctx,atomicGroupRequest){
       ?{v:atomicGroupRequest.v,kind:atomicGroupRequest.kind,id:atomicGroupRequest.id}:null;
   const groupId=groupDescriptor?.id;
   if(grouped){
-    if(ctx.perfil!=='admin'||!groupId||!operations.length
-        ||!['campObjetivoCascade','s065CampaignRestore'].includes(groupDescriptor.kind))
+    if(!groupId||!operations.length
+        ||!['campObjetivoCascade','s065CampaignRestore','n008FollowupCompletion'].includes(groupDescriptor.kind)
+        ||(groupDescriptor.kind!=='n008FollowupCompletion'&&ctx.perfil!=='admin'))
       return {ok:false,reason:'lote-atomico-invalido'};
-    if(groupDescriptor.kind==='campObjetivoCascade') {
+    if(groupDescriptor.kind==='n008FollowupCompletion') {
+      const [origin,result]=operations;
+      const occurrence=origin?.draftRecord?.followups?.find(item=>item.id===groupId);
+      if(operations.length!==2||origin?.entity!=='contatos'||result?.entity!=='contatos'
+          ||!origin.baseRecord||!origin.draftRecord||result.baseRecord||!result.draftRecord
+          ||origin.id===result.id||origin.draftRecord.loja!==result.draftRecord.loja
+          ||occurrence?.status!=='Concluído'||occurrence.contatoResultadoId!==result.id
+          ||result.draftRecord.followupOrigem?.contatoId!==origin.id
+          ||result.draftRecord.followupOrigem?.followupId!==groupId)
+        return {ok:false,reason:'lote-followup-invalido'};
+    } else if(groupDescriptor.kind==='campObjetivoCascade') {
       if(operations[0]?.entity!=='campObjetivos'||String(operations[0]?.id||'')!==groupId
           ||operations.some((operation,index)=>{
             const id=String(operation?.id||'');
@@ -69698,7 +69802,7 @@ function validateRestoreConsent(consent,intent,context) {
 function validateAtomicGroups(rawGroups, rawIntents, context) {
   if(!Array.isArray(rawGroups) || !Array.isArray(rawIntents))
     throw new Error('s053-grupos-atomicos-invalidos');
-  if(rawGroups.length && (!validContext(context) || context.perfil !== 'admin'))
+  if(rawGroups.length && !validContext(context))
     throw new Error('s053-grupo-cascata-sem-autoridade');
   const intents = rawIntents.map(raw => {
     if(!plainObject(raw) || !SPECS[raw.entidade]) throw new Error('s053-intencao-invalida');
@@ -69713,7 +69817,8 @@ function validateAtomicGroups(rawGroups, rawIntents, context) {
   const groups = rawGroups.map(raw => {
     if(!plainObject(raw)
         || !same(Object.keys(raw).sort(), ['id','kind','tokens','v'].sort())
-        || raw.v !== 1 || !['campObjetivoCascade','s065CampaignRestore'].includes(raw.kind)
+        || raw.v !== 1 || !['campObjetivoCascade','s065CampaignRestore','n008FollowupCompletion'].includes(raw.kind)
+        || (raw.kind!=='n008FollowupCompletion'&&context.perfil!=='admin')
         || typeof raw.id !== 'string' || !raw.id
         || !Array.isArray(raw.tokens) || !raw.tokens.length
         || raw.tokens.some(token => typeof token !== 'string' || !token)
@@ -69731,9 +69836,12 @@ function validateAtomicGroups(rawGroups, rawIntents, context) {
       const recordKey = intent.entidade + '\u001f' + intent.id;
       if(groupedRecords.has(recordKey)) throw new Error('s053-registro-repetido-no-grupo:' + intent.id);
       groupedRecords.add(recordKey);
-      if(intent.perfilCaptura !== 'admin')
+      if(intent.perfilCaptura !== context.perfil)
         throw new Error('s053-grupo-sem-autoridade:' + token);
-      if(descriptor.kind==='campObjetivoCascade') {
+      if(descriptor.kind==='n008FollowupCompletion') {
+        if(intent.entidade!=='contatos'||intent.draft?.present!==true)
+          throw new Error('n008-membro-invalido:' + token);
+      } else if(descriptor.kind==='campObjetivoCascade') {
         if(intent.draft?.present !== false
             || intent.tombstone?.field !== SPECS[intent.entidade].tombstoneField)
           throw new Error('s053-operacao-grupo-nao-e-exclusao:' + token);
@@ -69745,7 +69853,38 @@ function validateAtomicGroups(rawGroups, rawIntents, context) {
       }
       return intent;
     });
-    if(descriptor.kind==='campObjetivoCascade') {
+    if(descriptor.kind==='n008FollowupCompletion') {
+      const [origin,result]=members;
+      const occurrence=origin?.draft?.value?.followups?.find(item=>item.id===descriptor.id);
+      if(members.length!==2||!origin.base?.present||result.base?.present
+          ||origin.id===result.id||origin.draft.value.loja!==result.draft.value.loja
+          ||origin.base.value.cliente!==result.draft.value.cliente
+          ||origin.base.value.vendId!==result.draft.value.vendId
+          ||occurrence?.status!=='Concluído'||occurrence.contatoResultadoId!==result.id
+          ||result.draft.value.followupOrigem?.contatoId!==origin.id
+          ||result.draft.value.followupOrigem?.followupId!==descriptor.id)
+        throw new Error('n008-grupo-invalido:' + descriptor.id);
+      const {followups:beforeItems,ts:_beforeTs,...beforeFields}=origin.base.value;
+      const {followups:afterItems,ts:_afterTs,...afterFields}=origin.draft.value;
+      if(!same(beforeFields,afterFields)||!Array.isArray(afterItems)
+          ||afterItems.filter(item=>item?.id===descriptor.id).length!==1)
+        throw new Error('n008-origem-alterada:' + descriptor.id);
+      const previous=Array.isArray(beforeItems)?beforeItems.find(item=>item?.id===descriptor.id):null;
+      if(previous){
+        const {status:_previousStatus,contatoResultadoId:_previousResult,concluidoEm:_previousDone,...previousFields}=previous;
+        const {status:_status,contatoResultadoId:_result,concluidoEm:_done,...occurrenceFields}=occurrence;
+        if(!['Pendente','Aguardando resposta','Não realizado'].includes(previous.status)||!same(previousFields,occurrenceFields)
+            ||!same(beforeItems.filter(item=>item?.id!==descriptor.id),
+              afterItems.filter(item=>item?.id!==descriptor.id)))
+          throw new Error('n008-historico-alterado:' + descriptor.id);
+      }else if(Array.isArray(beforeItems)||afterItems.length!==1||!origin.base.value.proximoContato
+          ||descriptor.id!=='fu:'+origin.id+':legacy'
+          ||occurrence.data!==origin.base.value.proximoContato
+          ||Object.keys(occurrence).some(key=>!['id','data','status','contatoResultadoId','concluidoEm'].includes(key)))
+        throw new Error('n008-origem-legada-invalida:' + descriptor.id);
+      if(!Number.isSafeInteger(occurrence.concluidoEm)||occurrence.concluidoEm!==result.draft.value.ts)
+        throw new Error('n008-data-conclusao-invalida:' + descriptor.id);
+    } else if(descriptor.kind==='campObjetivoCascade') {
       const objective = members[0];
       if(objective.entidade !== 'campObjetivos' || objective.id !== descriptor.id
           || !objective.base?.present || members.filter(item=>item.entidade==='campObjetivos').length !== 1)
@@ -70710,9 +70849,44 @@ function createS053TransactionAdapters(deps) {
       for(const intent of normalizedIntents) {
         const atomicGroup=atomicGroupByToken.get(intent.token);
         if(atomicGroup) {
-          if(processedAtomicGroups.has(atomicGroup.id)) continue;
-          processedAtomicGroups.add(atomicGroup.id);
+          const groupIdentity=JSON.stringify([atomicGroup.kind,atomicGroup.id,atomicGroup.tokens]);
+          if(processedAtomicGroups.has(groupIdentity)) continue;
+          processedAtomicGroups.add(groupIdentity);
           const members=atomicGroup.tokens.map(token=>intentsByToken.get(token));
+          if(atomicGroup.kind==='n008FollowupCompletion') {
+            const stagedCopies=clone(copies), stagedResult=resultAccumulator();
+            let blockedReason=null;
+            for(const member of members) {
+              const entity=member.entidade;
+              const resolverCopies=stagedCopies.map(copy=>({source:copy.source,kind:copy.kind,
+                exists:copy.exists,...(copy.lojaId?{lojaId:copy.lojaId}:{}),
+                rows:copy.rows[entity],tombstones:copy.tombstones[entity]}));
+              const resolved=core.resolveCopies({entity,copies:resolverCopies,intents:[member],context:ctx});
+              if(resolved.applied.includes(member.token)){
+                const eligibility=typeof validateAppliedIntent==='function'?validateAppliedIntent({ctx,intent:member,currentSnapshots}):{ok:false,reason:'seller-validator-missing'};
+                if(eligibility!==true&&eligibility?.ok!==true){blockedReason=eligibility?.reason||'seller-not-currently-active';break;}
+              }
+              for(let i=0;i<stagedCopies.length;i++) {
+                stagedCopies[i].rows[entity]=clone(resolved.copies[i].rows);
+                stagedCopies[i].tombstones[entity]=clone(resolved.copies[i].tombstones);
+              }
+              mergeResult(stagedResult,resolved);
+              const failure=resolved.conflicts.find(item=>item.token===member.token)
+                ||resolved.rejected.find(item=>item.token===member.token);
+              if(failure){blockedReason=failure.reason||'member-conflict';break;}
+            }
+            const applied=new Set(stagedResult.applied), already=new Set(stagedResult.alreadyApplied);
+            if(!blockedReason&&!((members.every(item=>applied.has(item.token))&&!already.size)
+                ||(members.every(item=>already.has(item.token))&&!applied.size)))
+              blockedReason='partial-postimage';
+            if(blockedReason){addAtomicGroupConflicts(scoped,atomicGroup,members,blockedReason);continue;}
+            for(let i=0;i<copies.length;i++){
+              copies[i].rows=stagedCopies[i].rows;
+              copies[i].tombstones=stagedCopies[i].tombstones;
+            }
+            mergeResult(scoped,stagedResult);
+            continue;
+          }
           if(atomicGroup.kind==='s065CampaignRestore') {
             let blockedReason=null;
             for(const member of members) {
@@ -71753,22 +71927,23 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
         }
         const tokens=descriptor.tokens;
         const byToken=new Map(members.map(item=>[item.token,item]));
+        const isFollowup=descriptor.kind==='n008FollowupCompletion';
         const expectedChildren=members.filter(item=>item.entidade==='campRealizados').map(item=>item.id);
         let reason='grupo-cascata-divergente';
         let safe=members.length===tokens.length&&tokens.every(token=>byToken.has(token));
         const tokenSet=new Set(tokens);
-        if(safe&&pending.some(item=>!tokenSet.has(item.token)
+        if(!isFollowup&&safe&&pending.some(item=>!tokenSet.has(item.token)
             &&item.entidade==='campRealizados'&&item.draft?.present
             &&String(item.draft.value?.campId||'')===descriptor.id)) safe=false;
         const observedChildrenSet=new Set();
-        try{
+        try{ if(!isFollowup){
           for(const source of rec.expected){
             for(const row of physicalRows(rec,source,'campRealizados'))
               if(String(row?.campId||'')===descriptor.id) observedChildrenSet.add(row.id);
           }
           for(const row of next.campRealizados||[])
             if(String(row?.campId||'')===descriptor.id) observedChildrenSet.add(row.id);
-        }catch(_e){ safe=false; }
+        }}catch(_e){ safe=false; }
         const observedChildren=[...observedChildrenSet];
         if(new Set(observedChildren).size!==observedChildren.length) safe=false;
         const sameIds=(a,b)=>a.length===b.length&&a.every(id=>b.includes(id));
@@ -71790,7 +71965,7 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
             &&statuses.alreadyApplied.size===0&&statuses.conflicts.size===0&&statuses.rejected.size===0;
           const allAlready=tokens.every(token=>statuses.alreadyApplied.has(token))
             &&statuses.applied.size===0&&statuses.conflicts.size===0&&statuses.rejected.size===0;
-          safe=(allApplied&&sameIds(observedChildren,expectedChildren))
+          safe=isFollowup?(allApplied||allAlready):(allApplied&&sameIds(observedChildren,expectedChildren))
             ||(allAlready&&observedChildren.length===0);
         }
         if(!safe){
@@ -72283,9 +72458,12 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     if(!operations.length) return cascadeObjectiveId===undefined
       ?{ok:true,intents:[]}:failure('grupo-cascata-vazio');
     const multiGroups=Array.isArray(cascadeObjectiveId);
-    if(cascadeObjectiveId!==undefined&&ctx.perfil!=='admin') return failure('grupo-cascata-invalido');
+    const followupGroup=plainObject(cascadeObjectiveId)&&cascadeObjectiveId.v===1
+      &&cascadeObjectiveId.kind==='n008FollowupCompletion'&&typeof cascadeObjectiveId.id==='string'
+      &&!!cascadeObjectiveId.id;
+    if(cascadeObjectiveId!==undefined&&ctx.perfil!=='admin'&&!followupGroup) return failure('grupo-cascata-invalido');
     if(cascadeObjectiveId!==undefined&&!multiGroups
-        &&(typeof cascadeObjectiveId!=='string'||!cascadeObjectiveId))
+        &&!followupGroup&&(typeof cascadeObjectiveId!=='string'||!cascadeObjectiveId))
       return failure('grupo-cascata-invalido');
     if(multiGroups&&(!cascadeObjectiveId.length||cascadeObjectiveId.some(group=>
         !plainObject(group)||group.v!==1||group.kind!=='s065CampaignRestore'
@@ -72337,9 +72515,9 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
         core.validateAtomicGroups(descriptors,groupedIntents,ctx);
       }catch(e){return failure(e.message||'grupos-restauracao-invalidos');}
     }else if(cascadeObjectiveId!==undefined){
-      const descriptor={v:1,kind:'campObjetivoCascade',id:cascadeObjectiveId,
+      const descriptor={v:1,kind:followupGroup?'n008FollowupCompletion':'campObjetivoCascade',id:followupGroup?cascadeObjectiveId.id:cascadeObjectiveId,
         tokens:prepared.map(item=>item.intent.token)};
-      if(envelope.entries.some(entry=>entry.atomicGroup?.id===cascadeObjectiveId))
+      if(envelope.entries.some(entry=>entry.atomicGroup?.id===descriptor.id))
         return failure('grupo-cascata-ja-existente');
       try{
         const groupedIntents=prepared.map(item=>Object.assign({},clone(item.intent),
@@ -72610,18 +72788,19 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
       draftRow,baseRow,deleteMarker,receipt};
   }
   function groupReviewView(ctx,descriptor,envelope){
-    if(!descriptor||!['campObjetivoCascade','s065CampaignRestore'].includes(descriptor.kind)
+    if(!descriptor||!['campObjetivoCascade','s065CampaignRestore','n008FollowupCompletion'].includes(descriptor.kind)
         ||!Array.isArray(descriptor.tokens)) return null;
     const entries=descriptor.tokens.map(token=>envelope.entries.find(entry=>entry.token===token));
     if(entries.some(entry=>!entry||entry.status!=='conflict'
         ||atomicGroupKey(entry.atomicGroup)!==atomicGroupKey(descriptor))) return null;
     const restoreGroup=descriptor.kind==='s065CampaignRestore';
+    const followupGroup=descriptor.kind==='n008FollowupCompletion';
     if(restoreGroup&&!entries.some(entry=>entry.intent?.restoreConsent)) return null;
     const reviews=entries.map(entry=>reviewRecord(ctx,'verified',entry.token,envelope));
     if(reviews.some(item=>!item)) return null;
     const root=reviews[0];
     const members=entries.map(entry=>({entityLabel:reviewEntityLabels[entry.entidade]||entry.entidade,
-      id:entry.id,...(restoreGroup?{draft:entry.intent?.draft?.present===true
+      id:entry.id,...((restoreGroup||followupGroup)?{draft:entry.intent?.draft?.present===true
         ?reviewState(true,entry.intent.draft.value):reviewState(false,null)}:{})}));
     const groupFingerprint=legacyHash(JSON.stringify({owner:ctx.owner,geracao:ctx.geracao,
       descriptor,entries:entries.map((entry,index)=>[entry.token,entry.status,
@@ -72630,16 +72809,16 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     const groupReceipt={owner:ctx.owner,geracao:ctx.geracao,id:descriptor.id,
       tokens:descriptor.tokens.slice(),fingerprint:groupFingerprint};
     const view=Object.assign({},root.view,{
-      ...(restoreGroup?{title:'Restauração da campanha '+descriptor.id}:{}),
-      reason:restoreGroup
+      ...(restoreGroup?{title:'Restauração da campanha '+descriptor.id}:followupGroup?{title:'Conclusão do follow-up'}:{}),
+      reason:followupGroup?'A conclusão do follow-up e o contato vinculado precisam ser revisados juntos; os rascunhos foram preservados.':restoreGroup
         ?'A restauração desta campanha exige uma nova confirmação específica; os rascunhos foram preservados.'
         :'A exclusão completa da campanha precisa ser revisada como um único grupo.',
       atomicGroup:{version:1,id:descriptor.id,
-        kind:restoreGroup?'s065CampaignRestore':'campaign-objective-delete',
+        kind:followupGroup?'n008FollowupCompletion':restoreGroup?'s065CampaignRestore':'campaign-objective-delete',
         memberCount:entries.length,
         tokens:descriptor.tokens.map(token=>({source:'verified',token})),members},
       groupReceipt,canReapply:false,canDiscard:false,
-      canDiscardGroup:ctx.perfil==='admin'&&entries.every(entry=>entry.status==='conflict')
+      canDiscardGroup:(ctx.perfil==='admin'||followupGroup)&&entries.every(entry=>entry.status==='conflict')
     });
     return view;
   }
@@ -72700,7 +72879,7 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     return {ok:true,token,source};
   };
   window._s053DescartarGrupo=function(ctx,submittedReceipt){
-    if(!contextValid(ctx)||ctx.perfil!=='admin'||!plainObject(submittedReceipt))
+    if(!contextValid(ctx)||!plainObject(submittedReceipt))
       return failure('sessao-alterada');
     let envelope;
     try{ envelope=readEnvelope(ctx); }catch(e){ return failure(e.message||'sidecar-invalido'); }
@@ -72708,6 +72887,7 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
       &&entry.atomicGroup.id===submittedReceipt.id);
     if(!matching.length) return failure('grupo-cascata-nao-encontrado');
     const descriptor=matching[0].atomicGroup;
+    if(ctx.perfil!=='admin'&&descriptor.kind!=='n008FollowupCompletion') return failure('sessao-alterada');
     const current=groupReviewView(ctx,descriptor,envelope);
     if(!current||current.canDiscardGroup!==true||!core.same(current.groupReceipt,submittedReceipt))
       return failure('grupo-cascata-exibido-desatualizado');
@@ -73231,6 +73411,12 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     return rows.length?rows.join('; '):'Detalhes sem cadastro atual';
   }
   function fieldValue(key,value,data,win){
+    if(key==='followups'){
+      let list=value;try{if(typeof list==='string')list=JSON.parse(list);}catch(_e){}
+      return Array.isArray(list)?list.map(item=>`${text(item.data)}: ${text(item.status)}`).join('; '):'Histórico preservado';
+    }
+    if(key==='followupOrigem')return 'Contato vinculado à conclusão de um retorno';
+    if(key==='campanhaId')return campaignName(data,value)||'Sem campanha disponível';
     if(key==='loja'||key==='lojaId') return storeName(win,data,value)||'Loja sem nome disponível';
     if(key==='vendId') return sellerName(data,value)||'Vendedora sem cadastro atual';
     if(key==='campId') return campaignName(data,value)||'Campanha sem nome disponível';
@@ -73397,6 +73583,7 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
     if(item.atomicGroup){
       const group=item.atomicGroup;
       const restoreGroup=group.kind==='s065CampaignRestore';
+      const followupGroup=group.kind==='n008FollowupCompletion';
       const count=Number(group.memberCount);
       const members=Array.isArray(group.members)?group.members:[];
       if(typeof group.id==='string'&&group.id) section.setAttribute('data-s058-group',group.id);
@@ -73412,9 +73599,9 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
       members.forEach(member=>{
         if(!member||typeof member.entityLabel!=='string') return;
         const itemNode=element(doc,'li','','');
-        itemNode.appendChild(element(doc,'span','',restoreGroup
+        itemNode.appendChild(element(doc,'span','',restoreGroup||followupGroup
           ?`${member.entityLabel} [${member.id}]`:member.entityLabel));
-        if(restoreGroup){
+        if(restoreGroup||followupGroup){
           const fields=element(doc,'dl','s058-review-group-fields');
           fieldEntries(member.draft).forEach(field=>fields.append(
             element(doc,'dt','',fieldLabel(field.label)),
@@ -73901,7 +74088,9 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
         refreshBadge({markOpenStale:false});
         return false;
       }
-      const message=group.kind==='s065CampaignRestore'
+      const message=group.kind==='n008FollowupCompletion'
+        ?`A tentativa de conclusão foi descartada integralmente (${count} registros). Revise o follow-up antes de tentar novamente.`
+        :group.kind==='s065CampaignRestore'
         ?`A tentativa de restauração foi descartada integralmente (${count} registros). Inicie uma nova restauração para rever e confirmar novamente os registros excluídos.`
         :`A tentativa em grupo foi descartada integralmente (${count} registros). Revise o objetivo e repita a exclusão se ainda for necessária.`;
       refreshBadge({markOpenStale:false});
@@ -73999,6 +74188,604 @@ if(typeof window !== 'undefined') window._createS053TransactionAdapters = create
 })(window);
 ;
 window._s058ReviewController=window._s058ReviewUI.createController();window._s058ReviewController.install();
+
+/* N008 isolated candidate. Adapters must provide a physical S007 transaction. */
+(function(root){
+'use strict';
+const clone=value=>JSON.parse(JSON.stringify(value));
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const plain=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+function createCatalog(deps){
+  const {storage,keyFor,valid,runTransaction,readPrincipal,writePrincipal,defaults,restoreActive}=deps;
+  const requireContext=ctx=>{
+    if(!ctx||ctx.perfil!=='admin'||!valid(ctx)) throw Error('sessao-alterada');
+  };
+  const initial=()=>({version:1,revision:0,entries:clone(defaults),last:null});
+  function catalog(config){
+    const c=config?._n008Catalog;
+    if(c==null) return initial();
+    if(!plain(c)||c.version!==1||!Number.isSafeInteger(c.revision)||c.revision<0
+       ||!plain(c.entries)||!['contact','campaign'].every(k=>plain(c.entries[k]))
+       ||!(c.last===null||plain(c.last)&&typeof c.last.id==='string'&&typeof c.last.owner==='string'))
+      throw Error('catalogo-invalido');
+    for(const group of ['contact','campaign']) for(const [id,item] of Object.entries(c.entries[group]))
+      if(!/^[A-Za-z0-9_-]+$/.test(id)||['__proto__','prototype','constructor'].includes(id)
+          ||!plain(item)||typeof item.label!=='string'||!item.label.trim()||typeof item.retired!=='boolean')
+        throw Error('catalogo-item-invalido');
+    for(const kind of ['contact','campaign']) for(const [id,item] of Object.entries(defaults[kind]))
+      if(!c.entries[kind][id]||c.entries[kind][id].label!==item.label) throw Error('catalogo-padrao-divergente');
+    return clone(c);
+  }
+  function admit(localConfig,remoteConfig){
+    const local=catalog(localConfig), remote=catalog(remoteConfig);
+    if(remote.revision<local.revision) return local;
+    if(remote.revision===local.revision&&!same(local,remote)) throw Error('catalogo-revisao-divergente');
+    return remote;
+  }
+  function restore(currentConfig,backupConfig,operationId,owner){
+    if(typeof operationId!=='string'||!operationId||typeof owner!=='string'||!owner) throw Error('restauracao-invalida');
+    const current=catalog(currentConfig), backup=catalog(backupConfig), post=clone(backup);
+    if(current.revision===Number.MAX_SAFE_INTEGER) throw Error('revisao-esgotada');
+    for(const kind of ['contact','campaign']) for(const [id,item] of Object.entries(current.entries[kind])){
+      const saved=post.entries[kind][id];
+      if(saved&&saved.label!==item.label) throw Error('restauracao-rotulo-divergente');
+      if(!saved) post.entries[kind][id]={...item,retired:true};
+    }
+    for(const kind of ['contact','campaign']){
+      const active=new Set();
+      for(const item of Object.values(post.entries[kind])) if(!item.retired){
+        const key=item.label.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');
+        if(active.has(key)) throw Error('restauracao-rotulo-duplicado');
+        active.add(key);
+      }
+    }
+    post.revision=current.revision+1; post.last={id:operationId,owner};
+    return post;
+  }
+  function rawDraft(ctx){
+    requireContext(ctx);
+    const key=keyFor('n008-catalog-draft',ctx);
+    if(!key) throw Error('chave-invalida');
+    return {key,raw:storage.getItem(key)};
+  }
+  function readDraft(ctx){
+    const {raw}=rawDraft(ctx);
+    if(raw===null) return null;
+    let draft; try{draft=JSON.parse(raw);}catch(_e){throw Error('rascunho-invalido');}
+    if(!plain(draft)||draft.version!==1||draft.owner!==ctx.owner||typeof draft.operationId!=='string'
+       ||!draft.operationId||!plain(draft.base)||!plain(draft.post)||!plain(draft.operation)) throw Error('rascunho-invalido');
+    catalog({_n008Catalog:draft.base}); catalog({_n008Catalog:draft.post});
+    if(!same(derive(draft.base,draft.operation,draft.operationId,ctx.owner),draft.post))
+      throw Error('rascunho-divergente');
+    return draft;
+  }
+  function derive(base,operation,operationId,owner){
+    if(typeof operationId!=='string'||!operationId||!plain(operation)
+       ||!['contact','campaign'].includes(operation.kind)||!['add','retire'].includes(operation.action)
+       ||typeof operation.id!=='string'||!/^[A-Za-z0-9_-]+$/.test(operation.id)
+       ||['__proto__','prototype','constructor'].includes(operation.id)) throw Error('operacao-invalida');
+    const post=clone(base), entries=post.entries[operation.kind];
+    if(base.revision===Number.MAX_SAFE_INTEGER) throw Error('revisao-esgotada');
+    if(operation.action==='add'){
+      if(Object.prototype.hasOwnProperty.call(entries,operation.id)||typeof operation.label!=='string'
+         ||!operation.label.trim()) throw Error('item-invalido-ou-existente');
+      const norm=s=>s.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');
+      if(Object.values(entries).some(item=>!item.retired&&norm(item.label)===norm(operation.label)))
+        throw Error('rotulo-ativo-duplicado');
+      entries[operation.id]={label:operation.label.trim(),retired:false};
+    }else{
+      if(!Object.prototype.hasOwnProperty.call(entries,operation.id)||entries[operation.id].retired) throw Error('item-indisponivel');
+      entries[operation.id].retired=true;
+    }
+    post.revision++; post.last={id:operationId,owner};
+    return post;
+  }
+  function stage(ctx,config,operation,operationId){
+    requireContext(ctx);
+    if(typeof restoreActive!=='function'||restoreActive(ctx)!==false) throw Error('restauracao-em-curso');
+    const slot=rawDraft(ctx);
+    if(slot.raw!==null) throw Error('rascunho-existente');
+    const base=catalog(config), post=derive(base,operation,operationId,ctx.owner);
+    const draft={version:1,owner:ctx.owner,operationId,operation:clone(operation),base,post};
+    const raw=JSON.stringify(draft);
+    if(!valid(ctx)||storage.getItem(slot.key)!==null) throw Error('rascunho-concorrente');
+    storage.setItem(slot.key,raw);
+    if(storage.getItem(slot.key)!==raw) throw Error('rascunho-nao-confirmado');
+    return clone(draft);
+  }
+  async function publish(ctx){
+    requireContext(ctx);
+    if(typeof restoreActive!=='function'||restoreActive(ctx)!==false) throw Error('restauracao-em-curso');
+    const slot=rawDraft(ctx), draft=readDraft(ctx);
+    if(!draft) throw Error('rascunho-ausente');
+    const outcome=await runTransaction(async tx=>{
+      requireContext(ctx);
+      const principal=await readPrincipal(tx);
+      requireContext(ctx);
+      if(!plain(principal)) throw Error('principal-indisponivel');
+      const current=catalog(principal.configFollowUp);
+      if(same(current,draft.post)) return {state:'already-applied',catalog:current};
+      if(!same(current,draft.base)) return {state:'conflict',catalog:current};
+      const next={...principal,configFollowUp:{...(principal.configFollowUp||{}),_n008Catalog:clone(draft.post)}};
+      await writePrincipal(tx,next);
+      requireContext(ctx);
+      return {state:'applied',catalog:clone(draft.post)};
+    });
+    requireContext(ctx);
+    if(!outcome||!['applied','already-applied','conflict'].includes(outcome.state)) throw Error('resultado-invalido');
+    if(outcome.state!=='conflict'){
+      if(storage.getItem(slot.key)!==slot.raw) throw Error('rascunho-alterado-apos-publicacao');
+      storage.removeItem(slot.key);
+      if(storage.getItem(slot.key)!==null) throw Error('rascunho-nao-limpo');
+    }
+    return outcome;
+  }
+  function replaceDraft(ctx,config,operationId){
+    requireContext(ctx);
+    const slot=rawDraft(ctx),old=readDraft(ctx);
+    if(!old||typeof operationId!=='string'||!operationId) throw Error('rascunho-ausente');
+    const base=catalog(config),post=derive(base,old.operation,operationId,ctx.owner);
+    const next={...old,operationId,base,post},raw=JSON.stringify(next);
+    if(!valid(ctx)||storage.getItem(slot.key)!==slot.raw) throw Error('rascunho-alterado');
+    storage.setItem(slot.key,raw);
+    if(storage.getItem(slot.key)!==raw) throw Error('rascunho-nao-confirmado');
+    return clone(next);
+  }
+  function discardDraft(ctx,operationId){
+    const slot=rawDraft(ctx),draft=readDraft(ctx);
+    if(!draft||draft.operationId!==operationId||!valid(ctx)) throw Error('rascunho-alterado');
+    storage.removeItem(slot.key);
+    if(storage.getItem(slot.key)!==null) throw Error('rascunho-nao-limpo');
+  }
+  return {catalog,admit,restore,readDraft,stage,publish,replaceDraft,discardDraft};
+}
+function preserveCatalog(current,proposed){
+  if(current?.configFollowUp===undefined&&proposed?.configFollowUp===undefined) return proposed;
+  const next={...proposed,configFollowUp:{...(proposed.configFollowUp||{})}};
+  if(current?.configFollowUp?._n008Catalog===undefined) delete next.configFollowUp._n008Catalog;
+  else next.configFollowUp._n008Catalog=clone(current.configFollowUp._n008Catalog);
+  return next;
+}
+function restoreFence(ctx,inventory,capture,operationId){
+  if(!ctx||ctx.perfil!=='admin'||!Object.isFrozen(inventory)||inventory?.owner!==ctx.owner
+      ||inventory?.geracao!==ctx.geracao||inventory?.enumerated!==true||typeof capture!=='function'
+      ||typeof operationId!=='string'||!operationId) throw Error('n008-cerca-indisponivel');
+  const snap=capture('contatos','n008-fence-'+operationId,ctx,inventory);
+  const heads=snap?.familyHeads;
+  if(!snap?.leituraCompleta||snap.owner!==ctx.owner||snap.geracao!==ctx.geracao||!plain(heads)
+      ||!Object.prototype.hasOwnProperty.call(heads,'principal')) throw Error('n008-inventario-invalido');
+  for(const head of Object.values(heads)){
+    if(!plain(head)||typeof head.exists!=='boolean') throw Error('n008-cabeca-invalida');
+    if(head.exists){
+      if(typeof head.gid!=='string'||!head.gid||typeof head.ts!=='number'||!Number.isFinite(head.ts)
+          ||head.ts<0||!Number.isSafeInteger(head.partes)||head.partes<1||head.partes>400)
+        throw Error('n008-cabeca-invalida');
+    }else if(head.gid!==null||head.ts!==null||head.partes!==null) throw Error('n008-cabeca-invalida');
+  }
+  return {versao:1,owner:ctx.owner,operationId:'n008-'+operationId,
+    initialHeads:clone(heads),expectedHeads:clone(heads),settleOnly:false};
+}
+function catalogChoices(catalog,kind,visuals,selected){
+  if(!['contact','campaign'].includes(kind)||!plain(catalog?.entries?.[kind])) throw Error('catalogo-invalido');
+  return Object.entries(catalog.entries[kind])
+    .filter(([id,item])=>!item.retired||id===selected)
+    .map(([id,item])=>({id,label:item.label,retired:item.retired,
+      emoji:visuals?.[id]?.emoji||(kind==='campaign'?'📌':'💬'),
+      ...(kind==='contact'?{cor:visuals?.[id]?.cor||'var(--muted)'}:{})}));
+}
+{root._n008CreateCatalog=createCatalog;root._n008PreserveCatalog=preserveCatalog;root._n008CatalogChoices=catalogChoices;root._n008RestoreFence=restoreFence;}
+})(typeof globalThis!=='undefined'?globalThis:this);
+
+
+// Catalog IDs/labels survive retirement; only committed metadata enters shared controls.
+(function(){
+  'use strict';
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const visuals={contact:clone(CT_TIPOS),campaign:clone(CAMP_TIPOS)};
+  const cadenceDefaults=clone(window.TIPOS_CONTATO_FOLLOWUP);
+  window._n008CadenciaPadrao=tipo=>cadenceDefaults.find(t=>t.id===tipo)?.padrao??45;
+  const defaults=Object.fromEntries(Object.entries(visuals).map(([kind,map])=>[kind,Object.fromEntries(Object.entries(map).map(([id,item])=>[id,{label:item.label,retired:false}]))]));
+  window._n008CatalogDefaults=clone(defaults);
+  const reader=window._n008CreateCatalog({defaults});
+  let busy=null,retriedOwner='',conflictId=null;
+  function catalog(){return reader.catalog(D.configFollowUp);}
+  function choices(kind,historical=false){
+    return Object.entries(catalog().entries[kind]).filter(([,v])=>historical||!v.retired).map(([id,v])=>({id,...v}));
+  }
+  function info(kind,id,label){
+    const entry=catalog().entries[kind][id],style=visuals[kind][id]||{emoji:kind==='contact'?'💬':'📌',cor:'var(--muted)'};
+    return {...style,label:entry?.label||label||id||'Outro'};
+  }
+  window._n008TipoContatoInfo=(id,label)=>info('contact',id,label);
+  window._n008TipoCampanhaInfo=(id,label)=>info('campaign',id,label);
+  window._n008TipoContatoPermitido=id=>!!catalog().entries.contact[id]&&!catalog().entries.contact[id].retired;
+  window._n008TipoCampanhaPermitido=id=>!!catalog().entries.campaign[id]&&!catalog().entries.campaign[id].retired;
+  function select(id,rows,empty,selected){
+    const el=document.getElementById(id);if(!el)return;
+    const value=selected===undefined?el.value:selected;
+    const html=(empty===null?'':'<option value="">'+esc(empty)+'</option>')+rows.map(row=>'<option value="'+esc(row.id)+'"'+(row.retired?' data-retired="true"':'')+'>'+esc(row.label)+(row.retired?' (retirado)':'')+'</option>').join('');
+    if(el.dataset.n008Options!==html){el.innerHTML=html;el.dataset.n008Options=html;}
+    el.value=rows.some(r=>r.id===value)?value:'';
+  }
+  window._n008AtualizarOpcoes=function(edit={}){
+    const current=catalog();
+    for(const [kind,target] of [['contact',CT_TIPOS],['campaign',CAMP_TIPOS]]){
+      for(const key of Object.keys(target)) delete target[key];
+      for(const [id,item] of Object.entries(current.entries[kind])) target[id]={...(visuals[kind][id]||{emoji:kind==='contact'?'💬':'📌',cor:'var(--muted)'}),label:item.label};
+    }
+    const contactId=Object.prototype.hasOwnProperty.call(edit,'contatoId')?edit.contatoId:document.getElementById('ct-form-id')?.value;
+    const oldContact=(D.contatos||[]).find(c=>c.id===contactId);
+    const historyType=oldContact?.tipo;
+    const contactTypes=choices('contact',true);
+    if(historyType&&!contactTypes.some(r=>r.id===historyType))contactTypes.push({id:historyType,label:oldContact.tipoRotulo||historyType,retired:true});
+    select('ct-form-tipo',contactTypes.filter(r=>!r.retired||r.id===historyType),null,edit.contatoId?historyType:undefined);
+    const usedContact=new Set((D.contatos||[]).filter(c=>window.lojaVisivel(c.loja)&&(isAdmin()||c.loja===lojaId())).map(c=>c.tipo));
+    const filterTypes=choices('contact',true).filter(r=>!r.retired||usedContact.has(r.id)).map(r=>({...r,label:r.label+(r.retired?' (retirado)':''),retired:false}));
+    ['ct-filtro-tipo','ct-registros-tipo'].forEach(id=>select(id,filterTypes,'Todos os tipos'));
+    const objective=(D.campObjetivos||[]).find(c=>c.id===(edit.campanhaId||_editandoCampObjId));
+    const campaignTypes=choices('campaign',true);
+    if(objective?.tipo&&!campaignTypes.some(r=>r.id===objective.tipo))campaignTypes.push({id:objective.tipo,label:objective.tipoRotulo||objective.tipo,retired:true});
+    select('camp-tipo-obj',campaignTypes.filter(r=>!r.retired||r.id===objective?.tipo),null,edit.campanhaId?objective?.tipo:undefined);
+    const campaignRows=(D.campObjetivos||[]).filter(c=>!c.arquivada&&!D._campObjetivosExcluidos?.[c.id]&&(isAdmin()||Number(c.metasPorLoja?.[lojaId()]||0)>0));
+    const campaignOptions=campaignRows.map(c=>({id:c.id,label:c.nome||c.tipo}));
+    if(oldContact?.campanhaId&&!campaignOptions.some(c=>c.id===oldContact.campanhaId)){
+      const historical=(D.campObjetivos||[]).find(c=>c.id===oldContact.campanhaId);
+      campaignOptions.push({id:oldContact.campanhaId,label:(historical?.nome||'Campanha histórica')+' (histórico)'});
+    }
+    select('ct-form-campanha',campaignOptions,'Sem campanha');
+    const usedCampaign=new Set((D.campObjetivos||[]).map(c=>c.tipo));
+    for(const suffix of ['', '-adm']){
+      const all=document.getElementById('camp-fil-todos'+suffix),parent=all?.parentElement;if(!parent)continue;
+      const rows=choices('campaign',true).filter(r=>!r.retired||usedCampaign.has(r.id));
+      const signature=JSON.stringify(rows);
+      if(parent.dataset.n008Types===signature)continue;
+      parent.querySelectorAll('button').forEach(button=>{if(button!==all)button.remove();});
+      for(const row of rows){
+        const button=document.createElement('button');button.className='btn-s';button.type='button';button.id='camp-fil-'+row.id+suffix;
+        button.textContent=(visuals.campaign[row.id]?.emoji||'📌')+' '+row.label+(row.retired?' (retirado)':'');
+        button.style.opacity=_campFiltroAtivo===row.id?'1':'0.45';button.onclick=()=>filtrarCampTipo(row.id);parent.appendChild(button);
+      }
+      parent.dataset.n008Types=signature;
+    }
+    const oldCadence=new Map(window.TIPOS_CONTATO_FOLLOWUP.map(t=>[t.id,t]));
+    window.TIPOS_CONTATO_FOLLOWUP=choices('contact').map(row=>({id:row.id,nome:row.label,...(oldCadence.has(row.id)?{padrao:oldCadence.get(row.id).padrao}:{})}));
+    for(const kind of ['contact','campaign']){
+      const panel=document.getElementById('n008-catalog-'+kind);if(!panel)continue;
+      panel.closest('details').style.display=isAdmin()?'':'none';
+      if(!isAdmin()){panel.replaceChildren();continue;}
+      const signature=String(current.revision);
+      if(panel.dataset.revision===signature)continue;
+      panel.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><input id="n008-new-'+kind+'" aria-label="Nome do novo tipo" placeholder="Nome do novo tipo"><button class="btn-s" data-n008-kind="'+kind+'" data-n008-action="add">Adicionar</button></div>'
+        +choices(kind).map(row=>'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0"><span>'+esc(row.label)+'</span><button class="btn-s" data-n008-kind="'+kind+'" data-n008-action="retire" data-n008-id="'+esc(row.id)+'">Retirar opção</button></div>').join('')
+        +'<p style="color:var(--muted);font-size:11px">Retirar impede novos usos e preserva o histórico.</p>';
+      panel.dataset.revision=signature;
+    }
+    showDraft();
+    const ctx=window._s012Capturar?.(),owner=ctx?.owner+'|'+ctx?.geracao;
+    if(ctx?.perfil==='admin'&&owner!==retriedOwner){retriedOwner=owner;setTimeout(()=>{try{if(window._s012ContextoValido(ctx)&&window._n008CatalogEngine().readDraft(ctx)) mutate('retry');}catch(_e){showDraft();}},1000);}
+  };
+  function showDraft(message){
+    document.querySelectorAll('[data-n008-catalog-draft]').forEach(el=>{
+    if(!el)return;
+    if(!isAdmin()){el.hidden=true;el.textContent='';return;}
+    try{
+      const ctx=window._s012Capturar(),draft=window._n008CatalogEngine?.().readDraft(ctx);
+      el.hidden=!draft;if(!draft){el.textContent='';return;}
+      el.innerHTML='<p>'+esc(message||(conflictId===draft.operationId?'A lista mudou no servidor. Revise a alteração pendente antes de reaplicar.':'Alteração de opções preservada neste navegador; envio pendente.'))+'</p><p>'+esc(draft.operation.action==='add'?'Adicionar: '+draft.operation.label:'Retirar: '+(draft.base.entries[draft.operation.kind][draft.operation.id]?.label||draft.operation.id))+'</p>'
+        +'<button class="btn-s" data-n008-action="retry">Tentar sincronizar</button>'
+        +(conflictId===draft.operationId?' <button class="btn-s" data-n008-action="review">Aplicar à lista atual</button> <button class="btn-s" data-n008-action="discard">Descartar rascunho</button>':'');
+    }catch(error){el.hidden=false;el.textContent='Não foi possível conferir o rascunho de opções. Preserve este navegador e tente novamente.';}
+    });
+  }
+  async function mutate(action,kind,id){
+    if(busy&&window._s012ContextoValido(busy.ctx))return;
+    const ctx=window._s012Capturar?.();
+    if(!ctx||ctx.perfil!=='admin'||!window._s012ContextoValido(ctx)){showToast('Apenas o admin gerencia opções.','warn');return;}
+    if(!navigator.locks?.request){showToast('Não foi possível obter a coordenação local para editar opções.','warn');return;}
+    const attempt={ctx};busy=attempt;
+    try{
+      await navigator.locks.request('avatim-n008-catalog-'+ctx.owner,{ifAvailable:true},async lock=>{
+        if(!window._s012ContextoValido(ctx))throw Error('A sessão mudou.');
+        if(!lock)throw Error('Há outra edição de opções em andamento neste navegador.');
+        const engine=window._n008CatalogEngine();
+        if(action==='add'||action==='retire'){
+          const label=document.getElementById('n008-new-'+kind)?.value.trim()||'';
+          if(action==='add'&&!label)throw Error('Informe o nome do novo tipo.');
+          if(action==='retire'&&!confirm('Retirar esta opção de novos registros, preservando o histórico?'))return;
+          engine.stage(ctx,D.configFollowUp,{kind,action,id:action==='add'?'tipo_'+crypto.randomUUID():id,...(action==='add'?{label}:{})},crypto.randomUUID());
+        }else if(action==='review'||action==='discard'){
+          const draft=engine.readDraft(ctx);
+          if(!draft||conflictId!==draft.operationId)throw Error('Confira a versão do servidor antes de revisar este rascunho.');
+          if(!confirm(action==='discard'?'Descartar somente esta alteração de opções ainda não aplicada?':'Reaplicar esta alteração à lista atual? Uma nova mudança concorrente será bloqueada.'))return;
+          if(action==='discard'){engine.discardDraft(ctx,draft.operationId);conflictId=null;showDraft();return;}
+          engine.replaceDraft(ctx,D.configFollowUp,crypto.randomUUID());
+        }
+        conflictId=null;
+        const outcome=await window._n008CatalogPublish(ctx);
+        if(!window._s012ContextoValido(ctx))return;
+        D.configFollowUp={...(D.configFollowUp||{}),_n008Catalog:engine.admit(D.configFollowUp,{_n008Catalog:outcome.catalog})};
+        if(outcome.state==='conflict')conflictId=engine.readDraft(ctx)?.operationId||null;
+        _persistirLocal();
+        window._n008AtualizarOpcoes();
+        window.rerenderPaginaAtiva?.('n008-catalog');
+        showToast(outcome.state==='conflict'?'A lista mudou. Seu rascunho foi preservado para revisão.':'Opções confirmadas no servidor.',outcome.state==='conflict'?'warn':'ok');
+      });
+    }catch(error){if(window._s012ContextoValido(ctx)){showToast('Opções não confirmadas: '+error.message,'warn');showDraft();}}
+    finally{if(busy===attempt)busy=null;}
+  }
+  document.addEventListener('click',event=>{
+    const button=event.target.closest('[data-n008-action]');
+    if(button)mutate(button.dataset.n008Action,button.dataset.n008Kind,button.dataset.n008Id);
+  });
+  window._n008CatalogAtualizado=function(){const ctx=window._s012Capturar?.();queueMicrotask(()=>{if(ctx&&window._s012ContextoValido(ctx))window._n008AtualizarOpcoes();});};
+  window.addEventListener('online',()=>{try{const c=window._s012Capturar();if(c?.perfil==='admin'&&window._n008CatalogEngine().readDraft(c))mutate('retry');}catch(_e){showDraft();}});
+  const openCampaign=abrirFormCampObj,editCampaign=editarCampObj,renderCampaign=renderCampLista;
+  renderCampLista=function(){window._n008AtualizarOpcoes();return renderCampaign.apply(this,arguments);};
+  abrirFormCampObj=function(){openCampaign();window._n008AtualizarOpcoes();};
+  editarCampObj=function(id){editCampaign(id);window._n008AtualizarOpcoes({campanhaId:id});};
+  window._s012AoTrocarSessao.push(()=>{
+    retriedOwner='';conflictId=null;busy=null;
+    window.TIPOS_CONTATO_FOLLOWUP=clone(cadenceDefaults);
+    ['fup-config','fup-config-crm'].forEach(id=>document.getElementById(id)?.replaceChildren());
+    _campFiltroAtivo='';
+    for(const suffix of ['', '-adm']){const all=document.getElementById('camp-fil-todos'+suffix),parent=all?.parentElement;if(!parent)continue;all.style.opacity='1';parent.querySelectorAll('button').forEach(button=>{if(button!==all)button.remove();});delete parent.dataset.n008Types;}
+    for(const [kind,target] of [['contact',CT_TIPOS],['campaign',CAMP_TIPOS]]){Object.keys(target).forEach(k=>delete target[k]);Object.assign(target,clone(visuals[kind]));}
+    document.querySelectorAll('[data-n008-options]').forEach(el=>{el.replaceChildren();delete el.dataset.n008Options;});
+    document.querySelectorAll('[data-n008-catalog-draft]').forEach(el=>{el.hidden=true;el.replaceChildren();});
+    ['n008-catalog-contact','n008-catalog-campaign'].forEach(id=>{const el=document.getElementById(id);if(el){el.replaceChildren();delete el.dataset.revision;}});
+  });
+})();
+
+// N008: the agenda is a projection of contacts; only intentional actions write it.
+(function(){
+  'use strict';
+  const copy=value=>JSON.parse(JSON.stringify(value));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value+'T12:00:00Z').toISOString().slice(0,10)===value;
+  const statuses=['Pendente','Concluído','Aguardando resposta','Reagendado','Não realizado'];
+  const open=item=>item.status!=='Concluído'&&item.status!=='Reagendado';
+  const uid=()=>crypto.randomUUID();
+  const valid=ctx=>!!ctx&&window._s012ContextoValido?.(ctx)===true;
+  let completion=null, views=new Map(), frame=null;
+  const dateDrafts=new Map();
+  const pages={hoje:0,atrasados:0,proximos:0,concluidos:0,reagendados:0};
+  const visible=contact=>!!contact&&window.lojaVisivel(contact.loja)
+    &&(isAdmin()||contact.loja===lojaId())
+    &&!window._s085VendedoraArquivada?.(contact.vendId)
+    &&!D._contatosExcluidos?.[contact.id];
+  function items(contact,clone=true){
+    if(Array.isArray(contact.followups)) return clone?copy(contact.followups):contact.followups;
+    return contact.proximoContato
+      ?[{id:'fu:'+contact.id+':legacy',data:contact.proximoContato,status:'Pendente'}]:[];
+  }
+  window._n008AgendaItens=items;
+  window._n008ContatoComAgenda=function(record,base){
+    const next=copy(record), previous=base?items(base):[];
+    if(base&&base.proximoContato&&!next.proximoContato)
+      throw Error('A data já está agendada. Trate o retorno na aba Follow-ups antes de alterar o agendamento.');
+    if(base&&next.proximoContato===base.proximoContato) return next;
+    if(!next.proximoContato) return next;
+    if(!validDate(next.proximoContato))throw Error('Informe uma data válida para o próximo contato.');
+    const current=previous.findLast(item=>open(item)&&item.data===base?.proximoContato);
+    if(current){current.status='Reagendado';current.reagendadoEm=Date.now();}
+    const id=base?'fu:'+next.id+':'+uid():'fu:'+next.id+':initial';
+    previous.push({id,data:next.proximoContato,status:'Pendente'});
+    if(current) current.proximoId=id;
+    next.followups=previous;
+    return next;
+  };
+  function snapshot(id){
+    const ctx=window._s012Capturar?.(), contact=(D.contatos||[]).find(c=>c.id===id);
+    if(!valid(ctx)||!visible(contact)) throw Error('Contato indisponível nesta sessão.');
+    const shown=views.get(id);
+    if(shown&&!window._s053Core.same(shown,contact))
+      throw Error('Este contato foi atualizado. Confira a agenda novamente antes de agir.');
+    const capture=window._s053CapturarBase?.('contatos',id,ctx,contact.loja);
+    if(!capture?.leituraCompleta) throw Error('Aguarde a confirmação dos dados e tente novamente.');
+    return {ctx,contact,capture};
+  }
+  function persist(action,next){
+    if(!valid(action.ctx)) throw Error('A sessão mudou. Reabra a agenda.');
+    const op=window._s052IniciarOperacao();
+    if(!op||op.ctx.owner!==action.ctx.owner||op.ctx.geracao!==action.ctx.geracao)
+      throw Error('A sessão mudou. Reabra a agenda.');
+    const staged=window._s053CriarIntencao('contatos',next.id,action.capture.base,next,action.ctx,action.capture);
+    if(!staged?.ok) throw Error('Não foi possível preservar a alteração. Atualize e revise o contato.');
+    const index=D.contatos.findIndex(c=>c.id===next.id);
+    if(index<0) throw Error('O contato deixou de estar disponível.');
+    D.contatos[index]=next;
+    const saved=window._s052Salvar(null,D,op);
+    showToast(saved?'Alteração registrada; sincronização em andamento.':'Alteração pendente preservada para sincronização.',saved?'ok':'warn');
+    window.renderFollowups();
+  }
+  window.n008Agir=function(contactId,itemId,action,value){
+    try{
+      const source=snapshot(contactId), list=items(source.contact), item=list.find(i=>i.id===itemId);
+      if(!item||!open(item)) throw Error('Este retorno já foi tratado. Atualize a agenda.');
+      if(action==='registrar'){
+        abrirFormContato();
+        if(!window._s053ContatoForm||!valid(source.ctx)) return;
+        completion={...source,itemId,resultId:'ct'+uid()};
+        document.getElementById('ct-form-cliente').value=source.contact.cliente||'';
+        document.getElementById('ct-form-loja').value=source.contact.loja;
+        _popularVendsFormContato(source.contact.loja);
+        document.getElementById('ct-form-vend').value=source.contact.vendId;
+        document.getElementById('ct-form-vend').disabled=true;
+        document.getElementById('ct-form-loja').disabled=true;
+        document.getElementById('ct-form-cliente').readOnly=true;
+        const type=document.getElementById('ct-form-tipo');
+        type.value=source.contact.tipo;
+        if(!type.selectedOptions[0]||type.selectedOptions[0].disabled) type.value='';
+        document.getElementById('ct-form-proximo').value='';
+        document.getElementById('ct-form-obs').value='';
+        const campaign=document.getElementById('ct-form-campanha');
+        if(campaign) campaign.value=source.contact.campanhaId||'';
+        document.getElementById('n008-origin-info').textContent='Novo contato para concluir o retorno de '+source.contact.cliente+'.';
+        document.getElementById('n008-origin-info').hidden=false;
+        return;
+      }
+      const next={...copy(source.contact),followups:list,ts:Date.now()};
+      if(action==='reagendar'){
+        if(!validDate(value)||value===item.data)
+          throw Error('Informe uma nova data válida para reagendar.');
+        item.status='Reagendado';item.reagendadoEm=next.ts;
+        const successor={id:'fu:'+contactId+':'+uid(),data:value,status:'Pendente'};
+        item.proximoId=successor.id;list.push(successor);next.proximoContato=value;
+      }else if(action==='status'&&['Pendente','Aguardando resposta','Não realizado'].includes(value)){
+        item.status=value;
+      }else throw Error('Ação de retorno inválida.');
+      persist(source,next);
+    }catch(error){showToast(error.message,'warn');window.renderFollowups();}
+  };
+  window._n008SalvarConclusao=function(){
+    if(!completion) return null;
+    try{
+      const source=completion;
+      if(!valid(source.ctx)||!visible(source.contact)) throw Error('A sessão ou a disponibilidade do contato mudou. Reabra a agenda.');
+      const get=id=>document.getElementById(id)?.value||'';
+      const loja=get('ct-form-loja'),vendId=get('ct-form-vend');
+      if(loja!==source.contact.loja||vendId!==source.contact.vendId||!vendsAtivas(loja).some(v=>v.id===vendId))
+        throw Error('Selecione um vendedor ativo da loja do retorno.');
+      const cliente=get('ct-form-cliente').trim(),data=get('ct-form-data'),tipo=get('ct-form-tipo');
+      if(!cliente||cliente!==source.contact.cliente||!validDate(data)||!tipo) throw Error('Confira o cliente original, a data e o tipo do contato.');
+      if(window._n008TipoContatoPermitido&&!window._n008TipoContatoPermitido(tipo))
+        throw Error('Este tipo foi retirado. Escolha um tipo disponível.');
+      const now=Date.now();
+      let result=window._n008ContatoComAgenda({id:source.resultId,data,cliente,tipo,tipoRotulo:window._n008TipoContatoInfo(tipo).label,loja,vendId,
+        retorno:get('ct-form-retorno'),proximoContato:get('ct-form-proximo'),obs:get('ct-form-obs').trim(),
+        campanhaId:get('ct-form-campanha'),ts:now,
+        followupOrigem:{contatoId:source.contact.id,followupId:source.itemId}},null);
+      const origin={...copy(source.capture.base),followups:items(source.capture.base),ts:now};
+      const item=origin.followups.find(i=>i.id===source.itemId);
+      if(!item||!open(item)) throw Error('O retorno já foi tratado. Reabra a agenda.');
+      item.status='Concluído';item.contatoResultadoId=result.id;item.concluidoEm=now;
+      const op=window._s052IniciarOperacao();
+      if(!op||op.ctx.owner!==source.ctx.owner||op.ctx.geracao!==source.ctx.geracao) throw Error('A sessão mudou.');
+      const pending=window._s053SnapshotIntencoes(source.ctx);
+      const members=(pending?.intents||[]).filter(i=>i.atomicGroup?.kind==='n008FollowupCompletion'&&i.atomicGroup.id===source.itemId);
+      if(members.length){
+        const oldOrigin=members.find(i=>i.id===origin.id),oldResult=members.find(i=>i.id===result.id);
+        const sameSemantic=(a,b)=>{const {ts:_a,...av}=a||{}, {ts:_b,...bv}=b||{};return window._s053Core.same(av,bv);};
+        if(members.length!==2||!oldOrigin||!oldResult||!sameSemantic(oldResult.draft.value,result))
+          throw Error('Existe uma tentativa preservada deste retorno. Revise os rascunhos antes de tentar novamente.');
+        result=copy(oldResult.draft.value);
+        Object.assign(origin,copy(oldOrigin.draft.value));
+      }else{
+        const capture=window._s053CapturarBase('contatos',result.id,source.ctx,loja);
+        if(!capture?.leituraCompleta||capture.base) throw Error('Não foi possível confirmar o novo contato. Reabra a agenda.');
+        const staged=window._s053CriarIntencoes([
+          {entity:'contatos',id:origin.id,baseRecord:source.capture.base,draftRecord:origin,formSnapshot:source.capture},
+          {entity:'contatos',id:result.id,baseRecord:null,draftRecord:result,formSnapshot:capture}
+        ],source.ctx,{v:1,kind:'n008FollowupCompletion',id:source.itemId});
+        if(!staged?.ok) throw Error('Não foi possível preservar a conclusão e o contato juntos. Revise os dados.');
+      }
+      const index=D.contatos.findIndex(c=>c.id===origin.id);
+      if(index<0) throw Error('O registro de origem não está disponível.');
+      D.contatos[index]=origin;
+      if(!D.contatos.some(c=>c.id===result.id)) D.contatos.push(result);
+      const saved=window._s052Salvar(null,D,op);
+      showToast(saved?'Contato registrado e retorno concluído; sincronização em andamento.':'Conclusão e contato preservados como pendentes.',saved?'ok':'warn');
+      if(saved){fecharFormContato();window.renderFollowups();}
+      return saved;
+    }catch(error){showToast(error.message,'warn');return false;}
+  };
+  const originalOpen=abrirFormContato,originalClose=fecharFormContato;
+  abrirFormContato=function(id){completion=null;window._n008AtualizarOpcoes?.({contatoId:id||null});originalOpen(id);
+    const cliente=document.getElementById('ct-form-cliente'),vend=document.getElementById('ct-form-vend');if(cliente)cliente.readOnly=false;if(vend)vend.disabled=false;
+    const campaign=document.getElementById('ct-form-campanha');if(campaign)campaign.value=id?(D.contatos||[]).find(c=>c.id===id)?.campanhaId||'':'';
+    const el=document.getElementById('n008-origin-info');if(el) el.hidden=true;};
+  fecharFormContato=function(){completion=null;const info=document.getElementById('n008-origin-info');if(info){info.textContent='';info.hidden=true;}originalClose();};
+  const originalSave=salvarContato;
+  salvarContato=function(){const result=window._n008SalvarConclusao();return result===null?originalSave():result;};
+  function render(){
+    const root=document.getElementById('page-followups');
+    if(!root?.classList.contains('active')) return;
+    const active=document.activeElement,activeRow=active?.closest?.('[data-fu-origin]');
+    const focus=activeRow?{origin:activeRow.dataset.fuOrigin,id:activeRow.dataset.fuId,date:active.matches('[data-fu-date]'),status:active.matches('[data-fu-status]')}:null;
+    const stores=LOJAS.filter(l=>window.lojaVisivel(l.id));
+    window._selSincronizar(document.getElementById('fu-loja'),stores,{rotuloVazio:'Todas as lojas',valor:l=>l.id,rotulo:l=>l.nome});
+    document.getElementById('fu-loja-wrap').hidden=!isAdmin();
+    const lid=isAdmin()?document.getElementById('fu-loja').value:lojaId();
+    const vendors=(D.vendedoras||[]).filter(v=>v.ativa!==false&&window.lojaVisivel(v.loja)&&(isAdmin()||v.loja===lojaId())&&(!lid||v.loja===lid));
+    window._selSincronizar(document.getElementById('fu-vend'),vendors,{rotuloVazio:'Todos(as) vendedores',valor:v=>v.id,rotulo:v=>v.nome});
+    const selected=document.getElementById('fu-vend').value;
+    const groups={hoje:[],atrasados:[],proximos:[],concluidos:[],reagendados:[]},today=hoje();
+    for(const contact of D.contatos||[]){
+      if(!visible(contact)||(lid&&contact.loja!==lid)||(selected&&contact.vendId!==selected)) continue;
+      for(const item of items(contact,false)){
+        const key=item.status==='Concluído'?'concluidos':item.status==='Reagendado'?'reagendados':item.data<today?'atrasados':item.data===today?'hoje':'proximos';
+        groups[key].push({contact,item});
+      }
+    }
+    let pendingIds=new Set();
+    try{pendingIds=new Set((window._s053SnapshotIntencoes(window._s012Capturar())?.intents||[]).filter(i=>i.entidade==='contatos').map(i=>i.id));}catch(_e){}
+    const names=new Map((D.vendedoras||[]).map(v=>[v.id,v.nome]));
+    const campaigns=new Map((D.campObjetivos||[]).map(c=>[c.id,c.nome||c.titulo||c.tipo||c.id]));
+    views=new Map();
+    const liveResults=new Set((D.contatos||[]).filter(c=>!D._contatosExcluidos?.[c.id]).map(c=>c.id));
+    document.getElementById('fu-today').textContent='Você tem '+groups.hoje.length.toLocaleString('pt-BR')+' retorno(s) programado(s) para contato hoje.';
+    for(const [key,rows] of Object.entries(groups)){
+      rows.sort((a,b)=>(key==='concluidos'?-1:1)*a.item.data.localeCompare(b.item.data)||a.item.id.localeCompare(b.item.id));
+      const total=Math.max(1,Math.ceil(rows.length/50));pages[key]=Math.min(pages[key],total-1);
+      const slice=rows.slice(pages[key]*50,pages[key]*50+50);
+      const target=document.getElementById('fu-'+key);
+      target.innerHTML=slice.length?slice.map(({contact,item})=>{
+        if(!views.has(contact.id)) views.set(contact.id,copy(contact));
+        const type=window._n008TipoContatoInfo?.(contact.tipo,contact.tipoRotulo)||CT_TIPOS[contact.tipo]||CT_TIPOS.outro;
+        const result=liveResults.has(item.contatoResultadoId);
+        return '<article class="sc" style="margin:8px 0;'+(key==='atrasados'?'border-left:3px solid var(--verm)':'')+'" data-fu-origin="'+esc(contact.id)+'" data-fu-id="'+esc(item.id)+'">'
+          +'<strong>'+esc(contact.cliente)+'</strong> · '+esc(item.data.split('-').reverse().join('/'))
+          +'<div style="color:var(--muted);font-size:12px;margin-top:6px">'+esc(type.label)+' · '+esc(names.get(contact.vendId)||'—')
+          +(contact.campanhaId?' · '+esc(campaigns.get(contact.campanhaId)||'Campanha histórica'):'')+'</div>'
+          +'<div style="margin-top:6px">'+esc(contact.obs||'Sem observação registrada.')+'</div>'
+          +'<div style="margin-top:8px"><span class="fu-status">'+esc(item.status)+'</span>'+(key==='atrasados'?' · Atrasado':'')+(pendingIds.has(contact.id)?' · Aguardando confirmação do servidor':'')
+          +(item.status==='Concluído'&&!result?' · Registro de contato indisponível.':'')+'</div>'
+          +(open(item)?'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'
+            +'<button class="btn-p" data-fu-action="registrar">Registrar contato e concluir</button>'
+            +'<label>Status <select data-fu-status aria-label="Status do follow-up">'+statuses.filter(s=>s!=='Concluído'&&s!=='Reagendado').map(s=>'<option'+(s===item.status?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label>'
+            +'<label>Reagendar <input type="date" data-fu-date aria-label="Nova data do retorno" value="'+esc(dateDrafts.get(JSON.stringify([contact.id,item.id]))||'')+'"></label>'
+            +'<button class="btn-s" data-fu-action="reagendar">Reagendar</button></div>':'')+'</article>';
+      }).join(''):'<p style="color:var(--muted)">Nenhum retorno neste grupo.</p>';
+      document.getElementById('fu-count-'+key).textContent=rows.length.toLocaleString('pt-BR');
+      const pager=document.getElementById('fu-page-'+key);
+      pager.innerHTML=total>1?'<button class="btn-s" data-fu-page="'+key+'" data-fu-delta="-1"'+(!pages[key]?' disabled':'')+'>Anterior</button> <span>Página '+(pages[key]+1)+' de '+total+'</span> <button class="btn-s" data-fu-page="'+key+'" data-fu-delta="1"'+(pages[key]===total-1?' disabled':'')+'>Próxima</button>':'';
+    }
+    restoreAgendaFocus(focus);
+  }
+  function restoreAgendaFocus(focus){
+    if(!focus||(!focus.date&&!focus.status))return;
+    const row=[...document.querySelectorAll('#page-followups [data-fu-origin]')].find(r=>r.dataset.fuOrigin===focus.origin&&r.dataset.fuId===focus.id);
+    row?.querySelector(focus.date?'[data-fu-date]':'[data-fu-status]')?.focus({preventScroll:true});
+  }
+  window.renderFollowups=function(){
+    if(frame!==null) return;
+    const ctx=window._s012Capturar?.();
+    frame=requestAnimationFrame(()=>{frame=null;if(valid(ctx)) render();});
+  };
+  window.n008AgendaFiltro=function(){Object.keys(pages).forEach(k=>pages[k]=0);window.renderFollowups();};
+  document.getElementById('page-followups')?.addEventListener('click',event=>{
+    const pager=event.target.closest('[data-fu-page]');
+    if(pager){pages[pager.dataset.fuPage]+=Number(pager.dataset.fuDelta);window.renderFollowups();return;}
+    const button=event.target.closest('[data-fu-action]'),row=button?.closest('[data-fu-origin]');
+    if(row) window.n008Agir(row.dataset.fuOrigin,row.dataset.fuId,button.dataset.fuAction,row.querySelector('[data-fu-date]')?.value);
+  });
+  document.getElementById('page-followups')?.addEventListener('input',event=>{
+    const row=event.target.closest('[data-fu-origin]');
+    if(row&&event.target.matches('[data-fu-date]'))dateDrafts.set(JSON.stringify([row.dataset.fuOrigin,row.dataset.fuId]),event.target.value);
+  });
+  document.getElementById('page-followups')?.addEventListener('change',event=>{
+    const row=event.target.closest('[data-fu-origin]');
+    if(row&&event.target.matches('[data-fu-status]')) window.n008Agir(row.dataset.fuOrigin,row.dataset.fuId,'status',event.target.value);
+  });
+  window._s012AoTrocarSessao.push(()=>{const info=document.getElementById('n008-origin-info');if(info){info.textContent='';info.hidden=true;}completion=null;views.clear();dateDrafts.clear();Object.keys(pages).forEach(k=>pages[k]=0);if(frame!==null)cancelAnimationFrame(frame);frame=null;
+    ['fu-loja','fu-vend'].forEach(id=>{const el=document.getElementById(id);if(el){
+      el.replaceChildren();const option=document.createElement('option');option.value='';
+      option.textContent=id==='fu-loja'?'Todas as lojas':'Todos(as) vendedores';el.appendChild(option);delete el.dataset.assinatura;
+    }});
+    document.querySelectorAll('#page-followups [id^="fu-"]').forEach(el=>{if(el.id==='fu-today'||el.matches('[data-fu-list]')||el.id.startsWith('fu-page-'))el.textContent='';else if(el.id.startsWith('fu-count-'))el.textContent='0';});
+  });
+})();
 </script>
 </body>
 </html>
