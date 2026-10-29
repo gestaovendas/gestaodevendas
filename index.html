@@ -6784,6 +6784,7 @@ body:not(.logado) #appScreen{display:none!important}
 
 /* SECTION */
 .sc{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:20px;margin-bottom:12px}
+.n009-manager:not([open]){display:none}
 
 /* BOTÃO PERÍODO (histórico) */
 .btn-periodo{background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:5px 12px;color:var(--muted);font-size:11px;cursor:pointer;transition:all .15s;font-family:"DM Sans",sans-serif}
@@ -6915,6 +6916,7 @@ body:not(.logado) #appScreen{display:none!important}
 
 @media(max-width:900px){.g2,.g3{grid-template-columns:1fr 1fr}.sidebar{width:200px}.main{margin-left:200px;padding:14px}}
 @media(max-width:620px){.sidebar{transform:translateX(-100%);transition:transform .3s}.sidebar.open{transform:none}.main{margin-left:0}.kgrid{grid-template-columns:1fr 1fr}.g2,.g3{grid-template-columns:1fr}}
+@media(max-width:620px){#form-camp-obj>.sc>.igrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #crm-progress-region [hidden]{display:none!important}
 </style>
 </head>
@@ -8648,9 +8650,9 @@ body:not(.logado) #appScreen{display:none!important}
 
 
 <div class="page" id="page-followups">
-<div class="ph"><h1 class="pt">Follow-ups</h1><p class="ps">Retornos programados e histórico de atendimento</p></div>
+<div class="ph"><div><h1 class="pt">Follow-ups</h1><p class="ps">Retornos programados e histórico de atendimento</p></div></div>
 <div class="sc" id="fu-today" role="status" aria-live="polite" style="border-color:var(--ouro);font-weight:600"></div>
-<div class="sc" style="display:flex;gap:12px;flex-wrap:wrap"><label id="fu-loja-wrap">Loja <select id="fu-loja" aria-label="Loja dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todas as lojas</option></select></label><label>Vendedor(a) <select id="fu-vend" aria-label="Vendedor dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todos(as) vendedores</option></select></label></div>
+<div class="sc"><div class="igrid"><div class="ig" id="fu-loja-wrap"><label for="fu-loja">Loja</label><select id="fu-loja" aria-label="Loja dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todas as lojas</option></select></div><div class="ig"><label for="fu-vend">Vendedor(a)</label><select id="fu-vend" aria-label="Vendedor dos follow-ups" onchange="n008AgendaFiltro()"><option value="">Todos(as) vendedores</option></select></div><div class="ig"><label for="fu-tipo">Tipo de contato</label><select id="fu-tipo" onchange="n008AgendaFiltro()"><option value="">Todos os tipos</option></select></div></div></div>
 <section class="sc" aria-labelledby="fu-title-hoje"><h2 class="st" id="fu-title-hoje">Retornos de hoje · <span id="fu-count-hoje">0</span></h2><div id="fu-hoje" data-fu-list></div><div id="fu-page-hoje" style="display:flex;gap:10px;align-items:center"></div></section>
 <section class="sc" aria-labelledby="fu-title-atrasados"><h2 class="st" id="fu-title-atrasados">Retornos atrasados · <span id="fu-count-atrasados">0</span></h2><div id="fu-atrasados" data-fu-list></div><div id="fu-page-atrasados" style="display:flex;gap:10px;align-items:center"></div></section>
 <section class="sc" aria-labelledby="fu-title-proximos"><h2 class="st" id="fu-title-proximos">Próximos retornos · <span id="fu-count-proximos">0</span></h2><div id="fu-proximos" data-fu-list></div><div id="fu-page-proximos" style="display:flex;gap:10px;align-items:center"></div></section>
@@ -8671,7 +8673,6 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
   </div>
 
-  <details class="sc admin-only" style="display:none"><summary>Gerenciar tipos de contato</summary><div id="n008-catalog-contact"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
 
   <!-- [R172] LOJA E PERÍODO — valem para KPIs, ranking, PDF e demais blocos;
        Registros (N007) usa filtros próprios, independentes desta barra.
@@ -8987,7 +8988,7 @@ body:not(.logado) #appScreen{display:none!important}
       </div>
 
       <div>
-        <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">TIPO *</label>
+        <label for="ct-form-tipo" style="font-size:10px;color:var(--muted);letter-spacing:.5px">TIPO *</label> <button type="button" class="btn-s" data-n009-toggle="contact" aria-controls="n009-manager-contact" aria-expanded="false" hidden style="padding:4px 8px;font-size:10px">Gerenciar tipos</button>
         <select id="ct-form-tipo"
           style="width:100%;background:var(--cinza);border:1px solid var(--borda);border-radius:6px;padding:8px 10px;color:var(--texto);font-size:13px;margin-top:4px">
           <option value="aniversario">🎂 Aniversariante</option>
@@ -8998,6 +8999,8 @@ body:not(.logado) #appScreen{display:none!important}
           <option value="outro">💬 Outro contato</option>
         </select>
       </div>
+
+      <details class="sc n009-manager" id="n009-manager-contact"><summary>Gerenciar tipos de contato</summary><div id="n008-catalog-contact"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
 
       <div>
         <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">LOJA</label>
@@ -9013,7 +9016,7 @@ body:not(.logado) #appScreen{display:none!important}
         </select>
       </div>
 
-      <div><label for="ct-form-campanha" style="font-size:10px;color:var(--muted)">CAMPANHA (OPCIONAL)</label><select id="ct-form-campanha" style="width:100%;margin-top:4px"><option value="">Sem campanha</option></select></div>
+      <div class="ig"><label for="ct-form-campanha" style="font-size:10px;color:var(--muted)">CAMPANHA (OPCIONAL)</label><select id="ct-form-campanha" style="width:100%;margin-top:4px"><option value="">Sem campanha</option></select></div>
 
       <div>
         <label style="font-size:10px;color:var(--muted);letter-spacing:.5px">RESPOSTA DO CLIENTE</label>
@@ -9263,7 +9266,6 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
   </div>
 
-  <details class="sc admin-only" style="display:none"><summary>Gerenciar tipos de campanha</summary><div id="n008-catalog-campaign"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
 
   <!-- RELATÓRIO E RANKING DE CAMPANHAS -->
   <div id="painel-rel-camp" style="display:none;margin-bottom:16px">
@@ -9316,7 +9318,7 @@ body:not(.logado) #appScreen{display:none!important}
     <div class="sc">
       <div class="st" id="camp-form-titulo">Novo Objetivo de Campanha</div>
       <div class="igrid">
-        <div class="ig"><label>Campanha</label>
+        <div class="ig"><label for="camp-tipo-obj" style="display:inline">Campanha</label> <button type="button" class="btn-s" data-n009-toggle="campaign" aria-controls="n009-manager-campaign" aria-expanded="false" hidden style="padding:4px 8px;font-size:10px">Gerenciar tipos</button>
           <select id="camp-tipo-obj">
             <option value="NATAL">🎄 Natal</option>
             <option value="BLACK">🖤 Black Friday</option>
@@ -9328,6 +9330,7 @@ body:not(.logado) #appScreen{display:none!important}
             <option value="OUTRO">📌 Outro</option>
           </select>
         </div>
+        <details class="sc n009-manager" id="n009-manager-campaign" style="grid-column:1/-1"><summary>Gerenciar tipos de campanha</summary><div id="n008-catalog-campaign"></div><div class="sc" data-n008-catalog-draft hidden role="status"></div></details>
         <div class="ig"><label>Nome / Descrição</label>
           <input type="text" id="camp-nome-obj" placeholder="Ex: Black Friday 2026 — Meta de faturamento">
         </div>
@@ -10567,7 +10570,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-29a';
+window.AVATIM_BUILD = '2026-10-29b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -74408,6 +74411,11 @@ function catalogChoices(catalog,kind,visuals,selected){
     if(el.dataset.n008Options!==html){el.innerHTML=html;el.dataset.n008Options=html;}
     el.value=rows.some(r=>r.id===value)?value:'';
   }
+  function contactFilterTypes(){
+    const used=new Set((D.contatos||[]).filter(c=>window.lojaVisivel(c.loja)&&(isAdmin()||c.loja===lojaId())).map(c=>c.tipo));
+    return choices('contact',true).filter(r=>!r.retired||used.has(r.id)).map(r=>({...r,label:r.label+(r.retired?' (retirado)':''),retired:false}));
+  }
+  window._n009AtualizarTiposFollowups=()=>select('fu-tipo',contactFilterTypes(),'Todos os tipos');
   window._n008AtualizarOpcoes=function(edit={}){
     const current=catalog();
     for(const [kind,target] of [['contact',CT_TIPOS],['campaign',CAMP_TIPOS]]){
@@ -74420,9 +74428,8 @@ function catalogChoices(catalog,kind,visuals,selected){
     const contactTypes=choices('contact',true);
     if(historyType&&!contactTypes.some(r=>r.id===historyType))contactTypes.push({id:historyType,label:oldContact.tipoRotulo||historyType,retired:true});
     select('ct-form-tipo',contactTypes.filter(r=>!r.retired||r.id===historyType),null,edit.contatoId?historyType:undefined);
-    const usedContact=new Set((D.contatos||[]).filter(c=>window.lojaVisivel(c.loja)&&(isAdmin()||c.loja===lojaId())).map(c=>c.tipo));
-    const filterTypes=choices('contact',true).filter(r=>!r.retired||usedContact.has(r.id)).map(r=>({...r,label:r.label+(r.retired?' (retirado)':''),retired:false}));
-    ['ct-filtro-tipo','ct-registros-tipo'].forEach(id=>select(id,filterTypes,'Todos os tipos'));
+    const filterTypes=contactFilterTypes();
+    ['ct-filtro-tipo','ct-registros-tipo','fu-tipo'].forEach(id=>select(id,filterTypes,'Todos os tipos'));
     const objective=(D.campObjetivos||[]).find(c=>c.id===(edit.campanhaId||_editandoCampObjId));
     const campaignTypes=choices('campaign',true);
     if(objective?.tipo&&!campaignTypes.some(r=>r.id===objective.tipo))campaignTypes.push({id:objective.tipo,label:objective.tipoRotulo||objective.tipo,retired:true});
@@ -74453,10 +74460,11 @@ function catalogChoices(catalog,kind,visuals,selected){
     for(const kind of ['contact','campaign']){
       const panel=document.getElementById('n008-catalog-'+kind);if(!panel)continue;
       panel.closest('details').style.display=isAdmin()?'':'none';
+      const toggle=document.querySelector('[data-n009-toggle="'+kind+'"]');if(toggle)toggle.hidden=!isAdmin();
       if(!isAdmin()){panel.replaceChildren();continue;}
       const signature=String(current.revision);
       if(panel.dataset.revision===signature)continue;
-      panel.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><input id="n008-new-'+kind+'" aria-label="Nome do novo tipo" placeholder="Nome do novo tipo"><button class="btn-s" data-n008-kind="'+kind+'" data-n008-action="add">Adicionar</button></div>'
+      panel.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><div class="ig" style="flex:1;min-width:150px"><input id="n008-new-'+kind+'" aria-label="Nome do novo tipo" placeholder="Nome do novo tipo"></div><button class="btn-s" data-n008-kind="'+kind+'" data-n008-action="add">Adicionar</button></div>'
         +choices(kind).map(row=>'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0"><span>'+esc(row.label)+'</span><button class="btn-s" data-n008-kind="'+kind+'" data-n008-action="retire" data-n008-id="'+esc(row.id)+'">Retirar opção</button></div>').join('')
         +'<p style="color:var(--muted);font-size:11px">Retirar impede novos usos e preserva o histórico.</p>';
       panel.dataset.revision=signature;
@@ -74515,16 +74523,30 @@ function catalogChoices(catalog,kind,visuals,selected){
     finally{if(busy===attempt)busy=null;}
   }
   document.addEventListener('click',event=>{
+    const toggle=event.target.closest('[data-n009-toggle]');
+    if(toggle){
+      const ctx=window._s012Capturar?.(),details=document.getElementById(toggle.getAttribute('aria-controls'));
+      if(details&&ctx?.perfil==='admin'&&window._s012ContextoValido(ctx))details.open=!details.open;
+      return;
+    }
     const button=event.target.closest('[data-n008-action]');
     if(button)mutate(button.dataset.n008Action,button.dataset.n008Kind,button.dataset.n008Id);
   });
+  for(const kind of ['contact','campaign']){
+    const details=document.getElementById('n009-manager-'+kind),toggle=document.querySelector('[data-n009-toggle="'+kind+'"]');
+    details?.addEventListener('toggle',()=>toggle?.setAttribute('aria-expanded',String(details.open)));
+  }
+  function closeManager(kind){const details=document.getElementById('n009-manager-'+kind);if(details)details.open=false;document.querySelector('[data-n009-toggle="'+kind+'"]')?.setAttribute('aria-expanded','false');}
   window._n008CatalogAtualizado=function(){const ctx=window._s012Capturar?.();queueMicrotask(()=>{if(ctx&&window._s012ContextoValido(ctx))window._n008AtualizarOpcoes();});};
   window.addEventListener('online',()=>{try{const c=window._s012Capturar();if(c?.perfil==='admin'&&window._n008CatalogEngine().readDraft(c))mutate('retry');}catch(_e){showDraft();}});
-  const openCampaign=abrirFormCampObj,editCampaign=editarCampObj,renderCampaign=renderCampLista;
+  const openCampaign=abrirFormCampObj,editCampaign=editarCampObj,renderCampaign=renderCampLista,closeCampaign=fecharFormCampObj,closeContact=fecharFormContato;
   renderCampLista=function(){window._n008AtualizarOpcoes();return renderCampaign.apply(this,arguments);};
   abrirFormCampObj=function(){openCampaign();window._n008AtualizarOpcoes();};
   editarCampObj=function(id){editCampaign(id);window._n008AtualizarOpcoes({campanhaId:id});};
+  fecharFormCampObj=function(){closeManager('campaign');return closeCampaign.apply(this,arguments);};
+  fecharFormContato=function(){closeManager('contact');return closeContact.apply(this,arguments);};
   window._s012AoTrocarSessao.push(()=>{
+    for(const kind of ['contact','campaign']){closeManager(kind);const toggle=document.querySelector('[data-n009-toggle="'+kind+'"]');if(toggle)toggle.hidden=true;}
     retriedOwner='';conflictId=null;busy=null;
     window.TIPOS_CONTATO_FOLLOWUP=clone(cadenceDefaults);
     ['fup-config','fup-config-crm'].forEach(id=>document.getElementById(id)?.replaceChildren());
@@ -74703,16 +74725,17 @@ function catalogChoices(catalog,kind,visuals,selected){
     if(!root?.classList.contains('active')) return;
     const active=document.activeElement,activeRow=active?.closest?.('[data-fu-origin]');
     const focus=activeRow?{origin:activeRow.dataset.fuOrigin,id:activeRow.dataset.fuId,date:active.matches('[data-fu-date]'),status:active.matches('[data-fu-status]')}:null;
+    window._n009AtualizarTiposFollowups();
     const stores=LOJAS.filter(l=>window.lojaVisivel(l.id));
     window._selSincronizar(document.getElementById('fu-loja'),stores,{rotuloVazio:'Todas as lojas',valor:l=>l.id,rotulo:l=>l.nome});
     document.getElementById('fu-loja-wrap').hidden=!isAdmin();
     const lid=isAdmin()?document.getElementById('fu-loja').value:lojaId();
     const vendors=(D.vendedoras||[]).filter(v=>v.ativa!==false&&window.lojaVisivel(v.loja)&&(isAdmin()||v.loja===lojaId())&&(!lid||v.loja===lid));
     window._selSincronizar(document.getElementById('fu-vend'),vendors,{rotuloVazio:'Todos(as) vendedores',valor:v=>v.id,rotulo:v=>v.nome});
-    const selected=document.getElementById('fu-vend').value;
+    const selected=document.getElementById('fu-vend').value,tipo=document.getElementById('fu-tipo').value;
     const groups={hoje:[],atrasados:[],proximos:[],concluidos:[],reagendados:[]},today=hoje();
     for(const contact of D.contatos||[]){
-      if(!visible(contact)||(lid&&contact.loja!==lid)||(selected&&contact.vendId!==selected)) continue;
+      if(!visible(contact)||(lid&&contact.loja!==lid)||(selected&&contact.vendId!==selected)||(tipo&&contact.tipo!==tipo)) continue;
       for(const item of items(contact,false)){
         const key=item.status==='Concluído'?'concluidos':item.status==='Reagendado'?'reagendados':item.data<today?'atrasados':item.data===today?'hoje':'proximos';
         groups[key].push({contact,item});
@@ -74741,10 +74764,10 @@ function catalogChoices(catalog,kind,visuals,selected){
           +'<div style="margin-top:6px">'+esc(contact.obs||'Sem observação registrada.')+'</div>'
           +'<div style="margin-top:8px"><span class="fu-status">'+esc(item.status)+'</span>'+(key==='atrasados'?' · Atrasado':'')+(pendingIds.has(contact.id)?' · Aguardando confirmação do servidor':'')
           +(item.status==='Concluído'&&!result?' · Registro de contato indisponível.':'')+'</div>'
-          +(open(item)?'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'
+          +(open(item)?'<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px">'
             +'<button class="btn-p" data-fu-action="registrar">Registrar contato e concluir</button>'
-            +'<label>Status <select data-fu-status aria-label="Status do follow-up">'+statuses.filter(s=>s!=='Concluído'&&s!=='Reagendado').map(s=>'<option'+(s===item.status?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label>'
-            +'<label>Reagendar <input type="date" data-fu-date aria-label="Nova data do retorno" value="'+esc(dateDrafts.get(JSON.stringify([contact.id,item.id]))||'')+'"></label>'
+            +'<div class="ig"><label>Status</label><select data-fu-status aria-label="Status do follow-up">'+statuses.filter(s=>s!=='Concluído'&&s!=='Reagendado').map(s=>'<option'+(s===item.status?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></div>'
+            +'<div class="ig"><label>Reagendar</label><input type="date" data-fu-date aria-label="Nova data do retorno" value="'+esc(dateDrafts.get(JSON.stringify([contact.id,item.id]))||'')+'"></div>'
             +'<button class="btn-s" data-fu-action="reagendar">Reagendar</button></div>':'')+'</article>';
       }).join(''):'<p style="color:var(--muted)">Nenhum retorno neste grupo.</p>';
       document.getElementById('fu-count-'+key).textContent=rows.length.toLocaleString('pt-BR');
@@ -74779,9 +74802,9 @@ function catalogChoices(catalog,kind,visuals,selected){
     if(row&&event.target.matches('[data-fu-status]')) window.n008Agir(row.dataset.fuOrigin,row.dataset.fuId,'status',event.target.value);
   });
   window._s012AoTrocarSessao.push(()=>{const info=document.getElementById('n008-origin-info');if(info){info.textContent='';info.hidden=true;}completion=null;views.clear();dateDrafts.clear();Object.keys(pages).forEach(k=>pages[k]=0);if(frame!==null)cancelAnimationFrame(frame);frame=null;
-    ['fu-loja','fu-vend'].forEach(id=>{const el=document.getElementById(id);if(el){
+    ['fu-loja','fu-vend','fu-tipo'].forEach(id=>{const el=document.getElementById(id);if(el){
       el.replaceChildren();const option=document.createElement('option');option.value='';
-      option.textContent=id==='fu-loja'?'Todas as lojas':'Todos(as) vendedores';el.appendChild(option);delete el.dataset.assinatura;
+      option.textContent=id==='fu-loja'?'Todas as lojas':id==='fu-vend'?'Todos(as) vendedores':'Todos os tipos';el.appendChild(option);delete el.dataset.assinatura;delete el.dataset.n008Options;
     }});
     document.querySelectorAll('#page-followups [id^="fu-"]').forEach(el=>{if(el.id==='fu-today'||el.matches('[data-fu-list]')||el.id.startsWith('fu-page-'))el.textContent='';else if(el.id.startsWith('fu-count-'))el.textContent='0';});
   });
