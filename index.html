@@ -6817,6 +6817,12 @@ body:not(.logado) #appScreen{display:none!important}
 #fx-produtos-lista .fxp-preco b{display:block;font-size:11.5px;font-weight:700;color:var(--ouro)}
 #fx-produtos-lista .fxp-preco small{display:block;font-size:9.5px;color:var(--muted);letter-spacing:normal;text-transform:none}
 #fx-produtos-sel label{text-transform:none;letter-spacing:normal;font-size:11px;color:var(--texto);margin:0}
+#fx-produtos-sel .fxp-escolhido{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;max-width:100%;overflow-wrap:anywhere;background:rgba(122,199,79,.14);border:1px solid rgba(122,199,79,.45);border-radius:12px;padding:6px 9px;font-size:11px}
+#fx-produtos-sel .fxp-quantidade{display:inline-flex;gap:6px;flex:0 0 auto}
+#fx-produtos-sel .fxp-escolhido button{flex:0 0 auto;min-width:30px;min-height:30px;padding:3px 8px;border:1px solid var(--borda);border-radius:6px;background:var(--cinza);color:var(--texto);font:inherit;font-size:16px;line-height:1;cursor:pointer}
+#fx-produtos-sel .fxp-escolhido button:hover{border-color:var(--ouro)}
+#fx-produtos-sel .fxp-escolhido button:focus-visible{outline:2px solid var(--ouro);outline-offset:2px}
+#fx-produtos-sel .fxp-escolhido button:disabled{opacity:.45;cursor:default}
 .btn-p{background:linear-gradient(135deg,var(--ouro),var(--ouro2));border:none;border-radius:8px;padding:10px 22px;color:var(--preto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s}
 .btn-p:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(201,168,76,.3)}
 .btn-s{background:var(--cinza);border:1px solid var(--borda);border-radius:8px;padding:10px 18px;color:var(--texto);font-family:"DM Sans",sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s}
@@ -10570,7 +10576,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-10-29b';
+window.AVATIM_BUILD = '2026-10-31a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -39095,6 +39101,9 @@ function toggleFormFluxo(){
   } else {
     window._fxSelecionados = [];
   }
+  window._fxDiferencaPaga = 0;
+  const legado=document.getElementById("fx-produto-escolhido");
+  if(legado) legado.value="";
 }
 
 function salvarFluxo(){
@@ -64836,6 +64845,10 @@ window._fxModalidadeMudou = function(){
 
   const {mod, pct, valor, perfil, beneficio} = _fxBeneficioAtual();
   if(!mod){
+    window._fxSelecionados = [];
+    window._fxDiferencaPaga = 0;
+    const legado = document.getElementById("fx-produto-escolhido");
+    if(legado) legado.value = "";
     box.style.display = "none";
     if(prodBox) prodBox.style.display = "none";
     return;
@@ -64863,6 +64876,9 @@ window._fxModalidadeMudou = function(){
     } else {
       prodBox.style.display = "none";
       window._fxSelecionados = [];
+      window._fxDiferencaPaga = 0;
+      const legado = document.getElementById("fx-produto-escolhido");
+      if(legado) legado.value = "";
     }
   }
 };
@@ -64973,6 +64989,28 @@ window._fxToggleProduto = function(chave, marcado){
   _fxRenderProdutos();
 };
 
+window._fxAlterarQuantidade = function(codigo, delta){
+  const item = window._fxSelecionados.find(x => x.c === codigo);
+  if(!item || (delta !== 1 && delta !== -1)) return;
+  const ativo = document.activeElement;
+  const rotulo = ativo?.dataset?.codigo === codigo && ativo.closest('#fx-produtos-sel')
+    ? ativo.getAttribute('aria-label') : null;
+  if(delta > 0){
+    const produto = PRODUTOS.find(p => p.c === item.c);
+    if(!produto) return;
+    window._fxSelecionados.push({c:produto.c, n:produto.n, preco:_precoProduto(produto)});
+  } else {
+    const ultimo = window._fxSelecionados.map(x => x.c).lastIndexOf(item.c);
+    if(ultimo >= 0) window._fxSelecionados.splice(ultimo, 1);
+  }
+  _fxRenderProdutos();
+  if(rotulo){
+    const proximo = [...document.querySelectorAll('#fx-produtos-sel button[data-codigo]')]
+      .find(b => b.dataset.codigo === codigo && b.getAttribute('aria-label') === rotulo);
+    (proximo || document.getElementById('fx-prod-busca'))?.focus({preventScroll:true});
+  }
+};
+
 window._fxLimparSelecao = function(){
   window._fxSelecionados = [];
   window._fxDiferencaPaga = 0;
@@ -64991,6 +65029,7 @@ function _fxRenderSelecionados(){
   if(legado) legado.value = sel.map(x => x.n).join(", ");
 
   if(!sel.length){
+    window._fxDiferencaPaga = 0;
     el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhum produto escolhido ainda — marque acima o que o cliente vai levar.</div>';
     return;
   }
@@ -65001,12 +65040,23 @@ function _fxRenderSelecionados(){
   const sobra     = Math.max(0, Math.round((beneficio - total) * 100) / 100);
   window._fxDiferencaPaga = diferenca;
 
+  const grupos = new Map();
+  sel.forEach(x => {
+    if(!grupos.has(x.c)) grupos.set(x.c, {item:x, qtd:0, total:0});
+    const grupo = grupos.get(x.c);
+    grupo.qtd++;
+    grupo.total += Number(x.preco) || 0;
+  });
+  const escapar = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   el.innerHTML =
     '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">'
-    + sel.map(x =>
-        '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(122,199,79,.14);border:1px solid rgba(122,199,79,.45);border-radius:99px;padding:3px 9px;font-size:10.5px">'
-        + x.n + ' <strong style="color:var(--ouro)">' + fmt(x.preco) + '</strong>'
-        + '<span onclick="window._fxToggleProduto(\'' + String(x.c).replace(/'/g,"\\'") + '\', false)" style="cursor:pointer;color:var(--verm);font-weight:700">✕</span>'
+    + [...grupos.values()].map(g =>
+        '<span class="fxp-escolhido">'
+        + escapar(g.item.n) + ' · ' + g.qtd + ' un. · <strong style="color:var(--ouro)">' + fmt(g.total) + '</strong>'
+        + '<span class="fxp-quantidade" role="group" aria-label="Quantidade de ' + escapar(g.item.n) + '">'
+        + '<button type="button" aria-label="Remover uma unidade de ' + escapar(g.item.n) + '" data-codigo="' + escapar(g.item.c) + '" onclick="window._fxAlterarQuantidade(this.dataset.codigo,-1)">−</button>'
+        + '<button type="button" aria-label="Adicionar uma unidade de ' + escapar(g.item.n) + '" data-codigo="' + escapar(g.item.c) + '" onclick="window._fxAlterarQuantidade(this.dataset.codigo,1)"' + (PRODUTOS.some(p => p.c === g.item.c) ? '' : ' disabled') + '>+</button>'
+        + '</span>'
         + '</span>').join('')
     + '</div>'
     + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 11px;border-radius:7px;'
@@ -65091,9 +65141,7 @@ window.salvarFluxo = function(){
   const produtosSel = (modalidade === "gift_back" ? (window._fxSelecionados || []) : []).map(x => ({
     c: x.c, n: x.n, preco: Number(x.preco) || 0
   }));
-  const produtoEscolhido = produtosSel.length
-    ? produtosSel.map(x => x.n).join(", ")
-    : (document.getElementById("fx-produto-escolhido")?.value || "").trim();
+  const produtoEscolhido = produtosSel.map(x => x.n).join(", ");
   const produtosValor = produtosSel.reduce((a,x) => a + x.preco, 0);
   let modalidadePct = 0;
   let beneficioValor = 0;
