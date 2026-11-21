@@ -7314,6 +7314,8 @@ body:not(.logado) #appScreen{display:none!important}
     </div>
   </div>
 
+  <section id="lanc-meta-realizado" class="sc" hidden></section>
+
   <!-- [R49] Ritmo da meta: o que deveria ter sido vendido até a data vigente -->
   <div class="sc" id="lanc-ritmo-box" style="margin-bottom:16px;border-left:3px solid var(--ouro)"></div>
 
@@ -10576,7 +10578,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-11-20a';
+window.AVATIM_BUILD = '2026-11-21a';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -37063,6 +37065,86 @@ window.b045DefinirLancamento=function(ativo){
   return true;
 };
 
+function realizadoDiarioPainel(registro, campoFat){
+  // Mantém o zero informado e não deduz quantidade de tickets do faturamento.
+  const numero=campo=>_acompNumeroValido(registro,campo)?Number(registro[campo]):null;
+  return {fat:numero(campoFat), tickets:numero('trans') ?? numero('cli')};
+}
+
+function _lancConsolidadoVigente(lid, data, registro, pessoas){
+  if(!registro) return false;
+  const revisao=Number(registro._savedAt || registro.ts)||0;
+  // Uma exclusão individual posterior pode invalidar o espelho da loja.
+  return !pessoas.some(pessoa=>{
+    const {lapide,lapideTs}=window._s004VendasEstado('vend',pessoa.id,data);
+    return lapide && (!(Number(lapideTs)>0) || Number(lapideTs)>=revisao)
+      && window._s074RotaVendVisivel(pessoa.id,data,pessoa)?.loja===lid;
+  });
+}
+
+function detalhesRestantesPainel(metaCli, metaTm, tickets, fat){
+  const apurado=Number.isSafeInteger(tickets) && tickets>=0;
+  const faltam=apurado && Number.isSafeInteger(metaCli) && metaCli>0 ? Math.max(0,metaCli-tickets) : null;
+  const valorAlvo=Math.round(metaTm*100), realizado=Math.round(fat*100);
+  let rotulo='TM mínimo nos tickets restantes', valor='—';
+  if(faltam!==null && Number.isSafeInteger(valorAlvo) && valorAlvo>0
+      && fat!==null && Number.isSafeInteger(realizado)){
+    if(faltam>0){
+      const saldo=Math.max(0,metaCli*valorAlvo-realizado);
+      valor=fmt(Math.ceil(saldo/faltam)/100);
+    }else if(tickets*valorAlvo>realizado){
+      rotulo='Valor necessário no próximo ticket';
+      valor=fmt(((tickets+1)*valorAlvo-realizado)/100);
+    }else{
+      rotulo='Ticket médio';
+      valor='Meta atingida';
+    }
+  }
+  return `<div><dt>Clientes que faltam</dt><dd style="margin:0;font-weight:700">${faltam??'—'}</dd></div>
+    <div><dt>${rotulo}</dt><dd style="margin:0;font-weight:700">${valor}</dd></div>`;
+}
+
+function renderMetaRealizadoLoja(lid, data, config, tmNecessario){
+  const painel=document.getElementById('lanc-meta-realizado');
+  if(!painel) return;
+  painel.hidden=!lid;
+  if(!lid){ painel.replaceChildren(); return; }
+
+  const registros=[];
+  let completo=true;
+  const pessoas=vendsParaAgregadoHistoricoLoja(lid);
+  pessoas.forEach(({id})=>{
+    const leitura=vendasVendHistoricasLoja(lid,id);
+    if(!leitura.ok || leitura.completo===false) completo=false;
+    const registro=leitura.vendas?.[data];
+    if(registro) registros.push(realizadoDiarioPainel(registro,'val'));
+  });
+  // O consolidado pode espelhar os lançamentos individuais. Só use como
+  // alternativa, sempre com faturamento e tickets da própria linha.
+  if(completo && !registros.length){
+    const consolidado=_s007DiasConsolidadosDaLoja(lid)[data];
+    if(_lancConsolidadoVigente(lid,data,consolidado,pessoas))
+      registros.push(realizadoDiarioPainel(consolidado,'fat'));
+  }
+  const soma=campo=>completo && registros.length && registros.every(r=>r[campo]!==null)
+    ? registros.reduce((total,r)=>total+r[campo],0) : null;
+  const fat=soma('fat'), tickets=soma('tickets');
+  const tm=tickets>0 && fat!==null ? fat/tickets : null;
+  const metaTm=Number(config?.ticket), metaCli=Number(config?.metaCli);
+  painel.innerHTML=`<div class="st" id="lanc-meta-realizado-titulo">Meta × realizado da loja · Hoje</div>
+    <table class="dtable" aria-labelledby="lanc-meta-realizado-titulo">
+      <thead><tr><th scope="col">Indicador</th><th scope="col">Meta</th><th scope="col">Realizado</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Ticket médio</th><td>${Number.isFinite(metaTm)&&metaTm>0?fmt(metaTm):'—'}</td><td>${tm===null?'—':fmt(tm)}</td></tr>
+        <tr><th scope="row">Clientes / tickets</th><td>${Number.isFinite(metaCli)&&metaCli>0?metaCli:'—'}</td><td>${tickets??'—'}</td></tr>
+      </tbody>
+    </table>
+    <dl style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin:12px 0;font-size:12px">
+      ${detalhesRestantesPainel(metaCli,metaTm,tickets,fat)}
+    </dl>
+    <div style="font-size:11px;color:var(--muted)">TM pelo ritmo da meta mensal · ${tmNecessario===null?'—':fmt(tmNecessario)}</div>`;
+}
+
 function renderPainelDia(){
   // Admin usa a loja selecionada no dropdown; loja usa a sua própria — nunca "admin"
   const selLoja = document.getElementById("lanc-loja-sel");
@@ -37072,6 +37154,7 @@ function renderPainelDia(){
       : LOJAS[0]?.id)
     : lojaId();
   if(!lid || !window.lojaVisivel?.(lid)){
+    renderMetaRealizadoLoja(null);
     window.b045RenderLancamento(lid);
     ['lanc-meta-dia','lanc-meta-sem','lanc-meta-mes','lanc-soma-total','lanc-pa-vivo','lanc-tm-vivo']
       .forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='—';});
@@ -37095,6 +37178,7 @@ function renderPainelDia(){
   const clientesDiaLoja = Number(configDia?.metaCli);
   const tmNecessario = Number(configDia?.mes)>0 && Number.isFinite(clientesDiaLoja) && clientesDiaLoja>0
     && Number.isFinite(_progPainel.dia) && _progPainel.dia>0 ? _progPainel.dia/clientesDiaLoja : null;
+  renderMetaRealizadoLoja(per==='hoje' && hojeAberta ? lid : null,hj,configDia,tmNecessario);
   const metaDia = document.getElementById('lanc-meta-dia');
   const metaSem = document.getElementById('lanc-meta-sem');
   const metaMes = document.getElementById('lanc-meta-mes');
@@ -37126,8 +37210,11 @@ function renderPainelDia(){
         vends.map(v=>{
           const _cargoRef=window._cargoVendDoMes?.(v,mesAtual());
           const _cargoLabel=_cargoRef?.conhecido?_cargoRef.cargo:'Cargo pendente';
-          const _s060Resumo=window._s060ResumoVendLoja(lid,v.id,per,hj);
-          const val=_s060Resumo?.fat ?? null;
+          const leituraHoje=per==='hoje' ? vendasVendHistoricasLoja(lid,v.id) : null;
+          const {fat:fatHoje,tickets:ticketsHoje}=realizadoDiarioPainel(
+            leituraHoje?.ok && leituraHoje.completo!==false ? leituraHoje.vendas?.[hj] : null,'val');
+          const _s060Resumo=per==='hoje' ? null : window._s060ResumoVendLoja(lid,v.id,per,hj);
+          const val=per==='hoje' ? fatHoje : (_s060Resumo?.fat ?? null);
           // Meta correta por período — individual de cada vendedora (progressiva)
           const _sw = semanaDoMes(hj);
           const meta = per==='hoje'
@@ -37145,7 +37232,8 @@ function renderPainelDia(){
           const pct = metaIndisp?null:meta>0 ? val/meta*100 : 0;
           const pctSuper = semIndisp?null:superMeta>0 ? val/superMeta*100 : 0;
           const cor = semIndisp?'var(--muted)':pct>=_superPctDe(meta,superMeta)?'var(--roxo)':pct>=100?'var(--verde)':pct>=70?'var(--ouro)':val>0?'var(--verm)':'var(--muted)';
-          const tm=_s060Resumo?.tm ?? null;
+          const tm=per==='hoje' ? (ticketsHoje>0 && fatHoje!==null ? fatHoje/ticketsHoje : null)
+            : (_s060Resumo?.tm ?? null);
           const gapV = metaIndisp?null:val - meta;
           const corGapV = gapV>=0?"var(--verde)":"var(--verm)";
           const _lblPer = per==='semana'?'Período':'Mês';
@@ -37175,12 +37263,16 @@ function renderPainelDia(){
               <div><dt>Meta</dt><dd style="margin:0;color:var(--ouro);font-weight:700">${metaDiaTexto}</dd></div>
               <div><dt>Super meta</dt><dd style="margin:0;color:var(--roxo);font-weight:700">${superDiaTexto}</dd></div>
               <div title="Meta individual em reais dividida pelo TM cadastrado da loja, arredondada para cima"><dt>Clientes convertidos (meta)</dt><dd style="margin:0;font-weight:700">${clientesAlvo}${metaEmSuper && clientesAlvo!=='—'?' <small>(super meta)</small>':''}</dd></div>
-              <div title="Meta progressiva do dia da loja dividida pela meta diária de clientes da loja"><dt>TM necessário</dt><dd style="margin:0;font-weight:700">${tmNecessario===null?'—':fmt(tmNecessario)}</dd></div>
+              <div><dt>Clientes convertidos (realizado)</dt><dd style="margin:0;font-weight:700">${ticketsHoje??'—'}</dd></div>
+              <div title="Ticket médio alvo cadastrado na aba Metas da loja"><dt>TM alvo</dt><dd style="margin:0;font-weight:700">${ticketValido?fmt(ticketDia):'—'}</dd></div>
+              <div><dt>TM realizado</dt> <dd style="margin:0;font-weight:700">${tm===null?'—':fmt(tm)}</dd></div>
+              ${detalhesRestantesPainel(clientesAlvo,ticketCentavos/100,ticketsHoje,fatHoje)}
+              <div title="TM da loja pelo ritmo da meta mensal: meta financeira progressiva do dia dividida pela meta diária de clientes"><dt>TM necessário</dt><dd style="margin:0;font-weight:700">${tmNecessario===null?'—':fmt(tmNecessario)}</dd></div>
             </dl>`:'<div style="font-size:12px;margin:4px 0 10px">Loja fechada hoje</div>'}`:''}
             <div style="font-size:${semIndisp?12:24}px;font-weight:800;color:${cor};margin-bottom:2px;font-family:'Playfair Display',serif">${val===null?'Sem detalhe diário':per==='semana'?window.b005TextoRealizado(val):fmt(val)}</div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-bottom:6px">
               <span style="color:${cor};font-weight:700">${pct===null?(per==='hoje'?'—':window.b005TextoAtingimento(val,meta,periodoCfgPainel)):pct.toFixed(0)+(metaEmSuper?'% da super meta':'% da meta')}</span>
-              <span style="color:var(--muted)">TM${per==='hoje'?' realizado':''} ${tm===null?'—':fmt(tm)}</span>
+              ${temMeta&&hojeAberta?'':`<span style="color:var(--muted)">TM${per==='hoje'?' realizado':''} ${tm===null?'—':fmt(tm)}</span>`}
               <span style="color:${gapV===null?'var(--muted)':corGapV};font-weight:600">${gapV===null?'—':(gapV>=0?'+':'')+fmt(gapV)}</span>
             </div>
             <div style="position:relative;height:5px;background:var(--borda);border-radius:3px;overflow:hidden">
@@ -38528,7 +38620,8 @@ async function deletarLanc(lid, data){
   showToast("🗑️ Lançamento de "+data+" excluído.");
   try{carregarDash();}catch(e){}
   try{carregarVendsForm();}catch(e){}
-  renderHistoricoLanc();
+  if(document.getElementById('page-lanc')?.classList.contains('active')) renderPainelDia();
+  else renderHistoricoLanc();
   // Gravar exclusão no Firebase
   if(!_s012DelValido()) return;
   const _okEx1 = await waitForFirebase(4000);
@@ -53643,7 +53736,10 @@ function _lancEntre(lid, dataIni, dataFim, opcoes={}){
   let contagemInformada=false;
   const preservarZeroExplicito=opcoes?.preservarZeroExplicito===true;
   const coortes={fat:new Set(),atend:new Set(),itens:new Set()};
-  vendsParaAgregadoHistoricoLoja(lid).forEach(v => {
+  const diasVend=preservarZeroExplicito&&opcoes.complementarLojaPorDia
+    ? {fat:new Set(),atend:new Set(),itens:new Set()} : null;
+  const pessoas=vendsParaAgregadoHistoricoLoja(lid);
+  pessoas.forEach(v => {
     Object.entries(vendasVendHistoricasLoja(lid,v.id).vendas||{}).forEach(([d, vd]) => {
       if(d < dataIni || d > dataFim) return;
       const temFat=_acompNumeroValido(vd,'val');
@@ -53661,6 +53757,11 @@ function _lancEntre(lid, dataIni, dataFim, opcoes={}){
         if(temFat) coortes.fat.add(chave);
         if(temAtendimento) coortes.atend.add(chave);
         if(temItens) coortes.itens.add(chave);
+        if(diasVend){
+          if(temFat) diasVend.fat.add(d);
+          if(temAtendimento) diasVend.atend.add(d);
+          if(temItens) diasVend.itens.add(d);
+        }
         const fat=temFat?Number(vd.val):0;
         out.fat += fat;
         out.itens += temItens?Number(vd.itens):0;
@@ -53690,16 +53791,19 @@ function _lancEntre(lid, dataIni, dataFim, opcoes={}){
   // O modo estrito preserva zeros válidos; os demais consumidores mantêm
   // o fallback numérico histórico baseado em campo zerado.
   // ══════════════════════════════════════════════════════════════════
-  const falta=preservarZeroExplicito
+  // O consolidado pode espelhar os vendedores no mesmo dia e ser o único registro em outro.
+  const falta=diasVend ? {fat:true,atend:true,itens:true} : preservarZeroExplicito
     ? {fat:!out.disponivel.fat,atend:!out.disponivel.atend,itens:!out.disponivel.itens}
     : {fat:!out.fat,atend:!out.atend&&!contagemInformada,itens:!out.itens};
   if(falta.fat||falta.atend||falta.itens){
     const c = {fat:0, atend:0, itens:0};
     Object.entries(vendasLojaHistoricas(lid)).forEach(([d, vd]) => {
       if(d < dataIni || d > dataFim) return;
-      const temFat=_acompNumeroValido(vd,'fat');
-      const temAtend=_acompNumeroValido(vd,'trans');
-      const temItens=_acompNumeroValido(vd,'itens');
+      if(diasVend&&!_lancConsolidadoVigente(lid,d,vd,pessoas)) return;
+      const temFat=!diasVend?.fat.has(d)&&_acompNumeroValido(vd,'fat');
+      const campoAtend=diasVend&&!_acompNumeroValido(vd,'trans')?'cli':'trans';
+      const temAtend=!diasVend?.atend.has(d)&&_acompNumeroValido(vd,campoAtend);
+      const temItens=!diasVend?.itens.has(d)&&_acompNumeroValido(vd,'itens');
       if(temFat) out.disponivel.fat = true;
       if(temAtend) out.disponivel.atend = true;
       if(temItens) out.disponivel.itens = true;
@@ -53710,12 +53814,12 @@ function _lancEntre(lid, dataIni, dataFim, opcoes={}){
         if(falta.itens&&temItens) coortes.itens.add(chave);
       }
       c.fat += preservarZeroExplicito?(temFat?Number(vd.fat):0):Number(vd.fat || 0);
-      c.atend += preservarZeroExplicito?(temAtend?Number(vd.trans):0):Number(vd.trans || 0);
+      c.atend += preservarZeroExplicito?(temAtend?Number(vd[campoAtend]):0):Number(vd.trans || 0);
       c.itens += preservarZeroExplicito?(temItens?Number(vd.itens):0):Number(vd.itens || 0);
     });
-    if(falta.fat)   out.fat   = c.fat;
-    if(falta.atend) out.atend = c.atend;
-    if(falta.itens) out.itens = c.itens;
+    for(const campo of ['fat','atend','itens']){
+      if(falta[campo]) out[campo] = (diasVend ? out[campo] : 0) + c[campo];
+    }
   }
   if(preservarZeroExplicito){
     out.coortes=Object.fromEntries(Object.entries(coortes).map(([campo,chaves])=>[campo,[...chaves].sort()]));
@@ -53893,7 +53997,8 @@ window._periodoConsolidado = function(lid, dataIni, dataFim, opcoes={}){
     const [y, mm] = m.split('-').map(Number);
     const ini = m + '-01';
     const fim = m + '-' + String(new Date(y, mm, 0).getDate()).padStart(2,'0');
-    if(dataIni <= ini && dataFim >= fim){
+    const mesAtualComparado=opcoes.comparativoRelatorio&&m===hoje().slice(0,7);
+    if(dataIni <= ini && dataFim >= fim&&!mesAtualComparado){
       // mês inteiro: a regra de sempre decide a fonte
       const opcoesLeitura={...opcoes,acompanharCobertura:opcoes.preservarZeroExplicito===true};
       const f  = (typeof window.fatDoMes === 'function')
@@ -53957,7 +54062,7 @@ window._periodoConsolidado = function(lid, dataIni, dataFim, opcoes={}){
       const de  = dataIni > ini ? dataIni : ini;
       const ate = dataFim < fim ? dataFim : fim;
       const crm=opcoes.crmDias ? _relCrmDias(lid,m,de,ate,opcoes.crmDias) : null;
-      const p = crm || _lancEntre(lid, de, ate, opcoes);
+      const p = crm || _lancEntre(lid, de, ate, {...opcoes,complementarLojaPorDia:mesAtualComparado});
       out.fat += p.fat; out.atend += p.atend; out.itens += p.itens;
       out.parciais++;
       const campos=['fat','atend','itens'];
@@ -53970,7 +54075,7 @@ window._periodoConsolidado = function(lid, dataIni, dataFim, opcoes={}){
       };
       const estado=crm?.estado||(Object.values(metricas).some(x=>x!=='indisponivel')?'subtotal':'indisponivel');
       const segmento={mes:m,dataIni:de,dataFim:ate,fonte,estado,metricas,fontes,pares};
-      if(opcoes.crmDias){
+      if(opcoes.comparativoRelatorio){
         segmento.dias=Object.fromEntries(campos.map(k=>[k,
           crm?.dias||[...new Set((p.coortes?.[k]||[]).map(chave=>chave.slice(-10)))]]));
       }
@@ -56073,7 +56178,7 @@ function _relParesDetalhe({ctx,lojas,periodos}){
       if(mes>=atual||window._mesInteiroNoPeriodo(mes,info.inicio,info.fim)) continue;
       for(const {id:lid} of lojas){
         const ano=mes.slice(0,4), chave=lid+'|'+ano;
-        if(alvo.has(chave)||(info.fim<=hoje()&&_acompSnapshotIntervaloExato(lid,info.inicio,info.fim))) continue;
+        if(alvo.has(chave)||(info.fim.slice(0,7)<atual&&_acompSnapshotIntervaloExato(lid,info.inicio,info.fim))) continue;
         const cubo=_relBaseCrmDias(lid,mes);
         if(cubo&&!window.crmDetalheDisponivelNoCubo(ctx,lid,ano)) alvo.set(chave,{lid,ano,cubo});
       }
@@ -56163,17 +56268,19 @@ function _relBarraIntervalos(aba){
 function _relSomarIntervaloLoja(lid, aba, p){
   const info = _relInfoIntervalo(p);
   if(info.erro||!_relLojasVisiveis().some(l=>l.id===lid)) return null;
+  const dataAtual=hoje(), mesAtual=dataAtual.slice(0,7);
   if(info.modo==='dias'){
     const ctx=window._s012Capturar?.();
-    const futuro=info.fim>hoje();
-    const salvo=futuro?null:_acompSnapshotIntervaloExato(lid,info.inicio,info.fim);
+    const futuro=info.fim>dataAtual;
+    const salvo=info.fim.slice(0,7)<mesAtual?_acompSnapshotIntervaloExato(lid,info.inicio,info.fim):null;
     const {fat,atend,itens,cobertura}=salvo ? {
       fat:Number(salvo.realizado),atend:Number(salvo.nvendas),itens:Number(salvo.qtditens),
       cobertura:{estado:'exato',metricas:{fat:'completo',atend:'completo',itens:'completo'},pares:{tm:true,pa:true},
         segmentos:[{dataIni:info.inicio,dataFim:info.fim,estado:'completo',
           fontes:{fat:'historico-periodo',atend:'historico-periodo',itens:'historico-periodo'}}]}
     } : window._periodoConsolidado(lid,info.inicio,info.fim,{
-      historicoLojaExato:true,preservarZeroExplicito:true,contagensInformadas:true,crmDias:ctx
+      historicoLojaExato:true,preservarZeroExplicito:true,contagensInformadas:true,
+      crmDias:ctx,comparativoRelatorio:true
     });
     const {metricas,pares}=cobertura;
     const estados={
@@ -56186,7 +56293,17 @@ function _relSomarIntervaloLoja(lid, aba, p){
     return {real:fat,atend,tm:atend>0?fat/atend:0,pa:atend>0?itens/atend:0,estados,cobertura,info,futuro};
   }
   let real=0, atend=0, itensEquiv=0;
+  let diarioAtual=null;
   info.meses.forEach(mes=>{
+    if(mes===mesAtual){
+      diarioAtual=_lancEntre(lid,mes+'-01',dataAtual,{
+        preservarZeroExplicito:true,contagensInformadas:true,complementarLojaPorDia:true
+      });
+      real += diarioAtual.fat;
+      atend += diarioAtual.atend;
+      itensEquiv += diarioAtual.itens;
+      return;
+    }
     real += Number(_relReal(lid,mes).valor)||0;
     if(aba === 'mensal'){
       const vendas = Number(_relVendas(lid,mes))||0;
@@ -56195,16 +56312,30 @@ function _relSomarIntervaloLoja(lid, aba, p){
       if(vendas > 0) itensEquiv += pa*vendas;
     }
   });
+  const origemLancamentoAtual=Object.values(diarioAtual?.disponivel||{}).some(Boolean);
+  const mesAtualSemLancamento=!!diarioAtual&&!origemLancamentoAtual;
+  const indisponiveis={};
+  if(diarioAtual&&info.meses.length===1){
+    indisponiveis.real=!diarioAtual.disponivel.fat;
+    indisponiveis.atend=!diarioAtual.disponivel.atend;
+  }
+  if(diarioAtual&&(origemLancamentoAtual||info.meses.length===1)){
+    indisponiveis.tm=atend<=0||!_acompMesmaCoorte(diarioAtual.coortes.fat,diarioAtual.coortes.atend);
+    indisponiveis.pa=atend<=0||!_acompMesmaCoorte(diarioAtual.coortes.itens,diarioAtual.coortes.atend);
+  }
   return aba === 'mensal'
-    ? {real, atend, tm:atend>0?real/atend:0, pa:atend>0?itensEquiv/atend:0}
-    : {real};
+    ? {real, atend, tm:atend>0?real/atend:0, pa:atend>0?itensEquiv/atend:0, indisponiveis, origemLancamentoAtual, mesAtualSemLancamento}
+    : {real, indisponiveis, origemLancamentoAtual, mesAtualSemLancamento};
 }
 function _relCoberturaPar(a,b){
   if(a==='indisponivel'||b==='indisponivel') return 'indisponivel';
   return a==='completo'&&b==='completo'?'completo':'subtotal';
 }
 function _relOrigensIntervalo(linha,campo=null){
-  if(!linha.cobertura) return '';
+  if(!linha.cobertura){
+    if(linha.origemLancamentoAtual) return '<small style="display:block">Mês atual: lançamento diário até hoje</small>';
+    return linha.mesAtualSemLancamento?'<small style="display:block">Mês atual sem lançamentos disponíveis</small>':'';
+  }
   const nomes={crm:'CRM','historico-mensal':'histórico mensal','historico-periodo':'histórico do período',
     'lancamento-diario':'lançamento diário'};
   const fontes=new Set(linha.cobertura.segmentos.flatMap(s=>campo?[s.fontes[campo]]:Object.values(s.fontes))
@@ -56215,8 +56346,10 @@ function _relOrigensIntervalo(linha,campo=null){
 }
 function _relExibirReal(valor){ return valor === 0 ? '--' : fmt(valor); }
 function _relExibirMetrica(linha,campo,formatar,antigo){
+  if(linha.indisponiveis?.[campo]) return 'Indisponível';
   const estado=linha.estados?.[campo];
-  if(!estado) return antigo;
+  if(!estado) return linha.origemLancamentoAtual&&linha[campo]===0&&linha.indisponiveis?.[campo]===false
+    ? formatar(0) : antigo;
   if(estado==='indisponivel') return 'Indisponível';
   return formatar(linha[campo])+(estado==='subtotal'?' <small>(subtotal observado)</small>':'');
 }
@@ -56227,8 +56360,9 @@ function _relPadraoDias(linha,campo){
   return deslocamentos.filter(Number.isInteger).sort((a,b)=>a-b).join(',');
 }
 function _relTipoDelta(linha,base,campo){
-  if(!base) return null;
-  if(!linha.estados&&!base.estados) return 'completo';
+  if(!base||linha.indisponiveis?.[campo]||base.indisponiveis?.[campo]
+      ||linha.mesAtualSemLancamento||base.mesAtualSemLancamento) return null;
+  if(!linha.estados&&!base.estados) return linha.origemLancamentoAtual||base.origemLancamentoAtual?'parcial':'completo';
   if(!linha.estados||!base.estados) return null;
   const a=linha.estados[campo], b=base.estados[campo];
   if(a==='completo'&&b==='completo') return 'completo';
@@ -56241,7 +56375,7 @@ function _relTipoDelta(linha,base,campo){
 function _relExibirDelta(valor, base, indice, referencia, referenciaLabel, tipo){
   if(indice === referencia) return '<small style="color:var(--muted)">referência</small>';
   const d = tipo ? _relDelta(valor,base) : {cls:'rel-delta-flat',txt:'—'};
-  const label=tipo==='observado'&&d.txt!=='—'?'Δ observado ':'Δ ';
+  const label=d.txt==='—'?'Δ ':tipo==='observado'?'Δ observado ':tipo==='parcial'?'Δ parcial ':'Δ ';
   return '<small class="'+d.cls+'">'+label+d.txt+'</small>'
     + '<small style="display:block;white-space:normal;max-width:180px" title="Variação contra '+referenciaLabel+'">vs '+referenciaLabel+'</small>';
 }
