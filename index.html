@@ -10578,7 +10578,7 @@ service cloud.firestore {
 // Por isso o que vale é a lista de CAPACIDADES: cada proteção registra a si
 // mesma. Rode avatimVerificar() no console e veja o que está de fato ativo
 // naquele navegador, sem depender de eu manter uma data em dia.
-window.AVATIM_BUILD = '2026-11-27a';
+window.AVATIM_BUILD = '2026-11-27b';
 /**
  * [R135] Corpo de uma função SEM os comentários.
  *
@@ -41030,7 +41030,7 @@ window._s074LimparResultadoHistoricoVend=function(tipo){
   const pagina=tipo==='pagina';
   const raiz=document.getElementById(pagina?'hist-pg-resultado':'hist-vend-resultado');
   const filhos=pagina
-    ?['hist-pg-kpis','hist-pg-crescimento','hist-pg-tabela','hist-pg-conciliacao']
+    ?['hist-pg-kpis','hist-pg-crescimento','hist-pg-tabela','hist-pg-conciliacao','hist-pg-periodo-label']
     :['hist-vend-kpis','hist-vend-crescimento','hist-vend-tabela','hist-vend-campanhas'];
   filhos.forEach(id=>document.getElementById(id)?.replaceChildren());
   if(raiz){
@@ -52241,6 +52241,15 @@ function calcCrescimento(diasMapInput, getFatTransFn, metasPorMes, linhasPre){
       </table></div>
     </div>`:''}`;
 }
+function _s074LimparResultadoHistoricoLoja(){
+  window._histRealMetaDados=null;
+  ['hist-loja-kpis','hist-loja-tabela','hist-loja-por-vend','hist-loja-crescimento',
+    'hist-loja-evolucao','hist-loja-conciliacao','hist-realmeta','hist-anivinat',
+    'hist-loja-periodo-label'].forEach(id=>document.getElementById(id)?.replaceChildren());
+  const resultado=document.getElementById('hist-loja-resultado');
+  if(resultado) resultado.style.display='none';
+}
+
 async function buscarHistoricoLoja(){
   const _s055Req=window._s055HistLojaReq=(Number(window._s055HistLojaReq)||0)+1;
   const _s055Ctx=window._s012Capturar?.(), _s055Dados=D;
@@ -52269,14 +52278,7 @@ async function buscarHistoricoLoja(){
   // Verificar se há dados no período em D — se não, buscar do Firebase
   const lojasFallback = lid ? [lid] : LOJAS.map(l=>l.id);
   if((lid&&!window.lojaVisivel?.(lid))||(isAdmin()&&!lid&&!LOJAS.length)){
-    ['hist-loja-kpis','hist-loja-tabela','hist-loja-por-vend','hist-loja-crescimento',
-      'hist-loja-evolucao','hist-loja-conciliacao','hist-realmeta','hist-anivinat'].forEach(id=>{
-      const e=document.getElementById(id);if(e)e.replaceChildren();
-    });
-    const resultado=document.getElementById('hist-loja-resultado');
-    if(resultado) resultado.style.display='none';
-    const periodo=document.getElementById('hist-loja-periodo-label');
-    if(periodo) periodo.textContent='';
+    _s074LimparResultadoHistoricoLoja();
     return;
   }
   const vends = window._s074CandidatosVend(de,ate,lid);
@@ -53015,13 +53017,6 @@ function _s074HistoricoMetaVisivel(d){
   if(porLoja && typeof porLoja.keys === 'function')
     for(const lid of porLoja.keys()) if(!window.lojaVisivel(lid)) return false;
   return true;
-}
-
-function _s074OcultarRelatorio(id){
-  const el=document.getElementById(id);
-  if(!el) return;
-  el.style.display='none';
-  el.replaceChildren();
 }
 
 window._histMetasFaltando = function(de, ate, lid){
@@ -57229,14 +57224,9 @@ if(!window._s074Source06VisibilidadeHook){
       window._selSincronizar(selProspec,LOJAS,{rotuloVazio:'Todas as lojas',valor:l=>l.id,rotulo:l=>l.nome});
 
     window._s055HistLojaReq=(Number(window._s055HistLojaReq)||0)+1;
-    _s074OcultarRelatorio('hist-loja-resultado');
     window._s055HistVendReq=(Number(window._s055HistVendReq)||0)+1;
-    _s074OcultarRelatorio('hist-pg-resultado');
-    if(window._histRealMetaDados){
-      window._histRealMetaDados=null;
-      _s074OcultarRelatorio('hist-realmeta');
-      _s074OcultarRelatorio('hist-anivinat');
-    }
+    _s074LimparResultadoHistoricoLoja();
+    window._s074LimparResultadoHistoricoVend('pagina');
   });
 }
 
